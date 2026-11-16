@@ -466,4 +466,12 @@ describe("run.sh wiring", () => {
     it("judges with this script rather than in bash", () => {
         expect(runSh).toContain("testing/forks/rehearsal/lib/judgeHaltDrill.ts")
     })
+    it("at 30 validators of shardSize 10 halts with 24 stopped, not 21, and rides 3", () => {
+        expect(caseLine("halt-n30s10")).toContain("N=30; SHARD=10; START=30; STOPS=24")
+        expect(caseLine("ride-n30s10")).toContain("N=30; SHARD=10; START=30; STOPS=3")
+        // 9 survivors still reach q = 7: the chain would not halt
+        expect(drillPreconditionError(10, 30, 30 - 21)).not.toBeNull()
+        expect(drillPreconditionError(10, 30, 30 - 24)).toBeNull()
+        expect(guaranteedTolerance(10, 30)).toBe(3)
+    })
 })

@@ -2,6 +2,7 @@
 # Quorum failure drills on a local N-validator devnet, one command per drill.
 #
 #   run.sh [--image IMAGE] [--src TREE] [--binding on|off] <scenario> [label]
+#   run.sh --hosts FILE --image REF@sha256:... [--netem SPEC] <scenario> [label]
 #
 # Scenarios (see README.md for what each one asserts):
 #   floor           4 validators, shardSize 10: the chain never forges block 1
@@ -11,10 +12,16 @@
 #   halt-n10s10     10 validators, shardSize 10: stop 4 at once (6 live < q), hold, restart
 #   halt-n13s10     13 validators, shardSize 10: stop 7 at once (6 live < q), hold, restart
 #   ride-n13s10     13 validators, shardSize 10: stop 3 at once, the chain must keep forging
+#   drop-n30s10     30 validators, shardSize 10: stop 1, 2, 3, 4 committee members in turn
+#   halt-n30s10     30 validators, shardSize 10: stop 24 at once (6 live < q), hold, restart
+#   ride-n30s10     30 validators, shardSize 10: stop 3 at once, the chain must keep forging
+#   restart-n30s10  30 validators, shardSize 10: restart a committee member mid-round, 5 times
 #   listed-stall    10 staked, 7 running: stop 1 listed, start the 3 others
 #   fallback        10 validators: the last block lists 6 (< 7) of them
 #   partition       6 validators, shardSize 4: split 3 + 3, then heal
 #
+# --hosts FILE spreads the nodes over the hosts in FILE (`user@ip [max_nodes]`
+# per line, HOSTS.md); --netem SPEC adds `tc netem SPEC` there for the drill.
 # Everything lives in a per-run dir under runs/ (gitignored: it holds the
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
 # Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
@@ -30,10 +37,12 @@ SRC_TREE="${SRC_TREE:-}"
 BINDING="${BINDING:-on}"
 NETSHOOT_IMAGE="${NETSHOOT_IMAGE:-nicolaka/netshoot:latest}"
 CONSENSUS_TIME="${CONSENSUS_TIME:-10}"
-NODE_MEM="${NODE_MEM:-1800m}"
-# What one node actually holds once running (about 1.1 GB on the candidate
-# image, page cache included), used to size the preflight RAM check
-NODE_EST_MB="${NODE_EST_MB:-1100}"
+# Container memory cap per node; empty: 1800m up to 13 nodes, 1536m above
+NODE_MEM="${NODE_MEM:-}"
+# What one node costs the host once running, its share of postgres included
+# (about 1.1 GB for the node on the candidate image, page cache included, and
+# up to 0.5 GB of postgres per node database): the preflight RAM check
+NODE_EST_MB="${NODE_EST_MB:-1600}"
 HEADROOM_MB="${HEADROOM_MB:-3072}"
 RUNS_DIR="${RUNS_DIR:-${HERE}/runs}"
 MIN_DISK_GB="${MIN_DISK_GB:-10}"
@@ -53,13 +62,25 @@ RECOVERY_BLOCKS="${RECOVERY_BLOCKS:-3}"
 RECOVERY_TIMEOUT="${RECOVERY_TIMEOUT:-300}"
 RIDE_BLOCKS="${RIDE_BLOCKS:-5}"
 RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
+# restart-* drills (README.md "restart-n30s10")
+RESTARTS="${RESTARTS:-5}"
+REJOIN_BOOT_S="${REJOIN_BOOT_S:-180}"
+REJOIN_SYNC_S="${REJOIN_SYNC_S:-60}"
+REJOIN_ROUND_S="${REJOIN_ROUND_S:-$((3 * CONSENSUS_TIME))}"
+REJOIN_TIMEOUT="${REJOIN_TIMEOUT:-300}"
+# Two rounds plus the secretary's green-light (60 s) and validator-phase (30 s)
+# timeouts: the longest a round may take when one member is missing
+MAX_GAP_S="${MAX_GAP_S:-$((2 * CONSENSUS_TIME + 90))}"
+HOSTS_FILE=""
+NETEM=""
 
 usage() {
-    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
     echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
     echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
     echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
+    echo "             RESTARTS REJOIN_BOOT_S REJOIN_SYNC_S REJOIN_ROUND_S REJOIN_TIMEOUT MAX_GAP_S (restart-* drills)"
 }
 
 while [ $# -gt 0 ]; do
@@ -67,6 +88,8 @@ while [ $# -gt 0 ]; do
         --image) IMAGE="$2"; shift 2 ;;
         --src) SRC_TREE="$2"; shift 2 ;;
         --binding) BINDING="$2"; shift 2 ;;
+        --hosts) HOSTS_FILE="$2"; shift 2 ;;
+        --netem) NETEM="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --*) echo "unknown option $1" >&2; usage >&2; exit 2 ;;
         *) break ;;
@@ -84,6 +107,13 @@ case "${SCENARIO}" in
     halt-n10s10) N=10; SHARD=10; START=10; STOPS=4 ;;
     halt-n13s10) N=13; SHARD=10; START=13; STOPS=7 ;;
     ride-n13s10) N=13; SHARD=10; START=13; STOPS=3 ;;
+    drop-n30s10) N=30; SHARD=10; START=30; STOPS=4 ;;
+    # 24, not 21: 9 live validators can still fill a committee of 10 with 7
+    # live members (the draw is from all 30), and once the 21 leave the pool
+    # the 9 forge on their own. 6 live is below q whatever the draw.
+    halt-n30s10) N=30; SHARD=10; START=30; STOPS=24 ;;
+    ride-n30s10) N=30; SHARD=10; START=30; STOPS=3 ;;
+    restart-n30s10) N=30; SHARD=10; START=30 ;;
     listed-stall) N=10; SHARD=10; START=7 ;;
     fallback) N=10; SHARD=10; START=10 ;;
     partition) N=6; SHARD=4; START=6 ;;
@@ -96,7 +126,7 @@ esac
 # src/libs/consensus/v2/routines/networkAheadVeto.ts), so the recovery result
 # would measure that and not the halt. The other scenarios keep the harness
 # default (off; GOSSIP_ENABLED=true in the environment turns it on).
-case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED=true ;; esac
+case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10|*-n30s10) export GOSSIP_ENABLED=true ;; esac
 # The mainnet-shape drills run the fork set docs/mainnet/genesis.template.json
 # launches with (every fork it sets to 0, the rest off), read at run time. The
 # other scenarios keep the forks of genesis.devnet.json. Forks the drills cannot
@@ -105,7 +135,7 @@ case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED
 # EXCLUDED_FORKS is that list, name -> reason, read from the generated inputs.
 FORK_SET=devnet
 EXCLUDED_FORKS='{}'
-case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) FORK_SET=launch ;; esac
+case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10|*-n30s10) FORK_SET=launch ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
 if [ "${FORK_SET}" = launch ] && [ "${BINDING}" != on ]; then
     echo "${SCENARIO} runs the launch fork set, which activates committeeBinding: --binding off does not apply" >&2; exit 2
@@ -117,6 +147,27 @@ if [ -n "${SRC_TREE}" ]; then
     SRC_TREE="$(cd "${SRC_TREE}" 2>/dev/null && pwd)" || { echo "--src: no such dir" >&2; exit 2; }
     [ -f "${SRC_TREE}/src/index.ts" ] || { echo "--src: ${SRC_TREE}/src/index.ts not found" >&2; exit 2; }
 fi
+if [ -z "${NODE_MEM}" ]; then
+    # Above 13 a node is in about shardSize/N of the committees, and the cap
+    # bounds what a host can be asked for in the worst case
+    if [ "${N}" -le 13 ]; then NODE_MEM=1800m; else NODE_MEM=1536m; fi
+fi
+if [ -n "${HOSTS_FILE}" ]; then
+    [ -r "${HOSTS_FILE}" ] || { echo "--hosts: cannot read ${HOSTS_FILE}" >&2; exit 2; }
+    HOSTS_FILE="$(cd "$(dirname "${HOSTS_FILE}")" && pwd)/$(basename "${HOSTS_FILE}")"
+    [ -z "${SRC_TREE}" ] || { echo "--src cannot be used with --hosts: the source tree is not copied to the hosts" >&2; exit 2; }
+    case "${SCENARIO}" in partition|fallback|listed-stall)
+        echo "${SCENARIO} cannot run with --hosts (it needs one docker host)" >&2; exit 2 ;; esac
+    # Every host must run the same bytes: pulled by digest, never by tag
+    [[ "${IMAGE}" =~ ^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$ ]] ||
+        { echo "--hosts needs --image REF@sha256:<digest> (a registry reference by digest), got ${IMAGE}" >&2; exit 2; }
+fi
+if [ -n "${NETEM}" ]; then
+    [ -n "${HOSTS_FILE}" ] || { echo "--netem needs --hosts" >&2; exit 2; }
+    [[ "${NETEM}" =~ ^[A-Za-z0-9\ .%_-]+$ ]] || { echo "--netem: unexpected characters in '${NETEM}'" >&2; exit 2; }
+fi
+# shellcheck source=multihost.sh
+source "${HERE}/multihost.sh"
 Q=$(( SHARD * 2 / 3 + 1 ))
 GENESIS_DELAY="${GENESIS_DELAY:-$((60 + START * 25))}"
 
@@ -127,6 +178,7 @@ LOG_DIR="${RUN_DIR}/logs"
 PROJECT="qdrill-$(echo "${RUN_ID}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')"
 mkdir -p "${LOG_DIR}" "${RUN_DIR}/inputs/empty-snapshot"
 chmod 700 "${RUN_DIR}"
+[ -n "${HOSTS_FILE}" ] && mh_init
 EVENTS="${LOG_DIR}/events.log"
 PHASES="${RUN_DIR}/phases.tsv"
 printf 'phase\tdown\tlive\tfrom\tto\tblocks\tmean_s\tmax_s\toutcome\n' > "${PHASES}"
@@ -177,8 +229,11 @@ teardown() {
         fi
         say "tearing down ${PROJECT}"
         for s in "${SIDECARS[@]}"; do docker rm -f "${s}" >/dev/null 2>&1 || true; done
-        dc down -v --remove-orphans >"${LOG_DIR}/teardown.log" 2>&1 || true
+        [ -n "${HOSTS_FILE:-}" ] && mh_netem_clear
+        dc down -v --remove-orphans >>"${LOG_DIR}/teardown.log" 2>&1 || true
     fi
+    # Every host's run dir, whether or not the stack got started
+    [ -n "${HOSTS_FILE:-}" ] && mh_cleanup_dirs
     say "run dir: ${RUN_DIR}"
     exit "${rc}"
 }
@@ -187,35 +242,45 @@ trap 'exit 130' INT TERM
 
 # ── 1. preflight ────────────────────────────────────────────────────────
 step 01-preflight
-{
-    df -h /
-    free -m
-    echo "nproc $(nproc)"
-    uptime
-    vmstat 1 5
-    docker ps --format '{{.Names}}' | grep -E '^(crace|qdrill)-' | sed 's/^/harness container running: /'
-} >> "${STEP_LOG}" 2>&1
-disk_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
-avail_mb=$(free -m | awk '/^Mem:/{print $7}')
-load1=$(cut -d' ' -f1 /proc/loadavg)
-cores=$(nproc)
-need_mb=$(( START * NODE_EST_MB + 256 + HEADROOM_MB ))
-# Swapping in every one of the last three 1 s samples (si or so); the first
-# vmstat line averages since boot
-swapping=$(vmstat 1 4 | tail -3 | awk '$7 + $8 > 0 {n++} END {print (n == 3) ? 1 : 0}')
-say "preflight: disk ${disk_gb}G free, ${avail_mb}M RAM available (need ${need_mb}M), load ${load1}/${cores}, swapping=${swapping}"
 abort_pre() {
     say "ABORT: $*"
     ps -eo pid,comm,rss,%cpu --sort=-rss | head -10 >> "${STEP_LOG}"
     exit 2
 }
-[ "${disk_gb:-0}" -lt "${MIN_DISK_GB}" ] && abort_pre "free disk ${disk_gb}G < ${MIN_DISK_GB}G"
-[ "${avail_mb:-0}" -lt "${need_mb}" ] && abort_pre "available RAM ${avail_mb}M < ${need_mb}M for ${START} nodes"
-awk -v l="${load1}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && abort_pre "load ${load1} > ${cores} cores"
-[ "${swapping}" = 1 ] && abort_pre "the host is actively swapping"
-# One devnet at a time on this host: the race harness or another drill
-docker ps --format '{{.Names}}' | grep -qE '^(crace|qdrill)-' && abort_pre "another harness stack is running"
-for img in "${IMAGE}" "${NETSHOOT_IMAGE}" postgres:16-alpine; do
+if [ -n "${HOSTS_FILE}" ]; then
+    # The same checks on every host for the nodes it runs, then the images
+    # pulled there; from here on docker calls go to the hosts (multihost.sh)
+    mh_preflight
+    PREFLIGHT_IMAGES=("${IMAGE}" postgres:16-alpine)
+else
+    {
+        df -h /
+        free -m
+        echo "nproc $(nproc)"
+        uptime
+        vmstat 1 5
+        docker ps --format '{{.Names}}' | grep -E '^(crace|qdrill)-' | sed 's/^/harness container running: /'
+    } >> "${STEP_LOG}" 2>&1
+    disk_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+    avail_mb=$(free -m | awk '/^Mem:/{print $7}')
+    load1=$(cut -d' ' -f1 /proc/loadavg)
+    cores=$(nproc)
+    # Every node with its share of postgres (NODE_EST_MB), plus the headroom
+    need_mb=$(( START * NODE_EST_MB + HEADROOM_MB ))
+    # Swapping in every one of the last three 1 s samples (si or so); the first
+    # vmstat line averages since boot
+    swapping=$(vmstat 1 4 | tail -3 | awk '$7 + $8 > 0 {n++} END {print (n == 3) ? 1 : 0}')
+    say "preflight: disk ${disk_gb}G free, ${avail_mb}M RAM available (need ${need_mb}M), load ${load1}/${cores}, swapping=${swapping}"
+    [ "${disk_gb:-0}" -lt "${MIN_DISK_GB}" ] && abort_pre "free disk ${disk_gb}G < ${MIN_DISK_GB}G"
+    [ "${avail_mb:-0}" -lt "${need_mb}" ] &&
+        abort_pre "available RAM ${avail_mb}M < ${need_mb}M needed for ${START} nodes (${NODE_EST_MB}M each incl. postgres + ${HEADROOM_MB}M headroom; NODE_EST_MB, HEADROOM_MB)"
+    awk -v l="${load1}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && abort_pre "load ${load1} > ${cores} cores"
+    [ "${swapping}" = 1 ] && abort_pre "the host is actively swapping"
+    # One devnet at a time on this host: the race harness or another drill
+    docker ps --format '{{.Names}}' | grep -qE '^(crace|qdrill)-' && abort_pre "another harness stack is running"
+    PREFLIGHT_IMAGES=("${IMAGE}" "${NETSHOOT_IMAGE}" postgres:16-alpine)
+fi
+for img in "${PREFLIGHT_IMAGES[@]}"; do
     docker image inspect "${img}" >/dev/null 2>&1 || abort_pre "image ${img} is not present locally"
 done
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
@@ -286,13 +351,17 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
         --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --fork-set "${FORK_SET}" --genesis-ts "${GENESIS_TS}" \
         --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" \
-        --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}"
+        --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}" --hosts-file "${HOSTS_FILE}"
     # Once, after everything is written, so the modes do not depend on the umask.
     # 644 files in a 755 inputs/ under the 0700 ${RUN_DIR}: the node runs as the
     # image's user (uid 1000), not the host user, and these are throwaway devnet
     # keys; other host users still cannot traverse to them.
     python3 -I "${HERE}/drill_inputs.py" readable --dir "${RUN_DIR}/inputs"
 } >> "${STEP_LOG}" 2>&1 || { say "ABORT: generating inputs failed (see 02-inputs.log)"; exit 2; }
+if [ -n "${HOSTS_FILE}" ]; then
+    mh_push_inputs >> "${STEP_LOG}" 2>&1 || abort_pre "copying the inputs to the hosts failed (see 02-inputs.log)"
+    say "inputs copied to ${#MH_KS[@]} hosts; node RPC at $(mh_url 1) ... $(mh_url "${N}")"
+fi
 
 # The image's own user must be able to read what the nodes mount and write
 # what they write: a throwaway container, no network, inputs/ read-only, the
@@ -656,19 +725,23 @@ expect_stall() { # $1 phase name, $2 height at the fault
     PHASE_END="${m}"; return 1
 }
 
-# Stops node $1 once a round past the current head has started on node $2
+# Stops node $1 once a round past the current head has started on node $2,
+# waiting at most $3 s (default 60). Only committee members of a block log
+# "We are forging block", so with $2 = $1 the stop takes out a member of the
+# round in flight. STOP_SEEN: yes, or no when the wait ran out.
 stop_mid_round() {
-    local victim="$1" watcher="$2" h since line deadline
+    local victim="$1" watcher="$2" wait_s="${3:-60}" h since line deadline
     h=$(read_head "${watcher}") || read_error "stop node-${victim}"
     since=$(date -u +%s)
-    deadline=$((SECONDS + 60))
+    deadline=$((SECONDS + wait_s))
     while [ ${SECONDS} -lt ${deadline} ]; do
         line=$(docker logs --since "${since}" "$(cid_of "${watcher}")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
             grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | head -1)
         [ -n "${line}" ] && break
         sleep 0.3
     done
-    event "round start seen on node-${watcher}: ${line:-none within 60s}"
+    event "round start seen on node-${watcher}: ${line:-none within ${wait_s}s}"
+    STOP_SEEN=no; [ -n "${line}" ] && STOP_SEEN=yes
     stop_node "${victim}"
     STOP_HEIGHT="${h}"
 }
@@ -863,6 +936,7 @@ pg_limit_gate() {
 
 # ── 3. bring-up ─────────────────────────────────────────────────────────
 step 03-bringup
+[ -n "${HOSTS_FILE}" ] && mh_install_overrides
 # The node-log checks read what the daemon keeps, which a rotating logging
 # driver cuts short (read_node_log): the run log says which driver it is
 log_driver=$(timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker info --format '{{.LoggingDriver}}' 2>/dev/null) || log_driver=""
@@ -914,6 +988,7 @@ done >> "${STEP_LOG}" 2>&1
 
 # ── 4. scenario ─────────────────────────────────────────────────────────
 step 04-scenario
+[ -n "${NETEM}" ] && mh_netem_apply
 RESULT=FAIL
 DETAIL=""
 LOCK_HEIGHT=0
@@ -952,27 +1027,62 @@ scenario_floor() {
     [ "${m}" = 0 ] && [ "${lines}" -gt 0 ] && RESULT=PASS
 }
 
+# The k-th stop's expected outcome from lib/committeeOutcome.ts (README.md
+# "Which validators are stopped"): progress, stall, or ABORT when it depends
+# on the committee draw. Sets DROP_OUTCOME to "<outcome> <why>".
+drop_outcome() { # $1 k
+    DROP_OUTCOME=$(cd "${REPO_ROOT}" && bun testing/forks/rehearsal/lib/committeeOutcome.ts "${N}" "${SHARD}" "$1") ||
+        { say "ABORT: committeeOutcome.ts failed for N=${N} shardSize=${SHARD} stop ${1}"; exit 2; }
+    case "${DROP_OUTCOME%% *}" in
+        progress | stall) ;;
+        *) say "ABORT: stop ${1} of ${N} at shardSize ${SHARD} has no fixed outcome (${DROP_OUTCOME})"; exit 2 ;;
+    esac
+}
+
+# Stopped validators the peerlist of block $1 still lists (nothing when none)
+listed_stopped() { # $1 height, $2.. stopped nodes
+    local pl v h="$1"; shift
+    pl=$(block_at "$(reader)" "${h}" | jq -r '.content.peerlist[]? | if type == "string" then . else (.identity // .publicKey // tostring) end' |
+        tr 'A-Z' 'a-z')
+    for v in "$@"; do grep -qxF "${PUB[v]}" <<< "${pl}" && printf 'node-%s ' "${v}"; done
+}
+
 scenario_drop() {
     lockstep_or_abort 3
-    local ok=1 k victim live expect stopped=()
+    local ok=1 k victim live expect outcome watcher wait_s stopped=() still
     expect_progress "all-up" "${LOCK_HEIGHT}" || ok=0
     for k in $(seq 1 "${STOPS}"); do
         victim=$((N - k + 1))
-        stop_mid_round "${victim}" 1
+        # Up to shardSize every validator is in every committee and any node
+        # shows a round start. Above it the victim's own log does, so it is
+        # stopped as a member of the round in flight; it is drawn about one
+        # round in N/shardSize, hence the longer wait
+        if [ "${N}" -gt "${SHARD}" ]; then watcher="${victim}"; wait_s=180; else watcher=1; wait_s=60; fi
+        stop_mid_round "${victim}" "${watcher}" "${wait_s}"
         stopped+=("${victim}")
         live=$(live_count)
-        # The bound committee is every validator here (N <= shardSize), so
-        # the code forges iff the live members reach q
-        if [ "${live}" -ge "${Q}" ]; then expect=progress; else expect=stall; fi
-        say "stopped node-${victim} mid-round after ${STOP_HEIGHT}: ${live} live, q=${Q}, expect ${expect}"
+        drop_outcome "${k}"
+        outcome="${DROP_OUTCOME}"
+        expect="${outcome%% *}"
+        say "stopped node-${victim} mid-round after ${STOP_HEIGHT} (in its committee: ${STOP_SEEN}): ${live} live, q=${Q}, expect ${expect} (${outcome#* })"
         if [ "${expect}" = progress ]; then
             expect_progress "down-${k}" "${STOP_HEIGHT}" || ok=0
+            # Above shardSize the chain moves on without the stopped
+            # validators only because they leave the committed peerlist
+            if [ "${N}" -gt "${SHARD}" ] && [ "$(tail -1 "${PHASES}" | cut -f9)" = progress ]; then
+                still=$(listed_stopped "${PHASE_END}" "${stopped[@]}")
+                if [ -n "${still}" ]; then
+                    say "down-${k}: block ${PHASE_END} still lists the stopped ${still}"; ok=0
+                else
+                    say "down-${k}: block ${PHASE_END} lists none of the stopped validators"
+                fi
+            fi
         else
             local since; since=$(date -u +%s)
             expect_stall "down-${k}" "${STOP_HEIGHT}" || ok=0
             grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tail -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
         fi
-        DETAIL="${DETAIL}down${k}=${expect}:$(tail -1 "${PHASES}" | cut -f9) "
+        DETAIL="${DETAIL}down${k}=${expect}:$(tail -1 "${PHASES}" | cut -f9)$([ "${N}" -gt "${SHARD}" ] && echo "(member:${STOP_SEEN})") "
     done
     # Manual recovery: bring the stopped validators back
     local h; h=$(max_head) || read_error restart
@@ -1387,11 +1497,126 @@ scenario_ride() {
     drill_judge ride
 }
 
+# ── restart-* drill ─────────────────────────────────────────────────────
+# RESTARTS distinct validators other than node-1, one at a time: each is
+# restarted (`docker compose restart -t 0`) at a random point of a round it is
+# a committee member of, then watched until it signs a committee round again.
+# The run records what it saw in ${RUN_DIR}/restart-input.json and
+# testing/forks/rehearsal/lib/judgeRestartDrill.ts gives the verdict.
+
+# Node $1's committee-round markers logged since unix time $2, with the
+# daemon's timestamps (judgeRestartDrill.ts parseVictimLog)
+round_markers() { # $1 node, $2 since
+    docker logs --timestamps --since "$2" "$(cid_of "$1")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
+        grep -aE 'We are forging block [0-9]+|\[commitLock\] Precommit tally for block|Restart signing floor|Timeout waiting for green light'
+}
+
+# One cycle on node $1, its record written to $2 (restartCountEnd filled in later)
+restart_cycle() { # $1 victim, $2 record file
+    local v="$1" h since phase_ms t_restart t_serving=null t_synced=null head=null rc_serving=null deadline hv lines t_since
+    h=$(read_head "${v}") || read_error "restart node-${v}"
+    since=$(date -u +%s)
+    deadline=$((SECONDS + REJOIN_TIMEOUT))
+    while [ ${SECONDS} -lt ${deadline} ]; do
+        round_markers "${v}" "${since}" | grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | grep -q . && break
+        sleep 0.3
+    done
+    [ ${SECONDS} -ge ${deadline} ] && say "node-${v} was not drawn within ${REJOIN_TIMEOUT}s; restarting it anyway"
+    phase_ms=$(( RANDOM % (CONSENSUS_TIME * 1000) ))
+    sleep "$(awk -v m="${phase_ms}" 'BEGIN { printf "%.3f", m / 1000 }')"
+    dc restart -t 0 "node-${v}" >> "${STEP_LOG}" 2>&1 || { say "ABORT: restarting node-${v} failed"; exit 2; }
+    # Taken once the old process is gone: a line logged after it is the new one's
+    t_restart=$(now_ms)
+    t_since="$((t_restart / 1000)).$(printf '%03d' $((t_restart % 1000)))"
+    event "node-${v} restarted ${phase_ms} ms into its round past ${h}"
+    if wait_serve "${v}" "${REJOIN_BOOT_S}"; then
+        t_serving=$(now_ms)
+        head=$(max_head) || read_error "restart node-${v}"
+        deadline=$((SECONDS + REJOIN_SYNC_S + 30))
+        while [ ${SECONDS} -lt ${deadline} ]; do
+            hv=$(head_of "${v}")
+            [[ "${hv}" =~ ^[0-9]+$ ]] && [ "${hv}" -ge "${head}" ] && { t_synced=$(now_ms); break; }
+            sleep 1
+        done
+        rc_serving=$(docker inspect -f '{{.RestartCount}}' "$(cid_of "${v}")" 2>/dev/null)
+        [[ "${rc_serving}" =~ ^[0-9]+$ ]] || rc_serving=null
+        # Until it signs a round, or REJOIN_TIMEOUT: the judge says which round that was
+        deadline=$((SECONDS + REJOIN_TIMEOUT))
+        while [ ${SECONDS} -lt ${deadline} ]; do
+            round_markers "${v}" "${t_since}" | grep -q 'Precommit tally' && break
+            sleep 2
+        done
+    fi
+    lines=$(round_markers "${v}" "$((t_restart / 1000 - 1))" | jq -Rn '[inputs]')
+    say "node-${v}: served $([ "${t_serving}" = null ] && echo never || echo "$(( (t_serving - t_restart) / 1000 ))s") after the restart; $(jq 'map(select(test("Precommit tally"))) | length' <<< "${lines}") precommit(s) since"
+    jq -nc --argjson victim "${v}" --argjson tr "${t_restart}" --argjson ts "${t_serving}" --argjson head "${head}" \
+        --argjson tsy "${t_synced}" --argjson rcs "${rc_serving}" --argjson log "${lines}" \
+        '{victim: $victim, tRestartMs: $tr, tServingMs: $ts, servingHead: $head, tSyncedMs: $tsy,
+          restartCountServing: $rcs, restartCountEnd: null, log: $log}' > "$2" ||
+        { say "ABORT: could not record the restart of node-${v}"; exit 2; }
+}
+
+scenario_restart() {
+    local victims=() others=() v i k start_h end_h before after rows times heads input rc counts_end
+    LOCKSTEP_FAIL_ON_DIVERGENCE=1
+    [ "${RESTARTS}" -ge 1 ] && [ "${RESTARTS}" -lt "${N}" ] || { say "ABORT: RESTARTS must be 1..$((N - 1))"; exit 2; }
+    mapfile -t victims < <(shuf -i 2-"${N}" -n "${RESTARTS}")
+    for i in $(seq 1 "${N}"); do case " ${victims[*]} " in *" ${i} "*) ;; *) others+=("${i}") ;; esac; done
+    lockstep_or_abort "${BASELINE_HEIGHT}"
+    start_h="${LOCK_HEIGHT}"
+    before=$(restart_counts "${others[@]}") || { say "ABORT: cannot read the restart counts"; exit 2; }
+    say "${SCENARIO}: restarting ${victims[*]} one at a time from ${start_h} (round ${REJOIN_ROUND_S}s, longest gap ${MAX_GAP_S}s)"
+    for k in "${!victims[@]}"; do
+        v="${victims[k]}"
+        local from; from=$(max_head) || read_error "restart-$((k + 1))"
+        restart_cycle "${v}" "${RUN_DIR}/restart-cycle-$((k + 1)).json"
+        local to; to=$(max_head) || read_error "restart-$((k + 1))"
+        phase_row "restart-$((k + 1))" 1 "$((N - 1))" "${from}" "${to}" "$([ "${to}" -gt "${from}" ] && echo progress || echo stall)"
+    done
+    # One chain at the end: every node on one head with one hash, a fork fails here
+    wait_lockstep "${start_h}" "$(lockstep_window)" || lockstep_fail $? "the nodes never reached one head after the restarts"
+    end_h="${LOCK_HEIGHT}"
+    T_END=$(now_ms)
+    heads=$(heads_read $(running))
+    after=$(restart_counts "${others[@]}") || { say "ABORT: cannot read the restart counts"; exit 2; }
+    counts_end=$(restart_counts "${victims[@]}") || { say "ABORT: cannot read the restart counts"; exit 2; }
+    rows=$(block_rows "${start_h}" "${end_h}" $(running)) || { say "ABORT: could not read the drill's blocks"; exit 2; }
+    times=$(psql_node 1 "SELECT number, content->>'timestamp' FROM blocks WHERE number BETWEEN ${start_h} AND ${end_h} ORDER BY number" |
+        jq -Rn '[inputs | split("|") | {number: (.[0] | tonumber), timestamp: (.[1] | tonumber)}]') ||
+        { say "ABORT: could not read the block timestamps from node1_db"; exit 2; }
+    input="${RUN_DIR}/restart-input.json"
+    jq -s --argjson counts "${counts_end}" 'map(.restartCountEnd = ($counts[(.victim | tostring)] // null))' \
+        $(for k in "${!victims[@]}"; do echo "${RUN_DIR}/restart-cycle-$((k + 1)).json"; done) > "${RUN_DIR}/restart-cycles.json" ||
+        { say "ABORT: could not read the restart records"; exit 2; }
+    jq -n --arg scenario "${SCENARIO}" --argjson validators "${N}" --argjson shardSize "${SHARD}" \
+        --argjson consensusTimeS "${CONSENSUS_TIME}" --slurpfile cycles "${RUN_DIR}/restart-cycles.json" \
+        --argjson limits "$(jq -nc --argjson b "${REJOIN_BOOT_S}" --argjson s "${REJOIN_SYNC_S}" --argjson r "${REJOIN_ROUND_S}" \
+            --argjson d "${REJOIN_TIMEOUT}" --argjson g "${MAX_GAP_S}" '{bootS: $b, syncS: $s, roundS: $r, drawS: $d, maxGapS: $g}')" \
+        --argjson startHeight "${start_h}" --argjson endHeight "${end_h}" --argjson tEnd "${T_END}" \
+        --argjson blockTimes "${times}" --argjson heads "${heads}" --argjson rows "${rows}" \
+        --argjson before "${before}" --argjson after "${after}" \
+        '{scenario: $scenario, validators: $validators, shardSize: $shardSize, consensusTimeS: $consensusTimeS,
+          limits: $limits, cycles: $cycles[0], startHeight: $startHeight, endHeight: $endHeight, tEndMs: $tEnd,
+          blockTimes: $blockTimes, heads: $heads, rows: $rows, restartCounts: {before: $before, after: $after}}' > "${input}" ||
+        { say "ABORT: could not write ${input}"; exit 2; }
+    ( cd "${REPO_ROOT}" && bun testing/forks/rehearsal/lib/judgeRestartDrill.ts "${input}" --out "${RUN_DIR}/drill-verdict.json" ) \
+        > "${LOG_DIR}/judge.out" 2>&1
+    rc=$?
+    tee -a "${LOG_DIR}/run.log" < "${LOG_DIR}/judge.out"
+    case "${rc}" in
+        0) RESULT=PASS ;;
+        1) RESULT=FAIL ;;
+        *) RESULT=ERROR; DETAIL="the judge could not read ${input} (exit ${rc})"; write_verdict; exit 2 ;;
+    esac
+    DETAIL=$(jq -r .summary "${RUN_DIR}/drill-verdict.json")
+}
+
 case "${SCENARIO}" in
     floor) scenario_floor ;;
     drop-*) scenario_drop ;;
     halt-*) scenario_halt ;;
     ride-*) scenario_ride ;;
+    restart-*) scenario_restart ;;
     listed-stall) scenario_listed_stall ;;
     fallback) scenario_fallback ;;
     partition) scenario_partition ;;

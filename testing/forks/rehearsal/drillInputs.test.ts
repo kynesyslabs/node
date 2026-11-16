@@ -509,8 +509,8 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
 
 describe("run.sh fork set", () => {
     const sh = readFileSync(resolve(import.meta.dir, "../../devnet/quorum-drills/run.sh"), "utf8")
-    it("runs the launch fork set for the three mainnet-shape drills and no other scenario", () => {
-        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\) FORK_SET=launch ;; esac/)
+    it("runs the launch fork set for the mainnet-shape drills (and every 30-validator one) and no other scenario", () => {
+        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\|\*-n30s10\) FORK_SET=launch ;; esac/)
         expect(sh).toContain("--fork-set \"${FORK_SET}\"")
         expect(sh).toContain("FORK_SET=devnet\n")
     })

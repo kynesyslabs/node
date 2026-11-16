@@ -8,6 +8,7 @@ is generated per run because N changes between scenarios.
 
 ```
 testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|off] <scenario> [label]
+testing/devnet/quorum-drills/run.sh --hosts FILE --image REF@sha256:<digest> [--netem SPEC] <scenario> [label]
 ```
 
 - `--image` (or `IMAGE`): a prebuilt node image. Default
@@ -22,8 +23,11 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   0, and the node's fork loader refuses a genesis that has `commitLock`
   without `committeeBinding` (`src/forks/loadForkConfig.ts:296-307`). Loading
   the generated `--binding off` genesis with `loadForkConfigFromGenesis` gives
-  that error; a node boot was not run. The three mainnet-shape cases take
+  that error; a node boot was not run. The mainnet-shape cases take
   `--binding on` only.
+- `--hosts FILE`: run the nodes on several hosts instead of this one, see
+  [Several hosts](#several-hosts) and `HOSTS.md`. `--netem SPEC` adds
+  `tc qdisc ... netem SPEC` on those hosts for the drill.
 
 ### How a node starts
 
@@ -135,6 +139,10 @@ live. With N > shardSize (`halt-n13s10`, `ride-n13s10`) it does not: see
 | `halt-n10s10` | 10 | 10 | 7 | Stops validators 7-10 at once (6 live < q), holds for `HALT_ROUNDS` rounds, restarts them | Scenario 12's P1-P6, judged by `judgeHaltDrill.ts` (below) |
 | `halt-n13s10` | 13 | 10 | 7 | Stops validators 7-13 at once (6 live < q, a pool larger than the committee), holds, restarts them | Same P1-P6 |
 | `ride-n13s10` | 13 | 10 | 7 | Stops validators 11-13 at once (3, the most the committee code guarantees), waits for `RIDE_BLOCKS` blocks | P1 baseline, R2 ride (every survivor reaches pre-stop + `RIDE_BLOCKS`, one hash per height, every block >= 7 signatures), P6 no crash |
+| `drop-n30s10` | 30 | 10 | 7 | Stops validators 30, 29, 28, 27 in turn, each while it is a member of the round in flight, then restarts them | Progress after each stop, the stopped validators gone from the committed peerlist, progress after the restart ([30 validators](#30-validators)) |
+| `halt-n30s10` | 30 | 10 | 7 | Stops validators 7-30 at once (6 live < q), holds, restarts them | Same P1-P6 |
+| `ride-n30s10` | 30 | 10 | 7 | Stops validators 28-30 at once (3 = 10 - q), waits for `RIDE_BLOCKS` blocks | Same as `ride-n13s10` |
+| `restart-n30s10` | 30 | 10 | 7 | Restarts `RESTARTS` (5) random validators one at a time, each at a random point of a round it is a committee member of | Each back signing at its first or second committee round, no stall over `MAX_GAP_S`, one chain, no crash (`judgeRestartDrill.ts`) |
 | `listed-stall` | 10 staked, 7 running | 10 | 7 | Stops a listed validator, starts the 3 staked ones that never ran, then brings the listed one back | Stall after the stop, still stalled with the 3 extras up (the listed pool holds q, so the staked-set fallback does not apply), progress once the listed one is back |
 | `fallback` | 10 | 10 | 7 | Stops every node on one head, rewrites that block's committed peerlist in every database to 6 validators (below q), restarts all 10 | `--binding on`: progress, with the `drawing the committee from all 10 staked validators` log line. `--binding off`: stall (the pre-fork pool is the 6 listed) |
 | `partition` | 6 | 4 | 3 | Splits the network into {1,2,3} and {4,5,6} for `PARTITION_TIME`, then heals it | `--binding on`: at most one side forges, no height carries two hashes, one chain after the heal. `--binding off`: both sides forge, two hashes at one height (the pre-fork finding) |
@@ -149,6 +157,108 @@ host; `partition` shows the same property at shardSize 4 (pool 6 = 2q), and
 the real-ed25519 suite in
 `src/libs/blockchain/validation/verifyBlock.crypto.test.ts` covers the pool
 of 14.
+
+## 30 validators
+
+`drop-n30s10`, `halt-n30s10`, `ride-n30s10` and `restart-n30s10` run 30
+validators at mainnet's shardSize 10 on the launch fork set with gossip on,
+like the other mainnet-shape cases. None of them has been run in Docker yet:
+what was run is the unit tests of `lib/committeeOutcome.ts` and
+`lib/judgeRestartDrill.ts`, the input generator's tests
+(`test_multihost_inputs.py`) and the stub tests.
+
+**Drop.** With N > shardSize a stop does not shrink the committee: it is
+drawn from the pool, and an offline member stays in it as a missing vote
+until the stopped validator leaves the committed peerlist (about two blocks;
+[Which validators are stopped](#which-validators-are-stopped)). So each
+victim is stopped while it is a member of the round in flight (its own log
+shows `We are forging block B` for B past the head, waited for up to 180 s;
+it is drawn about one round in three) and the expected outcome of the k-th
+stop comes from `lib/committeeOutcome.ts`: the first block after the stop
+draws min(10, pool) members of whom one is down, the pool being 30 - (k - 1)
+since the earlier victims have left it. All four stops leave 9 of 10 members
+live, above q = 7, so the chain must keep forging; the check after each one
+also reads the peerlist of the newest block, which must list none of the
+stopped validators. The same function gives the old rule (progress iff
+N - k >= q) for every N <= shardSize, so the other drop scenarios are judged
+as before. A stop whose outcome depends on the draw is refused (ABORT).
+
+**Halt: 24 stopped, not 21.** With 21 stopped, 9 validators stay live. A
+committee of 10 drawn from 30 holds 7 or more of them about 0.2% of the time,
+and once the 21 leave the peerlist the 9 live ones are the whole pool, reach
+q and forge on: the chain would not halt, and the judge's precondition
+(`drillPreconditionError`) refuses that setup. 24 stopped leaves 6 live,
+below q whatever the draw.
+
+**Ride.** 3 = shardSize - q is the most `guaranteedTolerance(10, 30)` allows:
+any committee drawn from the 30 keeps 7 live members.
+
+**Restart.** `RESTARTS` distinct validators from 2..30 (node-1 seeds the
+peerlist) are restarted one at a time. For each, the harness waits until the
+victim logs `We are forging block B` for a B past the head (it is in that
+round's committee), sleeps a random 0..`CONSENSUS_TIME` s, runs
+`docker compose restart -t 0`, then records when it serves again, when it
+holds the head the network had then, and its log lines since the restart
+until it logs a `[commitLock] Precommit tally` or `REJOIN_TIMEOUT` passes.
+At the end it waits for one head with one hash, reads every node's blocks of
+the drill, the block timestamps and the restart counts into
+`restart-input.json`, and `lib/judgeRestartDrill.ts` decides:
+
+- per restart: it serves within `REJOIN_BOOT_S` (180) and holds the head
+  within `REJOIN_SYNC_S` (60) of serving; of the heights it is drawn for after
+  the restart, the first or the second carries its precommit (the round in
+  flight may be refused by the restart signing floor, by design), logged
+  within `REJOIN_ROUND_S` (3 x `CONSENSUS_TIME`) of that round's start, the
+  round starting within `REJOIN_TIMEOUT` (300) of serving; its restart count
+  does not move after it served (no second restart);
+- over the drill: no gap between consecutive block timestamps, nor from the
+  last block to the end, above `MAX_GAP_S` = 2 x `CONSENSUS_TIME` + 90 (the
+  60 s green-light and 30 s validator-phase timeouts of `secretaryManager`);
+  every node holds every height with one hash and quorum signatures; the
+  validators never restarted keep their restart counts.
+
+The pre-fix failure (a restarted validator waiting out a 60 s green light
+that never came, round after round, until a second restart) fails the
+signing check and, with too few others live, the gap check
+(`fixtures/restart-judge/restart-n30s10.u1-stuck.json`).
+
+Deviation from a real node: `/app/state` is tmpfs, so a restart loses the
+state file and the restart signing floor comes from the clock alone, not
+from the rounds recorded there.
+
+### Several hosts
+
+`--hosts FILE` takes one `user@ip [max_nodes]` per line (`#` comments). Node
+i goes to the hosts round-robin, skipping a host once it holds `max_nodes`;
+node 1 is always on the first host. Each node publishes its RPC
+(53549 + 2i), OMNI (RPC + 1) and gossip (54549 + i, `GOSSIP_PORT`) ports and
+is reached at `EXPOSED_URL=http://<ip>:<rpc port>`, which is also its genesis
+`connection_url` and node-1's peerlist entry. Each host gets its own compose
+file (its nodes and a postgres for their databases) and an `inputs/` with
+only its nodes' identities, copied over ssh into `~/qdrill-runs/<run id>`
+(mode 0700). From then on every docker call of `run.sh` goes to the host of
+the node it is about (`multihost.sh`): the drills address nodes by index
+whatever host they are on, node RPC is read from the controller over the
+public URL, and database reads go to the node's host. The preflight runs on
+every host for the nodes it gets and pulls the image there by digest
+(`--image` must be `REF@sha256:<digest>`). The teardown removes the
+containers and the remote run dir on every host on any exit.
+
+`--netem "delay 80ms 20ms"` sets `tc qdisc replace dev br-<network id> root
+netem ...` on each host's bridge of the run's network after bring-up and
+removes it in the teardown: every packet a host routes into its containers
+(from the other hosts and from the controller) gets the delay, containers on
+one host do not. It needs root or passwordless sudo; a host without either
+is skipped with a warning. `--src`, `partition`, `fallback` and
+`listed-stall` are refused with `--hosts`. Host prerequisites: `HOSTS.md`.
+
+```
+# one host, 30 nodes (about 50 GB available RAM: 30 x 1600 MB + 3 GB)
+testing/devnet/quorum-drills/run.sh --image IMAGE restart-n30s10
+# four hosts
+testing/devnet/quorum-drills/run.sh --hosts hosts.txt --image ghcr.io/ORG/demos-node@sha256:DIGEST \
+    --netem "delay 80ms 20ms" halt-n30s10
+```
 
 ## Mainnet-shape halt and ride drills
 
@@ -408,14 +518,17 @@ new block and stop to target instead of the restart timings.
 
 ### Resources per case
 
-From the preflight formula (`START * 1100 + 256 + 3072` MB) and the timeouts
-in `run.sh`. These are estimates from the constants, not measurements.
+From the preflight formula (`START * NODE_EST_MB + HEADROOM_MB`, 1600 MB per
+node with its share of postgres and 3072 MB headroom) and the timeouts in
+`run.sh`. These are estimates from the constants, not measurements. With
+`--hosts` each host is checked for the nodes it gets.
 
 | Case | Nodes | Available RAM the preflight needs | Docker memory caps (not all used) | Time |
 |---|---|---|---|---|
-| `halt-n10s10` | 10 | 14,328 MB (14.0 GiB) | 10 x 1800 MB + 1 GB | about 12-16 min: genesis delay 310 s, baseline and one more block, settle 20-50 s, hold about 130 s, recovery 1-5 min, teardown |
-| `halt-n13s10` | 13 | 17,628 MB (17.2 GiB) | 13 x 1800 MB + 1 GB | about 13-17 min: genesis delay 385 s, then as above |
-| `ride-n13s10` | 13 | 17,628 MB (17.2 GiB) | 13 x 1800 MB + 1 GB | about 10-14 min: genesis delay 385 s, then up to `RIDE_TIMEOUT` (300 s) for 5 blocks, no restart |
+| `halt-n10s10` | 10 | 19,072 MB (18.6 GiB) | 10 x 1800 MB + 1 GB | about 12-16 min: genesis delay 310 s, baseline and one more block, settle 20-50 s, hold about 130 s, recovery 1-5 min, teardown |
+| `halt-n13s10` | 13 | 23,872 MB (23.3 GiB) | 13 x 1800 MB + 1 GB | about 13-17 min: genesis delay 385 s, then as above |
+| `ride-n13s10` | 13 | 23,872 MB (23.3 GiB) | 13 x 1800 MB + 1 GB | about 10-14 min: genesis delay 385 s, then up to `RIDE_TIMEOUT` (300 s) for 5 blocks, no restart |
+| `*-n30s10` | 30 | 51,072 MB (49.9 GiB) | 30 x 1536 MB + 3000 MB | genesis delay 810 s, then as the matching case; `restart-n30s10` about 1-6 min per restart |
 
 Disk: the preflight needs 10 GB free on `/` (`MIN_DISK_GB`). Node and
 postgres state are on tmpfs, so they count as RAM; the run's own disk use is
@@ -547,14 +660,16 @@ drills also leave `drill-input.json` (what the run observed),
 ## Isolation on a shared host
 
 - Preflight aborts when free disk is under 10 GB, available RAM is under
-  `START * NODE_EST_MB + 256 + HEADROOM_MB` (1100 MB per node, 3 GB
-  headroom), the 1-minute load is above the core count, the host is
+  `START * NODE_EST_MB + HEADROOM_MB` (1600 MB per node with its share of
+  postgres, 3 GB headroom; the message gives the figure), the 1-minute load
+  is above the core count, the host is
   swapping, an image is missing, or another `crace-`/`qdrill-` stack is
   running.
 - A unique compose project per run (`qdrill-<run id>`), no container names,
   no published ports (the harness uses `docker exec`), postgres and node
-  state on tmpfs, no named volumes. Memory caps: `NODE_MEM` (1800m) per
-  node, 1 GB postgres, 64 MB per partition sidecar.
+  state on tmpfs, no named volumes. Memory caps: `NODE_MEM` (1800m up to 13
+  nodes, 1536m above) per node, postgres 1 GB up to 13 nodes and 100 MB per
+  node database above, 64 MB per partition sidecar.
 - The node runs as the image's user (`demos`, uid 1000 in the release image),
   and Docker creates a tmpfs root-owned. `run.sh` reads the uid and gid from
   `${IMAGE}` and mounts the node's `/app/state` as
@@ -586,6 +701,9 @@ times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. For the
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
 `RIDE_TIMEOUT` (300); the first five are scenario 12's values. The judge
 needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
+For `restart-*`: `RESTARTS` (5), `REJOIN_BOOT_S` (180), `REJOIN_SYNC_S` (60),
+`REJOIN_ROUND_S` (3 x `CONSENSUS_TIME`), `REJOIN_TIMEOUT` (300), `MAX_GAP_S`
+(2 x `CONSENSUS_TIME` + 90), see [30 validators](#30-validators).
 
 ## Notes
 
