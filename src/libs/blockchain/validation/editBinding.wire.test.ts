@@ -170,8 +170,18 @@ const cases: Case[] = [
         () => viaConfirm(() => identities.addNomisIdentity(demos, { chain: "evm", subchain: "mainnet", address: "0x1" } as never)),
     ],
     [
-        "identity humanpassport add",
-        () => viaConfirm(() => identities.addHumanPassportIdentity(demos, { address: "0x1", referralCode: null } as never)),
+        "identity humanpassport add with the signed score",
+        () =>
+            viaConfirm(() =>
+                identities.addHumanPassportIdentity(demos, {
+                    address: "0x" + "ab".repeat(20),
+                    verificationMethod: "api",
+                    score: 25.5,
+                    threshold: 20,
+                    stamps: ["Google"],
+                    lastScoreTimestamp: "2026-10-27T10:00:00.000Z",
+                } as never),
+            ),
     ],
     [
         "identity ethos add",
@@ -181,7 +191,8 @@ const cases: Case[] = [
         "identity tlsn add",
         () =>
             viaConfirm(() =>
-                identities.addWeb2IdentityViaTLSN(demos, "github", { pres: "x" } as never, "h", [[0, 1]] as never, "r" as never, "someone", 99, null),
+                // The SDK refuses TLSN links unless told the network predates tlsnProofEnforcement.
+                identities.addWeb2IdentityViaTLSN(demos, "github", { pres: "x" } as never, "h", [[0, 1]] as never, "r" as never, "someone", 99, undefined, { legacy: true }),
             ),
     ],
     // No public builder for zk identity edits in this SDK: hand-made payload.

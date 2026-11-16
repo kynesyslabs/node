@@ -28,8 +28,14 @@ import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSep
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey, withDerivedFeeEdits } from "../gcr/handleGCR"
-import { derivedGasEdit, expectsNonceEdit } from "../validation/editBinding"
+import {
+    derivedGasEdit,
+    expectsNonceEdit,
+    featureGateRefusal,
+} from "../validation/editBinding"
 import { legacyGasRetired } from "../validation/legacyGas"
+import { l2psOff } from "@/forks/l2psGate"
+import { tlsnDisabled } from "@/forks/tlsnDisabledGate"
 import {
     nativeSendRefusal,
     nonCanonicalAddressRefusal,
@@ -175,6 +181,20 @@ async function checkAdmissionAndStructure(
     if (typeRefusal) {
         validityData.data.message =
             "[Tx Validation] [TYPE ERROR] " + typeRefusal + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Before the fee is computed or an L2PS payload decrypted: a feature that
+    // is off is refused without quoting a cost for it.
+    const featureRefusal = featureGateRefusal(tx, {
+        l2psOff: l2psOff(),
+        tlsnOff: tlsnDisabled(),
+    })
+    if (featureRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [TYPE ERROR] " + featureRefusal + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData

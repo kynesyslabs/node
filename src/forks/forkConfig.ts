@@ -432,6 +432,61 @@ export type TelegramSenderBindingConfig = BaseForkConfig
 export type XmRemoveCanonicalConfig = BaseForkConfig
 
 /**
+ * `l2psGate` fork: L2PS is off. The four L2PS transaction types
+ * (`l2psEncryptedTx`, `l2psBatch`, `l2ps_hash_update`, `subnet`) are refused
+ * at RPC intake, pool admission, the consensus merge and apply; the L2PS
+ * RPC and peer handlers refuse every request; consensus applies no pending
+ * L2PS proof; and the node starts no L2PS service.
+ *
+ * A pending proof debits the L2 fee from the sender with no credit
+ * anywhere, so applying one breaks supply conservation. A network that
+ * launches without L2PS sets 0 and lifts it with a later fork once
+ * settlement conserves supply. No payload beyond the base.
+ */
+export type L2psGateConfig = BaseForkConfig
+
+/**
+ * `tlsnDisabled` fork: TLSNotary attestation is off. A native `tlsn_request`
+ * or `tlsn_store`, or a transaction carrying a `tlsnotary` edit, is refused
+ * at RPC intake, pool admission, the consensus merge and apply, before any
+ * of its edits run: no fee is charged, nothing is burned and no attestation
+ * token is issued. Judged at the tip like the other apply-time gates.
+ * No payload beyond the base.
+ */
+export type TlsnDisabledConfig = BaseForkConfig
+
+/**
+ * `storageFeeSettlement` fork: the storage fee of a Storage Program create or
+ * write is credited like a network fee, split between burn and treasury.
+ * The SDK builds that fee as a sender debit no edit credits, so each such
+ * transaction took the fee out of the total supply while every other fee is
+ * credited. The sender still pays it as signed, so the signed edits and
+ * their binding are unchanged; only the applied copy gains the credits.
+ * Credited where the gas of a non-native transaction is (`gasFeeSeparation`
+ * and `feeBinding`), judged at the tip like the other apply-time rules.
+ * Dormant by default, so an existing chain replays as applied; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type StorageFeeSettlementConfig = BaseForkConfig
+
+/**
+ * `referenceBlockRoom10` fork: a transaction's reference block may be up to
+ * 10 blocks behind the head instead of 1, and the deep window it can still
+ * be included as failed in is 50 blocks instead of 5.
+ *
+ * With a room of 1 a transaction confirmed at head N had to land in block
+ * N + 1 or N + 2, so under load (or a user who takes a few seconds to
+ * approve the fee) a large share failed with an expired reference. The room
+ * is a consensus rule: the forger's mempool filter, sync verification, the
+ * broadcast check and mempool cleanup all read it. Each judges a block on
+ * the rule of its own tip, so a block applied on a tip below the activation
+ * height verifies with room 1. Replay is refused by the nonce and the
+ * signature domain, not by the window. Dormant by default; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type ReferenceBlockRoom10Config = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -556,6 +611,8 @@ export type ForkConfig =
     | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
+    | L2psGateConfig
+    | TlsnDisabledConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -591,6 +648,10 @@ export type ForkName =
     | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
+    | "l2psGate"
+    | "tlsnDisabled"
+    | "storageFeeSettlement"
+    | "referenceBlockRoom10"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -625,6 +686,10 @@ export interface ForkConfigByName {
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
+    l2psGate: L2psGateConfig
+    tlsnDisabled: TlsnDisabledConfig
+    storageFeeSettlement: StorageFeeSettlementConfig
+    referenceBlockRoom10: ReferenceBlockRoom10Config
 }
 
 /**
@@ -928,6 +993,41 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "An xm identity remove finds the stored entry by the chain's canonical " +
             "address form, as admission compares them.",
     },
+    l2psGate: {
+        // Dormant by default: it refuses traffic a running chain accepts, and
+        // a missing genesis entry hydrates from here. A mainnet genesis that
+        // launches without L2PS sets 0.
+        activationHeight: null,
+        description:
+            "L2PS is off: its transaction types are refused at every layer, its handlers " +
+            "refuse, no pending proof applies and no L2PS service starts.",
+    },
+    tlsnDisabled: {
+        // Dormant by default, as above. A mainnet genesis that launches
+        // without TLSNotary sets 0.
+        activationHeight: null,
+        description:
+            "TLSNotary is off: tlsn_request and tlsn_store are refused before any edit " +
+            "applies, so no fee is charged and no attestation token is issued.",
+    },
+    storageFeeSettlement: {
+        // Dormant by default: it changes the balances a Storage Program
+        // create or write leaves, and a missing genesis entry hydrates from
+        // here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A Storage Program storage fee is credited like a network fee, split between " +
+            "burn and treasury, so it no longer leaves the total supply.",
+    },
+    referenceBlockRoom10: {
+        // Dormant by default: it changes which transactions a block may hold
+        // as confirmed, and a missing genesis entry hydrates from here. A
+        // mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A transaction's reference block may be up to 10 blocks behind the head " +
+            "(deep window 50) instead of 1 (deep window 5).",
+    },
 }
 
 /**
@@ -966,5 +1066,9 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
+        l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
+        tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
+        storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
+        referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
     }
 }

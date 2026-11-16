@@ -11,10 +11,14 @@ Pick one. Both tracks produce a working node; they differ only in where the bina
 
 ### Hardware Minimum
 
-- 4GB RAM
-- 4 CPU cores (2GHz+)
+Per validator (node and its database):
+
+- 2 dedicated vCPU (2GHz+), not shared or burstable
+- 3 GB RAM
 - Modern SSD
 - 200 Mbps internet connection
+
+In the launch rehearsal under flood load a validator peaked at 150-164 % CPU (1.5-1.6 cores) and 0.86 GiB of memory. A shared or burstable vCPU is throttled at such peaks, and a slow validator slows every round it takes part in. Several validators on one host need this much each.
 
 ### Hardware Recommended
 
@@ -42,6 +46,8 @@ chronyc tracking       # "Leap status : Normal", "System time" well under 1 seco
 ```
 
 If NTP is off: `sudo timedatectl set-ntp true`.
+
+Keep NTP synced and alert on `demos_clock_offset_seconds` above 1 second. In the launch rehearsal a validator 4.5 seconds off still followed the chain, but that leaves only 0.5 seconds before the 5-second refusal.
 
 ---
 
@@ -185,6 +191,7 @@ TLSNOTARY_ENABLED=true
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
 - **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses; without it, set `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
 - **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised proxy port (`TLSNOTARY_PROXY_PORT`) on every interface and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
+- **`SUDO_PUBKEY`** (optional) is the ed25519 public key (`0x` + 64 hex) this node answers its admin RPC to (`rate-limit/unblock`, `getCampaignData`, `awardPoints`). Empty, nobody may call them. It only authorises calls on this node: whether an award transaction is valid is decided by the genesis `properties.sudoPubkey`, the same on every node.
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
 - **Another install on this host** also sets `INSTANCE_SUFFIX` and `COMPOSE_PROJECT_NAME` and moves every port: see [More than one install on a host](#more-than-one-install-on-a-host).
 
@@ -274,7 +281,7 @@ The helper is the Postgres image the stack already uses, pinned by digest, so no
 ./scripts/node-doctor --production --env-from compose
 ```
 
-It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the validator set block 0 seeds (the snapshot's `validators.jsonl` when it has one, otherwise the genesis `validators`) holds fewer validators active at block 0 (status `"2"`, `valid_at` 0) than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` of that set that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). A validator without a URL passes that check: `null` anywhere, and a missing or empty URL in a snapshot row, since the node accepts those rows. A PASS therefore does not mean every validator can be dialed; check those validators' addresses against the peer list of the announcement. Fix every FAIL, and check every WARN by hand, before the next step.
+It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, the GitHub, Discord and RapidAPI credentials web2 identity links are verified with, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the validator set block 0 seeds (the snapshot's `validators.jsonl` when it has one, otherwise the genesis `validators`) holds fewer validators active at block 0 (status `"2"`, `valid_at` 0) than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` of that set that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). A validator without a URL passes that check: `null` anywhere, and a missing or empty URL in a snapshot row, since the node accepts those rows. A PASS therefore does not mean every validator can be dialed; check those validators' addresses against the peer list of the announcement. Fix every FAIL, and check every WARN by hand, before the next step.
 
 **8. Create the database schema and start without building.**
 
@@ -350,6 +357,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `L2PS_MESSAGING_SEND_RATE` | `5` | Messages per second one sender key may send through the messaging relay once its burst is spent. Over it the sender gets `RATE_LIMITED` with a retry time and keeps its socket. `0` turns the limit off. |
 | `L2PS_MESSAGING_SEND_BURST` | `30` | Messages a sender key may send at once before the rate applies. |
 | `L2PS_MESSAGING_BACKLOG_SHARE` | `0.5` | Largest fraction of `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` that messaging may hold, so RPC transactions keep the rest. `1` gives messaging all of it. |
+| `WEB2_MAX_INFLIGHT_PER_CALLER` / `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER` / `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` / `WEB2_MAX_INFLIGHT_TOTAL` | `2` / `10` / `104857600` (100 MiB) / `32` | Caps on the outbound fetches of the web2 (DAHR) proxy: running at once per caller, started per minute per caller, origin response bytes per hour per caller, and running at once on the node. A caller is the client address for a `web2ProxyRequest` RPC (one IPv6 /64 counts as one address; behind a reverse proxy this needs `TRUSTED_PROXIES`: otherwise every client counts as the proxy, which shares one cap, or, for a proxy on the same host, is loopback and skips the per-caller caps) and the sender for a `web2Request` or DemosWork tx. Over a cap the caller gets result `429` `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and `WHITELISTED_IPS` skip the per-caller caps; every fetch counts toward the node-wide one. Positive integers only, or the node does not start. Local to the node: no effect on blocks or state. |
 | `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. A validator sets `tlsnotary` (or nothing); `monitoring` needs `GRAFANA_ADMIN_PASSWORD`. See [Profiles](#profiles). |
 | `INSTANCE_SUFFIX` / `COMPOSE_PROJECT_NAME` | _(empty)_ / _(directory name)_ | Set both on every install but one when a host runs more than one; see [More than one install on a host](#more-than-one-install-on-a-host). |
 
@@ -420,7 +428,7 @@ EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
 
 A validator never leaves these set in `.env`: `DEMOS_ALLOW_UNPINNED_GENESIS`, and the one-start switches `DEMOS_GENERATE_IDENTITY`, `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`. Each of the last four is for the single start that needs it (see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) and below); remove it once the node runs. `./scripts/node-doctor --production` fails while any of them is set.
 
-At every start the node checks it before it signs anything: on an empty database against the genesis file (`data/genesis.json`, or `DEMOS_GENESIS_FILE`) and the snapshot that genesis declares, before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
+At every start the node checks it before it signs anything: on an empty database against the genesis file (`data/genesis.json`, or `DEMOS_GENESIS_FILE`) and the snapshot that genesis declares, before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; a node on the mainnet chain id refuses to start while it is set, even with a pin. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
 
 The genesis hash leaves out the validators' `connection_url` and the order of the keys in the file, and block 0 does not, so two files with the same genesis hash can still build different blocks 0. `EXPECTED_GENESIS_BLOCK_HASH` closes that: an empty database refuses to write any other block 0, and an existing one refuses to boot on it.
 

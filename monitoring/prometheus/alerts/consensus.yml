@@ -16,30 +16,23 @@ groups:
           summary: No new block for over 5 minutes
           description: "demos_seconds_since_last_block = {{ $value }} on {{ $labels.instance }}. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
 
+      # Not latched. The counter rises once per disagreeing peer per round, and genesis has
+      # a shard of 10, so one round where 4 of 9 peers refuse this node's candidate (mempool
+      # lag) already counts 4. That must clear on its own, not latch for 7 days.
+      # Fires at 4 or more in 10 m, not at 3. increase() extrapolates to the window edges,
+      # so exactly 3 events read about 3.02 off the scrape grid and "> 3" would fire on them;
+      # one disagreeing round on a 4-validator network is exactly 3.
       - alert: BlockHashMismatch
-        expr: increase(demos_consensus_block_hash_mismatch_total[10m]) > 3
+        expr: increase(demos_consensus_block_hash_mismatch_total[10m]) > 3.5
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: Peers disagree with this node's candidate block hash
-          description: "{{ $value }} peer disagreements on the candidate block hash in 10m on {{ $labels.instance }}. This node, or the peers, are forging different block content. Check the mempool, clock skew and the node logs for the tx-set diff."
+          summary: Peers disagreed with this node's candidate block hash
+          description: "About {{ $value | printf \"%.0f\" }} peer disagreements on the candidate block hash within 10m on {{ $labels.instance }} (one per disagreeing peer per round, so a single round can add several). This node, or the peers, forged different block content. Check the mempool, clock skew and the node logs for the tx-set diff; see docs/runbooks/mainnet-monitoring.md."
 
-      - alert: ConflictingBlock
-        expr: increase(demos_conflicting_block_total[10m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: Two blocks with a verified quorum exist at one height
-          description: "{{ $labels.instance }} holds a block at some height while a peer serves a different block there that carries a verified quorum. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep."
-
-      - alert: ForeignSignature
-        expr: increase(demos_foreign_signature_total[10m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: Another process is signing with this validator's key
-          description: "{{ $labels.instance }} saw a peer block carrying a signature by its own key that it never recorded, and stopped signing. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force."
+      # ConflictingBlock, ForeignSignature and PrecommitEquivocation are in the
+      # demos-consensus-latched group at the end of this file.
 
       - alert: SigningHalted
         expr: demos_signing_halted == 1
@@ -49,18 +42,13 @@ groups:
           summary: Block signing is stopped on this validator
           description: "{{ $labels.instance }} refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."
 
-      - alert: PrecommitEquivocation
-        expr: increase(demos_precommit_equivocation_total[10m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: A committee member precommitted two blocks in one round
-          description: "{{ $labels.instance }} received precommits from one member for two different blocks at the same height and round. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back."
-
+      # Trend signal, not an alarm: on a healthy 4-node soak the 15 m increase reached 9, higher
+      # than during real faults (4), so no threshold separated the two. No mainnet data yet.
+      # Alertmanager routes it to no receiver. Revisit after launch week.
       - alert: MissedSignatures
         expr: increase(demos_consensus_missed_signatures_total[15m]) >= 3
         labels:
-          severity: warning
+          severity: info
         annotations:
           summary: Validator was drawn into the shard but its signature is missing
           description: "{{ $value }} blocks in 15m where {{ $labels.instance }} was selected for the shard and did not sign. The node is online but not taking part in consensus: check sync state and peer connectivity."
@@ -112,3 +100,89 @@ groups:
         annotations:
           summary: Mempool backlog is large
           description: "demos_mempool_size = {{ $value }} on {{ $labels.instance }} for over 5m. Blocks are not draining the pool, or a flood is in progress."
+
+  # Latched fork alerts. A fork is not over when the counter stops moving, so these
+  # must not resolve on their own after a few minutes. Method: a recording rule keeps
+  # the 10 m burst size as its own series, and the alert is the maximum of that series
+  # over the last 7 days. Once the condition has been true the alert stays firing for 7 d,
+  # whatever the node does afterwards (restart, crash, stop being scraped).
+  #
+  # Clearing: see docs/runbooks/mainnet-monitoring.md, section "Clearing a latched alert".
+  # Only metrics the node exports today are used. The recorded series are
+  # demos:conflicting_block:increase10m, demos:foreign_signature:increase10m and
+  # demos:precommit_equivocation:increase10m.
+  #
+  # How the latch starts. increase() over 10 m is the normal trigger, but it is 0 when
+  # the first sample Prometheus ever sees of the counter is already 1 or more (an event
+  # between process start and the first scrape, on a node new to Prometheus or unscraped
+  # for over ~15 m): there is no earlier sample to subtract. So each rule also takes the
+  # counter's own value when (a) the series has no sample 10 m earlier and (b)
+  # demos_process_start_time_seconds says the process started under 15 m ago. The counter
+  # is 0 at every process start, so a value above 0 that young is an event of this process.
+  # (b) keeps a counter that has sat at 1 for days from latching again after a scrape gap.
+  # `or` ignores __name__ when it matches, so it would drop the second side whenever the
+  # increase() side exists (even as 0). label_replace gives the second side a marker label
+  # (first_sample) so both survive, and max without (first_sample) merges them.
+  - name: demos-consensus-latched
+    interval: 1m
+    rules:
+      - record: demos:conflicting_block:increase10m
+        expr: |
+          max without (first_sample) (
+            increase(demos_conflicting_block_total[10m])
+            or
+            label_replace(
+              (demos_conflicting_block_total > 0 unless demos_conflicting_block_total offset 10m)
+                and on (instance, job) ((time() - demos_process_start_time_seconds) < 900),
+              "first_sample", "1", "", "")
+          )
+
+      - record: demos:foreign_signature:increase10m
+        expr: |
+          max without (first_sample) (
+            increase(demos_foreign_signature_total[10m])
+            or
+            label_replace(
+              (demos_foreign_signature_total > 0 unless demos_foreign_signature_total offset 10m)
+                and on (instance, job) ((time() - demos_process_start_time_seconds) < 900),
+              "first_sample", "1", "", "")
+          )
+
+      - record: demos:precommit_equivocation:increase10m
+        expr: |
+          max without (first_sample) (
+            increase(demos_precommit_equivocation_total[10m])
+            or
+            label_replace(
+              (demos_precommit_equivocation_total > 0 unless demos_precommit_equivocation_total offset 10m)
+                and on (instance, job) ((time() - demos_process_start_time_seconds) < 900),
+              "first_sample", "1", "", "")
+          )
+
+      - alert: ConflictingBlock
+        expr: max_over_time(demos:conflicting_block:increase10m[7d]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Two blocks with a verified quorum existed at one height (latched)
+          description: "{{ $labels.instance }} held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+
+      - alert: ForeignSignature
+        expr: max_over_time(demos:foreign_signature:increase10m[7d]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Another process is signing with this validator's key (latched)
+          description: "{{ $labels.instance }} saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+
+      - alert: PrecommitEquivocation
+        expr: max_over_time(demos:precommit_equivocation:increase10m[7d]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: A committee member precommitted two blocks in one round (latched)
+          description: "{{ $labels.instance }} received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+
+  # SEAM kynesyslabs/node#1084: rules from that PR plug in as their own file under
+  # alerts/ (loaded by the alerts/*.yml glob) with its own group names, so nothing
+  # here needs to move. Do not reuse the alert names in this directory.

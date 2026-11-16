@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from "bun:test"
-import { dirname, join } from "node:path"
+import { describe, it, expect, beforeEach, afterEach, spyOn, mock, jest } from "bun:test"
+import { readFileSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { Address } from "@ton/core"
 import { AccountAddress } from "@aptos-labs/ts-sdk"
 import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
@@ -37,6 +38,7 @@ mock.module("@kynesyslabs/demosdk/xm-localsdk", () => ({
 const IdentityManager = (await import("./identityManager")).default
 const { NomisApiClient } = await import("@/libs/identity/tools/nomis")
 const { EthosApiClient } = await import("@/libs/identity/tools/ethos")
+const { HumanPassportProvider } = await import("@/libs/identity/tools/humanpassport")
 
 type Overrides = {
     signedData?: string
@@ -429,6 +431,31 @@ describe("IdentityManager.verifyPayload: xm proof quality", () => {
             expect(bound.success).toBe(false)
         })
     })
+
+    describe("on the mainnet schedule", () => {
+        beforeEach(() => {
+            const template = JSON.parse(
+                readFileSync(resolve(import.meta.dir, "../../../../../docs/mainnet/genesis.template.json"), "utf8"),
+            )
+            getSharedState.forkConfig.xmProofBinding.activationHeight =
+                template.forks.xmProofBinding.activationHeight
+            getSharedState.lastBlockNumber = 0
+        })
+
+        it("refuses an unbound xm proof from the genesis tip on", async () => {
+            for (const f of await allChains()) {
+                const r = await IdentityManager.verifyPayload(await payloadFor(f, SENDER), SENDER)
+                expect({ chain: f.chain, success: r.success }).toEqual({ chain: f.chain, success: false })
+            }
+        })
+
+        it("accepts the bound message at the genesis tip", async () => {
+            const f = evmFixture()
+            const msg = xmBoundProofMessage(f.chain, f.targetAddress, SENDER, Date.now())
+            const r = await IdentityManager.verifyPayload(await payloadFor(f, msg), SENDER)
+            expect(r.success).toBe(true)
+        })
+    })
 })
 
 describe("IdentityManager score identities need a linked wallet", () => {
@@ -490,13 +517,14 @@ describe("IdentityManager score identities need a linked wallet", () => {
         const n = await IdentityManager.verifyNomisPayload(nomisPayload(), SENDER)
         const e = await IdentityManager.verifyEthosPayload(ethosPayload(), SENDER)
         const hp = await IdentityManager.verifyHumanPassportPayload(
-            { address: evmAddr, verificationMethod: "api" },
+            { address: evmAddr, verificationMethod: "api", score: 25.5, threshold: 20 },
             SENDER,
         )
         expect(n.success).toBe(false)
         expect(e.success).toBe(false)
         expect(hp.success).toBe(false)
         expect(n.message).toContain("not linked")
+        expect(hp.message).toContain("not linked")
     })
 
     it("accepts Nomis and Ethos for a wallet linked on any subchain, ignoring address case", async () => {
@@ -587,5 +615,115 @@ describe("IdentityManager score identities need a linked wallet", () => {
             expect(e.success).toBe(false)
             expect(n.message).toContain("try again later")
         })
+    })
+})
+
+describe("IdentityManager.verifyHumanPassportPayload: signed score against the provider", () => {
+    const evmAddr = "0x" + "AB".repeat(20)
+    let getIdentities: ReturnType<typeof spyOn>
+    let instance: ReturnType<typeof spyOn>
+    const provider = jest.fn(async (_address: string): Promise<any> => reported)
+
+    const reported = {
+        address: evmAddr.toLowerCase(),
+        score: 25.5,
+        passingScore: true,
+        threshold: 20,
+        stamps: ["Google", "Discord"],
+        lastScoreTimestamp: "2026-10-27T10:00:00.000Z",
+        expirationTimestamp: "2027-01-27T10:00:00.000Z",
+        verifiedAt: 1,
+    }
+    const claim = (o: Record<string, unknown> = {}) =>
+        ({
+            address: evmAddr,
+            verificationMethod: "api",
+            score: 25.5,
+            threshold: 20,
+            stamps: ["Google", "Discord"],
+            lastScoreTimestamp: reported.lastScoreTimestamp,
+            expirationTimestamp: reported.expirationTimestamp,
+            ...o,
+        }) as any
+
+    beforeEach(() => {
+        getIdentities = spyOn(IdentityManager, "getIdentities").mockResolvedValue({
+            evm: { mainnet: [{ address: evmAddr }] },
+        } as any)
+        provider.mockReset()
+        provider.mockImplementation(async () => reported)
+        // The real provider refuses to start without an API key.
+        instance = spyOn(HumanPassportProvider, "getInstance").mockReturnValue({
+            verifyAddress: provider,
+        } as any)
+    })
+    afterEach(() => {
+        getIdentities.mockRestore()
+        instance.mockRestore()
+    })
+
+    it("accepts the claim the provider reports, stamps in any order", async () => {
+        const full = await IdentityManager.verifyHumanPassportPayload(claim(), SENDER)
+        expect(full.success).toBe(true)
+        const reordered = await IdentityManager.verifyHumanPassportPayload(
+            claim({ stamps: ["Discord", "Google"] }),
+            SENDER,
+        )
+        expect(reordered.success).toBe(true)
+        provider.mockImplementation(async () => ({ ...reported, expirationTimestamp: null }))
+        const noExpiry = await IdentityManager.verifyHumanPassportPayload(
+            claim({ expirationTimestamp: null }),
+            SENDER,
+        )
+        expect(noExpiry.success).toBe(true)
+    })
+
+    it("refuses a claim that leaves out the stamps, score time or expiry apply stores", async () => {
+        for (const o of [
+            { stamps: undefined },
+            { lastScoreTimestamp: undefined },
+            { expirationTimestamp: undefined },
+        ]) {
+            const r = await IdentityManager.verifyHumanPassportPayload(claim(o), SENDER)
+            expect({ o, ok: r.success }).toEqual({ o, ok: false })
+        }
+    })
+
+    it("refuses a payload without the signed score, as the SDK's typed API builds it", async () => {
+        const r = await IdentityManager.verifyHumanPassportPayload(
+            { address: evmAddr, verificationMethod: "api" } as any,
+            SENDER,
+        )
+        expect(r.success).toBe(false)
+        expect(r.message).toContain("getHumanPassportClaim")
+        expect(provider).not.toHaveBeenCalled()
+    })
+
+    it("refuses values the provider does not report", async () => {
+        for (const o of [
+            { score: 30 },
+            { threshold: 25 },
+            { stamps: ["Google"] },
+            { lastScoreTimestamp: "2026-10-28T10:00:00.000Z" },
+            { expirationTimestamp: null },
+        ]) {
+            const r = await IdentityManager.verifyHumanPassportPayload(claim(o), SENDER)
+            expect({ o, ok: r.success }).toEqual({ o, ok: false })
+        }
+    })
+
+    it("refuses a score the provider says does not pass", async () => {
+        provider.mockImplementation(async () => ({ ...reported, passingScore: false }))
+        const r = await IdentityManager.verifyHumanPassportPayload(claim(), SENDER)
+        expect(r.success).toBe(false)
+    })
+
+    it("fails closed when the provider cannot be reached", async () => {
+        provider.mockImplementation(async () => {
+            throw new Error("timeout")
+        })
+        const r = await IdentityManager.verifyHumanPassportPayload(claim(), SENDER)
+        expect(r.success).toBe(false)
+        expect(r.message).toContain("try again later")
     })
 })

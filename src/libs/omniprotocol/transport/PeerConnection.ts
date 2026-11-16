@@ -122,6 +122,10 @@ export class PeerConnection extends EventEmitter {
     // Public for cross-connection response routing (fallback lookup)
     public readonly inFlightRequests: Map<number, PendingRequest> = new Map()
 
+    // Peer requests this node is still answering. Closing the socket loses
+    // the answer: the peer's pending request waits on this socket only.
+    private servingRequests = 0
+
     // Timing and lifecycle
     private idleTimer: NodeJS.Timeout | null = null
     private authTimer: NodeJS.Timeout | null = null
@@ -950,6 +954,7 @@ export class PeerConnection extends EventEmitter {
             }
         }
 
+        this.servingRequests++
         try {
             // Dispatch to handler
             const responsePayload = await dispatchOmniMessage({
@@ -1001,7 +1006,14 @@ export class PeerConnection extends EventEmitter {
             ) {
                 await this.close()
             }
+        } finally {
+            this.servingRequests--
         }
+    }
+
+    /** Waiting for a reply from the peer, or still answering one of its requests. */
+    hasPendingWork(): boolean {
+        return this.inFlightRequests.size > 0 || this.servingRequests > 0
     }
 
     /**

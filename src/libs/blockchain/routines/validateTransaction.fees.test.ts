@@ -183,7 +183,7 @@ describe("native send confirmation fee quote", () => {
 
         const rpc = await handleValidateTransaction(tx, SENDER)
         expect(rpc.data.valid).toBe(false)
-        expect(rpc.data.message).toBe("GCREdit mismatch")
+        expect(rpc.data.message).toContain("debit from an account that does not sign this transaction")
         expect(balanceReads).toEqual([])
     })
 
@@ -263,12 +263,13 @@ describe("native send confirmation fee quote", () => {
     })
 
     for (const binding of [null, 0]) {
-        it(`checks edits before returning a nonce refusal (editBinding=${binding})`, async () => {
+        it(`returns a nonce refusal without a client fee quote (editBinding=${binding})`, async () => {
             chainIs(true, binding)
             getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
             caches.accounts.get(SENDER)!.balance = 100n * OS
             const tx = await pay(1n * OS)
             tx.content.nonce = 7
+            tx.attrs = { reference_block: 0, total_fee: "0" } as never
             const balanceEdit = tx.content.gcr_edits.find(edit => edit.type === "balance")!
             tx.content.gcr_edits.push({
                 ...balanceEdit,
@@ -279,9 +280,12 @@ describe("native send confirmation fee quote", () => {
 
             const response = await handleValidateTransaction(tx, SENDER)
 
+            // Stabilisation returns a confirm refusal before the edits are
+            // compared, so the refused transaction is echoed back.
             expect(response.data.valid).toBe(false)
-            expect(response.data.message).toBe("GCREdit mismatch")
-            expect(response.data.transaction).toBeNull()
+            expect(response.data.message).toContain("[NONCE ERROR]")
+            expect(response.data.transaction).toBe(tx)
+            expect((tx.attrs as { total_fee?: string }).total_fee).toBeUndefined()
         })
     }
 

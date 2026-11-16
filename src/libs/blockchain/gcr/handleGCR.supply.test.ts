@@ -516,3 +516,128 @@ describe("TLSNotary operations under gasFeeSeparation and feeBinding", () => {
         expect(supply()).toBe(before - 2n * OS)
     })
 })
+
+describe("Storage Program fees under storageFeeSettlement", () => {
+    const { StorageProgram } = require("@kynesyslabs/demosdk/storage") as typeof import("@kynesyslabs/demosdk/storage")
+
+    function settled(at: number | null) {
+        forks({ gasFee: true, fee: true })
+        getSharedState.forkConfig.nonceEnforcement.activationHeight = 0
+        getSharedState.forkConfig.storageFeeSettlement = { activationHeight: at }
+    }
+
+    const address = StorageProgram.deriveStorageAddress(SENDER, "probe", 8)
+    /** A Storage Program operation from SENDER on `nonce`, built and signed by the SDK. */
+    async function storage(payload: unknown, nonce: number): Promise<Transaction> {
+        return onTheWire(await demos.storagePrograms.sign(payload, { nonce })) as Transaction
+    }
+    const create = (nonce = 8) =>
+        storage(StorageProgram.createStorageProgram(SENDER, "probe", { n: 1 }, "json", { mode: "owner" }, { nonce: 8 }), nonce)
+    const write = (nonce: number) => storage(StorageProgram.writeStorage(address, { n: 2 }), nonce)
+    const setField = (nonce: number) => storage(StorageProgram.setField(address, "m", 3), nonce)
+
+    /** The storage fee a set signs: its first edit, a sender debit. */
+    const feeOf = (tx: Transaction) => {
+        const fee = tx.content.gcr_edits[0] as any
+        expect(fee).toMatchObject({ type: "balance", operation: "remove", account: SENDER })
+        return BigInt(fee.amount)
+    }
+
+    it("credits the storage fee of a create right after it, as a network fee", async () => {
+        settled(0)
+        const tx = await create()
+        const signed = structuredClone(tx.content.gcr_edits) as any[]
+        const fee = feeOf(tx)
+        expect(fee).toBe(OS)
+
+        const applied = withDerivedFeeEdits(tx).content.gcr_edits as any[]
+
+        expect(applied.slice(0, 4)).toEqual([
+            signed[0],
+            expect.objectContaining({ type: "balance", operation: "add", account: BURN, amount: Number(fee / 2n) }),
+            expect.objectContaining({ type: "balance", operation: "add", account: TREASURY, amount: Number(fee / 2n) }),
+            signed[1],
+        ])
+        // The gas keeps its own credits, so each debit is credited once.
+        expect(applied.filter(e => e.type === "balance" && e.operation === "add")).toHaveLength(4)
+        expect(tx.content.gcr_edits).toEqual(signed)
+        expect(withDerivedFeeEdits(withDerivedFeeEdits(tx)).content.gcr_edits).toEqual(applied)
+    })
+
+    it("conserves total supply across a create, a write and a granular write", async () => {
+        settled(0)
+        const before = supply()
+        const txs = [await create(8), await write(9), await setField(10)]
+
+        let paid = 0n
+        for (const tx of txs) {
+            const out = await block([tx])
+            expect(out.failedTxs).toEqual([])
+            paid += feeOf(tx) + gasOf(tx)
+        }
+
+        expect(supply()).toBe(before)
+        expect(paid).toBe(6n * OS)
+        expect(balanceOf(SENDER)).toBe(100n * OS - paid)
+        expect(balanceOf(BURN)).toBe(paid / 2n)
+        expect(balanceOf(TREASURY)).toBe(paid / 2n)
+        expect(nonceOf(SENDER)).toBe(10)
+        expect((caches.storagePrograms.get(address) as any)?.data).toEqual({ n: 2, m: 3 })
+    })
+
+    it("keeps the applied set bound to the signed body", async () => {
+        settled(0)
+        const { verifyGcrEditsMatch } = await import("@/libs/blockchain/validation/verifyGcrEdits")
+        const { verifyEditsAtApply } = await import("@/libs/blockchain/validation/editBinding")
+        const tx = await create()
+
+        expect(await verifyEditsAtApply(tx)).toEqual({ ok: true })
+        const applied = withDerivedFeeEdits(tx)
+        expect((await verifyGcrEditsMatch(applied, { expectFeeEdits: true, keyOrderInsensitive: true })).match).toBe(true)
+        // A set that lost a storage credit is not the one apply derives.
+        applied.content.gcr_edits.splice(1, 1)
+        expect((await verifyGcrEditsMatch(applied, { expectFeeEdits: true, keyOrderInsensitive: true })).match).toBe(false)
+    })
+
+    it("charges a create that fails in the block its gas only, credited, and conserves supply", async () => {
+        settled(0)
+        expect((await block([await create(8)])).failedTxs).toEqual([])
+        const before = supply()
+        const sender = balanceOf(SENDER)
+        const again = await create(9)
+
+        const out = await block([again])
+
+        expect(out.failedTxs).toEqual([again.hash])
+        expect(supply()).toBe(before)
+        expect(balanceOf(SENDER)).toBe(sender - gasOf(again))
+        expect(nonceOf(SENDER)).toBe(9)
+    })
+
+    // A storage edit refuses a rollback (it does not carry what it replaced),
+    // so only the forward replay is checked here.
+    it("applies a served block the same on a syncing node", async () => {
+        settled(0)
+        const tx = await create()
+        await block([tx])
+        const producer = balances()
+
+        caches = freshCaches(100n * OS)
+        const out = await block([onTheWire(tx)])
+        expect(out.failedTxs).toEqual([])
+        expect(balances()).toEqual(producer)
+    })
+
+    it("leaves the storage fee uncredited before the fork, as applied before", async () => {
+        settled(null)
+        const before = supply()
+        const tx = await create()
+
+        expect(withDerivedFeeEdits(tx).content.gcr_edits[1]).toEqual(tx.content.gcr_edits[1])
+        await block([tx])
+
+        // Only the gas is credited on that chain.
+        expect(supply()).toBe(before - feeOf(tx))
+        expect(balanceOf(BURN) + balanceOf(TREASURY)).toBe(gasOf(tx))
+    })
+})

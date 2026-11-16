@@ -257,8 +257,9 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
 - From `v1.0.0-rc.6`:
   - The node uses the host clock and no longer corrects it from NTP servers.
     Keep host NTP running (chrony or systemd-timesyncd). With `PROD=true` a
-    node refuses to boot when at least two NTP servers agree that the host
-    clock is further off than `BLOCK_TIMESTAMP_TOLERANCE`.
+    node refuses to boot when its clock is more than 5 s ahead or behind the
+    median of the largest group of NTP servers that agree within 2 s of each
+    other (at least two, and only if no other group is as large).
   - A balance edit larger than the balance fails on every node. Before, a node
     with `PROD=false` clamped the balance to 0 instead.
   - Mainnet validators append `docs/mainnet/parameters.env` to `.env`, and
@@ -306,6 +307,87 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     yet, so turning them on changes no consensus result.
   - The ZK merkle-proof and nullifier routes accept canonical decimal as well
     as hex.
+- From `v1.0.0-rc.8`:
+  - Two new forks, both at height 0 in the mainnet set (27 forks at 0):
+    `l2psGate` refuses every L2PS transaction and node call and starts no
+    L2PS service, and `tlsnDisabled` refuses `tlsn_request` and `tlsn_store`
+    before any fee or token. A network that does not schedule them keeps L2PS
+    and TLSNotary as before.
+  - `xmProofBinding` moves into the mainnet set at height 0: a cross-chain
+    identity proof must sign the `demos-xm:v1` message, so wallets and
+    clients that link xm identities need `@kynesyslabs/demosdk` 4.0.21. An
+    older SDK's proof (the sender's address) is refused from block 0.
+  - `launch-go-no-go` needs `--expected-treasury` (or
+    `DEMOS_EXPECTED_TREASURY`) on a mainnet chain id and is NO-GO when the
+    genesis names another treasury. A peer whose `gasFeeSeparation` treasury
+    differs is handled as a fork-schedule mismatch at any height.
+  - The mainnet template carries chain id `8587492`. `launch-go-no-go` and
+    `--plan` refuse chain ids `0`, `1`, `1337` and `31337`.
+  - A node on a mainnet chain id refuses to boot with
+    `DEMOS_ALLOW_UNPINNED_GENESIS` set, pinned or not.
+  - `node-doctor --production` fails when `GITHUB_TOKEN`,
+    `DISCORD_BOT_TOKEN`, `RAPID_API_KEY` or `RAPID_API_HOST` is empty: web2
+    identity links stay on and the node checks them against the providers.
+  - The Omni per-identity cap counts inbound connections only. Run one
+    process per validator key.
+- From `v1.0.0-rc.9`:
+  - Two new forks, both at height 0 in the mainnet set (29 forks at 0). A
+    network that does not schedule them keeps the rc.8 behaviour:
+    - `storageFeeSettlement`: the storage fee of a Storage Program create,
+      write or granular write is credited to the burn address and the
+      treasury per the network fee split, as gas already is. Before, the
+      fee left the total supply. The signed edits and admission do not
+      change; only the applied copy carries the credits.
+    - `referenceBlockRoom10`: a transaction may reference a block up to 10
+      blocks behind the head (1 before the fork), so a transaction
+      confirmed at head N stays valid for inclusion until block N+11. The
+      room is read at the tip each block is forged on, so sync of older
+      blocks applies the rule they were made under. The deep window that
+      keeps an expired transaction for inclusion as failed is 50 blocks.
+  - A validator abstaining on its own fork schedule is left out of the
+    shard after the first round it misses or refuses, so it no longer
+    slows every round or halts the chain once drawn as secretary.
+  - A web2 proxy request ends at its 30 s deadline even while the origin
+    keeps sending bytes. The GitHub and RapidAPI (Twitter) lookups behind
+    web2 identity verification have the same 30 s deadline and the
+    `web2MaxResponseBytes` size cap.
+  - `docker-compose.yml` passes `SUDO_PUBKEY` to the container; set it in
+    `.env` to answer the admin RPC. INSTALL gives the minimum per validator:
+    2 dedicated vCPU and 3 GB RAM. Keep host NTP synced: the rehearsal
+    clock skew of 4.5 s left 0.5 s before the 5 s refusal.
+  - A client whose transaction a launch gate (`l2psGate`, `tlsnDisabled`)
+    refuses at RPC validation gets the gate reason instead of
+    `GCREdit mismatch`.
+  - `node-doctor` (and `--production`) fails when the identity file is
+    readable by group or other users (`600` or stricter passes).
+- From `v1.0.0-rc.10`:
+  - A validator abstains when at least half of the staked set answers with a
+    different fork schedule (before: more than half). On an even split both
+    halves stop voting and the chain halts until an operator fixes a
+    schedule. Before, a quorum mixing both halves kept running while the
+    halves applied blocks differently (`storageFeeSettlement` changes only
+    the applied copy). A node that applied blocks under a wrong schedule must
+    be resynced from a correct peer.
+  - The web2 relay closes its outbound origin connection at the request
+    deadline and when its caller leaves early, not only the caller's side.
+  - `launch-go-no-go --plan` refuses a mainnet genesis that schedules
+    `atomicWork`.
+- From `v1.0.0-rc.11`:
+  - The web2 (DAHR) proxy caps its outbound fetches. Per caller: 2 running
+    at once, 10 started per minute, 100 MiB of origin response per hour
+    (charged with the bytes read, a refused or cut response included). Per
+    node: 32 running at once. A caller is the client address of a
+    `web2ProxyRequest` (one IPv6 /64 is one address) and the sender of a
+    `web2Request` or DemosWork tx. Over a cap the caller gets result `429`
+    `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and
+    `WHITELISTED_IPS` skip the per-caller caps. Set with
+    `WEB2_MAX_INFLIGHT_PER_CALLER`, `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER`,
+    `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` and `WEB2_MAX_INFLIGHT_TOTAL`
+    (positive integers, or the node does not start); local to the node,
+    no effect on blocks or state. Behind a reverse proxy, `TRUSTED_PROXIES`
+    must name it: otherwise every client counts as the proxy, which shares
+    one cap, or, for a proxy on the same host, is loopback and skips the
+    per-caller caps (only the node-wide cap applies).
 
 ## Known limits
 

@@ -18,12 +18,9 @@ import {
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 
 async function checkSenderFeeBalance(
-    validationData: ValidityData,
     gcrEdits: GCREdit[],
     sender: string,
 ): Promise<void> {
-    if (!validationData.data.valid) return
-
     const totalFee = gcrEdits
         .filter(
             (edit: GCREdit) =>
@@ -70,6 +67,11 @@ export async function handleValidateTransaction(
         log.only(
             `[handleValidateTransaction] Transaction confirmed in ${handleConfirmTransactionEnd - handleConfirmTransactionStart}ms`,
         )
+        // A refusal already carries its reason (a launch gate, a signature,
+        // a nonce); judging the edits of a refused transaction would only
+        // replace that reason with an edit mismatch.
+        if (!validationData.data.valid) return validationData
+
         const handleGcrEditsStart = Date.now()
         const gcrEdits = await generateGcrEdits(tx)
         gcrEdits.forEach((edit: GCREdit) => {
@@ -170,7 +172,7 @@ export async function handleValidateTransaction(
             throw new Error("GCREdit mismatch")
         }
 
-        await checkSenderFeeBalance(validationData, gcrEdits, sender)
+        await checkSenderFeeBalance(gcrEdits, sender)
     } catch (e) {
         log.error("SERVER", "[TX VALIDATION ERROR] 💀 : " + e)
         validationData = {

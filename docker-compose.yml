@@ -262,6 +262,8 @@ services:
       # Logging & misc
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
+      # The only key the admin RPC answers to; empty, nobody may call it
+      SUDO_PUBKEY: ${SUDO_PUBKEY:-}
       L2PS_ZK_ENABLED: ${L2PS_ZK_ENABLED:-false}
       # Written by `bun run setup`; the defaults equal the node's built-in ones.
       L2PS_HISTORY_RETENTION_DAYS: ${L2PS_HISTORY_RETENTION_DAYS:-0}
@@ -288,6 +290,10 @@ services:
       WEB2_MAX_RESPONSE_BYTES: ${WEB2_MAX_RESPONSE_BYTES:-}
       WEB2_SESSION_TTL_MS: ${WEB2_SESSION_TTL_MS:-}
       WEB2_INSECURE_TLS: ${WEB2_INSECURE_TLS:-}
+      WEB2_MAX_INFLIGHT_PER_CALLER: ${WEB2_MAX_INFLIGHT_PER_CALLER:-}
+      WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER: ${WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER:-}
+      WEB2_MAX_BYTES_PER_HOUR_PER_CALLER: ${WEB2_MAX_BYTES_PER_HOUR_PER_CALLER:-}
+      WEB2_MAX_INFLIGHT_TOTAL: ${WEB2_MAX_INFLIGHT_TOTAL:-}
       TLSNOTARY_ALLOWED_PORTS: ${TLSNOTARY_ALLOWED_PORTS:-}
       TLSNOTARY_ALLOW_PRIVATE_TARGETS: ${TLSNOTARY_ALLOW_PRIVATE_TARGETS:-}
       # Setup check at start and the `bun run setup` answers (empty = unset).
@@ -444,6 +450,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      # Minimum 7d: the consensus alert latch needs seven days of recorded samples.
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles
