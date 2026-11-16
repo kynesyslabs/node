@@ -181,6 +181,7 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.blockTimestampTolerance,
             ),
             logLevel: envStr(EnvKey.LOG_LEVEL, d.core.logLevel),
+            logsDir: envStr(EnvKey.LOGS_DIR, d.core.logsDir),
             whitelistedIPs: envList(
                 EnvKey.WHITELISTED_IPS,
                 d.core.whitelistedIPs,

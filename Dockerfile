@@ -285,8 +285,9 @@ ARG BUILT_AT=
 # its check passing. The mount adds nothing to the image.
 RUN --mount=type=bind,from=provenance,target=/mnt true
 
-# Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
-# IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
+# Sensible image-level defaults. Anything else (PG_HOST, PG_PORT, PG_USER,
+# PG_PASSWORD, PG_DATABASE, EXPOSED_URL, IDENTITY_FILE, PEER_LIST_FILE, etc.)
+# must be supplied at runtime.
 ENV NODE_ENV=production \
     RPC_PORT=53550 \
     METRICS_HOST=0.0.0.0 \

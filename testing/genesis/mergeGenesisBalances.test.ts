@@ -147,6 +147,23 @@ describe("mergeGenesisBalances", () => {
         ).rejects.toThrow(/unsupported balance type/)
     })
 
+    it.each(["", "  ", " 100", "0x10", "+5", "1e3", "1_000", "10.0"])(
+        "rejects the non-decimal string balance %j before writing anything",
+        async raw => {
+            const { em, rows } = makeMockEm()
+            const address = "0xaa00000000000000000000000000000000000000000000000000000000000001"
+            await expect(mergeGenesisBalances(em, [[address, raw]])).rejects.toThrow(/must be decimal digits/)
+            expect(rows.size).toBe(0)
+            expect(genesisBalancesProblems([[address, raw]])).toHaveLength(1)
+        },
+    )
+
+    it("rejects an integer number too large to be exact", () => {
+        const address = "0xaa00000000000000000000000000000000000000000000000000000000000001"
+        expect(genesisBalancesProblems([[address, 2 ** 53 + 2]])[0]).toMatch(/decimal string/)
+        expect(genesisBalancesProblems([[address, 2 ** 53 - 1]])).toEqual([])
+    })
+
     it("coerces string balance to bigint", async () => {
         const { em, rows } = makeMockEm()
         await mergeGenesisBalances(em, [["0xaa00000000000000000000000000000000000000000000000000000000000001", "1000000000000000000"]])
