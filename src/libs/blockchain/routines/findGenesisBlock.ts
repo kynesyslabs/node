@@ -23,17 +23,17 @@ import {
 import {
     GenesisRefusal,
     blockPinProblem,
+    bootSettingProblems as settingProblems,
     chainIdOf,
     defaultTreasuryWarning,
-    devModeProblem,
     genesisScheduleProblems,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
-    pinRequirementProblem,
     restartGenesisProblems,
     unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
+import { explicitXffMode } from "@/libs/network/middleware/rateLimiter"
 import {
     acceptSchedule,
     parseOverrideDigest,
@@ -137,6 +137,20 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
     genesisData["balances"] = Object.entries(finalBalances)
 }
 
+/** The XFF mode the rate limiter will run with when it is set explicitly. */
+function configuredXffMode(): string | undefined {
+    return explicitXffMode(Config.getInstance().core.xffMode)
+}
+
+/** Every refusal of this node's pin, PROD and XFF_MODE settings for a genesis with this chain id. */
+function bootSettingProblems(pin: string, chainId: unknown): string[] {
+    return settingProblems(pin, chainId, {
+        env: process.env,
+        prod: Config.getInstance().core.prod,
+        xffMode: configuredXffMode(),
+    })
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -161,11 +175,8 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
-    const pinProblem = pinRequirementProblem(pin, process.env, fileChainId)
-    if (pinProblem) refuse([pinProblem])
-    const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
-    if (modeProblem) refuse([modeProblem])
+    const fileGenesis = hasGenesisFile ? readGenesisFile() : null
+    refuse(bootSettingProblems(pin, chainIdOf(fileGenesis)))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -178,19 +189,19 @@ export default async function findGenesisBlock() {
             | undefined
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
-        const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
-        if (storedPinProblem) refuse([storedPinProblem])
-        const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
-        if (storedModeProblem) refuse([storedModeProblem])
+        refuse(bootSettingProblems(pin, chainIdOf(stored)))
+        // Without a file only the pin can be checked; the schedule check
+        // still sees the defaults this node would run with.
+        const fileOrStored = fileGenesis ?? stored
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
+                fileGenesisData: fileGenesis,
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(hasGenesisFile ? readGenesisFile() : stored)
+        warnDefaultTreasury(fileOrStored)
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -198,9 +209,7 @@ export default async function findGenesisBlock() {
         refuse(
             restartGenesisProblems({
                 storedGenesisData: stored,
-                // Without a file only the pin can be checked; the schedule check
-                // below still sees the defaults this node would run with.
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : stored,
+                fileGenesisData: fileOrStored,
                 pin,
             }),
         )
