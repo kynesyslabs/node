@@ -63,19 +63,21 @@ cannot tell the senders apart.
 
 ## Transaction states
 
-`getTransactionStatus {hash}` takes the 64-hex transaction hash without `0x`;
-a hash with the `0x` prefix is refused with 400. The reply carries no amounts.
-It returns one of four states:
+`getTransactionStatus {hash}` takes the 64-hex transaction hash without `0x`.
+The HTTP status of an RPC reply is 200 in every case below: read the outcome
+from the JSON reply's `result` field (200, 400, 404, 500 or 503) and the
+reason from `extra.reason`. The reply carries no amounts. It returns one of
+four states:
 
 | `state` | Meaning | What to do |
 |---|---|---|
 | `pending` | In the node's mempool, not in a block yet | Wait. |
 | `included` | In a block and executed. `blockNumber` is set. | Credit after the finality rule below. |
 | `failed` | In a block but not executed, or executed and refused. `code` and `message` say why. | Do not credit. See "Fee on a failed transaction". |
-| `unknown` | The node does not know the hash. HTTP 404 when the node is synced, 503 `node_not_synced` when it is not. | Ask a synced node. If a synced node says 404 after the expiry window below, the transaction is gone. |
+| `unknown` | The node does not know the hash. `result` 404 (`extra.reason` `not_found`) when the node is synced, 503 (`node_not_synced`) when it is not. | Ask a synced node. If a synced node answers 404 after the expiry window below, the transaction is gone. |
 
-A malformed or `0x`-prefixed hash returns 400. A lookup error returns 500;
-retry on another node.
+A malformed or `0x`-prefixed hash gets `result` 400. A lookup error gets
+`result` 500; retry on another node.
 
 ## Detecting a deposit
 
