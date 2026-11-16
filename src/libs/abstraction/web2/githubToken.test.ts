@@ -10,7 +10,15 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 
 // Read when the config first loads, so set before the modules are imported.
-process.env.GITHUB_TOKEN ||= "test-token"
+// Pinned, not defaulted: Octokit strips a "Bearer " or "token " prefix from a
+// developer's own value, so the header would not echo it back verbatim.
+const TOKEN = "test-token"
+const savedToken = process.env.GITHUB_TOKEN
+process.env.GITHUB_TOKEN = TOKEN
+afterAll(() => {
+    if (savedToken === undefined) delete process.env.GITHUB_TOKEN
+    else process.env.GITHUB_TOKEN = savedToken
+})
 
 const { GithubProofParser } = await import("./github")
 const { verifyWeb2Proof } = await import("@/libs/abstraction")
@@ -91,7 +99,7 @@ describe("GitHub rejects the node's token", () => {
 
     it("asks GitHub once, with the token, and does not retry without it", async () => {
         await readGist()
-        expect(seen).toEqual([`token ${process.env.GITHUB_TOKEN}`])
+        expect(seen).toEqual([`token ${TOKEN}`])
     })
 
     it("logs each refused link once, through the verifier, with the cause", async () => {
