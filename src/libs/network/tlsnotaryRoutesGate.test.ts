@@ -6,48 +6,13 @@
  * real `serverRpcBun` and checks which routes it registers.
  */
 
-import { afterEach, describe, expect, it, mock } from "bun:test"
-import { mockCore } from "src/utilities/testSupport/coreMocks"
+import { afterEach, describe, expect, it } from "bun:test"
+import { mockCore, mockEntityDatasource } from "src/utilities/testSupport/coreMocks"
 
-const sharedState: Record<string, any> = {
-    signingAlgorithm: "ed25519",
-    lastBlockNumber: 10,
-    keypair: { publicKey: new Uint8Array(32).fill(7) },
-    publicKeyHex: "07".repeat(32),
-    SUDO_PUBKEY: "",
-    connectionString: "http://us:53550",
-    serverPort: 0,
-    PROD: false,
-    rateLimitConfig: {
-        enabled: true,
-        defaultLimit: { maxRequests: 100_000, windowMs: 60_000 },
-        blockDurationMs: 60_000,
-        whitelistedIPs: ["127.0.0.1"],
-        whitelistedKeys: [],
-        methodLimits: {},
-        txPerBlock: 1_000,
-    },
-}
-
-mockCore(sharedState, { asInstance: true })
-mock.module("src/model/datasource", () => ({
-    __esModule: true,
-    dataSource: {},
-    default: {
-        getInstance: async () => {
-            throw new Error("no database in this test")
-        },
-    },
-}))
-mock.module("src/libs/consensus/stakedSet", () => ({
-    getStakedSet: async () => new Set<string>(),
-    getStakedSetHeight: () => 0,
-    isStaked: async () => false,
-    isSelfStaked: async () => false,
-    onSelfStakeChange: () => () => undefined,
-    invalidateStakedSet: () => undefined,
-    __resetStakedSet: () => undefined,
-}))
+// No request is served: registering the routes reads only the port and builds
+// the rate limiter, so that is all the shared state needs.
+mockCore({ serverPort: 0, rateLimitConfig: {} }, { asInstance: true })
+mockEntityDatasource()
 
 const { BunServer } = await import("./bunServer")
 BunServer.prototype.start = function () {
