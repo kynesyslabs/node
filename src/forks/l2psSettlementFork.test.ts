@@ -10,7 +10,8 @@ import { DEFAULT_FORK_CONFIG, cloneDefaultForkConfig, type ForkConfigByName } fr
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { getSharedState } from "@/utilities/sharedState"
-import { MAINNET_FORKS } from "../../scripts/launch-go-no-go"
+import { l2psOff } from "@/forks/l2psGate"
+import { LAUNCH_DORMANT_FORKS, MAINNET_FORKS } from "../../scripts/launch-go-no-go"
 import devnetGenesis from "../../testing/devnet/genesis.devnet.json"
 import template from "../../docs/mainnet/genesis.template.json"
 
@@ -44,6 +45,15 @@ describe("l2psSettlement fork config", () => {
         expect(MAINNET_FORKS).toContain("l2psSettlement")
         loadForkConfigFromGenesis(devnetGenesis)
         expect(isForkActive("l2psSettlement", 0)).toBe(true)
+    })
+
+    it("settles from block 0 with the L2PS kill switch unscheduled in the template and the devnet genesis", () => {
+        expect((template.forks as Record<string, { activationHeight: unknown }>).l2psGate).toEqual({ activationHeight: null })
+        expect(LAUNCH_DORMANT_FORKS).toContain("l2psGate")
+        loadForkConfigFromGenesis(devnetGenesis)
+        getSharedState.lastBlockNumber = 1_000_000
+        expect(l2psOff()).toBe(false)
+        expect(l2psSettlementActive()).toBe(true)
     })
 
     it("is judged at the tip", () => {

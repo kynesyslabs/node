@@ -199,8 +199,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
   third of the first committee's votes; the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `l2psGate`, `tlsnDisabled`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10` and `l2psSettlement` at
-  `activationHeight` 0, leaves `networkGovernance` and `tokenStaking` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `tlsnDisabled`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10` and `l2psSettlement` at
+  `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking` and the L2PS kill switch `l2psGate` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
   (`--expected-treasury`),
   uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`

@@ -149,6 +149,7 @@ import json, sys
 inputs, repo, genesis_ts = sys.argv[1], sys.argv[2], sys.argv[3]
 g = json.load(open(f"{repo}/testing/devnet/genesis.devnet.json"))
 assert g["forks"]["l2psSettlement"]["activationHeight"] == 0, "devnet genesis must activate l2psSettlement at 0"
+assert g["forks"].get("l2psGate", {}).get("activationHeight") is None, "devnet genesis must leave the l2psGate kill switch unscheduled"
 g["timestamp"] = genesis_ts
 pubs = [open(f"{inputs}/pub{i}").read().strip() for i in (1, 2, 3, 4)]
 ports = ["53551", "53553", "53555", "53557"]

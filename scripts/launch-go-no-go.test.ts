@@ -719,8 +719,10 @@ describe("checkLaunch", () => {
         })
     })
 
-    it("launches with L2PS and TLSNotary off", () => {
-        expect(MAINNET_FORKS).toContain("l2psGate")
+    it("launches with L2PS settling and TLSNotary off", () => {
+        expect(MAINNET_FORKS).toContain("l2psSettlement")
+        expect(MAINNET_FORKS).not.toContain("l2psGate")
+        expect(LAUNCH_DORMANT_FORKS).toContain("l2psGate")
         expect(MAINNET_FORKS).toContain("tlsnDisabled")
         expect(MAINNET_FORKS).toHaveLength(29)
     })
