@@ -29,6 +29,7 @@ SUITE_FILES=(
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
+    src/libs/blockchain/chainTransactions.insert.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
     src/libs/blockchain/finality/requesterFixtures.test.ts
@@ -45,6 +46,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/handleGCR.failedTx.test.ts
     src/libs/blockchain/gcr/handleGCR.identityRollback.test.ts
     src/libs/blockchain/gcr/handleGCR.keyRefusal.test.ts
+    src/libs/blockchain/gcr/handleGCR.l2psSettlement.test.ts
     src/libs/blockchain/gcr/handleGCR.nativeValue.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
@@ -146,7 +148,16 @@ SUITE_FILES=(
     src/libs/network/manageGCRRoutines.humanPassportClaim.test.ts
     src/libs/network/manageGCRRoutines.readOnly.test.ts
     src/libs/omniprotocol/protocol/noConsensusStateWrites.test.ts
+    src/libs/l2ps/l2psAggregatorSettlement.test.ts
+    src/libs/l2ps/l2psAggregatorTeardown.test.ts
     src/libs/l2ps/l2psApplyTime.test.ts
+    src/libs/l2ps/l2psSettlementOldPath.test.ts
+    src/libs/l2ps/settlement/aggregator.test.ts
+    src/libs/l2ps/settlement/bootCheck.test.ts
+    src/libs/l2ps/settlement/encoding.test.ts
+    src/libs/l2ps/settlement/planner.test.ts
+    src/libs/l2ps/settlement/transfer.test.ts
+    src/libs/l2ps/settlement/validation.test.ts
     src/libs/network/peerHttpAuth.test.ts
     src/libs/network/sudoReplayFloor.test.ts
     src/libs/network/tlsnotaryRoutesGate.test.ts
