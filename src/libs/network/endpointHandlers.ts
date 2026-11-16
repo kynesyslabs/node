@@ -17,7 +17,6 @@ import {
     XMScript,
     ConsensusRequest,
     RPCResponse,
-    IWeb2Payload,
 } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import log from "src/utilities/logger"
@@ -27,8 +26,6 @@ import Mempool from "src/libs/blockchain/mempool"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
-import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
-import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import { emptyResponse } from "./rpcDispatch"
@@ -84,13 +81,6 @@ export default class ServerHandlers {
     }
 
     // ── Simple proxy methods ──────────────────────────────────
-    static async handleWeb2Request(
-        rawPayload: IWeb2Payload,
-    ): Promise<RPCResponse> {
-        const params = parseWeb2ProxyRequest(rawPayload)
-        return await handleWeb2ProxyRequest(params)
-    }
-
     static async handleXMChainOperation(xmscript: XMScript) {
         log.debug("[XMChain] Handling XM Chain Operation...")
         return await multichainDispatcher.digest(xmscript)

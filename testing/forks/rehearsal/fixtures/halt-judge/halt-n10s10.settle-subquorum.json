@@ -12,7 +12,8 @@
   "consensusTimeS": 10,
   "forks": {
     "quorumParity": 0,
-    "committeeBinding": 0
+    "committeeBinding": 0,
+    "commitLock": 0
   },
   "baselineMinHeight": 6,
   "holdRounds": 12,
