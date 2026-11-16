@@ -78,6 +78,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/network/rateLimiter.loopback.test.ts
     src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
