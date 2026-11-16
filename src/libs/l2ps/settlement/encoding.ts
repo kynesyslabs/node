@@ -19,6 +19,11 @@ export const SETTLEMENT_SIGNATURE_DOMAIN = "l2ps-settlement:v1:"
 /** Amounts, fees, balances and net change magnitudes stay below this. */
 export const AMOUNT_LIMIT = 1n << 128n
 export const NONCE_LIMIT = 1n << 64n
+/**
+ * A transfer's fee stays below this: the fee distribution edits split it in
+ * JS numbers, which are exact only up to Number.MAX_SAFE_INTEGER.
+ */
+export const FEE_LIMIT = BigInt(Number.MAX_SAFE_INTEGER) + 1n
 export const SALT_BYTES = 31
 /** BN254 scalar field order: circuit values and hashes live below it. */
 export const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n

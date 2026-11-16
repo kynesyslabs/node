@@ -11,6 +11,7 @@
  */
 import {
     AMOUNT_LIMIT,
+    FEE_LIMIT,
     NONCE_LIMIT,
     SALT_BYTES,
     SETTLEMENT_TRANSFERS,
@@ -117,6 +118,8 @@ export function openSettlementTransfer(inner: InnerTx, txHash: string): Transfer
             salt: hexToField(salt),
         }
         if (opened.salt >= SALT_LIMIT) return refuse("settlement salt is not below 2^248")
+        // Every batch carrying it is refused, so the transfer would never settle.
+        if (opened.fee >= FEE_LIMIT) return refuse(`settlement fee is above ${Number.MAX_SAFE_INTEGER}`)
         const recomputed = settlementCommitment(opened)
         if (recomputed !== hexToField(commitment)) {
             return refuse("settlement commitment does not open to the decrypted transfer")

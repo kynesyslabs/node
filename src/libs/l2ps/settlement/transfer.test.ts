@@ -4,7 +4,7 @@
  * the admission rules (signature, fee floor, unspent nonce).
  */
 import { describe, expect, it } from "bun:test"
-import { SETTLEMENT_TRANSFERS, fieldToHex } from "./encoding"
+import { FEE_LIMIT, SETTLEMENT_TRANSFERS, fieldToHex } from "./encoding"
 import {
     SETTLEMENT_ENVELOPE_MAX_BYTES,
     envelopeSizeRefusal,
@@ -49,6 +49,7 @@ const admission = (minimumFee: bigint, accountNonce: bigint) => ({
 describe("openSettlementTransfer", () => {
     it("opens the SDK vectors and recomputes their commitments", () => {
         for (const [i, v] of vectors.transfers.entries()) {
+            if (BigInt(v.fee) >= FEE_LIMIT) continue
             const out = openSettlementTransfer(vectorInner(i), `enc_${i}`)
             expect(out.ok).toBe(true)
             if (!out.ok) continue
@@ -86,6 +87,20 @@ describe("openSettlementTransfer", () => {
         const upper = vectorInner(0)
         upper.content.from = upper.content.from.toUpperCase().replace("0X", "0x")
         expect(openSettlementTransfer(upper, "enc").ok).toBe(false)
+    })
+
+    it("refuses a fee no batch could carry, which would never settle", () => {
+        const max = vectors.transfers.findIndex(v => BigInt(v.fee) >= FEE_LIMIT)
+        expect(max).toBeGreaterThanOrEqual(0)
+        expect(openSettlementTransfer(vectorInner(max), "enc")).toEqual({
+            ok: false,
+            reason: `settlement fee is above ${Number.MAX_SAFE_INTEGER}`,
+        })
+
+        const atLimit = signedTransfer({ from: ALICE, to: BOB.account, amount: 5n, fee: FEE_LIMIT, nonce: 4n })
+        expect(openSettlementTransfer(innerTx(atLimit), "enc")).toMatchObject({ ok: false })
+        const below = signedTransfer({ from: ALICE, to: BOB.account, amount: 5n, fee: FEE_LIMIT - 1n, nonce: 4n })
+        expect(openSettlementTransfer(innerTx(below), "enc").ok).toBe(true)
     })
 
     it("refuses an amount that is not a decimal string", () => {

@@ -15,6 +15,7 @@ import { calculateFeeBreakdown } from "@/libs/blockchain/routines/calculateCurre
 import { getSharedState } from "@/utilities/sharedState"
 import {
     AMOUNT_LIMIT,
+    FEE_LIMIT,
     NONCE_LIMIT,
     SETTLEMENT_ACCOUNTS,
     SETTLEMENT_TRANSFERS,
@@ -167,7 +168,7 @@ export function parseSettlement(tx: {
                 return refuse(`transfer ${i} commitment is not a field element`)
             }
             const fee = parseUnsigned(t.fee, AMOUNT_LIMIT, `transfer ${i} fee`)
-            if (fee > BigInt(Number.MAX_SAFE_INTEGER)) {
+            if (fee >= FEE_LIMIT) {
                 return refuse(`transfer ${i} fee is above ${Number.MAX_SAFE_INTEGER}`)
             }
             parsedTransfers.push({
