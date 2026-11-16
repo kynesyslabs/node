@@ -34,7 +34,8 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
-import { submitValidatedTx } from "./txSubmission"
+import { gossipSizeRefusal, submitValidatedTx } from "./txSubmission"
+import GossipManager from "src/libs/gossip/GossipManager"
 import { isSelfStaked } from "src/libs/consensus/stakedSet"
 import handleL2PS from "./routines/transactions/handleL2PS"
 
@@ -226,6 +227,25 @@ export async function handleExecuteTransaction(
         result.success = false
         result.response = false
         result.extra = validatedData.data.message
+        return result
+    }
+
+    // l2psEncryptedTx returns before submission and never reaches the tx topic.
+    const sizeRefusal =
+        GossipManager.isEnabled() &&
+        validatedData.data.transaction?.content?.type !== "l2psEncryptedTx"
+            ? gossipSizeRefusal(validatedData)
+            : null
+    if (sizeRefusal) {
+        result.success = false
+        result.response = {
+            message: "Failed to add transaction to mempool",
+        }
+        result.extra = {
+            confirmationBlock: null,
+            lastBlockNumber: getSharedState.lastBlockNumber,
+            error: sizeRefusal,
+        }
         return result
     }
 
