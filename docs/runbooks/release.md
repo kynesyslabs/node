@@ -39,11 +39,19 @@ key in the OpenSSH allowed-signers format:
 release@kynesyslabs.com namespaces="git" ssh-ed25519 AAAA...
 ```
 
-A signer configures git once:
+A signer configures git in the checkout used to tag. The first two lines are
+needed once; run the last four again before each tag, because the signer
+file is a copy of the list at that moment and goes stale when a signer is
+added or removed. The copy goes into the clone's own `.git`, as in
+`INSTALL.md` step 1:
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS"
 ```
 
 Keep the private key off the validators and out of CI. How a holder
@@ -132,6 +140,42 @@ INSTALL.md, "After the genesis is reissued".
 
 ## What a validator runs
 
+Before changing `IMAGE_TAG`, verify and check out the release tag, so the
+compose file, scripts and parameter sheet match the image. The signer list
+goes into the clone's own `.git`, as in `INSTALL.md` step 1:
+
+```bash
+TAG=v1.0.0-rc.1
+
+OLD_HEAD="$(git rev-parse HEAD)" &&
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
+git merge-base --is-ancestor "$TAG" origin/stabilisation &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+The first line records the commit the checkout is at now. If this chain
+stops, do not continue the upgrade. A good signature from a key you cannot
+match is a failure: the email `git verify-tag` prints must be a signer the
+announcement names, and the `SHA256:` fingerprint the one that signer
+published outside GitHub (see `INSTALL.md` step 1). The chain has already
+checked out the new tag by then, so before anything else go back to the
+commit the first line recorded, in the same shell: `git checkout "$OLD_HEAD"`.
+Then do not continue the upgrade.
+
+Run the chain once; to read the signature again, run `git verify-tag "$TAG"`,
+which moves nothing. If the shell is gone or the chain ran twice, `OLD_HEAD`
+is empty or holds the new tag's commit. Go back instead to the release named
+by `IMAGE_TAG` in `.env`, the part before `@` (`git checkout vX.Y.Z` for
+`IMAGE_TAG=vX.Y.Z@sha256:<digest>`): it still names the release the node
+runs, because this chain runs before `IMAGE_TAG` changes. If `IMAGE_TAG` is
+still `local` (an image built from this checkout), find the way back in
+`git reflog`: the oldest `checkout: moving from <place> to <tag>` line of
+this upgrade names the commit or branch to check out.
+
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
 `docs/mainnet/parameters.env`, the announcement says so and every validator
@@ -182,8 +226,8 @@ the same for every release. A node started with migrations still pending
 refuses to boot and names the command.
 Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
-A bare-metal validator (`./run`) checks out the tag instead and verifies it
-locally before starting:
+A bare-metal validator (`./run`) runs the same verify-and-checkout chain, then
+starts `./run`:
 
 ```bash
 git fetch --tags origin stabilisation &&
@@ -220,6 +264,26 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show   # from the node che
 # launcher options; -d must name the port just migrated:
 PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> <other launcher options>
 ```
+
+## Rolling upgrades
+
+On a running network, validators upgrade one at a time, whatever the number
+of validators:
+
+1. Upgrade one validator with the blocks above.
+2. Wait until it is back in the committee: healthy, at the network head, and
+   signing blocks. The check is in
+   [chain-halt-recovery.md](chain-halt-recovery.md), "Restart and upgrade
+   rule". Post its running digest on the release thread.
+3. Only then start the next one.
+
+Each stop costs the committees it sits in one vote, and a restarted node sits
+out rounds until its restart signing floor passes, so two validators down at
+once can stop a committee that holds both. If a just-restarted validator
+logs `Timeout waiting for green light` for the same block twice, restart it
+once more (`docker compose restart node`). From `v1.0.0-rc.12` the validator
+leaves a round the secretary abandoned and joins the newer one on its own, so
+this restart is a fallback there.
 
 ## Upgrade notes
 
@@ -388,7 +452,33 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     must name it: otherwise every client counts as the proxy, which shares
     one cap, or, for a proxy on the same host, is loopback and skips the
     per-caller caps (only the node-wide cap applies).
-- From the first release after `v1.0.0-rc.11`:
+  - Rolling restart finding (U-1): a validator restarted while its
+    committee was in a round could stay out of every later round at that
+    height. On the 3-validator rehearsal this halted the chain for about
+    10 minutes until a second restart of that validator. Apply the restart
+    rule in [Rolling upgrades](#rolling-upgrades).
+- From `v1.0.0-rc.12`:
+  - A validator restarted in the middle of a round rejoins the committee
+    within a round on its own. The secretary releases a late phase report
+    it already released the group from, and a validator that sees the
+    secretary open a newer round at the same height leaves its attempt
+    without signing and joins that round. Before, it could wait out its
+    green light while the round timed out, and only a second restart
+    brought it back. No setting; no effect on blocks or state.
+  - Genesis balances and validator stakes are read as decimal digits only.
+    A genesis with an amount written as `""`, with spaces, a sign, a
+    `0x`/`0b` prefix, or a JSON number above 2^53 is refused at boot
+    instead of read. Every published genesis already uses decimal strings.
+  - Launch tooling: `genesis-hash --snapshot` runs the carry-over import
+    check a node runs at boot; `launch-go-no-go` refuses a test-genesis
+    treasury on the mainnet chain id; the carry-over builder takes
+    `--zero-points`, `--drop-storage` and `--empty-storage` lists.
+  - A node on the mainnet chain id refuses to boot with
+    `XFF_MODE=legacy`. Remove the setting or set `XFF_MODE=strict` with
+    `TRUSTED_PROXIES` before upgrading.
+  - Docker validators write logs to the `node_logs` volume instead of the
+    container layer. Bare-metal `./run -e` keeps the operator's `PG_PORT`
+    instead of forcing 5332.
   - An empty `RAPID_API_HOST` passes `node-doctor --production` and uses the
     Twitter API45 default.
   - Each RapidAPI (Twitter) provider read is capped at 4.5 s (was 30 s) and

@@ -49,6 +49,25 @@ export function pickRpcUrl(
 }
 
 /**
+ * The node's configured EVM RPC URL for a chain, read from the configured keys
+ * only: names such as "constructor" or "toString" are inherited from
+ * Object.prototype, not configured.
+ */
+function configuredEvmUrl(
+    chain: unknown,
+    subchain: unknown,
+): string | undefined {
+    if (typeof chain !== "string" || typeof subchain !== "string") {
+        return undefined
+    }
+    if (!Object.hasOwn(evmProviders, chain)) return undefined
+    const urls: Record<string, unknown> = evmProviders[chain]
+    if (!Object.hasOwn(urls, subchain)) return undefined
+    const url = urls[subchain]
+    return typeof url === "string" && url !== "" ? url : undefined
+}
+
+/**
  * Broadcasts an XM operation's signed EVM transaction. The SDK caches one
  * instance per chain id, so only the configured RPC goes into that cache: an
  * allow-listed caller URL gets a connection of its own, which later callers
@@ -58,7 +77,7 @@ export async function sendSignedEvmTransaction(
     operation: IOperation,
     chainID: number,
 ) {
-    const configuredUrl = evmProviders[operation.chain]?.[operation.subchain]
+    const configuredUrl = configuredEvmUrl(operation.chain, operation.subchain)
     const rpcUrl = pickRpcUrl(operation.rpc, configuredUrl)
     if (!rpcUrl) {
         return {

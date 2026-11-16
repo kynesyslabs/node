@@ -80,10 +80,14 @@ export async function pairWithAnchor(
     deps: AnchorPairingDeps,
     chainHash: string,
     delays: number[] = BOOT_RETRY_DELAYS_MS,
-): Promise<"paired" | "unreachable"> {
+): Promise<"paired" | "unreachable" | "self"> {
     let answered = false
     for (let attempt = 0; ; attempt++) {
         const verdict = await deps.sayHello(peer)
+        if (verdict === "self") {
+            log.warning(`[BOOTSTRAP] Skipping ${anchorLabel(peer)}: its URL answered with this node's signed identity`)
+            return "self"
+        }
         const refusal = refusalFor(verdict, peer, chainHash)
         if (refusal) throw refusal
         if (verdict === "verified" && deps.isPaired(peer.identity)) return "paired"
@@ -120,7 +124,7 @@ export async function pairAnchorsAtBoot(
     for (const [i, result] of results.entries()) {
         if (result.status === "rejected") throw result.reason
         if (result.value === "paired") paired.push(anchors[i])
-        else unreachable.push(anchors[i])
+        else if (result.value === "unreachable") unreachable.push(anchors[i])
     }
     return { paired, unreachable }
 }
@@ -201,6 +205,10 @@ export class DeferredAnchorChecks {
             const outcome = await pairWithAnchor(peer, this.deps, this.chainHash, [])
             if (outcome === "unreachable") {
                 this.backOff(entry, "still not answering")
+                return
+            }
+            if (outcome === "self") {
+                this.pending.delete(peer.identity)
                 return
             }
             await this.deps.confirm(peer)

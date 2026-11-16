@@ -184,12 +184,12 @@ IMAGE_NAME=ghcr.io/kynesyslabs/node
 IMAGE_TAG=vX.Y.Z@sha256:<digest>   # the image: line of mainnet/checksums.txt, after "ghcr.io/kynesyslabs/node:"
 RPC_PORT=53550
 EXPOSED_URL=http://YOUR_PUBLIC_IP:53550
-COMPOSE_PROFILES=tlsnotary
-TLSNOTARY_ENABLED=true
+COMPOSE_PROFILES=
+TLSNOTARY_ENABLED=false
 ```
 
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
-- **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses; without it, set `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
+- **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. TLSNotary is off on mainnet at launch: the genesis activates `tlsnDisabled` at block 0, so every node refuses `tlsn_request` and `tlsn_store`, and a mainnet validator keeps `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false` as above. On a network without that fork, `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses, paired with `TLSNOTARY_ENABLED=true`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
 - **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised proxy port (`TLSNOTARY_PROXY_PORT`) on every interface and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
 - **`SUDO_PUBKEY`** (optional) is the ed25519 public key (`0x` + 64 hex) this node answers its admin RPC to (`rate-limit/unblock`, `getCampaignData`, `awardPoints`). Empty, nobody may call them. It only authorises calls on this node: whether an award transaction is valid is decided by the genesis `properties.sudoPubkey`, the same on every node.
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
@@ -344,7 +344,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
 | `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required on mainnet in every mode, and in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
-| `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. |
+| `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. A node whose genesis has a mainnet chain id (not 1 or 1337) refuses to start without it. |
 | `PROD` | `false` | `true` on validators. The node then refuses to start with a loopback or missing `EXPOSED_URL`, without the commit it was built from, or without its identity file (it never creates a new key on its own; see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Production refusals"). |
 | `CONSENSUS_TIME`, `BLOCK_TIMESTAMP_MIN_DELTA`, `BLOCK_TIMESTAMP_TOLERANCE`, `NETWORK_FEE`, `RPC_FEE`, `BURN_FEE`, `RPC_FEE_PERCENT`, `MIN_VALIDATOR_STAKE`, `ZK_ATTESTATION_POINTS` | _(empty: built-in values)_ | Chain-wide: every validator runs the same values. Mainnet validators copy them from [docs/mainnet/parameters.env](docs/mainnet/parameters.env); `./scripts/node-doctor --production` fails on any other value. |
 | `FORK_SCHEDULE_MISMATCH_POLICY` | `abstain` | What a validator does when its fork schedule differs from most validators' before a fork. Mainnet runs `abstain` only; `warn` is for devnets and testnets, and the node refuses it together with `DEMOS_REQUIRE_VALIDATORS=true`. See [docs/runbooks/fork-schedule-policy.md](docs/runbooks/fork-schedule-policy.md). |
@@ -358,7 +358,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `L2PS_MESSAGING_SEND_BURST` | `30` | Messages a sender key may send at once before the rate applies. |
 | `L2PS_MESSAGING_BACKLOG_SHARE` | `0.5` | Largest fraction of `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` that messaging may hold, so RPC transactions keep the rest. `1` gives messaging all of it. |
 | `WEB2_MAX_INFLIGHT_PER_CALLER` / `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER` / `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` / `WEB2_MAX_INFLIGHT_TOTAL` | `2` / `10` / `104857600` (100 MiB) / `32` | Caps on the outbound fetches of the web2 (DAHR) proxy: running at once per caller, started per minute per caller, origin response bytes per hour per caller, and running at once on the node. A caller is the client address for a `web2ProxyRequest` RPC (one IPv6 /64 counts as one address; behind a reverse proxy this needs `TRUSTED_PROXIES`: otherwise every client counts as the proxy, which shares one cap, or, for a proxy on the same host, is loopback and skips the per-caller caps) and the sender for a `web2Request` or DemosWork tx. Over a cap the caller gets result `429` `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and `WHITELISTED_IPS` skip the per-caller caps; every fetch counts toward the node-wide one. Positive integers only, or the node does not start. Local to the node: no effect on blocks or state. |
-| `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. A validator sets `tlsnotary` (or nothing); `monitoring` needs `GRAFANA_ADMIN_PASSWORD`. See [Profiles](#profiles). |
+| `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. A mainnet validator sets nothing at launch (TLSNotary is off, see step 3 of [Run a released image](#run-a-released-image-validators)); `monitoring` needs `GRAFANA_ADMIN_PASSWORD`. See [Profiles](#profiles). |
 | `INSTANCE_SUFFIX` / `COMPOSE_PROJECT_NAME` | _(empty)_ / _(directory name)_ | Set both on every install but one when a host runs more than one; see [More than one install on a host](#more-than-one-install-on-a-host). |
 
 Under docker compose a variable reaches the node only when `docker-compose.yml` lists it in the node's `environment:`; a value in `.env` that is not listed there does nothing. Every node variable in this table is listed.
@@ -388,7 +388,7 @@ If running behind NAT, port-forward `RPC_PORT` (53550), `OMNI_PORT` (53551) and 
 
 **2. Provide a bootstrap peer list.**
 
-The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key out: the node adds itself. On a validator network list every other validator.
+The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key and public URL out: the node adds itself, and a listed URL that is dialed and answers with this node's identity refuses boot. Remove such an entry before restarting. On a validator network list every other validator.
 
 Run this from the checkout, with `STATE_VOLUME` and `HELPER_IMAGE` set as in [step 3](#run-a-released-image-validators) of the released-image install (a source build sets them the same way):
 
@@ -463,6 +463,12 @@ For exchanges and wallets that reconcile balances. Amounts are in OS (1 DEM = 1 
 - Every other transaction type except `identity` and `d402_payment` pays the flat 1 DEM gas edit the SDK ships, not `transaction_fee`. The sender is debited exactly that gas, and the block credits it as it credits a `network_fee`: 50/50 to the burn address and the treasury, the treasury taking any rounding remainder. Total supply does not change.
 - A transaction included in a block that then fails pays its fee (or, for a non-native type, its gas with the same credits) and spends its nonce; the amount does not move. If the balance cannot cover the fee, only the nonce is spent.
 - The fee values, `additional_fee` (0 at launch) and the split percentages are network parameters that governance can change; read them from the transaction's `transaction_fee`, not from this page.
+
+### Crediting deposits
+
+- **Protocol finality is one block.** A block is final once it carries a quorum certificate: the signatures of 7 of the 10 members of its committee. Blocks are never reorganised after that. Check a deposit with `getTransactionStatus` (`state: "included"`; `failed` never credits the amount) and, to verify without trusting the node, `getTransactionProof` and `getFinalizedHead`. The calls and their answers are in [docs/runbooks/finality-read-api.md](docs/runbooks/finality-read-api.md).
+- **Launch margin.** For the first weeks after launch, credit a deposit only once its block is at least 3 blocks below the finalized head (about 30 s at the 10 s block time). This is an operational margin while the network is new, not a protocol rule. The date it ends is announced: TBD (owner).
+- The full integration guide (address format, statuses, failed transactions, expiry, halt notices) is [docs/mainnet/exchange-integration.md](docs/mainnet/exchange-integration.md).
 
 ### Network Exposure
 
@@ -592,26 +598,49 @@ docker volume inspect "$STATE_VOLUME"
 
 ### Backup the node identity
 
-Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up this install's whole state volume (`$STATE_VOLUME`, with `HELPER_IMAGE` from the same step 3), encrypted, and keep the backup off this host:
+Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up this install's whole state volume (`$STATE_VOLUME`, with `SUFFIX` and `HELPER_IMAGE` from the same step 3; a source build sets them the same way), encrypted, and keep the backup off this host:
 
 ```bash
+export GPG_TTY=$(tty)
 out="node-state$SUFFIX-$(date +%F-%H%M%S).tar.gz.gpg"
 if docker compose stop node; then
-  ( set -o pipefail
+  if ( set -o pipefail
     docker run --rm --entrypoint tar -v "$STATE_VOLUME":/src:ro "$HELPER_IMAGE" czf - -C /src . \
-      | gpg --symmetric --cipher-algo AES256 -o "$out"
-  ) || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
-  docker compose up -d --no-build    # a source build: ./run --docker -d
+      | gpg --symmetric --no-symkey-cache --cipher-algo AES256 -o "$out"
+  ) && gpg --decrypt --no-symkey-cache "$out" > /dev/null; then
+    docker compose up -d --no-build
+  else
+    echo "backup FAILED; removing $out" >&2
+    rm -f "$out"
+    docker compose up -d --no-build
+    false
+  fi
 else
   echo "the node did not stop; no backup taken" >&2
+  false
 fi
 ```
 
-A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup.
+A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup. On a source build with no `INSTANCE_SUFFIX` in `.env`, replace both `docker compose up -d --no-build` lines with `./run --docker -d`, so the node comes back with the profiles `./run` started, which can differ from `COMPOSE_PROFILES`. With a suffix, keep the block as it is: `./run --docker` resets `INSTANCE_SUFFIX` to empty, so it would start the default-named stack and leave this install's node stopped.
 
-`gpg` asks for a passphrase; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
+The block cannot clean up after an interrupt: if you press Ctrl-C at a passphrase prompt or the SSH session drops, it stops where it is and can leave the node stopped. Then run `docker compose up -d --no-build` (a source build with no `INSTANCE_SUFFIX` in `.env`: `./run --docker -d`) and delete this run's `node-state$SUFFIX-<date>-<time>.tar.gz.gpg` file, which the block did not finish checking.
+
+`GPG_TTY` lets `gpg` ask for the passphrase on this terminal, so `tty` must print a terminal path (not `not a tty`): use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file.
+
+GnuPG older than 2.2.7 rejects `--no-symkey-cache`, so the block fails, removes the file and restarts the node. On such a host, delete `--no-symkey-cache` from both `gpg` commands and paste the block again. Its decrypt check then reads the passphrase from the agent's cache, so right after it, in the same shell, flush the cache and check the file with the passphrase typed again:
+
+```bash
+gpgconf --reload gpg-agent &&
+gpg --decrypt "$out" > /dev/null &&
+gpgconf --reload gpg-agent ||
+{ echo "backup FAILED; removing $out" >&2; rm -f "$out"; false; }
+```
+
+`gpg` asks for a passphrase and asks again for the decrypt check; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
 
 Restoring is not the reverse of this: an old copy can make the key vote against a vote it already cast. Follow the restore rules in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) (newest complete copy, network head above the key's last possible vote, never two hosts running the key).
+
+This volume does not hold the genesis snapshot (`./mainnet/snapshot` above): keep the genesis snapshot on every validator for the life of the chain; with `identityCarryover` active a node without it refuses to start ([docs/mainnet/genesis-import.md](docs/mainnet/genesis-import.md)).
 
 ### View logs
 
@@ -708,6 +737,8 @@ docker volume ls --filter "name=^demos_.*$SUFFIX\$"    # left over; without a su
 ```
 
 `down -v` removes only the volumes labelled with this project, which every volume this guide seeds is, since the seeding steps run `docker compose create` first. A volume made outside compose (an older `docker run -v demos_node_state:...` seed) has no label: `down -v` prints `Volume ... was not created by Docker Compose` and keeps it. Remove such a volume by its exact name (`docker volume rm demos_node_state$SUFFIX`), and only once you have checked that no other install uses it. Never run `docker volume prune` or `down -v` from another install's checkout to clean up this one.
+
+Through the launcher, `./run --docker down -v` (or `./scripts/docker-run down -v`, also as `--volumes` or in a flag group such as `-vt 0`; as in compose, the last of these settings counts, so a later `--volumes=false` turns it off) first lists the stack's declared named volumes (the ten `demos_*` ones) and asks you to type `delete`; `down -v` also removes the anonymous volumes attached to the containers, which are not listed. Where there is no terminal (scripts, CI) it stops unless you add `--yes-delete-volumes`.
 
 ### Troubleshooting
 
@@ -954,11 +985,15 @@ cp .env.example .env
 cp demos_peerlist.json.example demos_peerlist.json
 ```
 
+The peer list example is a placeholder: its key and URL are not valid, so the node skips it and boots with no peers (`[BOOTSTRAP] No usable peers`). Replace it with a real validator in [Joining a Network](#8-joining-a-network) before you expect to join one. On this node's RPC port, only two kinds of entry are skipped: the exact bound host (`RPC_BIND`), and, for a wildcard bind (`0.0.0.0` or `::`), a numeric loopback address the listener accepts (`127.0.0.0/8`, `::1`, or IPv4-mapped `127.0.0.0/8`). A hostname bind such as `RPC_BIND=localhost` matches only that hostname, and a numeric bind only that same address, so with `RPC_BIND=localhost` an entry for `http://127.0.0.1:53550` is dialed. Other spellings, including `localhost` on a wildcard bind and this node's public URL, are dialed; if they answer as this node, boot is refused and the error log names the URL. Remove that entry from the peer list by hand and restart.
+
 For the bare-metal path, override these in `.env`:
 
 - `PG_HOST=localhost`
 - `PG_PORT=5332` (the host-mapped port the `./run` Postgres sidecar uses)
 - `TLSNOTARY_HOST=localhost`
+
+With your own PostgreSQL (`./run -e` or `--external-db`), set `PG_HOST` and `PG_PORT` to that server. `./run -e` takes `PG_PORT` from `-d`, else from the shell, else from `.env`; earlier versions used 5332 unless `-d` was given, so check `PG_PORT` in `.env` before upgrading.
 
 Set `EXPOSED_URL` based on your setup:
 

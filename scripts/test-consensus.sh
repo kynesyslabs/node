@@ -17,12 +17,16 @@ SUITE_FILES=(
     scripts/launch-go-no-go.prover.test.ts
     scripts/launch-height1-check.test.ts
     scripts/node-doctor.test.ts
+    scripts/validator.test.ts
     scripts/validator-prove-signing.test.ts
+    docs/runbooks/dormant-mode.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
+    src/config/loader.logsDir.test.ts
     src/config/loader.rapidApi.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/features/web2/proxy/Proxy.contentType.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -51,6 +55,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/storableRows.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/mempool.editBinding.test.ts
+    src/libs/blockchain/mempool.nextBlockRef.test.ts
     src/libs/blockchain/mempool.receive.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
@@ -60,12 +65,14 @@ SUITE_FILES=(
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
     src/libs/blockchain/routines/validatorsManagement.typecheck.test.ts
+    src/libs/blockchain/sdkTypes.typecheck.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
     src/libs/gossip/sidecarHealth.test.ts
+    src/libs/gossip/txPublishPeers.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
@@ -73,6 +80,7 @@ SUITE_FILES=(
     src/libs/identity/tools/twitter.request.test.ts
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
+    src/libs/network/broadcastReferenceWindow.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -108,14 +116,17 @@ SUITE_FILES=(
     testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
+    testing/genesis/findGenesisBlock.requireValidators.test.ts
     testing/genesis/forkScheduleAbstain.test.ts
     testing/genesis/forkScheduleAgreement.test.ts
     testing/genesis/forkScheduleWatch.test.ts
     testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts
+    testing/genesis/genesisSchedule.test.ts
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
+    testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
     scripts/test-consensus.registration.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
@@ -136,6 +147,7 @@ SUITE_FILES=(
     src/libs/l2ps/l2psApplyTime.test.ts
     src/libs/network/peerHttpAuth.test.ts
     src/libs/network/sudoReplayFloor.test.ts
+    src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
 )

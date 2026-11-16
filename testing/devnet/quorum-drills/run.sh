@@ -19,7 +19,8 @@
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
 # Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
 # stopped answering mid-window, or postgres hit its connection limit, or a node
-# log that check needs could not be read: no verdict).
+# log that check needs could not be read: no verdict; or the verdict's row could
+# not be added to results.tsv, or verdict.json could not be written).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -113,6 +114,7 @@ fi
 if [[ ! "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]]; then
     echo "label must match [A-Za-z0-9_-]+" >&2; exit 2
 fi
+[[ "${CONSENSUS_TIME}" =~ ^[1-9][0-9]*$ ]] || { echo "CONSENSUS_TIME must be a whole number of seconds" >&2; exit 2; }
 if [ -n "${SRC_TREE}" ]; then
     SRC_TREE="$(cd "${SRC_TREE}" 2>/dev/null && pwd)" || { echo "--src: no such dir" >&2; exit 2; }
     [ -f "${SRC_TREE}/src/index.ts" ] || { echo "--src: ${SRC_TREE}/src/index.ts not found" >&2; exit 2; }
@@ -120,13 +122,24 @@ fi
 Q=$(( SHARD * 2 / 3 + 1 ))
 GENESIS_DELAY="${GENESIS_DELAY:-$((60 + START * 25))}"
 
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}-${BINDING}-${LABEL}"
+# The run dir is made with mkdir, not mkdir -p, so it is this run's alone: a run
+# started in the same second with the same options finds it taken and takes the
+# next free suffix (-2, -3, ...), and with it its own compose project
+mkdir -p "${RUNS_DIR}" || { echo "could not create ${RUNS_DIR}" >&2; exit 2; }
+RUN_BASE="$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}-${BINDING}-${LABEL}"
+RUN_ID="${RUN_BASE}"
+for k in $(seq 2 100); do
+    mkdir -m 700 "${RUNS_DIR}/${RUN_ID}" 2>/dev/null && break
+    if [ ! -e "${RUNS_DIR}/${RUN_ID}" ] || [ "${k}" = 100 ]; then
+        echo "could not create a run dir ${RUNS_DIR}/${RUN_ID}" >&2; exit 2
+    fi
+    RUN_ID="${RUN_BASE}-${k}"
+done
 RUN_DIR="${RUNS_DIR}/${RUN_ID}"
 LOG_DIR="${RUN_DIR}/logs"
 # Compose project names allow [a-z0-9_-] only
 PROJECT="qdrill-$(echo "${RUN_ID}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')"
 mkdir -p "${LOG_DIR}" "${RUN_DIR}/inputs/empty-snapshot"
-chmod 700 "${RUN_DIR}"
 EVENTS="${LOG_DIR}/events.log"
 PHASES="${RUN_DIR}/phases.tsv"
 printf 'phase\tdown\tlive\tfrom\tto\tblocks\tmean_s\tmax_s\toutcome\n' > "${PHASES}"
@@ -209,6 +222,9 @@ abort_pre() {
     ps -eo pid,comm,rss,%cpu --sort=-rss | head -10 >> "${STEP_LOG}"
     exit 2
 }
+# results.tsv is shared by the runs in RUNS_DIR and written under a flock
+# (write_verdict): without flock the run would end with no row, so it does not start
+command -v flock > /dev/null || abort_pre "flock (util-linux) is not installed: run.sh takes a lock with it to write ${RUNS_DIR}/results.tsv, which every run there shares"
 [ "${disk_gb:-0}" -lt "${MIN_DISK_GB}" ] && abort_pre "free disk ${disk_gb}G < ${MIN_DISK_GB}G"
 [ "${avail_mb:-0}" -lt "${need_mb}" ] && abort_pre "available RAM ${avail_mb}M < ${need_mb}M for ${START} nodes"
 awk -v l="${load1}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && abort_pre "load ${load1} > ${cores} cores"
@@ -350,10 +366,12 @@ say "inputs ready (genesis in ${GENESIS_DELAY}s)"
 
 # ── helpers ─────────────────────────────────────────────────────────────
 port_of() { echo $((53549 + 2 * $1)); }
-cid_of() { dc ps -q "node-$1" 2>/dev/null; }
+# Container lookup and docker exec are bounded (bdc, bdocker, below): one that
+# does not answer gives no container, or no answer, as a failed read does
+cid_of() { bdc ps -q "node-$1" 2>/dev/null; }
 rpc() { # $1 node, $2 JSON body, $3 curl timeout in s (default 4)
     local cid; cid=$(cid_of "$1"); [ -z "${cid}" ] && return 1
-    docker exec "${cid}" curl -sS -m"${3:-4}" -X POST -H 'Content-Type: application/json' \
+    bdocker exec "${cid}" curl -sS -m"${3:-4}" -X POST -H 'Content-Type: application/json' \
         -d "$2" "http://localhost:$(port_of "$1")/" 2>/dev/null
 }
 head_of() { # $1 node, $2 curl timeout in s (default 4)
@@ -381,7 +399,7 @@ hash_read() {
 }
 # The hash, or nothing when it could not be read (after hash_read's retry)
 hash_at() { local h; h=$(hash_read "$1" "$2") && echo "${h}"; }
-serving() { local cid; cid=$(cid_of "$1"); [ -n "${cid}" ] && docker exec "${cid}" curl -sS -m3 "http://localhost:$(port_of "$1")/" 2>/dev/null | grep -q Hello; }
+serving() { local cid; cid=$(cid_of "$1"); [ -n "${cid}" ] && bdocker exec "${cid}" curl -sS -m3 "http://localhost:$(port_of "$1")/" 2>/dev/null | grep -q Hello; }
 wait_serve() {
     local deadline=$((SECONDS + $2))
     while [ ${SECONDS} -lt ${deadline} ]; do serving "$1" && return 0; sleep 3; done
@@ -426,18 +444,28 @@ stop_node() {
 # pg_limit_gate, the teardown's collection) are bounded: every docker call by
 # LOG_READ_TIMEOUT_S, so a stalled daemon ends the read and not the run, and the
 # log by LOG_READ_MAX_BYTES (stripped). pg_cid bounds the postgres lookup by it
-# too. QDRILL_TEST_LOG_READ_TIMEOUT_S is for lockstep-stub.test.sh only.
+# too, and bdocker / bdc every other docker call a check reads: the container
+# lookups (cid_of), the head and block reads (rpc), serving, the round-start and
+# log-line reads (stop_mid_round, grep_logs), restart_counts and the bring-up
+# snapshot. A call that does not answer in time is a failed read, never an
+# answer. QDRILL_TEST_LOG_READ_TIMEOUT_S is for lockstep-stub.test.sh only.
 LOG_READ_TIMEOUT_S="${QDRILL_TEST_LOG_READ_TIMEOUT_S:-60}"
 LOG_READ_MAX_BYTES=$((256 * 1024 * 1024))
+# docker, and docker compose on this run's project, ended after LOG_READ_TIMEOUT_S:
+# exit 124 then (137 if it ignores the TERM)
+bdocker() { timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker "$@"; }
+bdc() { bdocker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" "$@"; }
+# Why a bdocker or bdc call with exit status $1 failed
+bounded_why() { case "$1" in 124 | 137) echo "did not answer within ${LOG_READ_TIMEOUT_S}s" ;; *) echo "failed (exit $1)" ;; esac; }
 # Node $1's container log, colour codes stripped, into file $2: all of it that
 # the Docker daemon keeps, or its last $3 lines. That is the whole log unless
 # the daemon's logging driver rotates logs (the local driver, or json-file with
 # max-size/max-file): then early lines can be gone, and the run log names the
-# driver at bring-up. Fails, printing why, when node $1 has no container or it
-# cannot be looked up, docker logs fails or does not finish in time, the copy
-# in $2 cannot be written whole (a full disk), or the log is over
-# LOG_READ_MAX_BYTES: part of what docker logs gives is never passed off as all
-# of it.
+# driver and the node containers' max-size/max-file at bring-up (log_rotation).
+# Fails, printing why, when node $1 has no container or it cannot be looked up,
+# docker logs fails or does not finish in time, the copy in $2 cannot be written
+# whole (a full disk), or the log is over LOG_READ_MAX_BYTES: part of what
+# docker logs gives is never passed off as all of it.
 read_node_log() { # $1 node, $2 file, $3 last lines (default: all)
     local cid rc size
     # dc ps, spelled out: timeout runs a command, not a shell function
@@ -480,6 +508,24 @@ boot_failure_line() {
     grep -aiE 'refusing to boot' "${f}" | tail -1 | cut -c1-600 | grep . || grep -aiE 'error' "${f}" | tail -1 | cut -c1-600
     rm -f "${f}"
     return 0
+}
+# The rotation options the started node containers were created with
+# (HostConfig.LogConfig.Config: the daemon's log-opts, as the compose file sets
+# none), each distinct answer once, joined by "; ": "max-size S, max-file F"
+# ("none set" for one of the two that is not), "max-size/max-file none set", or
+# "unreadable" for a container not looked up or inspected within LOG_READ_TIMEOUT_S
+log_rotation() {
+    local i cid conf
+    for i in $(seq 1 "${N}"); do
+        [ "${STARTED[i]:-0}" = 1 ] || continue
+        if cid=$(cid_of "${i}") && [ -n "${cid}" ] && conf=$(bdocker inspect -f '{{json .HostConfig.LogConfig.Config}}' "${cid}" 2>/dev/null); then
+            jq -r 'if (.["max-size"] // .["max-file"]) == null then "max-size/max-file none set"
+                   else "max-size \(.["max-size"] // "none set"), max-file \(.["max-file"] // "none set")" end' <<< "${conf}" 2>/dev/null ||
+                echo unreadable
+        else
+            echo unreadable
+        fi
+    done | sort -u | paste -sd ';' - | sed 's/;/; /g'
 }
 
 # Window (s) for a fresh lockstep, 120 up to N=6, 160 at 10, 190 at 13. The reads
@@ -615,16 +661,17 @@ reader() { local i; for i in $(running); do case " $* " in *" ${i} "*) ;; *) ech
 
 # Waits for PROGRESS_BLOCKS new blocks past $1; records a phase row
 expect_progress() { # $1 phase name, $2 from height
-    local deadline=$((SECONDS + PROGRESS_TIMEOUT)) m t0=${SECONDS} r times
+    local deadline=$((SECONDS + PROGRESS_TIMEOUT)) m t0=${SECONDS} r times seen=0
     while [ ${SECONDS} -lt ${deadline} ]; do
         m=$(max_head) || read_error "$1"
-        [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ] && break
+        # A read that finished after the deadline does not count as inside the window
+        if [ ${SECONDS} -lt ${deadline} ] && [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ]; then seen=1; break; fi
         sleep 2
     done
     r=$(reader)
     times=$(round_times "${r}" "$2" "${m}")
     local down=$((N - $(live_count)))
-    if [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ]; then
+    if [ "${seen}" = 1 ]; then
         say "$1: progressing, ${2} -> ${m} in $((SECONDS - t0))s (round mean/max ${times// //} s)"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tprogress\n' "$1" "${down}" "$(live_count)" "$2" "${m}" $((m - $2)) ${times} >> "${PHASES}"
         PHASE_END="${m}"; return 0
@@ -656,40 +703,130 @@ expect_stall() { # $1 phase name, $2 height at the fault
     PHASE_END="${m}"; return 1
 }
 
-# Stops node $1 once a round past the current head has started on node $2
+# Stops node $1 once a round past the current head has started on node $2,
+# within ROUND_START_WAIT_S (60 s, or 3 rounds if longer: the node logs the line
+# once per round). Each log read is bounded (bdc, bdocker). A lookup
+# or log read that fails or does not answer, or no round start in time, ends
+# the drill as ERROR before node $1 is stopped (round_start_error): a stop not
+# seen mid-round is not the drill. The ROUND_START_WAIT_S deadline is checked
+# before each docker logs read, not after it: a read that starts before the
+# deadline and returns after it with a round start in it still stops node $1
+ROUND_START_WAIT_S=$(( 3 * ${CONSENSUS_TIME:-0} > 60 ? 3 * ${CONSENSUS_TIME:-0} : 60 ))
 stop_mid_round() {
-    local victim="$1" watcher="$2" h since line deadline
+    local victim="$1" watcher="$2" h since line="" deadline cid rc
     h=$(read_head "${watcher}") || read_error "stop node-${victim}"
     since=$(date -u +%s)
-    deadline=$((SECONDS + 60))
-    while [ ${SECONDS} -lt ${deadline} ]; do
-        line=$(docker logs --since "${since}" "$(cid_of "${watcher}")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
-            grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | head -1)
-        [ -n "${line}" ] && break
-        sleep 0.3
+    deadline=$((SECONDS + ROUND_START_WAIT_S))
+    while [ -z "${line}" ]; do
+        [ ${SECONDS} -lt ${deadline} ] ||
+            round_start_error "${victim}" "${watcher}" "no round past ${h} started within ${ROUND_START_WAIT_S}s"
+        cid=$(cid_of "${watcher}"); rc=$?
+        [ "${rc}" = 0 ] || round_start_error "${victim}" "${watcher}" "docker compose ps $(bounded_why "${rc}")"
+        [ -n "${cid}" ] || round_start_error "${victim}" "${watcher}" "no container"
+        # awk keeps the first round start past h and reads on, so no stage is cut
+        # off and, with pipefail, a status other than 0 is the read's own failure
+        # (grep finding no round start yet is not one)
+        line=$(bdocker logs --since "${since}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
+            { grep -aoE 'We are forging block [0-9]+' || [ $? = 1 ]; } | awk -v h="${h}" '$5 > h && !n++')
+        rc=$?
+        [ "${rc}" = 0 ] || round_start_error "${victim}" "${watcher}" "docker logs $(bounded_why "${rc}")"
+        [ -n "${line}" ] || sleep 0.3
     done
-    event "round start seen on node-${watcher}: ${line:-none within 60s}"
+    event "round start seen on node-${watcher}: ${line}"
     stop_node "${victim}"
     STOP_HEIGHT="${h}"
 }
 
 # Log lines matching $1 across every node, logged at or after unix time $2
-# (default: the whole log; a restarted container keeps its earlier lines)
+# (default: the whole log; a restarted container keeps its earlier lines).
+# Every docker call is bounded (bdc, bdocker). Fails when a node's container
+# could not be looked up or its log not read and filtered to the end (a docker
+# error, no answer in time, or a sed or grep that failed), after a WARN on
+# stderr naming it: a count of these lines then misses that node's, and the
+# callers that judge on one give no verdict (log_read_error).
 grep_logs() {
-    local i cid
+    local i cid rc st bad=0
     for i in $(seq 1 "${N}"); do
-        cid=$(dc ps -aq "node-${i}" 2>/dev/null); [ -z "${cid}" ] && continue
-        docker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
+        cid=$(bdc ps -aq "node-${i}" 2>/dev/null); rc=$?
+        [ "${rc}" = 0 ] || { say "WARN: node-${i}: docker compose ps $(bounded_why "${rc}"), its log not read" >&2; bad=1; continue; }
+        [ -z "${cid}" ] && continue
+        # A caller that reads only the first lines (`| head`) closes the pipe: the
+        # last stage then fails, dying of SIGPIPE or, where SIGPIPE is ignored,
+        # getting EPIPE (its error is dropped), and cat drains the rest. So
+        # docker, sed and grep read to the end whatever the caller reads and
+        # however SIGPIPE is set, and any other status of theirs is lines
+        # missing: a docker error or timeout (124, 137 after -k), or a stage that
+        # stopped (grep refusing the pattern cuts docker off). The counting
+        # callers read to the end through tee and wc, and pipefail catches those
+        bdocker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" |
+            { sed "s/^/node-${i}: /" 2> /dev/null; cat > /dev/null; }
+        st=("${PIPESTATUS[@]}")
+        if [ "${st[0]}" != 0 ]; then
+            say "WARN: node-${i}: docker logs $(bounded_why "${st[0]}"), its log not read whole" >&2; bad=1
+        elif [ "${st[1]}" != 0 ] || [ "${st[2]}" -gt 1 ]; then
+            say "WARN: node-${i}: its log could not be filtered (sed exit ${st[1]}, grep exit ${st[2]}), lines missing" >&2; bad=1
+        fi
     done
+    return "${bad}"
 }
 
-# Verdict, written after the scenario or when a window cannot be judged
+# results.tsv is shared by every run in RUNS_DIR: write_verdict's append and
+# rewrite_verdict's rewrite each hold an exclusive flock on results.tsv.lock next
+# to it, waiting up to RESULTS_LOCK_WAIT_S for it (the preflight checks for flock)
+RESULTS_LOCK_WAIT_S=30
+# Verdict, written after the scenario or when a window cannot be judged:
+# verdict.json first, then this run's row of results.tsv, so that a crash
+# between the two leaves a verdict.json with no row, never a row with no
+# verdict.json. A row that cannot be added (no lock within RESULTS_LOCK_WAIT_S,
+# or a failed write) rewrites verdict.json as ERROR, with why and what the
+# result was. A verdict.json that cannot be written makes the row ERROR
+# instead, with why and what the result was. Either way the exit is 2. With no
+# lock results.tsv is not touched; a write that fails part way (a full disk on
+# a first run, after the header line, for example) can leave a header or a
+# partial row in it. The exit is 0 or 1 only with both written. A crash or an
+# interrupt between the two, or an ERROR rewrite that fails too (said on
+# stderr), leaves a verdict.json whose result results.tsv does not show.
 write_verdict() {
     step 05-verdict
     column -t -s $'\t' "${PHASES}" | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     sed 's/^/    /' "${EVENTS}" 2>/dev/null | tee -a "${LOG_DIR}/run.log" >/dev/null
+    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" written=1 was="" why=""
+    if ! verdict_json; then
+        written=0
+        say "ERROR: could not write ${v}: the verdict is ERROR, the exit is 2" >&2
+        DETAIL="could not record the verdict: ${v} not written; the result was ${RESULT}${DETAIL:+ (${DETAIL})}"
+        RESULT=ERROR
+    fi
+    VERDICT_WRITTEN=1
+    free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
+    say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+    {
+        if ! flock -w "${RESULTS_LOCK_WAIT_S}" 9; then
+            why="no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s"
+        elif ! { [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"; } ||
+            ! results_row >> "${results}"; then
+            why="a write to it failed"
+        fi
+    } 9>> "${results}.lock" || why="could not open ${results}.lock"
+    if [ -n "${why}" ]; then
+        say "ERROR: the row of ${RUN_ID} could not be added to ${results} (${why}): the verdict is ERROR, the exit is 2" >&2
+        was="${RESULT}"
+        DETAIL="could not record the verdict: no row added to ${results} (${why}); the result was ${RESULT}${DETAIL:+ (${DETAIL})}"
+        RESULT=ERROR
+        # A verdict.json that could not be written is not tried again
+        if [ "${written}" = 1 ] && ! verdict_json; then
+            say "ERROR: could not rewrite ${v}: it still says ${was}, the exit is 2" >&2
+        fi
+        say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+    fi
+    [ -z "${why}" ] && [ "${written}" = 1 ] || exit 2
+}
+# verdict.json from RESULT and DETAIL, whole or not at all: written to
+# verdict.json.tmp, then moved over it, so a crash part way leaves that copy,
+# never a torn verdict.json. A copy that failed is removed.
+verdict_json() {
+    local v="${LOG_DIR}/verdict.json" drill=null
     # halt-* and ride-* drills: the judge's per-phase verdict and timings
-    local drill=null
     [ -s "${RUN_DIR}/drill-verdict.json" ] && drill=$(jq -c . "${RUN_DIR}/drill-verdict.json")
     jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
         --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
@@ -698,13 +835,10 @@ write_verdict() {
         '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
           q: $q, code: $code, image: $image, detail: $detail, result: $result}
          + (if $forkSet == "launch" then {excludedForks: $excluded} else {} end)
-         + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
-    local results="${RUNS_DIR}/results.tsv"
-    [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
-    results_row >> "${results}"
-    VERDICT_WRITTEN=1
-    free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
-    say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+         + (if $drill == null then {} else {drill: $drill} end)' > "${v}.tmp" &&
+        mv -f "${v}.tmp" "${v}" && return 0
+    rm -f "${v}.tmp"
+    return 1
 }
 results_row() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \
@@ -715,23 +849,35 @@ results_row() {
 # detail, worded as pg_limit_gate words it. A record that cannot be rewritten is
 # said on stderr; the exit is 2 either way.
 rewrite_verdict() { # $1 why
-    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" was="${RESULT}" why st=0
+    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" tmp="${RUNS_DIR}/results.tsv.tmp.${RUN_ID}" was="${RESULT}" why="" st=0
     DETAIL="$1; the result was ${was}"
     RESULT=ERROR
     say "RESULT ERROR: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
     { jq --arg detail "${DETAIL}" '.detail = $detail | .result = "ERROR"' "${v}" > "${v}.tmp" && mv -f "${v}.tmp" "${v}"; } 2>/dev/null ||
         { rm -f "${v}.tmp"; say "ERROR: could not rewrite ${v}: it still says ${was}, the exit is 2" >&2; st=1; }
-    RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
-        "${results}" > "${results}.tmp" 2>/dev/null
-    case $? in
-        # gawk exits 0 after an END exit 0 even when it could not write the
-        # copy: one with fewer lines than results.tsv replaces nothing
-        0) if [ "$(wc -l < "${results}.tmp")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
-           else mv -f "${results}.tmp" "${results}" 2>/dev/null && return "${st}"; why="mv failed"; fi ;;
-        3) why="no row for ${RUN_ID}" ;;
-        *) why="it could not be read or the copy written" ;;
-    esac
-    rm -f "${results}.tmp"
+    # Copy and replace under the lock write_verdict's append takes. The copy is
+    # this run's own (results.tsv.tmp.<run>: unique, as its run dir is, where a
+    # pid can repeat across PID namespaces), made, renamed and removed only while
+    # the lock is held: no run touches another one's
+    {
+        if ! flock -w "${RESULTS_LOCK_WAIT_S}" 9; then
+            why="no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s"
+        else
+            RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
+                "${results}" > "${tmp}" 2>/dev/null
+            case $? in
+                # gawk exits 0 after an END exit 0 even when it could not write the
+                # copy: one with fewer lines than results.tsv replaces nothing
+                0) if [ "$(wc -l < "${tmp}")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
+                   elif ! mv -f "${tmp}" "${results}" 2>/dev/null; then why="mv failed"; fi ;;
+                3) why="no row for ${RUN_ID}" ;;
+                *) why="it could not be read or the copy written" ;;
+            esac
+            # A copy that did not replace results.tsv
+            rm -f "${tmp}"
+        fi
+    } 9>> "${results}.lock" || why="could not open ${results}.lock"
+    [ -z "${why}" ] && return "${st}"
     say "ERROR: could not rewrite ${results} (${why}): the row of ${RUN_ID} still says ${was}, the exit is 2" >&2
     return 1
 }
@@ -743,6 +889,27 @@ read_error() { # $1 phase name
     printf '%s\t%s\t%s\t-\t-\t-\t-\t-\tunreadable\n' "$1" "$((N - $(live_count)))" "$(live_count)" >> "${PHASES}"
     RESULT=ERROR
     DETAIL="${DETAIL:+${DETAIL} }$1: node unreadable ($(heads_line))"
+    write_verdict
+    exit 2
+}
+
+# A node log whose matching lines a result counts could not be read whole
+# (grep_logs failed and named it): no verdict from part of the logs, ERROR
+log_read_error() { # $1 phase name
+    say "ERROR: $1: a node log could not be read whole (the WARN lines above name it)"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }$1: node log unreadable"
+    write_verdict
+    exit 2
+}
+
+# stop_mid_round saw no round start on node $2 ($3 why), so node $1 is not
+# stopped: a stop not seen mid-round is not the drill, ERROR
+round_start_error() { # $1 victim, $2 watcher, $3 why
+    say "ERROR: stop node-$1: no round start seen on node-$2 ($3); node-$1 not stopped"
+    event "round start not seen on node-$2 ($3): node-$1 not stopped"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }stop node-$1: round start unseen on node-$2 ($3)"
     write_verdict
     exit 2
 }
@@ -770,14 +937,16 @@ pg_cid() {
     echo "${cid}"
 }
 psql_node() { # $1 node, $2 SQL
-    local rc pg errf
+    local rc pg errf note=""
     pg=$(pg_cid) || { echo "psql node$1_db: ${pg}" >&2; return 1; }
     # stderr goes to the caller as before and, when there is any, to
     # psql-errors.log, which pg_limit_gate reads. errf is made before psql runs
     # (none, no psql) and removed once that append is done, or when there is
-    # nothing to append: a psql that failed, other than by the timeout, always
-    # says why, so an empty errf then is words that could not be written. An
-    # errf left behind fails the gate and the teardown backstop.
+    # nothing to append. A psql that failed, other than by the timeout, with an
+    # empty errf either said nothing (killed by a signal: exit 128 + n) or its
+    # words could not be written (a full disk). errf is kept either way: an
+    # errf left behind fails the gate and the teardown backstop (exit 2). When
+    # errf can still be written it gets a note that the error text was none given.
     errf=$(mktemp "${LOG_DIR}/psql-err.XXXXXX") || { echo "psql node$1_db: no file for its errors in ${LOG_DIR}: not run" >&2; return 1; }
     timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
     rc=$?
@@ -786,8 +955,14 @@ psql_node() { # $1 node, $2 SQL
         sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log" && rm -f "${errf}"
     elif [ "${rc}" = 0 ] || [ "${rc}" = 124 ]; then
         rm -f "${errf}"
+    elif echo "psql node$1_db: exit ${rc}, error text: none given" 2> /dev/null > "${errf}"; then
+        note="exit ${rc}, error text: none given"
     fi
-    [ -e "${errf}" ] && echo "psql node$1_db: its errors could not be written to ${LOG_DIR}/psql-errors.log (${errf} is kept)" >&2
+    if [ -n "${note}" ]; then
+        echo "psql node$1_db: ${note} (${errf} is kept)" >&2
+    elif [ -e "${errf}" ]; then
+        echo "psql node$1_db: its errors could not be written to ${LOG_DIR}/psql-errors.log (${errf} is kept)" >&2
+    fi
     [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within ${DB_TIMEOUT_S}s" >&2
     return "${rc}"
 }
@@ -905,12 +1080,25 @@ if [ "${wait_s}" -lt 0 ]; then
 else
     say "all ${START} up ${wait_s}s before the genesis time"
 fi
-docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' $(dc ps -q) >> "${STEP_LOG}" 2>&1
-# Anonymous memory is what the node really holds; the rest is page cache
-for c in $(dc ps -q); do
-    echo "$(docker inspect -f '{{.Name}}' "${c}") anon $(docker exec "${c}" cat /sys/fs/cgroup/memory.stat 2>/dev/null |
-        awk '/^anon /{print int($2 / 1048576)}') MiB"
-done >> "${STEP_LOG}" 2>&1
+# With max-size/max-file set, the daemon drops a log's oldest lines once it
+# fills them, which the node-log checks then cannot see (read_node_log): the run
+# log says whether the node containers rotate (above, the driver)
+say "node log rotation: $(log_rotation)"
+# A snapshot of what each container holds, every docker call bounded (bdc,
+# bdocker): one that does not answer is noted in the step log and skipped
+cids=$(bdc ps -q); ps_rc=$?
+if [ "${ps_rc}" = 0 ] && [ -n "${cids}" ]; then
+    mapfile -t CIDS <<< "${cids}"
+    bdocker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' "${CIDS[@]}" >> "${STEP_LOG}" 2>&1 ||
+        echo "docker stats: $(bounded_why $?)" >> "${STEP_LOG}"
+    # Anonymous memory is what the node really holds; the rest is page cache
+    for c in "${CIDS[@]}"; do
+        echo "$(bdocker inspect -f '{{.Name}}' "${c}") anon $(bdocker exec "${c}" cat /sys/fs/cgroup/memory.stat 2>/dev/null |
+            awk '/^anon /{print int($2 / 1048576)}') MiB"
+    done >> "${STEP_LOG}" 2>&1
+else
+    echo "docker compose ps -q $([ "${ps_rc}" = 0 ] && echo "found no container" || bounded_why "${ps_rc}"): no stats" >> "${STEP_LOG}"
+fi
 
 # ── 4. scenario ─────────────────────────────────────────────────────────
 step 04-scenario
@@ -944,7 +1132,7 @@ scenario_floor() {
     since=$(( GENESIS_TS < $(date -u +%s) ? $(date -u +%s) : GENESIS_TS ))
     while [ "$(date -u +%s)" -lt "${until_ts}" ]; do sleep 5; done
     m=$(max_head) || read_error floor
-    lines=$(grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tee -a "${STEP_LOG}" | wc -l)
+    lines=$(grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tee -a "${STEP_LOG}" | wc -l) || log_read_error floor
     say "head after $((8 * CONSENSUS_TIME + 30))s past genesis: ${m}; floor/quorum refusals logged in the window: ${lines}"
     grep_logs "below the (floor|quorum) of ${Q}" "${since}" | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     printf 'floor\t0\t%s\t0\t%s\t%s\t-\t-\t%s\n' "${N}" "${m}" "${m}" "$([ "${m}" = 0 ] && echo stall || echo progress)" >> "${PHASES}"
@@ -1007,7 +1195,7 @@ scenario_listed_stall() {
 
 scenario_fallback() {
     lockstep_or_abort 3
-    local i h heads_db listed pl_json fallback_lines ok=1
+    local i h heads_db listed pl_json fallback_lines pg ok=1
     # Stop every node at once right after a commit, so they all hold one head.
     # Exact, not within one block: block h is rewritten on every database below,
     # so every node must hold h and nothing above it when it stops
@@ -1038,7 +1226,9 @@ text = json.dumps(c, separators=(",", ":"))
 assert "$qdrill$" not in text
 print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = {int(sys.argv[2])};")
 ' "${pl_json}" "${h}" > "${RUN_DIR}/inputs/content-${i}.sql" || { say "ABORT: rewriting block ${h} failed"; exit 2; }
-        timeout "${DB_TIMEOUT_S}" docker exec -i "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
+        # The postgres lookup bounded as psql_node's (pg_cid), before the write's own timeout
+        pg=$(pg_cid) || { say "ABORT: update failed on node${i}_db: ${pg}"; exit 2; }
+        timeout "${DB_TIMEOUT_S}" docker exec -i "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
             < "${RUN_DIR}/inputs/content-${i}.sql" >> "${STEP_LOG}" 2>&1 || { say "ABORT: update failed on node${i}_db"; exit 2; }
         [ "$(psql_node "${i}" "SELECT json_array_length(content->'peerlist') FROM blocks WHERE number = ${h}")" = 6 ] ||
             { say "ABORT: node${i}_db does not list 6 at ${h}"; exit 2; }
@@ -1053,7 +1243,7 @@ print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = 
         # Pre-fork rule: the pool is the 6 listed, below the floor, forever
         expect_stall "listed-below-q" "${h}" || ok=0
     fi
-    fallback_lines=$(grep_logs "drawing the committee from all" "${since}" | tee -a "${STEP_LOG}" | wc -l)
+    fallback_lines=$(grep_logs "drawing the committee from all" "${since}" | tee -a "${STEP_LOG}" | wc -l) || log_read_error listed-below-q
     grep_logs "drawing the committee from all|Shard of [0-9]+ is below the floor" "${since}" | head -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     say "fallback log lines: ${fallback_lines}"
     if [ "${BINDING}" = on ] && [ "${fallback_lines}" = 0 ]; then ok=0; fi
@@ -1062,6 +1252,22 @@ print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = 
 }
 
 sidecar() { echo "${PROJECT}-fault-$1"; }
+# Heights $1..$2: FORK_CONFLICTS lists those where the running nodes hold two hashes.
+# Every node holds every height <= $3 (the lowest head), so a hash unread there is
+# an unreadable node (read_error), not an absent block: it could hide a fork.
+fork_scan() {
+    local hh i h seen n
+    FORK_CONFLICTS=""
+    for hh in $(seq "$1" "$2"); do
+        seen=""; n=0
+        for i in $(running); do
+            h=$(hash_at "${i}" "${hh}")
+            if [ -n "${h}" ]; then seen="${seen}${h}"$'\n'; n=$((n + 1)); fi
+        done
+        if [ "${hh}" -le "$3" ] && [ "${n}" -lt "$(live_count)" ]; then read_error healed; fi
+        if [ "$(printf '%s' "${seen}" | sort -u | grep -c .)" -gt 1 ]; then FORK_CONFLICTS="${FORK_CONFLICTS} ${hh}"; fi
+    done
+}
 scenario_partition() {
     lockstep_or_abort 3
     local i j ip groupA="1 2 3" groupB="4 5 6" h0 a_max b_max
@@ -1112,10 +1318,8 @@ scenario_partition() {
     local hmin=999999 hh conflicts="" seen
     for i in $(running); do hh=$(read_head "${i}") || read_error healed; [ "${hh}" -lt "${hmin}" ] && hmin="${hh}"; done
     local hmax_all=$(( top > hmin ? top : hmin ))
-    for hh in $(seq "${h0}" "${hmax_all}"); do
-        seen=$(for i in $(running); do hash_at "${i}" "${hh}"; done | grep . | sort -u | wc -l)
-        [ "${seen}" -gt 1 ] && conflicts="${conflicts} ${hh}"
-    done
+    fork_scan "${h0}" "${hmax_all}" "${hmin}"
+    conflicts="${FORK_CONFLICTS}"
     local fork=no; [ -n "${conflicts}" ] && fork=yes
     say "heights ${h0}..${hmax_all}: fork=${fork}${conflicts:+ at${conflicts}}; final heads $(heads_line)"
     grep_logs '\[FORK\]' | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
@@ -1166,11 +1370,12 @@ heads_read() {
     done | kv_json
 }
 
-# Restart counts of the given containers; fails when one cannot be read
+# Restart counts of the given containers; fails when one cannot be read, or
+# not within LOG_READ_TIMEOUT_S (bdocker)
 restart_counts() {
     local i c
     for i in "$@"; do
-        c=$(docker inspect -f '{{.RestartCount}}' "$(cid_of "${i}")" 2>/dev/null) || return 1
+        c=$(bdocker inspect -f '{{.RestartCount}}' "$(cid_of "${i}")" 2>/dev/null) || return 1
         [[ "${c}" =~ ^[0-9]+$ ]] || return 1
         printf '%s %s\n' "${i}" "${c}"
     done | kv_json
@@ -1323,7 +1528,11 @@ drill_judge() { # $1 mode: halt or ride
     case "${rc}" in
         0) RESULT=PASS ;;
         1) RESULT=FAIL ;;
-        *) RESULT=ERROR; DETAIL="the judge could not read ${input} (exit ${rc})"; write_verdict; exit 2 ;;
+        # Malformed or unreadable input, or a genesis without the forks the
+        # criteria rest on: the judge's reasons ("  - ..." lines) go in the detail
+        *) RESULT=ERROR
+           DETAIL="the judge gave no verdict on ${input} (exit ${rc})$(sed -n 's/^  - /; /p' "${LOG_DIR}/judge.out" | head -5 | tr -d '\n')"
+           write_verdict; exit 2 ;;
     esac
     DETAIL=$(jq -r .summary "${RUN_DIR}/drill-verdict.json")
 }

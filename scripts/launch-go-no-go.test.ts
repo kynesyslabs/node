@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test"
+import fs from "node:fs"
+import path from "node:path"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import {
     type GoNoGoInput,
@@ -14,6 +16,7 @@ import {
     sameCommit,
     parseArgs,
     treasuryReasons,
+    KNOWN_TEST_TREASURIES,
 } from "./launch-go-no-go"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -668,6 +671,46 @@ describe("checkLaunch", () => {
                 expect(treasuryReasons(g, null)).toEqual([])
                 expect(treasuryReasons(g, "0x" + "cd".repeat(32)).join("\n")).toContain("is not the agreed treasury")
             }
+        })
+
+        it("is NO-GO on the mainnet chain id with a test genesis treasury, even when it was the one agreed", () => {
+            for (const test of KNOWN_TEST_TREASURIES) {
+                const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: test } }
+                const d = checkLaunch({
+                    ...base,
+                    expectedTreasury: test.toUpperCase().replace("0X", "0x"),
+                    genesis: genesisFile(rows, forks),
+                    blockZero: blockZero(rows),
+                })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain("treasury of a test genesis")
+            }
+        })
+
+        it("lets a test genesis treasury through on the testnet and devnet chain ids", () => {
+            const [test] = KNOWN_TEST_TREASURIES
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: test } }
+                const g = { ...genesisFile(rows, forks), properties: { id: chainId, shardSize: 10 } }
+                expect(treasuryReasons(g, test)).toEqual([])
+            }
+        })
+
+        it("knows every treasury the repository's genesis files name", () => {
+            const root = path.resolve(import.meta.dir, "..")
+            const found = new Set<string>()
+            for (const dir of ["testing", "docs", "data"]) {
+                const glob = new Bun.Glob("**/*.json")
+                if (!fs.existsSync(path.join(root, dir))) continue
+                for (const file of glob.scanSync({ cwd: path.join(root, dir) })) {
+                    const text = fs.readFileSync(path.join(root, dir, file), "utf8")
+                    for (const m of text.matchAll(/"treasuryAddress"\s*:\s*"(0x[0-9a-fA-F]{64})"/g)) {
+                        found.add(m[1].toLowerCase())
+                    }
+                }
+            }
+            expect(found.size).toBeGreaterThan(0)
+            for (const address of found) expect(KNOWN_TEST_TREASURIES).toContain(address)
         })
 
         it("is NO-GO when the genesis has no treasury to compare", () => {
