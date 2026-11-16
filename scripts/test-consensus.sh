@@ -128,6 +128,7 @@ SUITE_FILES=(
     testing/genesis/normalizeGenesisForHash.test.ts
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
+    src/libs/abstraction/web2/githubToken.test.ts
     scripts/test-consensus.registration.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
     src/features/incentive/pointsApplyPure.test.ts
