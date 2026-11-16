@@ -67,8 +67,11 @@
     "tlsnProofEnforcement": {
       "activationHeight": 0
     },
-    "l2psGate": {
+    "l2psSettlement": {
       "activationHeight": 0
+    },
+    "l2psGate": {
+      "activationHeight": null
     },
     "tlsnDisabled": {
       "activationHeight": 0

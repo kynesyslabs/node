@@ -15,6 +15,7 @@
  */
 
 import L2PSProofManager from "./L2PSProofManager"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { L2PSProof } from "@/model/entities/L2PSProofs"
 import HandleGCR, {
     isGCRMainEdit,
@@ -191,6 +192,13 @@ export default class L2PSConsensus {
         // Block N is applied on tip N - 1, the height every gate reads.
         if (l2psOffAt(blockNumber - 1)) {
             result.message = L2PS_GATE_REFUSAL
+            return result
+        }
+
+        // Local proofs move balances on the entry node alone (DEM-816);
+        // under the fork balances move only through settlement batches.
+        if (l2psSettlementActive()) {
+            result.message = "L2PS proofs are not applied under l2psSettlement"
             return result
         }
 
@@ -526,6 +534,9 @@ export default class L2PSConsensus {
             const l1BatchTx = {
                 type: "l2psBatch",
                 hash: `0x${batchHash}`,
+                // Top-level columns of the stored row, both NOT NULL.
+                blockNumber,
+                status: TRANSACTION_STATUS.CONFIRMED,
                 signature: {
                     type: "ed25519",
                     data: "", // System-generated, no actual signature needed
@@ -537,6 +548,14 @@ export default class L2PSConsensus {
                     amount: 0,
                     nonce: blockNumber,
                     timestamp: Date.now(),
+                    // Chain.insertTransaction stores the fee columns from
+                    // here; without it every insert threw on network_fee.
+                    transaction_fee: {
+                        network_fee: 0,
+                        rpc_fee: 0,
+                        additional_fee: 0,
+                        rpc_address: null,
+                    },
                     status: TRANSACTION_STATUS.CONFIRMED,
                     data: [
                         "l2psBatch",

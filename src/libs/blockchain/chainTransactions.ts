@@ -321,7 +321,10 @@ export async function insertTransaction(
     try {
         // REVIEW P5a: bridge wire-shape `RawTransaction` to entity-shape
         // `Transactions` (bigint amount/fees). Runtime payload unchanged.
-        await getTransactionsRepo().save(toTransactionsEntity(rawTransaction))
+        // The raw shape carries id 0; saved with it, every later row would
+        // update that one instead of getting an id of its own.
+        const { id: _generated, ...row } = toTransactionsEntity(rawTransaction)
+        await getTransactionsRepo().save(row as Transactions)
         return true
     } catch (e) {
         log.error(

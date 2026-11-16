@@ -1,4 +1,5 @@
-import { normalizePubkey } from "@/libs/blockchain/gcr/handleGCR"
+// Ordering needs the key format only, not the GCR apply path behind it.
+import { normalizePubkey } from "@/libs/blockchain/gcr/normalizePubkey"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 
 /**
@@ -9,6 +10,25 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
  */
 export function orderDeterministically<T extends Transaction>(txs: T[]): T[] {
     return [...txs].sort(compareTxDeterministic)
+}
+
+/**
+ * Whether the canonical order can place `tx`. The comparison throws on a
+ * sender that is not a string and on a missing hash, so a caller that sorts
+ * transactions no signature check has vetted refuses these first: a throw
+ * there stalls only the node that hit it.
+ */
+export function canonicallyOrderable(tx: {
+    hash?: unknown
+    content?: { from_ed25519_address?: unknown } | null
+}): boolean {
+    const sender = tx?.content?.from_ed25519_address
+    return (
+        typeof sender === "string" &&
+        sender.length > 0 &&
+        typeof tx.hash === "string" &&
+        tx.hash.length > 0
+    )
 }
 
 /**

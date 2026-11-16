@@ -187,18 +187,20 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
-    "l2psGate",
     "tlsnDisabled",
     "xmProofBinding",
     "storageFeeSettlement",
     "referenceBlockRoom10",
+    "l2psSettlement",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
+ * l2psGate is the L2PS kill switch: L2PS settles from block 0 and the gate
+ * is scheduled only if it has to be stopped.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["atomicWork", "networkGovernance", "tokenStaking"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["atomicWork", "networkGovernance", "tokenStaking", "l2psGate"]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a

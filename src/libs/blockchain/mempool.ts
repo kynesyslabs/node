@@ -10,11 +10,14 @@ import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { isSystemRelayTx, verifySystemRelayTx } from "./validation/systemRelayTx"
+import type { TxValidationResult } from "./validation/types"
 import { chunkedInsert } from "./chainDb"
 import {
     admissionReads,
     expectsNonceEdit,
     loadAdmissionReads,
+    settlementBatchRefusal,
     verifyAdmissionEdits,
 } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
@@ -32,6 +35,7 @@ import {
 } from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
@@ -338,6 +342,14 @@ export default class Mempool {
     private static blockSizeRefusal(tx: Transaction): string | null {
         if (!blockCapsActiveForPendingBlock()) return null
         return oversizeTxRefusal(tx, isForkActive("osDenomination", pendingHeight()))
+    }
+
+    /**
+     * Why the pool would refuse this transaction whatever it holds and
+     * however often it is offered: unstorable, or larger than a block.
+     */
+    public static permanentRefusal(tx: Transaction): string | null {
+        return admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
     }
 
     /** Every row's eviction ranking inputs. Only read when the pool is full. */
@@ -658,6 +670,19 @@ export default class Mempool {
         if (oversize !== null) {
             return { confirmationBlock: null, error: oversize }
         }
+        // The producer pools its batch on the verdict the merge gives it on
+        // every peer: one only its producer holds keeps blocks from agreeing.
+        if ((transaction.content?.type as string) === "l2psBatch" && l2psSettlementActive()) {
+            let refusal: string | null
+            try {
+                refusal = await settlementBatchRefusal(transaction)
+            } catch (error) {
+                refusal = `settlement batch could not be checked: ${error instanceof Error ? error.message : String(error)}`
+            }
+            if (refusal !== null) {
+                return { confirmationBlock: null, error: refusal }
+            }
+        }
 
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -733,8 +758,8 @@ export default class Mempool {
         // The exemption is gated on the tx originating from THIS node's
         // OWN identity. The aggregator only ever submits batch txs from
         // the node's own keypair, via a direct local addTransaction call;
-        // legitimate batch txs reach other nodes inside a block, not via
-        // mempool admission. Gating on own-identity means an arbitrary
+        // legitimate batch txs reach other nodes through the consensus
+        // merge (Mempool.receive), not this RPC admission. Gating on own-identity means an arbitrary
         // signer (or a remote peer) cannot self-label a tx `l2psBatch`
         // to skip the per-account nonce throttle and flood the mempool —
         // their `from` won't match this node's identity and they stay on
@@ -1108,7 +1133,7 @@ export default class Mempool {
         // first, since the chain lookup below queries by the hash.
         const unseenCandidates = incoming.filter(tx => {
             if (existingHashes[tx.hash]) return false
-            const unstorable = admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
+            const unstorable = this.permanentRefusal(tx)
             if (unstorable !== null) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${String(tx?.hash).slice(0, 80)}: ${unstorable}`,
@@ -1193,11 +1218,25 @@ export default class Mempool {
         // Same story for the signature preimage: resolved here, where the
         // fork config and the chain tip live, and threaded into the workers.
         const signatureDomain = pendingTxSignatureContext()
-        const results = await TxValidatorPool.getInstance().validate(
-            unseenTransactions,
+        // A relay tx is hashed and signed by its producer's rule, which the
+        // standard check never accepts. Judged here by the rule block and
+        // sync verification apply, every member pools a peer's batch; refused,
+        // only its producer forms a block with it and no block is agreed on.
+        // Not behind l2psSettlement: what a member pools is no apply rule,
+        // and block and Sync verification judge relay txs this way on both
+        // sides of the fork, so the old refusal stalled pre-fork batches too.
+        const standardTxs = unseenTransactions.filter(tx => !isSystemRelayTx(tx))
+        const standardResults = await TxValidatorPool.getInstance().validate(
+            standardTxs,
             coherenceIsPostFork,
             signatureDomain,
         )
+        const verdictByTx = new Map<Transaction, TxValidationResult>()
+        standardTxs.forEach((tx, i) => verdictByTx.set(tx, standardResults[i]))
+        for (const tx of unseenTransactions) {
+            if (isSystemRelayTx(tx)) verdictByTx.set(tx, await verifySystemRelayTx(tx))
+        }
+        const results = unseenTransactions.map(tx => verdictByTx.get(tx)!)
         const end = Date.now()
         log.only(
             `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${unseenTransactions.length} transactions`,

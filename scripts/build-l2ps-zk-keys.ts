@@ -1,7 +1,7 @@
 /**
- * Builds the L2PS batch proving keys into src/libs/l2ps/zk/keys, for the
- * release image. Uses the setup wizard's own build, so the result must match
- * the committed verification keys or the build fails.
+ * Builds the L2PS batch and settlement proving keys into src/libs/l2ps/zk/keys,
+ * for the release image. Uses the setup wizard's own build, so the result must
+ * match the committed verification keys or the build fails.
  *
  * Usage: bun scripts/build-l2ps-zk-keys.ts [ptau base url ...]
  */

@@ -67,6 +67,7 @@ import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
 import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { isForkActive } from "@/forks/forkGates"
 import { l2psOffAt } from "@/forks/l2psGate"
 import {
@@ -605,12 +606,13 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            // Apply pending L2PS proofs to L1 state
-            // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
-            // Their edits join the block's pending state and commit with it.
+            // Before l2psSettlement only the entry node held these proofs, so
+            // only it moved the balances (DEM-816). Under the fork a batch
+            // settles inside applyTransactions on every node instead.
             // Under l2psGate none apply: a proof debits the L2 fee with no
             // credit, and the proofs a node holds are its own, not the block's.
-            if (!l2psOffAt(blockRef - 1)) {
+            if (!l2psSettlementActive() && !l2psOffAt(blockRef - 1)) {
+                // Their edits join the block's pending state and commit with it.
                 const l2psStart = Date.now()
                 const l2psResult = await L2PSConsensus.applyPendingProofs(
                     blockRef,

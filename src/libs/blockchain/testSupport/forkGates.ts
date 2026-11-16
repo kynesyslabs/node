@@ -66,7 +66,7 @@ export function restoreForkConfigAfterEach(): void {
 }
 
 /** The activation tests every consensus fork passes. */
-export function describeForkConfig(fork: string): void {
+export function describeForkConfig(fork: string, atLaunch: 0 | null = 0): void {
     describe(`${fork} fork config`, () => {
         beforeEach(() => {
             getSharedState.forkConfig = cloneDefaultForkConfig()
@@ -85,10 +85,10 @@ export function describeForkConfig(fork: string): void {
             expect(isForkActive(fork as never, 500)).toBe(true)
         })
 
-        it("is switched on at block 0 by the mainnet template and the devnet", () => {
+        it(`is ${atLaunch === 0 ? "switched on at block 0" : "left unscheduled"} by the mainnet template and the devnet`, () => {
             for (const path of ["docs/mainnet/genesis.template.json", "testing/devnet/genesis.devnet.json"]) {
                 const genesis = JSON.parse(readFileSync(path, "utf8"))
-                expect(genesis.forks[fork]).toEqual({ activationHeight: 0 })
+                expect(genesis.forks[fork]).toEqual({ activationHeight: atLaunch })
             }
         })
     })

@@ -82,9 +82,10 @@ after the sheet, and confirms the container has it:
 docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" | grep '^SIGNALING_ENABLED='
 ```
 
-L2PS and TLSNotary are not switched here: the `l2psGate` and `tlsnDisabled`
-forks are at block 0 in the mainnet genesis, so every node refuses them
-whatever its environment says ([genesis.md](genesis.md)).
+L2PS and TLSNotary are not switched here: `l2psSettlement` is at block 0 and
+the `l2psGate` kill switch is unscheduled in the mainnet genesis, so L2PS
+settles on every node, and `tlsnDisabled` is at block 0, so every node refuses
+TLSNotary, whatever its environment says ([genesis.md](genesis.md)).
 
 ### Must stay unset
 
