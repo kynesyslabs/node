@@ -5,6 +5,22 @@ import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
 import { boundedFetch, web2Limits, type Web2Limits } from "./boundedFetch"
 
+const TOKEN_REJECTED =
+    "this node's GitHub token was rejected by GitHub (expired or revoked); the node operator must renew GITHUB_TOKEN"
+
+/**
+ * A 401 on the gist read is about the node's token, not the proof, so every
+ * GitHub link on this node fails until the operator renews it (#1027).
+ * Anything else is passed on as GitHub or the fetch reported it. The verifier
+ * logs whatever is thrown here, so it is not logged again.
+ */
+function refuseRejectedToken(error: unknown): never {
+    if ((error as { status?: number })?.status === 401) {
+        throw new Error(TOKEN_REJECTED)
+    }
+    throw error
+}
+
 export class GithubProofParser extends Web2ProofParser {
     private static instance: GithubProofParser
     private github: Octokit
@@ -89,12 +105,14 @@ export class GithubProofParser extends Web2ProofParser {
 
         // The gist id is what identifies a gist, not the name in front of it
         // in the URL, so the owner comes from the API.
-        const res = await this.github.request(`GET /gists/${gistId}`, {
-            headers: {
-                Accept: "application/vnd.github.raw+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        })
+        const res = await this.github
+            .request(`GET /gists/${gistId}`, {
+                headers: {
+                    Accept: "application/vnd.github.raw+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            })
+            .catch(refuseRejectedToken)
 
         if (res.status !== 200) {
             throw new Error(`Failed to read gist: ${res.status}`)
