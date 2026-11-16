@@ -387,8 +387,10 @@ export async function buildCarryoverSnapshot(opts: {
         return r.line
     })
     if (zeroList) missingFromSnapshot(zeroList, pubkeys, "--zero-points", "gcr_main.jsonl")
-    if (!Number.isSafeInteger(pointsRemoved)) {
-        throw new Error(`--zero-points: the points removed (${pointsRemoved}) are not a safe integer`)
+    // Awards come in halves (a Web3 wallet link is 0.5), which add up exactly
+    // in a double; only a non-finite or out-of-range total is refused.
+    if (!Number.isFinite(pointsRemoved) || pointsRemoved < 0 || pointsRemoved > Number.MAX_SAFE_INTEGER) {
+        throw new Error(`--zero-points: the points removed (${pointsRemoved}) are not a finite total in range`)
     }
 
     let storageText: string | null = null

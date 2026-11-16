@@ -119,16 +119,16 @@ const LAUNCH = [
 
 const jsonl = (rows: unknown[]) => rows.map(r => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "")
 
-async function writeSnapshot(dir: string): Promise<void> {
+async function writeSnapshot(dir: string, accounts = ACCOUNTS): Promise<void> {
     await mkdir(dir, { recursive: true })
-    const gcr = jsonl(ACCOUNTS)
+    const gcr = jsonl(accounts)
     const storage = jsonl(PROGRAMS)
     const validators = jsonl([{ ...LAUNCH[0], address: hex64("old"), unstake_requested_at: null, unstake_available_at: null }])
     const manifest = {
         schemaVersion: 2,
         source: { host: "test", chain_block_height: 1, chain_block_hash: "00".repeat(32), node_version: "t", pg_version: "16", dumped_at: "2026-01-01T00:00:00Z" },
         files: {
-            "gcr_main.jsonl": { sha256: sha256(gcr), rows: ACCOUNTS.length, balance_sum: String(5 * ACCOUNTS.length) },
+            "gcr_main.jsonl": { sha256: sha256(gcr), rows: accounts.length, balance_sum: String(5 * accounts.length) },
             "gcr_storageprogram.jsonl": {
                 sha256: sha256(storage),
                 rows: PROGRAMS.length,
@@ -268,6 +268,18 @@ describe("--zero-points", () => {
         expect(await carryoverSnapshotProblems(await load(out), LAUNCH)).toEqual([])
     })
 
+    it("zeroes accounts whose points come in halves", async () => {
+        const halves = ACCOUNTS.map(a => (a.pubkey === FARM_1 ? account(FARM_1, 4.5, ROOT) : a))
+        const halfSource = join(work, "halves")
+        await writeSnapshot(halfSource, halves)
+        const zeroFile = await list("group-a.txt", [FARM_1, FARM_2])
+        const out = join(work, "out")
+        const r = await buildCarryoverSnapshot({ inDir: halfSource, validatorsFile: launchFile, outDir: out, zeroPointsFile: zeroFile })
+        expect(r.zeroPoints!.points).toBe(11.5)
+        const manifest = JSON.parse(await readFile(join(out, "manifest.json"), "utf8"))
+        expect(manifest.carryover.zero_points.points_removed).toBe(11.5)
+    })
+
     it("leaves the manifest as it was without a list", async () => {
         const out = join(work, "out")
         const r = await buildCarryoverSnapshot({ inDir: source, validatorsFile: launchFile, outDir: out })
@@ -367,6 +379,16 @@ describe("list builder", () => {
         const r = refereesOf(ACCOUNTS, [ROOT])
         expect(r).toEqual({ addresses: [FARM_1, FARM_2].sort(), points: 11, flagged: 2 })
         expect(listText(r.addresses)).toBe([FARM_1, FARM_2].sort().join("\n") + "\n")
+    })
+
+    it("never lists a root, even one another root referred", () => {
+        const ROOT_2 = hex64("root-two")
+        const rows = [
+            ...ACCOUNTS.map(a => (a.pubkey === ROOT ? account(ROOT, 9, null, [FARM_1, FARM_2, ROOT_2]) : a)),
+            account(ROOT_2, 5, ROOT),
+        ]
+        expect(refereesOf(rows, [ROOT]).addresses).toContain(ROOT_2)
+        expect(refereesOf(rows, [ROOT, ROOT_2])).toEqual({ addresses: [FARM_1, FARM_2].sort(), points: 11, flagged: 2 })
     })
 
     it("refuses a root whose referrals array and referredBy fields disagree, or an unknown root", () => {

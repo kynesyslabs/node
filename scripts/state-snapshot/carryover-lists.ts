@@ -90,7 +90,11 @@ export function refereesOf(rows: Row[], roots: string[]): RefereeList {
                     `(${onlyListed.length} only in the array, ${onlyReferred.length} only in referredBy)`,
             )
         }
-        for (const a of referred) out.add(a)
+        for (const a of referred) {
+            // A root referred by another root keeps its points: the roots are
+            // not part of the list.
+            if (!fromReferredBy.has(a)) out.add(a)
+        }
     }
     const addresses = [...out].sort(compareCodeUnits)
     let points = 0
