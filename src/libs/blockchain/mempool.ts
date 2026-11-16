@@ -602,6 +602,17 @@ export default class Mempool {
         return { accepted: true, confirmationBlock }
     }
 
+    /**
+     * The block a transaction admitted now is queued for: the next block,
+     * or, while a consensus round runs, the one after the block it forges.
+     */
+    public static nextBlockRef(): number {
+        if (getSharedState.inConsensusLoop) {
+            return SecretaryManager.lastBlockRef + 1
+        }
+        return getSharedState.lastBlockNumber + 1
+    }
+
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
@@ -643,11 +654,7 @@ export default class Mempool {
         }
 
         if (blockRef === undefined) {
-            blockRef = getSharedState.lastBlockNumber + 1
-
-            if (getSharedState.inConsensusLoop) {
-                blockRef = SecretaryManager.lastBlockRef + 1
-            }
+            blockRef = this.nextBlockRef()
         }
 
         // Audit-sweep batch C PR 4 — re-check the nonce at the insert
