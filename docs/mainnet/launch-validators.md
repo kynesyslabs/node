@@ -55,7 +55,8 @@ visible; it is not capped.
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address>
 ```
 
 Each rule prints one `PASS` or `FAIL` line, followed by the counts per
@@ -78,24 +79,26 @@ timing, fees, stake floor and ZK points, which every validator must run with
 the same values), a synchronised clock, outbound NTP, both genesis pins, and
 that no one-start switch is left set. Each operator then confirms on the
 launch thread that they run the published sheet: a Docker host posts the
-`docker inspect` output from INSTALL.md ("Run a released image", step 7); a
+`docker inspect` output from INSTALL.md ("Run a released image", step 10); a
 bare-metal host has no container to inspect, so it posts the `node-doctor
 --production --env-from env` output, run from the node checkout in the shell
 that starts the node. That reads the process environment over `.env`, as the
 node does, and prints each sheet value it found on its `PASS` line.
 
 The node does not create its database schema at boot, so before its first
-start each validator creates it once, with the released image (Docker host):
+start each validator creates it once, with the released image (Docker host;
+`SUFFIX` is the install's `INSTANCE_SUFFIX`, INSTALL.md "Run a released image",
+step 3):
 
 ```bash
 docker compose pull node &&
 docker compose up -d --wait postgres &&
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:run &&
 docker compose up -d --no-build
 ```
 
 A bare-metal host makes its first start `./run -c true`, which creates the
 schema on the launcher's empty Postgres. A node started without the schema
 stops at boot, before block 0, and names the command
-(`INSTALL.md`, step 5 of "Run a released image";
+(`INSTALL.md`, step 8 of "Run a released image";
 `docs/runbooks/database-migrations.md`).

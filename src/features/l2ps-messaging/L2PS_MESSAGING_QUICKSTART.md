@@ -383,6 +383,7 @@ src/features/l2ps-messaging/
 | `INVALID_PROOF` | Signature verification failed |
 | `PEER_NOT_FOUND` | Target peer not connected |
 | `L2PS_NOT_FOUND` | L2PS network UID not loaded |
+| `L2PS_DISABLED` | L2PS is off on this network (fork `l2psGate` active at the node's tip) |
 | `L2PS_SUBMIT_FAILED` | Failed to submit to L2PS mempool |
 | `RATE_LIMITED` | Too many offline messages from sender |
 | `INTERNAL_ERROR` | Unexpected server error |

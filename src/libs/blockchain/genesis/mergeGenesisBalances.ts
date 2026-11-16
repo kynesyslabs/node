@@ -42,6 +42,7 @@ import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import type { SavedUdIdentity } from "src/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import { duplicateBalanceProblems } from "./genesisPin"
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 
 const GENESIS_ADDRESS_RE = /^0x[0-9a-f]{64}$/
 
@@ -136,7 +137,7 @@ export function genesisBalancesProblems(balances: unknown): string[] {
  * indistinguishable from one created via the normal account flow.
  */
 function defaultEmptyAccountFields(pubkey: string) {
-    const now = new Date()
+    const now = applyTime()
     // NOTE: no `assignedTxs` — that array was moved off gcr_main into the
     // dedicated gcr_assigned_txs relation (MoveAssignedTxsToOwnTable). A
     // freshly-merged genesis account simply has no assignments yet.
@@ -247,7 +248,7 @@ export async function mergeGenesisBalances(
             // (identities, points, referralInfo, flagged, …) belongs to
             // the snapshot row and we have no business stomping it.
             existing.balance = balance
-            existing.updatedAt = new Date()
+            existing.updatedAt = applyTime()
             await repo.save(existing)
             result.updated++
         } else {

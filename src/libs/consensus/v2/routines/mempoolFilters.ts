@@ -6,6 +6,7 @@ import { normalizeAccount } from "@/libs/l2ps/editConservation"
 import {
     deepWindowCutoff,
     isReferenceBlockAllowed,
+    referenceBlockRoomAt,
 } from "@/libs/blockchain/referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { ErrorCode } from "@/errors"
@@ -26,7 +27,7 @@ export type MempoolTransaction = Transaction & { reference_block: number }
  * fail because the reference block is out of range.
  *
  * With `includeExpiredAsFailed`: expired txs still inside the deep window
- * (5x referenceBlockRoom) are marked FAILED and kept in `validTxs` so
+ * (5x the room of the head) are marked FAILED and kept in `validTxs` so
  * they enter the block as failed — mirroring the TX_NONCE_INVALID_LOW
  * pattern. Txs older than the deep window, and txs whose reference block
  * is in the future, are removed as before; the merge admission path
@@ -48,7 +49,7 @@ export function filterMempoolByRefBlock(
     for (const tx of mempool) {
         if (!isReferenceBlockAllowed(tx.reference_block, lastBlockNumber)) {
             const code = ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE
-            const message = `Reference block expired. Expected: ${lastBlockNumber - getSharedState.referenceBlockRoom} - ${lastBlockNumber} got ${tx.reference_block}`
+            const message = `Reference block expired. Expected: ${lastBlockNumber - referenceBlockRoomAt(lastBlockNumber)} - ${lastBlockNumber} got ${tx.reference_block}`
             if (
                 includeExpiredAsFailed &&
                 tx.reference_block <= lastBlockNumber &&

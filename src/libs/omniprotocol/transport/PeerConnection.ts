@@ -25,9 +25,11 @@ import {
 } from "./types"
 import {
     ConnectionTimeoutError,
+    RequestTimeoutError,
     SigningError,
     InvalidAuthBlockFormatError,
     ConnectionError,
+    ConnectionLostError,
     OmniProtocolError,
 } from "../types/errors"
 import {
@@ -119,6 +121,10 @@ export class PeerConnection extends EventEmitter {
     // Request tracking for outbound requests we send
     // Public for cross-connection response routing (fallback lookup)
     public readonly inFlightRequests: Map<number, PendingRequest> = new Map()
+
+    // Peer requests this node is still answering. Closing the socket loses
+    // the answer: the peer's pending request waits on this socket only.
+    private servingRequests = 0
 
     // Timing and lifecycle
     private idleTimer: NodeJS.Timeout | null = null
@@ -392,7 +398,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -509,7 +515,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -728,7 +734,7 @@ export class PeerConnection extends EventEmitter {
         // Reject all pending requests
         for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
-            pending.reject(new Error("Connection closing"))
+            pending.reject(new ConnectionLostError("Connection closing"))
         }
         this.inFlightRequests.clear()
 
@@ -948,6 +954,7 @@ export class PeerConnection extends EventEmitter {
             }
         }
 
+        this.servingRequests++
         try {
             // Dispatch to handler
             const responsePayload = await dispatchOmniMessage({
@@ -999,7 +1006,14 @@ export class PeerConnection extends EventEmitter {
             ) {
                 await this.close()
             }
+        } finally {
+            this.servingRequests--
         }
+    }
+
+    /** Waiting for a reply from the peer, or still answering one of its requests. */
+    hasPendingWork(): boolean {
+        return this.inFlightRequests.size > 0 || this.servingRequests > 0
     }
 
     /**
@@ -1043,7 +1057,7 @@ export class PeerConnection extends EventEmitter {
         // Reject all pending requests
         for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
-            pending.reject(new Error("Connection closed"))
+            pending.reject(new ConnectionLostError("Connection closed"))
         }
         this.inFlightRequests.clear()
         this.framer.clear()

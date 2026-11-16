@@ -83,6 +83,7 @@ const OPEN_GCR_METHODS: ReadonlySet<string> = new Set([
     "validateReferralCode",
     "getAccountByIdentity",
     "getHumanPassportScore",
+    "getHumanPassportClaim",
     "getStorageProgram",
     "getStorageProgramsByOwner",
     "searchStoragePrograms",

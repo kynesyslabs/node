@@ -28,7 +28,7 @@ mkdir -p "$PTAU_DIR"
 download_ptau() {
     local size=$1
     local file="powersOfTau28_hez_final_${size}.ptau"
-    local url="https://storage.googleapis.com/zkevm/ptau/$file"
+    local url="https://circom.info/$file"
     
     if [[ ! -f "$PTAU_DIR/$file" ]] || [[ $(stat -c%s "$PTAU_DIR/$file") -lt 1000000 ]]; then
         echo -e "${YELLOW}Downloading pot${size}...${NC}"

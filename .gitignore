@@ -97,6 +97,11 @@ local_tests/
 # ---- Local devnet identities (private keys / mnemonics) ----
 .devnet/
 .manual-test-mnemonic
+*.mnemonic
+
+# ---- Validator install files (INSTALL.md, "Run a released image") ----
+/mainnet/
+/docker-compose.override.yml
 
 # ---- Local upgradable-network manual test artifacts ----
 scripts/check_fee_test.ts

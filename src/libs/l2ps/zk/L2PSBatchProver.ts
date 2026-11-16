@@ -74,6 +74,7 @@ export class L2PSBatchProver {
     /** Child process for non-blocking proof generation */
     private childProcess: ChildProcess | null = null
     private processReady = false
+    private spawning: Promise<void> | null = null
     private readonly pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }> = new Map()
     private requestCounter = 0
     private responseBuffer = ""
@@ -115,9 +116,28 @@ export class L2PSBatchProver {
     }
 
     /**
-     * Initialize child process for proof generation
+     * Start the child process that proves. One spawn at a time: a second
+     * caller waits for the spawn in progress.
      */
-    private async initializeSubprocess(): Promise<void> {
+    private initializeSubprocess(): Promise<void> {
+        this.spawning ??= this.spawnSubprocess().finally(() => {
+            this.spawning = null
+        })
+        return this.spawning
+    }
+
+    private failPendingRequests(error: Error): void {
+        for (const [id, pending] of this.pendingRequests) {
+            pending.reject(error)
+            this.pendingRequests.delete(id)
+        }
+    }
+
+    private async spawnSubprocess(): Promise<void> {
+        this.childProcess?.kill()
+        this.childProcess = null
+        this.processReady = false
+        this.responseBuffer = ""
         return new Promise((resolve) => {
             try {
                 const processPath = path.join(__dirname, "zkProofProcess.ts")
@@ -130,48 +150,54 @@ export class L2PSBatchProver {
 
                 log.debug(`[L2PSBatchProver] Spawning: ${runtime} ${args.join(" ")}`)
 
-                this.childProcess = spawn(runtime, args, {
+                const child = spawn(runtime, args, {
                     stdio: ["pipe", "pipe", "pipe"],
                     cwd: process.cwd(),
                 })
+                this.childProcess = child
 
                 // Handle stdout - responses from child process
-                this.childProcess.stdout?.on("data", (data: Buffer) => {
+                child.stdout?.on("data", (data: Buffer) => {
+                    if (this.childProcess !== child) return
                     this.responseBuffer += data.toString()
                     this.processResponseBuffer()
                 })
 
                 // Handle stderr - log errors
-                this.childProcess.stderr?.on("data", (data: Buffer) => {
+                child.stderr?.on("data", (data: Buffer) => {
                     const msg = data.toString().trim()
                     if (msg) {
                         log.debug(`[L2PSBatchProver] Process stderr: ${msg}`)
                     }
                 })
 
-                this.childProcess.on("error", (error) => {
+                child.on("error", (error) => {
                     log.error(`[L2PSBatchProver] Process error: ${error.message}`)
+                    if (this.childProcess !== child) return
                     this.processReady = false
-                    // Reject all pending requests
-                    for (const [id, pending] of this.pendingRequests) {
-                        pending.reject(error)
-                        this.pendingRequests.delete(id)
-                    }
+                    this.failPendingRequests(error)
                 })
 
-                this.childProcess.on("exit", (code) => {
+                child.on("exit", (code, signal) => {
                     if (code !== 0 && code !== null) {
                         log.error(`[L2PSBatchProver] Process exited with code ${code}`)
                     }
+                    // A replaced child exiting late must not mark its successor down.
+                    if (this.childProcess !== child) return
                     this.processReady = false
                     this.childProcess = null
+                    // A proof in flight fails now instead of at its 120 s timeout.
+                    this.failPendingRequests(new Error(`L2PS prover subprocess exited (code ${code}, signal ${signal})`))
                 })
 
-                // Wait for ready signal
+                // Wait for ready signal. A subprocess that never comes up is
+                // not replaced by the main thread: a proof there blocks the
+                // node's event loop, consensus included, for its whole length.
                 const readyTimeout = setTimeout(() => {
                     if (!this.processReady) {
-                        log.warning("[L2PSBatchProver] Process initialization timeout, using main thread")
-                        this.useSubprocess = false
+                        log.error("[L2PSBatchProver] Prover subprocess did not start within 15s; proofs are unavailable until it does")
+                        child.kill()
+                        if (this.childProcess === child) this.childProcess = null
                         resolve()
                     }
                 }, 15000)
@@ -185,12 +211,16 @@ export class L2PSBatchProver {
                         resolve()
                     }
                 }
-                this.pendingRequests.set("__ready__", { resolve: checkReady, reject: () => { } })
+                // A child that dies before it is ready ends the wait at once.
+                const notReady = () => {
+                    clearTimeout(readyTimeout)
+                    resolve()
+                }
+                this.pendingRequests.set("__ready__", { resolve: checkReady, reject: notReady })
 
             } catch (error) {
-                log.warning(`[L2PSBatchProver] Failed to spawn subprocess: ${error instanceof Error ? error.message : String(error)}`)
-                this.useSubprocess = false
-                resolve() // Continue without subprocess
+                log.error(`[L2PSBatchProver] Failed to spawn the prover subprocess: ${error instanceof Error ? error.message : String(error)}`)
+                resolve()
             }
         })
     }
@@ -280,6 +310,9 @@ export class L2PSBatchProver {
             this.childProcess.kill()
             this.childProcess = null
             this.processReady = false
+            // The exit handler ignores a child that is no longer current, so
+            // an in-flight proof would otherwise wait out its 120 s timeout.
+            this.failPendingRequests(new Error("L2PS prover terminated"))
             log.info("[L2PSBatchProver] Subprocess terminated")
         }
     }
@@ -419,8 +452,13 @@ export class L2PSBatchProver {
 
         const startTime = Date.now()
 
-        // Try subprocess first (non-blocking)
-        if (this.useSubprocess && this.processReady) {
+        if (this.useSubprocess) {
+            // A subprocess that exited (crash, OOM kill) is started again
+            // once per proof instead of falling back to the main thread.
+            if (!this.processReady) await this.initializeSubprocess()
+            if (!this.processReady) {
+                throw new Error("L2PS prover subprocess is unavailable")
+            }
             try {
                 log.debug(`[L2PSBatchProver] Generating proof in subprocess (${txCount} transactions)...`)
 
@@ -457,12 +495,16 @@ export class L2PSBatchProver {
                     totalVolume: BigInt(result.totalVolume),
                 }
             } catch (error) {
-                log.warning(`[L2PSBatchProver] Subprocess failed, falling back to main thread: ${error instanceof Error ? error.message : String(error)}`)
-                // Fall through to main thread execution
+                // A timed-out child may still be computing; restart it so the
+                // next proof does not queue behind a stuck one.
+                this.childProcess?.kill()
+                this.childProcess = null
+                this.processReady = false
+                throw new Error(`L2PS prover subprocess failed: ${error instanceof Error ? error.message : String(error)}`)
             }
         }
 
-        // Fallback to main thread (blocking)
+        // Only when L2PS_ZK_USE_MAIN_THREAD asks for it; blocks the event loop.
         return this.generateProofMainThread(input, startTime)
     }
 

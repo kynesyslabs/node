@@ -24,7 +24,6 @@ const quietLog = {
 }
 const sharedState = {
     lastBlockNumber: 100,
-    referenceBlockRoom: 1,
     publicKeyHex: OWN_KEY,
     inConsensusLoop: false,
 }

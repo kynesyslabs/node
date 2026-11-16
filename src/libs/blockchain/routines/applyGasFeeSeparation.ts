@@ -43,6 +43,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  * an import that can be jest-mocked.
  */
 
+import { denomination } from "@kynesyslabs/demosdk"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import type { Transaction as ITransaction } from "@kynesyslabs/demosdk/types"
 import {
@@ -58,6 +59,40 @@ import {
     chargedFeeMismatch,
     shippedFeeMismatch,
 } from "@/libs/blockchain/validation/feeBinding"
+import {
+    legacyGasRetired,
+    withoutLegacyGas,
+} from "@/libs/blockchain/validation/legacyGas"
+import { generateGcrEdits } from "@/libs/blockchain/validation/generateGcrEdits"
+
+/**
+ * What the block debits the sender of a native transaction besides its fee
+ * edits, in ledger units, and the account it debits: the sender's debits
+ * among the edits regenerated from the signed body, which the block binds the
+ * shipped edits to, less the retired gas edit. A send debits its amount, a
+ * TLSNotary request or store its special-operation burn. The sender is the
+ * account of the nonce edit, the ed25519 identity, which for a PQC-signed
+ * transaction is not the `from` the fee edits debit.
+ */
+async function nativeSenderDebit(
+    tx: ApplyGasFeeSeparationTx,
+    postFork: boolean,
+): Promise<{ account: string; amount: bigint }> {
+    const regenerated = withoutLegacyGas(await generateGcrEdits(tx as ITransaction))
+    const serialised = denomination.serializeTransactionContent(
+        { gcr_edits: regenerated } as never,
+        postFork,
+    )
+    const edits = (JSON.parse(serialised).gcr_edits ?? []) as Array<Record<string, unknown>>
+    const sender = edits.findLast(e => e.type === "nonce")?.account
+    let debit = 0n
+    for (const edit of edits) {
+        if (edit.type !== "balance" || edit.operation !== "remove") continue
+        if (edit.account !== sender) continue
+        debit += BigInt(edit.amount as string | number)
+    }
+    return { account: typeof sender === "string" ? sender : "", amount: debit }
+}
 
 export type ApplyGasFeeSeparationResult =
     | { ok: true }
@@ -87,6 +122,96 @@ export type ApplyGasFeeSeparationTx = Pick<
     ITransaction,
     "content" | "hash"
 >
+
+/** Why a fee component is not a non-negative integer, or null when none is. */
+function breakdownRefusal(breakdown: FeeBreakdown): string | null {
+    const components: Array<[keyof FeeBreakdown, number]> = [
+        ["network_fee", breakdown.network_fee],
+        ["rpc_fee", breakdown.rpc_fee],
+        ["additional_fee", breakdown.additional_fee],
+        ["total", breakdown.total],
+    ]
+    for (const [name, value] of components) {
+        if (
+            !Number.isFinite(value) ||
+            !Number.isInteger(value) ||
+            value < 0
+        ) {
+            return `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`
+        }
+    }
+    return null
+}
+
+/** An account's balance, or why it could not be read. */
+async function readBalance(account: string): Promise<{ balance: bigint } | { error: string }> {
+    try {
+        return { balance: await GCR.getAccountBalance(account) }
+    } catch (e) {
+        return {
+            error: `failed to read sender balance: ${
+                e instanceof Error ? e.message : stringifyNonError(e)
+            }`,
+        }
+    }
+}
+
+/**
+ * Why the sender cannot pay what the block will debit it, or null when it can.
+ */
+async function balanceRefusal(
+    tx: ApplyGasFeeSeparationTx,
+    senderAddress: string,
+    breakdown: FeeBreakdown,
+): Promise<string | null> {
+    const sender = await readBalance(senderAddress)
+    if ("error" in sender) return sender.error
+    if (legacyGasRetired(tx)) {
+        return retiredGasBalanceRefusal(tx, senderAddress, sender.balance, breakdown)
+    }
+    return sender.balance < BigInt(breakdown.total)
+        ? `sender balance ${sender.balance.toString()} < total fee ${breakdown.total}`
+        : null
+}
+
+/**
+ * Where the fee edits are the whole fee (legacyGasRetired), the block debits
+ * the fee and the transaction's own debits in ledger units and nothing else,
+ * so each account must hold what it is debited: the fee from `from`, the
+ * amount (a TLSNotary operation's burn) from the nonce-edit account, both
+ * from one account when they are the same. Before, the amount alone was
+ * checked, and the fee was compared as a DEM count against an OS balance.
+ */
+async function retiredGasBalanceRefusal(
+    tx: ApplyGasFeeSeparationTx,
+    senderAddress: string,
+    senderBalance: bigint,
+    breakdown: FeeBreakdown,
+): Promise<string | null> {
+    const postFork = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
+    const fee = BigInt(breakdown.total) * (postFork ? 1_000_000_000n : 1n)
+    let debit: { account: string; amount: bigint }
+    try {
+        debit = await nativeSenderDebit(tx, postFork)
+    } catch (e) {
+        return `cannot compute what the block debits the sender: ${
+            e instanceof Error ? e.message : stringifyNonError(e)
+        }`
+    }
+    if (debit.amount === 0n || debit.account.toLowerCase() === senderAddress.toLowerCase()) {
+        return senderBalance < debit.amount + fee
+            ? `sender balance ${senderBalance.toString()} < amount ${debit.amount.toString()} + fee ${fee.toString()}`
+            : null
+    }
+    if (senderBalance < fee) {
+        return `sender balance ${senderBalance.toString()} < fee ${fee.toString()}`
+    }
+    const payer = await readBalance(debit.account)
+    if ("error" in payer) return payer.error
+    return payer.balance < debit.amount
+        ? `balance of ${debit.account} ${payer.balance.toString()} < amount ${debit.amount.toString()}`
+        : null
+}
 
 export async function applyGasFeeSeparation(
     tx: ApplyGasFeeSeparationTx,
@@ -129,24 +254,8 @@ export async function applyGasFeeSeparation(
     // validator-side consensus disagreement. Validate each component
     // here so the tx is rejected at the RPC boundary with an
     // actionable per-component message instead.
-    const components: Array<[keyof FeeBreakdown, number]> = [
-        ["network_fee", breakdown.network_fee],
-        ["rpc_fee", breakdown.rpc_fee],
-        ["additional_fee", breakdown.additional_fee],
-        ["total", breakdown.total],
-    ]
-    for (const [name, value] of components) {
-        if (
-            !Number.isFinite(value) ||
-            !Number.isInteger(value) ||
-            value < 0
-        ) {
-            return {
-                ok: false,
-                message: `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`,
-            }
-        }
-    }
+    const invalid = breakdownRefusal(breakdown)
+    if (invalid) return { ok: false, message: invalid }
 
     // Epic #21 #204: do NOT mutate tx.content. Stamping transaction_fee
     // and prepending fee edits AFTER the SDK signed the tx broke
@@ -212,23 +321,8 @@ export async function applyGasFeeSeparation(
     // made devnet/staging diverge from PROD validation semantics.
     // Devnet uses a funded-genesis fixture, so unfunded broadcasts
     // are no longer needed for local testing.
-    let senderBalance: bigint
-    try {
-        senderBalance = await GCR.getAccountBalance(senderAddress)
-    } catch (e) {
-        return {
-            ok: false,
-            message: `failed to read sender balance: ${
-                e instanceof Error ? e.message : stringifyNonError(e)
-            }`,
-        }
-    }
-    if (senderBalance < BigInt(breakdown.total)) {
-        return {
-            ok: false,
-            message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
-        }
-    }
+    const unfunded = await balanceRefusal(tx, senderAddress, breakdown)
+    if (unfunded) return { ok: false, message: unfunded }
 
     // Epic #21 #204: fee edits are NO LONGER prepended here. They are
     // derived at apply (deriveFeeEdits in handleGCR) from the SDK-shipped

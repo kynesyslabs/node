@@ -21,17 +21,15 @@ import manageBridges from "./manageBridge"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import { RateLimiter } from "./middleware/rateLimiter"
+import { rateLimitSubject } from "./middleware/rateLimitSubject"
+import type { Web2FetchCaller } from "@/features/web2/web2FetchLimiter"
+import { SUDO_METHODS } from "./peerHttpAuth"
 import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import Datasource from "@/model/datasource"
 import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
 
-// Protected endpoints requiring SUDO access
-const PROTECTED_ENDPOINTS = new Set([
-    "rate-limit/unblock",
-    "getCampaignData",
-    "awardPoints",
-])
+const PROTECTED_ENDPOINTS = SUDO_METHODS
 
 export const emptyResponse: RPCResponse = {
     result: 0,
@@ -62,9 +60,23 @@ export function isRPCRequest(obj: any): obj is RPCRequest {
     )
 }
 
+/**
+ * The caller a web2 fetch from an RPC client is counted against: its address
+ * as the rate limiter resolved it (proxy headers only from trusted proxies),
+ * grouped the same way, so every address of one IPv6 /64 shares a budget.
+ */
+function web2CallerForClient(clientIP: string | undefined): Web2FetchCaller {
+    const ip = clientIP || "unknown"
+    return {
+        key: `ip:${rateLimitSubject(ip)}`,
+        exempt: RateLimiter.getInstance().isWhitelistedIP(ip),
+    }
+}
+
 export async function processPayload(
     payload: RPCRequest,
     sender: string,
+    clientIP?: string,
 ): Promise<RPCResponse> {
     const splits = sender.split(":")
     if (splits.length > 1) {
@@ -117,7 +129,6 @@ export async function processPayload(
                 sender,
             )
             log.info(`[RPC Call] Merged mempool from: ${sender}`)
-            log.info(JSON.stringify(res))
             return res
         }
         case "peerlist":
@@ -154,14 +165,17 @@ export async function processPayload(
         }
 
         case "gcr_routine":
-            return await manageGCRRoutines(sender, payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0], clientIP)
 
         case "bridge":
             return await manageBridges(sender, payload.params[0])
 
         case "web2ProxyRequest": {
             const params = parseWeb2ProxyRequest(payload.params[0])
-            return await handleWeb2ProxyRequest(params)
+            return await handleWeb2ProxyRequest(
+                params,
+                web2CallerForClient(clientIP),
+            )
         }
 
         case "rate-limit/unblock": {

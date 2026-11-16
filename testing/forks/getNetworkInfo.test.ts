@@ -274,6 +274,21 @@ describe("getNetworkInfo RPC handler", () => {
         expect(Object.keys(body.forks).sort()).toEqual(Object.keys(getSharedState.forkConfig).sort())
         expect(Object.keys(body.forks)).toContain("atomicWork")
         expect(Object.keys(body.forks)).toContain("tlsnProofEnforcement")
+        expect(Object.keys(body.forks)).toContain("l2psGate")
+        expect(Object.keys(body.forks)).toContain("tlsnDisabled")
+    })
+
+    it("publishes the gasFeeSeparation treasury beside its height, and no payload for other forks", async () => {
+        const treasury = "0x" + "7e".repeat(32)
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
+        getSharedState.forkConfig.gasFeeSeparation.treasuryAddress = treasury
+        const body = (await getNetworkInfo({}, makeResponse(), "")).response as {
+            forks: Record<string, ForkStatusResponse & { treasuryAddress?: string }>
+        }
+        expect(body.forks.gasFeeSeparation.treasuryAddress).toBe(treasury)
+        expect(body.forks.signatureDomain.treasuryAddress).toBeUndefined()
+        const { peerScheduleView } = await import("@/libs/peer/routines/forkScheduleAgreement")
+        expect(peerScheduleView(body)?.treasuryAddress).toBe(treasury)
     })
 
     it("publishes a schedule digest that follows the whole schedule and the chain id", async () => {

@@ -62,6 +62,16 @@ describe("runL2psZkSetup", () => {
         expect(runner.calls.filter(c => c.startsWith("download"))).toHaveLength(1)
     })
 
+    it("fails a step that exits 0 without writing its output, as the snarkjs CLI does under Bun", async () => {
+        seedCommittedVkeys(BATCH_VKEY)
+        const runner = fakeRunner({ silentOn: "plonk setup" })
+        const out = await runL2psZkSetup(root, runner, recorder().say, [5])
+        expect(out.ok).toBe(false)
+        expect(out.messages[0]).toContain("Generating the proving key for l2ps_batch_5 exited without writing")
+        expect(out.messages[0]).toContain("Node.js")
+        expect(runner.calls).not.toContain("snarkjs zkey export")
+    })
+
     it("falls back to the next host and explains how to recover when none works", async () => {
         seedCommittedVkeys(BATCH_VKEY)
         const tried: string[] = []
