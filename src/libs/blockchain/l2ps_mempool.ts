@@ -5,6 +5,7 @@ import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import forge from "node-forge"
 import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
+import { SETTLEABLE_QUEUE_STATUSES } from "@/libs/l2ps/settleableStatuses"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import log from "@/utilities/logger"
@@ -849,7 +850,7 @@ export default class L2PSMempool {
         const rows = await this.repo.find({
             where: {
                 hash: In(hashes),
-                status: In([L2PS_STATUS.EXECUTED, L2PS_STATUS.DEFERRED, L2PS_STATUS.BATCHED]),
+                status: In([...SETTLEABLE_QUEUE_STATUSES]),
             },
             select: { hash: true },
         })
