@@ -398,6 +398,59 @@ describe("a validator that restarts mid-round", () => {
         }
     })
 
+    test("leaves the round when the newer round releases its report at once", async () => {
+        // C's next round already released phase 3, so A's late report is
+        // let through, but with C's newer timestamp: forging in A's old
+        // round would cost the attempt.
+        openSecretaryRound(ROUND_2, 3, {
+            [A]: phase(1, false),
+            [B]: phase(3, false),
+            [C]: phase(3, false),
+        }, 3)
+        const attempt = startMemberAttempt()
+        attempt.blockTimestamp = ROUND_1
+        // C's own greenlight call to A is late: the answer arrives first.
+        // Had the greenlight come first, it would move the attempt to
+        // ROUND_2 before forging, which is also fine.
+        memberAttempt = null
+        const three = await reportPhase(attempt, 3)
+        expect(three.elapsed).toBeLessThan(GREENLIGHT_TIMEOUT_MS)
+        expect(three.result).toBe(SUPERSEDED_ROUND)
+    })
+
+    test("an attempt that ended does not resolve the next attempt's wait", async () => {
+        const ended = startMemberAttempt()
+        ended.blockTimestamp = ROUND_1
+        await ended.setOurValidatorPhase(3, true)
+        ended.ended = true
+        ;(secretaryManager as any).instances.clear()
+
+        const next = startMemberAttempt()
+        await next.setOurValidatorPhase(3, true)
+        const key = waiter.keys.GREEN_LIGHT + BLOCK + 3
+        const waiting = waiter.wait(key, GREENLIGHT_TIMEOUT_MS).catch(() => "timeout")
+        // The newer round's greenlight reaches the attempt that ended.
+        await ended.receiveGreenLight(ROUND_2, 1)
+        await settle()
+        expect(waiter.isWaiting(key)).toBe(true)
+        expect(await waiting).not.toBe(SUPERSEDED_ROUND)
+    })
+
+    test("an answer that reaches an attempt after it ended resolves nothing", async () => {
+        openSecretaryRound(ROUND_1, 3, {
+            [A]: phase(1, false),
+            [B]: phase(3, false),
+            [C]: phase(3, false),
+        }, 3)
+        const attempt = startMemberAttempt()
+        memberAttempt = null
+        await attempt.setOurValidatorPhase(3, true)
+        const answered = attempt.sendOurValidatorPhaseToSecretary(2).catch(() => "timeout")
+        // The attempt ends while its report is in flight.
+        attempt.ended = true
+        expect(await answered).not.toBe(ROUND_1)
+    })
+
     test("an attempt told of a newer round does not wait on its next phase", async () => {
         const round = openSecretaryRound(ROUND_2, 1, {
             [A]: phase(0, false),

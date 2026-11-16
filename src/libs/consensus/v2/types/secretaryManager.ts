@@ -1197,6 +1197,10 @@ export default class SecretaryManager {
             )
         }
         this.supersededBy = Math.max(this.supersededBy ?? 0, timestamp)
+        // The key below may already belong to the next attempt.
+        if (this.ended) {
+            return
+        }
         const waiterKey =
             Waiter.keys.GREEN_LIGHT +
             this.shard.blockRef +
@@ -1310,6 +1314,13 @@ export default class SecretaryManager {
             )
             log.debug(`Set validator phase response: ${JSON.stringify(res)}`)
 
+            // Waiter keys are per height and phase, not per attempt: an
+            // answer reaching an attempt that already ended would resolve
+            // the next attempt's wait.
+            if (this.ended) {
+                return null
+            }
+
             if (!Waiter.isWaiting(waiterKey)) {
                 // INFO: The secretary sent the green light for the phase before
                 // the setValidatorPhase request returned.
@@ -1402,7 +1413,6 @@ export default class SecretaryManager {
             // Our report reached a round the secretary started after ours,
             // which holds no place for this attempt.
             if (
-                !greenlight &&
                 res.extra.blockRef === this.shard.blockRef &&
                 this.isNewerRound(timestamp) &&
                 this.acceptSecretaryTimestamp(timestamp, "phase report answer")
