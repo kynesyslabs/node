@@ -100,6 +100,9 @@ COPY scripts/     ./scripts/
 COPY data/        ./data/
 COPY sdk/         ./sdk/
 COPY libs/        ./libs/
+# Only the pinned TLSN verifier wasm; its Rust sources are rebuilt and
+# compared in CI (native/tlsn-verify/README.md), never in this image.
+COPY native/tlsn-verify/dist/ ./native/tlsn-verify/dist/
 COPY sidecar/     ./sidecar/
 COPY tsconfig.json bunfig.toml ormconfig.json ./
 

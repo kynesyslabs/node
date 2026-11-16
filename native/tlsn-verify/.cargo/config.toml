@@ -1,0 +1,21 @@
+[target.wasm32-unknown-unknown]
+# - getrandom custom backend: the backends registered in lib.rs always fail, so
+#   a hidden use of randomness in the verify path is an error, not a silent
+#   import of crypto.getRandomValues from the host.
+# - --max-memory: a crafted presentation makes tlsn-core allocate an
+#   attacker-chosen size during decode (spike F1). With a 64 MiB cap that
+#   allocation fails the same way on every host (a trap), instead of growing to
+#   ~1 GiB. Legitimate presentations peak near 2.2 MiB.
+# - --remap-path-prefix: panic locations embed source paths; the build image
+#   uses these fixed paths, and the remap keeps them out of the artifact.
+rustflags = [
+    "--cfg", 'getrandom_backend="custom"',
+    "-C", "link-arg=--max-memory=67108864",
+    "--remap-path-prefix=/usr/local/cargo=/cargo",
+    "--remap-path-prefix=/tlsn-verify=/src",
+]
+
+[env]
+# ring compiles C for wasm32; the build image pins this clang/llvm version.
+CC_wasm32_unknown_unknown = "clang-14"
+AR_wasm32_unknown_unknown = "llvm-ar-14"

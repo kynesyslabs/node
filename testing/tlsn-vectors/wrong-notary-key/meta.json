@@ -1,0 +1,12 @@
+{
+  "description": "Valid presentation signed by notary B, a key not in the trusted set.",
+  "root": "test-ca.der",
+  "verifier": "ok",
+  "nodePolicy": "refuse",
+  "expect": {
+    "server": "api.demos-spike.test",
+    "method": "GET",
+    "path": "/user",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}
