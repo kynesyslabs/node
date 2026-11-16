@@ -17,6 +17,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
     AbortConsensusError,
     PEERLIST_PHASE,
+    SUPERSEDED_ROUND,
 } from "./types/secretaryManager"
 import {
     BlockInvalidError,
@@ -1556,6 +1557,14 @@ async function updateValidatorPhase(
             2,
         )}`,
     )
+
+    if (res === SUPERSEDED_ROUND) {
+        // Not a fault of the secretary: it restarted the height in a newer
+        // round, and the next attempt reports into that one.
+        throw new AbortConsensusError(
+            `The secretary started a newer round for block ${blockRef}; leaving this attempt to join it`,
+        )
+    }
 
     if (res === ("abortConsensus" as any)) {
         log.error("[consensusRoutine] Abort consensus routine")
