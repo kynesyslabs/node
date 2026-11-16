@@ -255,7 +255,9 @@ export function getExecutedBacklogGuard(): ExecutedBacklogGuard {
         countExecuted: async uid =>
             (await L2PSMempool.countByUIDAndStatus(uid, "executed")) +
             (await L2PSMempool.countByUIDAndStatus(uid, "deferred")),
-        countMessaging: uid => L2PSMempool.countExecutedFromMessaging(uid),
+        // Async like countExecuted: a synchronous throw here would leave that
+        // count's rejection unhandled.
+        countMessaging: async uid => L2PSMempool.countExecutedFromMessaging(uid),
         messagingShare: Config.getInstance().l2ps.messagingBacklogShare,
         minBatchSize: Config.getInstance().l2ps.minBatchSize,
     })
