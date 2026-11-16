@@ -1153,6 +1153,14 @@ case "$1" in
         fi
         [ "$3" = --out ] && echo '{"pass":true,"summary":"stub judge pass"}' > "$4"
         echo "PASS: stub judge"; exit 0 ;;
+    *committeeOutcome.ts)
+        # Up to shardSize every validator sits in every committee, so the k-th
+        # stop progresses iff N - k >= q (committeeOutcome.test.ts holds the real
+        # function to this rule); the stubbed drills stay at or below it
+        [ "$2" -le "$3" ] || { echo "stub committeeOutcome: N=$2 above shardSize $3" >&2; exit 2; }
+        q=$(( $3 * 2 / 3 + 1 )); live=$(( $2 - $4 ))
+        [ "${live}" -ge "${q}" ] && o=progress || o=stall
+        echo "${o} pool=$(( $2 - $4 + 1 )) committee=$(( $2 - $4 + 1 )) worstLive=${live} bestLive=${live} need=${q}"; exit 0 ;;
 esac
 printf 'MNEMONIC:stub stub stub\nPUBKEY:0xAB%s%s\n' "$$" "${RANDOM}"
 FULLBUN

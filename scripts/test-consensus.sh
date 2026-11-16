@@ -23,6 +23,7 @@ SUITE_FILES=(
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
     src/config/loader.logsDir.test.ts
+    src/config/loader.rapidApi.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
@@ -79,6 +80,7 @@ SUITE_FILES=(
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
+    src/libs/identity/tools/twitter.request.test.ts
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
     src/libs/network/broadcastReferenceWindow.test.ts
@@ -91,6 +93,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/outboundEntryGate.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/network/rateLimiter.loopback.test.ts
     src/libs/network/rpcGossipSize.test.ts
     src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
@@ -134,6 +137,7 @@ SUITE_FILES=(
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
     src/libs/abstraction/web2/githubToken.test.ts
+    scripts/test-consensus.registration.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
     src/features/incentive/pointsApplyPure.test.ts
     src/libs/blockchain/gcr/applyTime.test.ts
@@ -166,6 +170,16 @@ SUITE_FILES=(
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
 )
 
+list_suite_files() {
+    find "${SUITE_DIRS[@]}" -name '*.test.ts'
+    printf '%s\n' "${SUITE_FILES[@]}"
+}
+
+if [ "${1:-}" = "--list" ]; then
+    list_suite_files | sort -u
+    exit 0
+fi
+
 runner_for() {
     if grep -q 'from "bun:test"' "$1"; then
         echo bun
@@ -192,7 +206,7 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
-done < <({ find "${SUITE_DIRS[@]}" -name '*.test.ts'; printf '%s\n' "${SUITE_FILES[@]}"; } | sort -u)
+done < <(list_suite_files | sort -u)
 
 echo "consensus suites: $count files, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then
