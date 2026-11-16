@@ -41,10 +41,17 @@ node_tmpfs_specs.
 prints "NEEDED CONFIGURED": the fewest max_connections an N-node drill can run
 on, and the value gen-inputs.py starts the shared postgres with (run.sh refuses
 a postgres below the first).
+
+    drill_inputs.py hosts --file FILE --nodes N
+reads a hosts file (one `user@ip [max_nodes]` per line, see parse_hosts) and
+prints one tab-separated line per host: index (1-based), user@ip, ip, max_nodes
+(0 = no limit) and the comma-separated nodes assigned to it (assign_nodes).
+Exit 2 with the reason on a malformed file or too little capacity.
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 EMPTY_SNAPSHOT = "empty-snapshot"
@@ -82,6 +89,99 @@ def pg_max_connections(n):
     pair yet exits and restarts) is already opening 10 more.
     """
     return 2 * PG_POOL_PER_NODE * n + PG_FIXED
+
+
+# Up to this many nodes the shared postgres keeps the 1g cap every earlier
+# scenario ran with (their generated compose stays as it was).
+PG_MEM_FIXED_UP_TO = 13
+# Above it: about 100 MB per node. 30 nodes keep up to 600 connections open
+# (pg_max_connections), and every open backend holds a few MB of its own.
+PG_MEM_PER_NODE_MB = 100
+
+
+def pg_mem_limit(n):
+    """mem_limit of the postgres that holds n node databases."""
+    if n <= PG_MEM_FIXED_UP_TO:
+        return "1g"
+    return f"{PG_MEM_PER_NODE_MB * n}m"
+
+
+def node_port(i):
+    """RPC port of node i; its OMNI port is the next one."""
+    return 53549 + 2 * i
+
+
+def gossip_port(i):
+    """Gossip (libp2p) port of node i in multi-host mode.
+
+    On one host every node keeps the default 9095 inside its own container.
+    Across hosts the port is published, so it must differ between the nodes
+    that share a host, and the node advertises the EXPOSED_URL host with this
+    port (getListenAddr in src/libs/gossip/GossipManager.ts). Kept clear of
+    the RPC/OMNI range for up to 400 nodes.
+    """
+    return 54549 + i
+
+
+_HOST_RE = re.compile(r"^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+)$")
+
+
+def parse_hosts(text):
+    """Hosts of a --hosts file: [{"ssh": "user@ip", "ip": ip, "max": int or 0}].
+
+    One host per line, `user@ip [max_nodes]`; blank lines and `#` comments are
+    skipped. max_nodes is a positive integer, absent means no limit (0). The
+    same ip twice is refused: both entries would run the same compose project
+    on one Docker daemon.
+    """
+    hosts = []
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        m = _HOST_RE.match(parts[0])
+        if not m or len(parts) > 2:
+            raise ValueError(f"line {lineno}: expected `user@ip [max_nodes]`, got {raw.strip()!r}")
+        cap = 0
+        if len(parts) == 2:
+            if not re.fullmatch(r"[1-9][0-9]*", parts[1]):
+                raise ValueError(f"line {lineno}: max_nodes must be a positive integer, got {parts[1]!r}")
+            cap = int(parts[1])
+        if any(h["ip"] == m.group(1) for h in hosts):
+            raise ValueError(f"line {lineno}: {m.group(1)} is listed twice")
+        hosts.append({"ssh": parts[0], "ip": m.group(1), "max": cap})
+    if not hosts:
+        raise ValueError("no hosts in the file")
+    return hosts
+
+
+def assign_nodes(hosts, n):
+    """Host index (0-based) of nodes 1..n, as a list: round-robin over the
+    hosts, skipping a host once it holds its max_nodes. Node 1, the seed of
+    the peerlist, always lands on the first host."""
+    total = sum(h["max"] for h in hosts) if all(h["max"] for h in hosts) else None
+    if total is not None and total < n:
+        raise ValueError(f"the hosts take at most {total} nodes, {n} are needed")
+    load = [0] * len(hosts)
+    out = []
+    k = 0
+    for _ in range(n):
+        while hosts[k]["max"] and load[k] >= hosts[k]["max"]:
+            k = (k + 1) % len(hosts)
+        out.append(k)
+        load[k] += 1
+        k = (k + 1) % len(hosts)
+    return out
+
+
+def host_plan(hosts, n):
+    """[{"index": 1-based, "ssh", "ip", "max", "nodes": [node ids]}] for n nodes."""
+    where = assign_nodes(hosts, n)
+    return [
+        {"index": k + 1, **h, "nodes": [i + 1 for i, hk in enumerate(where) if hk == k]}
+        for k, h in enumerate(hosts)
+    ]
 
 
 def with_genesis_timestamp(genesis, ts):
@@ -280,7 +380,19 @@ def main():
     tf.add_argument("--gid", type=int)
     pc = sub.add_parser("pgconn")
     pc.add_argument("--nodes", type=int, required=True)
+    hs = sub.add_parser("hosts")
+    hs.add_argument("--file", required=True)
+    hs.add_argument("--nodes", type=int, required=True)
     a = ap.parse_args()
+    if a.cmd == "hosts":
+        try:
+            with open(a.file) as f:
+                plan = host_plan(parse_hosts(f.read()), a.nodes)
+        except (OSError, ValueError) as e:
+            hs.error(f"{a.file}: {e}")
+        for h in plan:
+            print("\t".join([str(h["index"]), h["ssh"], h["ip"], str(h["max"]), ",".join(map(str, h["nodes"]))]))
+        return
     if a.cmd == "readable":
         make_readable(a.dir)
         return
