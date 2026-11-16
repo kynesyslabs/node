@@ -84,7 +84,6 @@ const chains: { [key: string]: typeof DefaultChain } = {
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
-    // @ts-expect-error - APTOS module contains more fields than the DefaultChain type
     aptos: APTOS,
 }
 

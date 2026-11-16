@@ -584,7 +584,7 @@ export async function consensusRoutine(): Promise<void> {
 
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all transactions in the block are either confirmed or failed
-            const states = new Set([
+            const states = new Set<string>([
                 TRANSACTION_STATUS.CONFIRMED,
                 TRANSACTION_STATUS.FAILED,
             ])
