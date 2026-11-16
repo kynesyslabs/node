@@ -479,6 +479,11 @@ this restart is a fallback there.
   - Docker validators write logs to the `node_logs` volume instead of the
     container layer. Bare-metal `./run -e` keeps the operator's `PG_PORT`
     instead of forcing 5332.
+  - While `editBinding` is active, a transaction the admission rules refuse
+    at RPC validation gets `GCREdit mismatch: <reason>`. Before, it got the
+    bare `GCREdit mismatch`. A reason the node does not list as public still
+    gets the bare text, and the node log has it. Launch-gate refusals keep
+    their own text, with no prefix.
   - An empty `RAPID_API_HOST` passes `node-doctor --production` and uses the
     Twitter API45 default.
   - Each RapidAPI (Twitter) provider read is capped at 4.5 s (was 30 s) and
