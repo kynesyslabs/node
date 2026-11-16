@@ -235,6 +235,12 @@ export interface GCREntityCaches {
     zkNullifiers?: Map<string, true>
     /** What this set's identity unlinks removed, for their undo. */
     removedIdentities?: RemovedIdentities
+    /**
+     * Accounts absent from the database that only settlement batches name.
+     * Each is loaded so its batch can be judged; one no batch credited or
+     * debited is not written.
+     */
+    settlementPlaceholders?: Set<string>
 }
 
 /** The caches a set stages outside the entity maps, as one transaction saw them. */
@@ -913,6 +919,8 @@ export default class HandleGCR {
 
     static async prepareEntities(txs: Transaction[]): Promise<GCREntityCaches> {
         const affectedPubkeys = new Set<string>()
+        /** Accounts something other than a settlement batch's own edits names. */
+        const namedElsewhere = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
         const affectedTokenIds = new Set<string>()
         const affectedWorkIds = new Set<string>()
@@ -923,11 +931,13 @@ export default class HandleGCR {
             const gcrEdits = tx.content.gcr_edits
             if (!gcrEdits || !Array.isArray(gcrEdits)) continue
 
+            const isSettlement = settlementOfTx.has(tx)
             for (const edit of gcrEdits) {
                 const editType = edit.type
                 if (isGCRMainEdit(edit)) {
                     const pubkey = normalizePubkey(edit.account)
                     affectedPubkeys.add(pubkey)
+                    if (!isSettlement) namedElsewhere.add(pubkey)
                 } else if (editType === "storageProgram") {
                     affectedStorageAddresses.add(
                         (edit as unknown as GCREditStorageProgram).target,
@@ -956,15 +966,16 @@ export default class HandleGCR {
             }
 
             if (tx.content?.from_ed25519_address) {
-                affectedPubkeys.add(
-                    normalizePubkey(tx.content.from_ed25519_address),
-                )
+                const sender = normalizePubkey(tx.content.from_ed25519_address)
+                affectedPubkeys.add(sender)
+                namedElsewhere.add(sender)
             }
             for (const account of settlementAccounts(tx)) {
                 affectedPubkeys.add(normalizePubkey(account))
             }
         }
 
+        const createdAccounts = new Set<string>()
         // Parallel DB loads
         const [
             gcrMainCache,
@@ -973,19 +984,39 @@ export default class HandleGCR {
             atomicWorkCache,
             resourceSlotCache,
         ] = await Promise.all([
-            this.loadGCRMainEntities(affectedPubkeys),
+            this.loadGCRMainEntities(affectedPubkeys, createdAccounts),
             this.loadStorageProgramEntities(affectedStorageAddresses),
             this.loadTLSNotaryEntities(affectedTokenIds),
             this.loadAtomicWorks(affectedWorkIds),
             this.loadResourceSlots(affectedSlotKeys),
         ])
 
+        const placeholders = [...createdAccounts].filter(p => !namedElsewhere.has(p))
         return {
             accounts: gcrMainCache,
             storagePrograms: storageProgramCache,
             tlsNotaries: tlsNotaryCache,
             atomicWorks: atomicWorkCache,
             resourceSlots: resourceSlotCache,
+            ...(placeholders.length > 0 && {
+                settlementPlaceholders: new Set(placeholders),
+            }),
+        }
+    }
+
+    /**
+     * Drops the settlement placeholders no batch moved: a failed batch, or a
+     * zero change, would otherwise create a stored account that no edit made.
+     * A settlement edits only balances and nonces, so an untouched one still
+     * has both at zero.
+     */
+    static dropUnmovedPlaceholders(entities: GCREntityCaches): void {
+        for (const pubkey of entities.settlementPlaceholders ?? []) {
+            const account = entities.accounts.get(pubkey)
+            if (!account) continue
+            if (BigInt(account.balance ?? 0) === 0n && Number(account.nonce ?? 0) === 0) {
+                entities.accounts.delete(pubkey)
+            }
         }
     }
 
@@ -1018,6 +1049,7 @@ export default class HandleGCR {
 
     private static async loadGCRMainEntities(
         pubkeys: Set<string>,
+        created?: Set<string>,
     ): Promise<Map<string, GCRMain>> {
         const cache = new Map<string, GCRMain>()
         if (pubkeys.size === 0) return cache
@@ -1040,6 +1072,7 @@ export default class HandleGCR {
                     true,
                 )
                 cache.set(pubkey, newEntity)
+                created?.add(pubkey)
             }
         }
 
@@ -2625,6 +2658,8 @@ export default class HandleGCR {
                 if (failedAll.has(tx.hash)) failedTxs.push(tx.hash)
             }
         }
+
+        if (!isRollback) HandleGCR.dropUnmovedPlaceholders(entities)
 
         let pending: PendingGCRWrite | undefined
         if (options.defer) {

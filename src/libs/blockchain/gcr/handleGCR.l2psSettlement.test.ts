@@ -600,3 +600,81 @@ describe("an account a settlement names with a zero delta", () => {
         expect(forgedSignals).toContainEqual(signalsOf(zero, afterCredit))
     })
 })
+
+describe("an account only a settlement names, absent from the database", () => {
+    const DAVE = key(4)
+    let db: Map<string, { balance: bigint; nonce: number }>
+    const originalLoad = (HandleGCR as any).loadGCRMainEntities
+    const clock = { height: 101, timestampSec: 1_800_000_000 }
+
+    beforeEach(() => {
+        getSharedState.networkFee = 0
+        getSharedState.rpcFee = 0
+        getSharedState.additionalFee = 0
+        db = new Map([
+            [ALICE.account, { balance: 100n * OS, nonce: 4 }],
+            [NODE.account, { balance: 0n, nonce: 0 }],
+        ])
+        ;(HandleGCR as any).prepareEntities = original.prepareEntities
+        // As on a node: a missing row becomes an unsaved placeholder.
+        ;(HandleGCR as any).loadGCRMainEntities = async (pubkeys: Set<string>, created?: Set<string>) =>
+            new Map(
+                [...pubkeys].map(pubkey => {
+                    const row = db.get(pubkey)
+                    if (!row) created?.add(pubkey)
+                    return [pubkey, { pubkey, balance: row?.balance ?? 0n, nonce: row?.nonce ?? 0 } as any]
+                }),
+            )
+    })
+
+    afterEach(() => {
+        ;(HandleGCR as any).loadGCRMainEntities = originalLoad
+    })
+
+    const dbBalances = () => new Map([...db].map(([k, v]) => [k, v.balance]))
+    const stored = (out: { pending?: { entities: GCREntityCaches } }) => out.pending!.entities.accounts
+
+    it("is not written when its batch fails", async () => {
+        const plannedOn = dbBalances()
+        plannedOn.set(ALICE.account, 1_000n * OS)
+        const tx = batch(proven([pay(ALICE, DAVE.account, OS, 5n, 0n)], plannedOn))
+
+        const out = await HandleGCR.applyTransactions([tx as any], false, clock, { defer: true })
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(stored(out).has(DAVE.account)).toBe(false)
+        expect(stored(out).has(ALICE.account)).toBe(true)
+    })
+
+    it("is not written when its batch moves nothing to it", async () => {
+        const tx = batch(proven([pay(ALICE, DAVE.account, 0n, 5n, 0n)], dbBalances()))
+
+        const out = await HandleGCR.applyTransactions([tx as any], false, clock, { defer: true })
+
+        expect(out.successfulTxs).toEqual([tx.hash])
+        expect(stored(out).has(DAVE.account)).toBe(false)
+    })
+
+    it("is written with what a batch that applied credited it", async () => {
+        const tx = batch(proven([pay(ALICE, DAVE.account, 2n * OS, 5n, 0n)], dbBalances()))
+
+        const out = await HandleGCR.applyTransactions([tx as any], false, clock, { defer: true })
+
+        expect(out.successfulTxs).toEqual([tx.hash])
+        expect(BigInt((stored(out).get(DAVE.account) as any).balance)).toBe(2n * OS)
+    })
+
+    it("is still written when another transaction of the block names it", async () => {
+        const plannedOn = dbBalances()
+        plannedOn.set(ALICE.account, 1_000n * OS)
+        const failed = batch(proven([pay(ALICE, DAVE.account, OS, 5n, 0n)], plannedOn))
+        const sentByDave = batchTx(proven([pay(ALICE, DAVE.account, OS, 5n, 0n)], plannedOn), {
+            from: DAVE.account,
+            nonce: 1,
+        })
+
+        const out = await HandleGCR.applyTransactions([failed, sentByDave] as any[], false, clock, { defer: true })
+
+        expect(stored(out).has(DAVE.account)).toBe(true)
+    })
+})
