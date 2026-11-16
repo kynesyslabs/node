@@ -13,7 +13,7 @@ export const LOOPBACK_HOSTS = new Set([
  * ::1. A numeric IPv4 spelling (127.1, 0177.0.0.1, 2130706433) needs no
  * handling here: the URL parser has folded it before a hostname gets this far.
  */
-function canonicalIpv6(host: string): string {
+export function canonicalIpv6(host: string): string {
     if (!host.includes(":")) return host
     try {
         return stripBrackets(new URL(`http://[${host}]`).hostname)
