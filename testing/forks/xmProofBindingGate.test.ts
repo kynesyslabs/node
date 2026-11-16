@@ -35,4 +35,12 @@ describe("xmProofBinding gate", () => {
         getSharedState.lastBlockNumber = 100
         expect(xmProofBindingActiveForPendingBlock()).toBe(true)
     })
+
+    it("binds every proof from the genesis tip on when scheduled at 0", () => {
+        getSharedState.forkConfig.xmProofBinding.activationHeight = 0
+        for (const height of [0, 1, 1_000_000]) {
+            getSharedState.lastBlockNumber = height
+            expect(xmProofBindingActiveForPendingBlock()).toBe(true)
+        }
+    })
 })

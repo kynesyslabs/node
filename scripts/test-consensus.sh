@@ -14,13 +14,16 @@ SUITE_FILES=(
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/launch-go-no-go.plan.test.ts
+    scripts/launch-go-no-go.prover.test.ts
     scripts/launch-height1-check.test.ts
     scripts/node-doctor.test.ts
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
+    src/config/loader.logsDir.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/features/web2/proxy/Proxy.contentType.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -43,30 +46,37 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/handleGCR.nativeValue.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
+    src/libs/blockchain/gcr/handleGCR.supply.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/gcr/storableRows.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/mempool.editBinding.test.ts
+    src/libs/blockchain/mempool.nextBlockRef.test.ts
     src/libs/blockchain/mempool.receive.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
+    src/libs/blockchain/routines/validateTransaction.feeBalance.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
+    src/libs/blockchain/routines/validatorsManagement.typecheck.test.ts
+    src/libs/blockchain/sdkTypes.typecheck.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
     src/libs/gossip/sidecarHealth.test.ts
+    src/libs/gossip/txPublishPeers.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
+    src/libs/network/broadcastReferenceWindow.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -85,6 +95,7 @@ SUITE_FILES=(
     src/libs/peer/routines/anchorPairing.test.ts
     src/libs/omniprotocol/server/preauthLimits.test.ts
     src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
+    src/libs/omniprotocol/transport/ConnectionPool.perPeerCap.test.ts
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
@@ -98,6 +109,7 @@ SUITE_FILES=(
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
+    testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
     testing/genesis/findGenesisBlock.requireValidators.test.ts
@@ -112,6 +124,27 @@ SUITE_FILES=(
     testing/genesis/normalizeGenesisForHash.test.ts
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
+    # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
+    src/features/incentive/pointsApplyPure.test.ts
+    src/libs/blockchain/gcr/applyTime.test.ts
+    src/libs/blockchain/gcr/gcr_routines/identityManager.xmBinding.test.ts
+    src/libs/blockchain/gcr/gcr_routines/noAccountRowsOutsideApply.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/scoreIdentityRoutines.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/zkAttestationContext.test.ts
+    src/libs/blockchain/genesis/genesisSeedingTime.test.ts
+    src/libs/identity/humanPassportClaimGate.test.ts
+    src/libs/identity/providers/scoreRefresh.test.ts
+    src/libs/network/authReplayCache.test.ts
+    src/libs/network/httpBodyBinding.test.ts
+    src/libs/network/manageGCRRoutines.humanPassportClaim.test.ts
+    src/libs/network/manageGCRRoutines.readOnly.test.ts
+    src/libs/omniprotocol/protocol/noConsensusStateWrites.test.ts
+    src/libs/l2ps/l2psApplyTime.test.ts
+    src/libs/network/peerHttpAuth.test.ts
+    src/libs/network/sudoReplayFloor.test.ts
+    src/libs/network/tlsnotaryRoutesGate.test.ts
+    scripts/sudo-call.test.ts
+    testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
 )
 
 runner_for() {

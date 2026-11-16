@@ -5,18 +5,19 @@ import {
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
     UDIdentityAssignPayload,
-    HumanPassportIdentityData,
 } from "@kynesyslabs/demosdk/abstraction"
 import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
+import type { HumanPassportClaim } from "@/libs/identity/humanPassportClaim"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
 import Datasource from "@/model/datasource"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
+import { attestationContextError } from "@/features/zk/proof/publicSignals"
 
 interface IdentityResponse {
     success: boolean
@@ -118,13 +119,13 @@ export default async function handleIdentityRequest(
                 payload.payload as NomisWalletIdentity,
                 sender,
             )
-        case "humanpassport_identity_assign": {
-            const hpPayload = payload.payload as HumanPassportIdentityData
+        case "humanpassport_identity_assign":
+            // The SDK type predates the signed score; the payload is passed
+            // through to the edit as sent, so the fields arrive all the same.
             return await IdentityManager.verifyHumanPassportPayload(
-                hpPayload,
+                payload.payload as unknown as HumanPassportClaim,
                 sender,
             )
-        }
         case "ethos_identity_assign":
             return await IdentityManager.verifyEthosPayload(
                 payload.payload as EthosWalletIdentity,
@@ -156,6 +157,11 @@ export default async function handleIdentityRequest(
                     message: "Invalid ZK attestation payload",
                 }
             }
+
+            // Apply refuses another context; refusing it here too keeps a
+            // client from being told an attestation passed that never lands.
+            const contextError = attestationContextError(attestation.public_signals)
+            if (contextError) return { success: false, message: contextError }
 
             // Checked only: the nullifier is marked when the block that
             // carries the transaction commits

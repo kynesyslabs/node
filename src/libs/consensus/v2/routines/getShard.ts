@@ -54,13 +54,18 @@ async function readCommittedPeerlist(
     return committed
 }
 
-/** Addresses of the active (staked) validator set at a block. */
+/**
+ * Addresses of the active (staked) validator set at a block. With `strict` a
+ * failed read throws instead of answering an empty set, which reads the same
+ * as a network with no staked validators.
+ */
 export async function readActiveValidatorAddresses(
     lastBlockNumber: number,
+    strict = false,
 ): Promise<Set<string>> {
-    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
-        lastBlockNumber,
-    )) as Validators[]
+    const activeValidators = strict
+        ? await GCR.getGCRValidatorsAtBlockOrThrow(lastBlockNumber)
+        : ((await GCR.getGCRValidatorsAtBlock(lastBlockNumber)) as Validators[])
     return new Set<string>(
         activeValidators
             .map(v => v.address)

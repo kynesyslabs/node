@@ -105,7 +105,7 @@ echo ""
 echo "🚀 Welcome to Demos Network (Devnet Mode)!"
 echo "⚙️  Node Configuration:"
 echo "   🌐 Node Port: ${PORT}"
-echo "   🔗 Mode: External database (DATABASE_URL)"
+echo "   🔗 Mode: External database (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE)"
 if [[ ! -z "${IDENTITY_FILE}" ]]; then
     echo "   🔑 Identity File: ${IDENTITY_FILE}"
 fi

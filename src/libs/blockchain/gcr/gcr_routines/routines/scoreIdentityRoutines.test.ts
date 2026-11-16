@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test"
 import axios from "axios"
 import { applyNomisIdentityUpsert } from "./nomisRoutines"
 import { applyEthosIdentityUpsert } from "./ethosRoutines"
+import { applyHumanPassportIdentityAdd } from "./humanpassportRoutines"
+import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
 import { NomisApiClient } from "@/libs/identity/tools/nomis"
 import { EthosApiClient } from "@/libs/identity/tools/ethos"
 
@@ -9,8 +11,22 @@ const ACCOUNT = "0x" + "11".repeat(32)
 const ADDRESS = "0x" + "AB".repeat(20)
 
 function account(): any {
-    return { pubkey: ACCOUNT, identities: { xm: {}, nomis: {}, ethos: {} } }
+    return { pubkey: ACCOUNT, identities: { xm: {}, nomis: {}, ethos: {}, humanpassport: [] } }
 }
+
+const passportEdit = (data: Record<string, unknown> = {}) => ({
+    account: ACCOUNT,
+    data: {
+        address: ADDRESS,
+        verificationMethod: "api",
+        score: 25.5,
+        threshold: 20,
+        stamps: ["Google", "Discord"],
+        lastScoreTimestamp: "2026-10-27T10:00:00.000Z",
+        expirationTimestamp: "2027-01-27T10:00:00.000Z",
+        ...data,
+    },
+})
 
 const nomisEdit = (data: Record<string, unknown> = {}) => ({
     account: ACCOUNT,
@@ -58,6 +74,9 @@ describe("score identity apply is a pure function of the edit", () => {
             spyOn(EthosApiClient.getInstance(), "getScore").mockImplementation(
                 refuse as any,
             ),
+            spyOn(HumanPassportProvider.prototype, "verifyAddress").mockImplementation(
+                refuse as any,
+            ),
         )
     })
     afterEach(() => {
@@ -98,13 +117,50 @@ describe("score identity apply is a pure function of the edit", () => {
         ])
     })
 
+    it("stores the signed Human Passport values without asking Human Passport", async () => {
+        const gcr = account()
+        const r = await applyHumanPassportIdentityAdd(passportEdit(), gcr)
+
+        expect(r.success).toBe(true)
+        expect(calls()).toBe(0)
+        expect(gcr.identities.humanpassport).toEqual([
+            {
+                address: ADDRESS.toLowerCase(),
+                score: 25.5,
+                passingScore: true,
+                threshold: 20,
+                stamps: ["Discord", "Google"],
+                verificationMethod: "api",
+                verifiedAt: Date.parse("2026-10-27T10:00:00.000Z"),
+                expiresAt: Date.parse("2027-01-27T10:00:00.000Z"),
+            },
+        ])
+    })
+
+    it("refuses a Human Passport edit without a passing signed score", async () => {
+        for (const o of [
+            { score: undefined },
+            { threshold: undefined },
+            { score: 19.9 },
+            { threshold: 0 },
+            { score: "25.5" },
+            { lastScoreTimestamp: "soon" },
+        ]) {
+            const r = await applyHumanPassportIdentityAdd(passportEdit(o), account())
+            expect({ o, ok: r.success }).toEqual({ o, ok: false })
+        }
+        expect(calls()).toBe(0)
+    })
+
     it("produces identical state for identical edits, at any time", async () => {
         const runs = async () => {
             const n = account()
             const e = account()
+            const h = account()
             await applyNomisIdentityUpsert(nomisEdit(), n)
             await applyEthosIdentityUpsert(ethosEdit(), e)
-            return JSON.stringify([n.identities, e.identities])
+            await applyHumanPassportIdentityAdd(passportEdit(), h)
+            return JSON.stringify([n.identities, e.identities, h.identities])
         }
         const first = await runs()
         await new Promise(resolve => setTimeout(resolve, 5))

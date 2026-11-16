@@ -8,6 +8,7 @@ import { confirmTransaction } from "@/libs/blockchain/routines/validateTransacti
 import type { ValidityData } from "@kynesyslabs/demosdk/types"
 import { submitValidatedTx } from "@/libs/network/txSubmission"
 import { Config } from "src/config"
+import { l2psOff } from "@/forks/l2psGate"
 
 /**
  * L2PS Hash Generation Service
@@ -161,6 +162,15 @@ export class L2PSHashService {
 
         // Service shutdown check
         if (!this.isRunning) {
+            return
+        }
+
+        // The stake hook that starts and stops this service does not fire
+        // when l2psGate activates at a later height on a node that stays
+        // staked, so each cycle checks the gate itself.
+        if (l2psOff()) {
+            log.info("[L2PS Hash Service] L2PS is off at the tip (fork l2psGate): stopping")
+            await this.stop()
             return
         }
 

@@ -1,16 +1,22 @@
 import { describe, expect, it } from "bun:test"
+import fs from "node:fs"
+import path from "node:path"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import {
     type GoNoGoInput,
     KNOWN_FORKS,
     LAUNCH_DORMANT_FORKS,
     MAINNET_FORKS,
+    NON_MAINNET_CHAIN_IDS,
+    REFUSED_MAINNET_CHAIN_IDS,
     type ValidatorProbe,
     checkLaunch,
     commitSha,
     decideGoNoGo,
     sameCommit,
     parseArgs,
+    treasuryReasons,
+    KNOWN_TEST_TREASURIES,
 } from "./launch-go-no-go"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -522,9 +528,17 @@ describe("decideGoNoGo", () => {
     })
 })
 
+const TREASURY = "0x" + "ab".repeat(32)
+
+/** A mainnet fork at 0, gasFeeSeparation with the treasury it is refused without. */
+const atZero = (name: string, extra: Record<string, unknown> = {}) =>
+    name === "gasFeeSeparation"
+        ? { activationHeight: 0, treasuryAddress: TREASURY, ...extra }
+        : { activationHeight: 0, ...extra }
+
 /** Every fork this build knows declared: the mainnet ones at 0, the rest off. */
 const mainnetForks = () =>
-    Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }]))
+    Object.fromEntries(KNOWN_FORKS.map(name => [name, MAINNET_FORKS.includes(name) ? atZero(name) : { activationHeight: null }]))
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
     return { properties: { id: 7, shardSize: 10 }, forks, validators: rows }
@@ -538,6 +552,7 @@ describe("checkLaunch", () => {
         probes: launch.map(v => online(v)),
         operators: spread(launch),
         ...AGREED,
+        expectedTreasury: TREASURY,
     }
     const blockZero = (r: typeof rows) => ({ rows: r, source: "genesis" as const, reasons: [], warnings: [] })
 
@@ -599,6 +614,132 @@ describe("checkLaunch", () => {
         expect(LAUNCH_DORMANT_FORKS).toContain("networkGovernance")
         expect(MAINNET_FORKS).not.toContain("networkGovernance")
         expect(KNOWN_FORKS).toContain("networkGovernance")
+    })
+
+    it("keeps atomicWork off at launch, as docs/mainnet/genesis.md states", () => {
+        expect(LAUNCH_DORMANT_FORKS).toContain("atomicWork")
+        expect(MAINNET_FORKS).not.toContain("atomicWork")
+        const forks = { ...mainnetForks(), atomicWork: { activationHeight: 1000000 } }
+        const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("fork atomicWork is scheduled at 1000000")
+    })
+
+    it("launches with token staking off: the gate at block 0, tokenStaking left for a later upgrade", () => {
+        expect(MAINNET_FORKS).toContain("tokenStakingGate")
+        expect(LAUNCH_DORMANT_FORKS).toContain("tokenStaking")
+        expect(MAINNET_FORKS).not.toContain("tokenStaking")
+    })
+
+    it("launches with bound web2 and xm proofs and no structure-only TLSN claims", () => {
+        expect(MAINNET_FORKS).toContain("web2ProofBinding")
+        expect(MAINNET_FORKS).toContain("tlsnProofEnforcement")
+        expect(MAINNET_FORKS).toContain("xmProofBinding")
+    })
+
+    describe("the agreed treasury", () => {
+        it("is NO-GO on the mainnet chain id when no treasury was agreed", () => {
+            for (const expectedTreasury of [null, undefined, " "]) {
+                const d = checkLaunch({ ...base, expectedTreasury, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain("no --expected-treasury given")
+            }
+        })
+
+        it("is NO-GO when the genesis names another well-formed treasury", () => {
+            const other = "0x" + "cd".repeat(32)
+            const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: other } }
+            const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons).toEqual([`the genesis gasFeeSeparation treasuryAddress ${other} is not the agreed treasury ${TREASURY}`])
+        })
+
+        it("compares the agreed treasury without regard to case or surrounding spaces", () => {
+            const d = checkLaunch({
+                ...base,
+                expectedTreasury: ` ${TREASURY.toUpperCase().replace("0X", "0x")} `,
+                genesis: genesisFile(rows),
+                blockZero: blockZero(rows),
+            })
+            expect(d.reasons).toEqual([])
+            expect(d.go).toBe(true)
+        })
+
+        it("checks a given treasury on the testnet and devnet chain ids, and needs none there", () => {
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const g = { ...genesisFile(rows), properties: { id: chainId, shardSize: 10 } }
+                expect(treasuryReasons(g, null)).toEqual([])
+                expect(treasuryReasons(g, "0x" + "cd".repeat(32)).join("\n")).toContain("is not the agreed treasury")
+            }
+        })
+
+        it("is NO-GO on the mainnet chain id with a test genesis treasury, even when it was the one agreed", () => {
+            for (const test of KNOWN_TEST_TREASURIES) {
+                const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: test } }
+                const d = checkLaunch({
+                    ...base,
+                    expectedTreasury: test.toUpperCase().replace("0X", "0x"),
+                    genesis: genesisFile(rows, forks),
+                    blockZero: blockZero(rows),
+                })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain("treasury of a test genesis")
+            }
+        })
+
+        it("lets a test genesis treasury through on the testnet and devnet chain ids", () => {
+            const [test] = KNOWN_TEST_TREASURIES
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: test } }
+                const g = { ...genesisFile(rows, forks), properties: { id: chainId, shardSize: 10 } }
+                expect(treasuryReasons(g, test)).toEqual([])
+            }
+        })
+
+        it("knows every treasury the repository's genesis files name", () => {
+            const root = path.resolve(import.meta.dir, "..")
+            const found = new Set<string>()
+            for (const dir of ["testing", "docs", "data"]) {
+                const glob = new Bun.Glob("**/*.json")
+                if (!fs.existsSync(path.join(root, dir))) continue
+                for (const file of glob.scanSync({ cwd: path.join(root, dir) })) {
+                    const text = fs.readFileSync(path.join(root, dir, file), "utf8")
+                    for (const m of text.matchAll(/"treasuryAddress"\s*:\s*"(0x[0-9a-fA-F]{64})"/g)) {
+                        found.add(m[1].toLowerCase())
+                    }
+                }
+            }
+            expect(found.size).toBeGreaterThan(0)
+            for (const address of found) expect(KNOWN_TEST_TREASURIES).toContain(address)
+        })
+
+        it("is NO-GO when the genesis has no treasury to compare", () => {
+            const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0 } }
+            expect(treasuryReasons(genesisFile(rows, forks), TREASURY).join("\n")).toContain("has no treasuryAddress")
+        })
+    })
+
+    it("launches with L2PS and TLSNotary off", () => {
+        expect(MAINNET_FORKS).toContain("l2psGate")
+        expect(MAINNET_FORKS).toContain("tlsnDisabled")
+        expect(MAINNET_FORKS).toHaveLength(29)
+    })
+
+    it("launches with the Storage Program fee kept in the supply", () => {
+        expect(MAINNET_FORKS).toContain("storageFeeSettlement")
+    })
+
+    it("launches with a reference block room of 10", () => {
+        expect(MAINNET_FORKS).toContain("referenceBlockRoom10")
+    })
+
+    it("is NO-GO on chain ids 0, 1, 1337 and 31337", () => {
+        for (const chainId of REFUSED_MAINNET_CHAIN_IDS) {
+            const genesis = { ...genesisFile(rows), properties: { id: chainId, shardSize: 10 } }
+            const d = checkLaunch({ ...base, genesis, blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain(`genesis properties.id ${chainId} is`)
+        }
     })
 
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
@@ -689,7 +830,7 @@ describe("launchGenesisExpectations", () => {
         const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0, description: "x" }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f, { description: "x" })])),
         }
         const a = await launchGenesisExpectations(genesis)
         expect(a.expectedGenesisDataHash).toBe(hashGenesisData(genesis))
@@ -697,7 +838,7 @@ describe("launchGenesisExpectations", () => {
         // A description is not part of the schedule; a height is
         const b = await launchGenesisExpectations({
             ...genesis,
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
         })
         expect(b.expectedScheduleDigest).toBe(a.expectedScheduleDigest)
         const c = await launchGenesisExpectations({
@@ -712,7 +853,7 @@ describe("launchGenesisExpectations", () => {
         const { buildGenesisBlock } = await import("src/libs/blockchain/genesis/buildGenesisBlock")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
             balances: [],
             timestamp: 1793318400,
         }
@@ -751,6 +892,9 @@ describe("command line", () => {
         const a = run(["--genesis", genesisPath(), "--genesis-hash", "genesis-a"])
         expect(a.code).toBe(2)
         expect(a.err).toContain("--genesis-hash must be 64 hex characters")
+        const c = run(["--genesis", genesisPath(), "--expected-treasury", "0xab"])
+        expect(c.code).toBe(2)
+        expect(c.err).toContain("--expected-treasury must be 0x and 64 hex characters")
         const b = run(["--genesis", genesisPath(), "--commit", "stabilisation"])
         expect(b.code).toBe(2)
         expect(b.err).toContain("--commit must be a 7 to 40 character hex SHA")
@@ -772,5 +916,13 @@ describe("parseArgs", () => {
         expect(parseArgs(["--snapshot", "s"], env)).toMatchObject({ genesis: null, snapshot: "s" })
         expect(parseArgs(["--rpc", "http://v0:53550"], { DEMOS_SNAPSHOT_DIR: "/srv/snap" })).toMatchObject({ genesis: null, snapshot: null })
         expect(parseArgs([], {})).toMatchObject({ genesis: null, snapshot: null })
+    })
+
+    it("takes the agreed treasury from --expected-treasury, else from DEMOS_EXPECTED_TREASURY", () => {
+        const env = { DEMOS_EXPECTED_TREASURY: TREASURY }
+        expect(parseArgs(["--expected-treasury", "0x" + "cd".repeat(32)], env).expectedTreasury).toBe("0x" + "cd".repeat(32))
+        expect(parseArgs([], env).expectedTreasury).toBe(TREASURY)
+        expect(parseArgs([], {}).expectedTreasury).toBeNull()
+        expect(() => parseArgs(["--expected-treasury"], {})).toThrow("--expected-treasury needs a value")
     })
 })

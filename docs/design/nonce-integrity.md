@@ -91,6 +91,8 @@ What is charged, all or nothing, in this order:
    right before the nonce edit, derived by the node rather than read from
    the shipped edits, so a sender cannot leave it out while `editBinding` is
    dormant. Identity and `d402_payment` transactions pay none.
+   A native transaction whose fee edits replace it (`gasFeeSeparation` and
+   `feeBinding` both active) pays no gas, in a block or out of one.
 3. The nonce edit.
 
 Never charged: anything the type itself debits (a storage program's burn, a

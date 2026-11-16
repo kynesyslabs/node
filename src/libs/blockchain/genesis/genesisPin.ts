@@ -70,19 +70,28 @@ export function isMainnetChainId(chainId: unknown): boolean {
  * A production node, and any node on a mainnet chain id, runs with a pinned
  * genesis. Only a production node on a test network may opt out by name: a
  * bare-metal install runs as development, so NODE_ENV alone would let a
- * mainnet validator boot on whatever genesis file it holds.
+ * mainnet validator boot on whatever genesis file it holds. The opt-out set on
+ * a mainnet chain id is refused even beside a pin: it is meant for networks
+ * that publish no hash, so on mainnet it only marks a node one edit away from
+ * running unpinned.
  */
 export function pinRequirementProblem(
     pin: string,
     env: Record<string, string | undefined>,
     chainId?: unknown,
 ): string | null {
+    if (isMainnetChainId(chainId) && isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) {
+        return (
+            `DEMOS_ALLOW_UNPINNED_GENESIS is set and the genesis has chain id ${String(chainId)}, ` +
+            "which is not a test network's. It is refused there: remove it and pin the published " +
+            "genesis hash in EXPECTED_GENESIS_HASH"
+        )
+    }
     if (pin !== "") return null
     if (isMainnetChainId(chainId)) {
         return (
             `EXPECTED_GENESIS_HASH is not set and the genesis has chain id ${String(chainId)}, ` +
-            "which is not a test network's. A node on it must pin the published genesis hash; " +
-            "DEMOS_ALLOW_UNPINNED_GENESIS does not apply"
+            "which is not a test network's. A node on it must pin the published genesis hash"
         )
     }
     if (env.NODE_ENV !== "production") return null
@@ -129,6 +138,51 @@ export function requireValidatorsProblem(
         "which is not a test network's. Without it a node that cannot read the validator set " +
         "uses every online peer as the committee; set DEMOS_REQUIRE_VALIDATORS=true"
     )
+}
+
+/**
+ * A node on a mainnet chain id does not run XFF_MODE=legacy. Legacy trusts
+ * X-Forwarded-For and X-Real-IP from any client, so a client chooses the IP its
+ * per-IP rate limits are counted under. It is never derived from
+ * TRUSTED_PROXIES, so only an explicit setting reaches it; "" is unset.
+ */
+export function xffModeProblem(
+    xffMode: string | undefined | null,
+    chainId: unknown,
+): string | null {
+    if (xffMode !== "legacy" || !isMainnetChainId(chainId)) return null
+    const shown =
+        typeof chainId === "number" || typeof chainId === "string"
+            ? chainId
+            : JSON.stringify(chainId)
+    return (
+        `XFF_MODE=legacy and the genesis has chain id ${shown}, which is not a test ` +
+        "network's. Legacy trusts proxy headers (X-Forwarded-For, X-Real-IP) from any client, so a " +
+        "client can choose the IP the per-IP rate limits are counted under; " +
+        "set XFF_MODE=strict with TRUSTED_PROXIES, or leave XFF_MODE unset"
+    )
+}
+
+/**
+ * Every refusal of the settings this node booted with, judged against the
+ * chain id of its genesis, in the order the checks run. Empty when none apply.
+ */
+export function bootSettingProblems(
+    pin: string,
+    chainId: unknown,
+    settings: {
+        env: Record<string, string | undefined>
+        prod: boolean
+        xffMode: string | undefined | null
+        requireValidators: boolean
+    },
+): string[] {
+    return [
+        pinRequirementProblem(pin, settings.env, chainId),
+        devModeProblem(settings.prod, chainId),
+        xffModeProblem(settings.xffMode, chainId),
+        requireValidatorsProblem(settings.requireValidators, chainId),
+    ].filter((problem): problem is string => problem !== null)
 }
 
 /**

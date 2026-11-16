@@ -51,6 +51,25 @@ export class ConnectionTimeoutError extends OmniProtocolError {
     }
 }
 
+// The answer did not come in time while the connection was up, or while a
+// connect another call started was still running: the peer is slow, not
+// unreachable over Omni, so callers must not fall back to HTTP for it.
+export class RequestTimeoutError extends ConnectionTimeoutError {
+    constructor(message: string) {
+        super(message)
+        this.name = "RequestTimeoutError"
+    }
+}
+
+// An established connection went away with the request on it. The peer may
+// already have acted on the request, so it must not be resent elsewhere.
+export class ConnectionLostError extends ConnectionError {
+    constructor(message: string) {
+        super(message)
+        this.name = "ConnectionLostError"
+    }
+}
+
 export class AuthenticationError extends OmniProtocolError {
     constructor(message: string) {
         super(message, 0xf004)

@@ -25,8 +25,14 @@ import {
     checkIdentityAdmission,
 } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
-import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
+import {
+    deepWindowCutoff,
+    isWithinDeepWindow,
+    referenceBlockRoomAt,
+} from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
+import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
+import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
@@ -74,8 +80,8 @@ const SIGNED_TS_SQL =
 type PoolTx = Transaction & { reference_block: number }
 
 /**
- * Where a tx entered from. Only an RPC submit may displace other txs at a
- * full pool; see `checkAdmission`.
+ * Where a tx entered from. Only an RPC submit or a gossiped tx may displace
+ * other txs at a full pool; see `checkAdmission`.
  */
 export type AdmissionOrigin = "rpc" | "gossip" | "internal"
 
@@ -93,6 +99,11 @@ export interface ReceiveOptions {
 }
 
 const AGE_SWEEP_MIN_INTERVAL_MS = 2_000
+
+// At a full pool, a gossiped tx may try to evict at most once per interval.
+// A try reads every held tx under the mempool lock, and gossip brings every
+// peer's submissions here; the others are refused as full, as before.
+const MEMPOOL_GOSSIP_EVICT_INTERVAL_MS = 1_000
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -231,7 +242,7 @@ export default class Mempool {
      * Counts every tx whose `content.from` matches the supplied
      * lowercase hex address AND whose `reference_block` is still
      * inside the allowed window
-     * (`lastBlock - referenceBlockRoom ..= lastBlock`) — the same
+     * (`lastBlock - referenceBlockRoomAt(lastBlock) ..= lastBlock`) — the same
      * cut-off that `cleanMempool` uses to mark a tx stale and that
      * `isReferenceBlockAllowed` enforces on inbound RPC. Without the
      * window filter, expired-but-not-yet-swept rows would inflate
@@ -255,7 +266,7 @@ export default class Mempool {
         address: string,
     ): Promise<number> {
         const lastBlock = await Chain.getLastBlockNumber()
-        const cutoff = lastBlock - getSharedState.referenceBlockRoom
+        const cutoff = lastBlock - referenceBlockRoomAt(lastBlock)
         return await this.repo
             .createQueryBuilder("tx")
             .where("LOWER(tx.content->>'from') = LOWER(:address)", {
@@ -346,6 +357,7 @@ export default class Mempool {
     }
 
     private static lastAgeSweep = 0
+    private static lastGossipEvictAttempt = 0
 
     /**
      * Drops txs whose signed timestamp is past the pool lifetime, or is not
@@ -380,12 +392,16 @@ export default class Mempool {
      * and the pool-wide count and byte caps, and decides, without changing
      * anything, which held txs would have to go to make room.
      *
-     * Only an RPC submit may displace held txs, and only when the sender can
-     * pay the fee it offers: a tx that pays nothing it can lose must not be
-     * able to push out others. Gossip and internal txs are turned away at a
-     * full pool instead. The caller deletes the returned victims in the same
-     * database transaction as the insert, after its own nonce and duplicate
-     * checks, so a tx that then fails never costs anyone their place.
+     * Only an RPC submit or a gossiped tx may displace held txs, and only when
+     * the sender can pay the fee it offers: a tx that pays nothing it can lose
+     * must not be able to push out others. A gossiped tx is judged by the
+     * same fee rule as an RPC one, but only the first gossiped tx to get here
+     * in each MEMPOOL_GOSSIP_EVICT_INTERVAL_MS is considered; the rest are
+     * refused as full. RPC is not limited. Internal txs are turned away at a
+     * full pool instead.
+     * The caller deletes the returned victims in the same database
+     * transaction as the insert, after its own nonce and duplicate checks, so
+     * a tx that then fails never costs anyone their place.
      *
      * The peer merge does not come through here: every committee member
      * must end it with the same pool, so it is not subject to caps or
@@ -441,8 +457,20 @@ export default class Mempool {
         // Deleting a held tx while a round runs would change the pool the
         // committee is exchanging: members that already received it keep it,
         // and this node's final read would not.
-        if (origin !== "rpc" || sender === null || getSharedState.inConsensusLoop) {
+        if (origin === "internal" || sender === null || getSharedState.inConsensusLoop) {
             return refuse(full)
+        }
+        // A try counts from here, refused or failed, timed when it gets here:
+        // the queries above can be slow. Gossip only comes in under
+        // Mempool.lock (addTransactionWithLock), so no other lock. A clock
+        // stepped back behind the last try counts as a lapsed interval.
+        if (origin === "gossip") {
+            const at = Date.now()
+            const last = this.lastGossipEvictAttempt
+            if (at >= last && at - last < MEMPOOL_GOSSIP_EVICT_INTERVAL_MS) {
+                return refuse(full)
+            }
+            this.lastGossipEvictAttempt = at
         }
 
         // One balance read, and only at a full pool.
@@ -513,7 +541,7 @@ export default class Mempool {
             )
             .andWhere("tx.nonce = :nonce", { nonce })
             .andWhere("tx.reference_block >= :cutoff", {
-                cutoff: head - getSharedState.referenceBlockRoom,
+                cutoff: head - referenceBlockRoomAt(head),
             })
             .getCount()
         return taken > 0
@@ -596,6 +624,17 @@ export default class Mempool {
         return { accepted: true, confirmationBlock }
     }
 
+    /**
+     * The block a transaction admitted now is queued for: the next block,
+     * or, while a consensus round runs, the one after the block it forges.
+     */
+    public static nextBlockRef(): number {
+        if (getSharedState.inConsensusLoop) {
+            return SecretaryManager.lastBlockRef + 1
+        }
+        return getSharedState.lastBlockNumber + 1
+    }
+
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
@@ -606,6 +645,14 @@ export default class Mempool {
         const unstorable = admissionRefusal(transaction)
         if (unstorable !== null) {
             return { confirmationBlock: null, error: unstorable }
+        }
+        // Node-built L2PS batches and hash updates come here directly, so the
+        // feature gates hold here too, not only at RPC and gossip intake.
+        const featureOff =
+            l2psGateRefusal(transaction, l2psOff()) ??
+            tlsnDisabledRefusal(transaction, tlsnDisabled())
+        if (featureOff !== null) {
+            return { confirmationBlock: null, error: featureOff }
         }
         const oversize = this.blockSizeRefusal(transaction)
         if (oversize !== null) {
@@ -629,11 +676,7 @@ export default class Mempool {
         }
 
         if (blockRef === undefined) {
-            blockRef = getSharedState.lastBlockNumber + 1
-
-            if (getSharedState.inConsensusLoop) {
-                blockRef = SecretaryManager.lastBlockRef + 1
-            }
+            blockRef = this.nextBlockRef()
         }
 
         // Audit-sweep batch C PR 4 — re-check the nonce at the insert
@@ -680,10 +723,11 @@ export default class Mempool {
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
         // nonce, not a sequential per-account counter, and never advance
-        // the sender's account.nonce (no `nonce` GCR edit). The
-        // sequential `account.nonce + 1 + pendingCount` check below is
-        // built for value-transfer txs and would reject every batch (the
-        // timestamp nonce never equals account.nonce+1), trapping the
+        // the sender's account.nonce (no `nonce` GCR edit). The nonce
+        // window below (above the confirmed nonce, at most
+        // MEMPOOL_MAX_NONCE_AHEAD past it, one pending tx per nonce) is
+        // built for value-transfer txs and would reject every batch (a
+        // timestamp nonce is far past the window), trapping the
         // L2PSBatchAggregator in a permanent retry loop.
         //
         // The exemption is gated on the tx originating from THIS node's
@@ -1051,7 +1095,7 @@ export default class Mempool {
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
         // Drop gossiped txs whose reference block has aged out of the deep
-        // window (5x referenceBlockRoom) before they reach validation.
+        // window (5x the room of the head) before they reach validation.
         // Expired-but-recent txs — outside the inclusion window that
         // isReferenceBlockAllowed enforces on the endpoint admission path,
         // but inside the deep window — are admitted so consensus can
@@ -1096,10 +1140,10 @@ export default class Mempool {
                 )
                 return false
             }
-            if (!isWithinDeepWindow(tx.reference_block, lastBlock)) {
+            if (!isWithinDeepWindow(peerColumns.reference_block, lastBlock)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
-                        `${tx.reference_block} outside the allowed window at block ${lastBlock}`,
+                        `${peerColumns.reference_block} outside the allowed window at block ${lastBlock}`,
                 )
                 return false
             }
@@ -1365,7 +1409,7 @@ export default class Mempool {
      * Removes old and executed transactions from the mempool.
      *
      * Old: reference_block falls outside the deep window
-     * (5x referenceBlockRoom). Rows in the expired-but-includable band —
+     * (5x the room of the head). Rows in the expired-but-includable band —
      * outside the inclusion window isReferenceBlockAllowed enforces on
      * inbound RPC, but inside the deep window — are retained so consensus
      * can include them as failed.

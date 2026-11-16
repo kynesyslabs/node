@@ -28,8 +28,8 @@ prints the excluded forks the template activates at 0 as a JSON object of
 name -> reason ({} when there are none).
 
     drill_inputs.py readable --dir DIR
-sets every file under DIR to 644 and every directory to 755 (run.sh, once all
-its inputs are written).
+sets every file under DIR to 644 and every directory to 755 (run.sh and
+../consensus-race/run.sh, once all their inputs are written).
 
     drill_inputs.py tmpfs [--uid UID --gid GID]
 prints the node tmpfs entries, one per line, exactly as gen-inputs.py writes
@@ -98,6 +98,10 @@ def with_genesis_timestamp(genesis, ts):
 DRILL_REQUIRED_FORKS = ("quorumParity", "committeeBinding", "commitLock")
 # gasFeeSeparation validates a treasury even when it is off (loadForkConfig.ts)
 OFF_TREASURY = "0x" + "0" * 64
+# Active, the zero address is the burn account and the node refuses to boot on
+# it, so a genesis without a treasury of its own, or with that one, gets this
+# drill-only account.
+DRILL_TREASURY = "0x" + "7d" * 32
 
 # Forks the template activates at 0 that the drills keep off, by name, each with
 # the reason. The drills mount an empty data/snapshot, so genesis takes the legacy
@@ -159,7 +163,7 @@ def with_launch_forks(genesis, template):
     template does not give it, and no fork is left to the node's own default
     (osDenomination, nonceEnforcement and gasFeeSeparation default to 0).
     Payload fields (gasFeeSeparation's treasuryAddress) are kept from the
-    genesis' own entry. Excluded forks (LAUNCH_EXCLUDED_FORKS) get an explicit
+    genesis' own entry, or filled with one the node accepts. Excluded forks (LAUNCH_EXCLUDED_FORKS) get an explicit
     `activationHeight: null`.
     """
     own = genesis.get("forks") or {}
@@ -167,7 +171,10 @@ def with_launch_forks(genesis, template):
     for name, height in launch_fork_heights(template).items():
         entry = {k: v for k, v in own.get(name, {}).items() if k not in ("activationHeight", "description")}
         if name == "gasFeeSeparation":
-            entry.setdefault("treasuryAddress", OFF_TREASURY)
+            if height is None:
+                entry.setdefault("treasuryAddress", OFF_TREASURY)
+            elif entry.get("treasuryAddress", OFF_TREASURY) == OFF_TREASURY:
+                entry["treasuryAddress"] = DRILL_TREASURY
         forks[name] = {"activationHeight": height, **entry}
     out = dict(genesis)
     out["forks"] = forks

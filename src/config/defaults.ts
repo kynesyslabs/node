@@ -77,6 +77,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         blockTimestampMinDelta: 1,
         blockTimestampTolerance: 60,
         logLevel: "info",
+        logsDir: "",
         whitelistedIPs: [],
         whitelistedKeys: [],
         trustedProxies: [],
@@ -138,7 +139,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     l2ps: {
-        zkEnabled: true,
+        // Same as docker-compose and .env.example. The current batch proof is
+        // checked by no other node (docs/design/l2ps-zk-settlement.md).
+        zkEnabled: false,
         zkUseMainThread: false,
         hashIntervalMs: 5000,
         aggregationIntervalMs: 10000,
@@ -233,6 +236,10 @@ export const DEFAULT_CONFIG: AppConfig = {
         web2MaxResponseBytes: 10 * 1024 * 1024,
         web2SessionTtlMs: 15 * 60 * 1000,
         web2InsecureTls: false,
+        web2MaxInflightPerCaller: 2,
+        web2MaxFetchesPerMinutePerCaller: 10,
+        web2MaxBytesPerHourPerCaller: 100 * 1024 * 1024,
+        web2MaxInflightTotal: 32,
         tlsnotaryAllowedPorts: [443],
         tlsnotaryAllowPrivateTargets: false,
     },

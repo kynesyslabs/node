@@ -48,18 +48,3 @@ export default async function ensureGCRForUser(
 
     return gcr
 }
-
-/**
- * The account for `pubkey` as a read sees it: the stored row, or the
- * unsaved account a first write would create. Never writes, so a public read
- * cannot be used to fill the table with addresses nobody uses.
- */
-export async function readGCRForUser(pubkey: string): Promise<GCRMain> {
-    pubkey = normalizedPubkey(pubkey)
-    const db = await Datasource.getInstance()
-    const gcr = await db
-        .getDataSource()
-        .getRepository(GCRMain)
-        .findOne({ where: { pubkey } })
-    return gcr ?? (await HandleGCR.createAccount(pubkey, {}, true))
-}

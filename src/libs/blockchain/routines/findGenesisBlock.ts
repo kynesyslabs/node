@@ -23,18 +23,17 @@ import {
 import {
     GenesisRefusal,
     blockPinProblem,
+    bootSettingProblems as settingProblems,
     chainIdOf,
     defaultTreasuryWarning,
-    devModeProblem,
     genesisScheduleProblems,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
-    pinRequirementProblem,
-    requireValidatorsProblem,
     restartGenesisProblems,
     unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
+import { explicitXffMode } from "@/libs/network/middleware/rateLimiter"
 import {
     acceptSchedule,
     parseOverrideDigest,
@@ -151,13 +150,19 @@ function fileGenesisOr<T>(fileGenesis: unknown, fallback: T) {
     return fileGenesis === undefined ? fallback : fileGenesis
 }
 
-/** Every boot setting the chain id requires and this node lacks, in one list. */
+/** The XFF mode the rate limiter will run with when it is set explicitly. */
+function configuredXffMode(): string | undefined {
+    return explicitXffMode(Config.getInstance().core.xffMode)
+}
+
+/** Every refusal of this node's pin, PROD, XFF_MODE and DEMOS_REQUIRE_VALIDATORS settings for a genesis with this chain id. */
 function bootSettingProblems(pin: string, chainId: unknown): string[] {
-    return [
-        pinRequirementProblem(pin, process.env, chainId),
-        devModeProblem(Config.getInstance().core.prod, chainId),
-        requireValidatorsProblem(requireValidatorsEnabled(), chainId),
-    ].filter((problem): problem is string => problem !== null)
+    return settingProblems(pin, chainId, {
+        env: process.env,
+        prod: Config.getInstance().core.prod,
+        xffMode: configuredXffMode(),
+        requireValidators: requireValidatorsEnabled(),
+    })
 }
 
 export default async function findGenesisBlock() {
@@ -216,7 +221,7 @@ export default async function findGenesisBlock() {
             restartGenesisProblems({
                 storedGenesisData: stored,
                 // Without a file only the pin can be checked; the schedule check
-                // below still sees the defaults this node would run with.
+                // still sees the defaults this node would run with.
                 fileGenesisData: fileGenesisOr(fileGenesis, stored),
                 pin,
             }),

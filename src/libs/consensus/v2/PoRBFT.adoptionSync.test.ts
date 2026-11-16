@@ -171,7 +171,6 @@ beforeEach(() => {
 
     getSharedState.lastBlockNumber = HEIGHT - 1
     getSharedState.lastBlockHash = PARENT_HASH
-    getSharedState.referenceBlockRoom = 1
     getSharedState.isInitialized = true
     getSharedState.inSyncLoop = false
     getSharedState.fastSyncCount = 1

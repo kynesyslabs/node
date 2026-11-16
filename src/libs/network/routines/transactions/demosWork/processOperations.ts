@@ -2,12 +2,14 @@ import { DemoScript, DemosWorkOperationScripts } from "@kynesyslabs/demosdk/type
 import log from "src/utilities/logger"
 import { OperationResult } from "./handleDemosWorkRequest"
 import handleStep from "./handleStep"
+import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
 
 // ANCHOR - Process the operations
 // This method is responsible for iterating over the operations and steps
 // and executing them
 export async function processOperations(
     script: DemoScript,
+    web2Caller?: Web2FetchCaller,
 ): Promise<[DemoScript, OperationResult[]]> {
     const operationsResults: OperationResult[] = []
     for (const operationName of script.operationOrder) {
@@ -27,7 +29,7 @@ export async function processOperations(
 
             for (const workId of operation.id) {
                 const currentStep = script.steps[workId]
-                const stepResult = await handleStep(currentStep)
+                const stepResult = await handleStep(currentStep, web2Caller)
                 /* NOTE If a step fails, the operation is not successful and
                 the error is appended to the operation error */
                 if (!stepResult.success) {

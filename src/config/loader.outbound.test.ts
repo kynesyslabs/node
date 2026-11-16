@@ -15,6 +15,10 @@ const KEYS = [
     "WEB2_MAX_RESPONSE_BYTES",
     "WEB2_SESSION_TTL_MS",
     "WEB2_INSECURE_TLS",
+    "WEB2_MAX_INFLIGHT_PER_CALLER",
+    "WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER",
+    "WEB2_MAX_BYTES_PER_HOUR_PER_CALLER",
+    "WEB2_MAX_INFLIGHT_TOTAL",
     "TLSNOTARY_ALLOWED_PORTS",
     "TLSNOTARY_ALLOW_PRIVATE_TARGETS",
 ] as const
@@ -38,6 +42,10 @@ describe("outbound request settings", () => {
             web2MaxResponseBytes: 10 * 1024 * 1024,
             web2SessionTtlMs: 15 * 60 * 1000,
             web2InsecureTls: false,
+            web2MaxInflightPerCaller: 2,
+            web2MaxFetchesPerMinutePerCaller: 10,
+            web2MaxBytesPerHourPerCaller: 100 * 1024 * 1024,
+            web2MaxInflightTotal: 32,
             tlsnotaryAllowedPorts: [443],
             tlsnotaryAllowPrivateTargets: false,
         })
@@ -73,6 +81,36 @@ describe("outbound request settings", () => {
 
         process.env.TLSNOTARY_ALLOWED_PORTS = "443,https"
         expect(() => loadConfig()).toThrow(/TLSNOTARY_ALLOWED_PORTS/)
+    })
+
+    it("read the web2 fetch caps, with empty meaning the default", () => {
+        process.env.WEB2_MAX_INFLIGHT_PER_CALLER = "4"
+        process.env.WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER = " 30 "
+        process.env.WEB2_MAX_BYTES_PER_HOUR_PER_CALLER = "1048576"
+        process.env.WEB2_MAX_INFLIGHT_TOTAL = ""
+        const o = loadConfig().outbound
+        expect([
+            o.web2MaxInflightPerCaller,
+            o.web2MaxFetchesPerMinutePerCaller,
+            o.web2MaxBytesPerHourPerCaller,
+            o.web2MaxInflightTotal,
+        ]).toEqual([4, 30, 1048576, 32])
+    })
+
+    it("refuse a web2 fetch cap that is zero, negative or not a plain integer", () => {
+        const caps = [
+            "WEB2_MAX_INFLIGHT_PER_CALLER",
+            "WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER",
+            "WEB2_MAX_BYTES_PER_HOUR_PER_CALLER",
+            "WEB2_MAX_INFLIGHT_TOTAL",
+        ] as const
+        for (const key of caps) {
+            for (const bad of ["0", "-1", "2.5", "10k", "abc", "1e3"]) {
+                process.env[key] = bad
+                expect(() => loadConfig()).toThrow(new RegExp(`${key} must be an integer > 0 \\(got ${bad.replace(".", "\\.")}\\)`))
+            }
+            delete process.env[key]
+        }
     })
 
     it("refuse skipping web2 certificate checks on a production node", () => {

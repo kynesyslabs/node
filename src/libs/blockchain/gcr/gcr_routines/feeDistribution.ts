@@ -67,15 +67,16 @@ export interface FeeDistributionInput {
     isRollback: boolean
 }
 
+type FeeDistribution = NonNullable<typeof getSharedState.feeDistribution>
+type TwoRecipientComponent = "network_fee" | "additional_fee"
+
 /**
  * Lazy guard: returns the runtime `feeDistribution` view if both
  * bootstraps (P2's loader + P13's governance fold) have run, otherwise
  * logs and returns null. Callers receiving null MUST treat it as a
  * fork-not-yet-armed condition and emit no edits.
  */
-function requireFeeDistribution(): NonNullable<
-    typeof getSharedState.feeDistribution
-> | null {
+function requireFeeDistribution(): FeeDistribution | null {
     const fd = getSharedState.feeDistribution
     if (!fd) {
         log.error(
@@ -135,44 +136,29 @@ function makeBalanceEdit(
 }
 
 /**
- * Emit the burn / treasury distribution edits for a two-recipient
- * component (network_fee or additional_fee). Returns an array of 0..3
- * edits: one `remove` from the sender plus up to two `add`s to burn and
- * treasury. Recipients with a 0% share contribute nothing.
- *
- * Treasury captures the rounding remainder so the sum of the
- * `add` amounts equals the `remove` amount exactly.
+ * The burn and treasury credits of a two-recipient component (network_fee or
+ * additional_fee): 0..2 `add` edits whose amounts sum to `total`. Recipients
+ * with a 0% share contribute nothing; treasury takes the rounding remainder.
  */
-function emitTwoRecipientSplit(
-    componentName: "network_fee" | "additional_fee",
+function twoRecipientCredits(
+    fd: FeeDistribution,
+    componentName: TwoRecipientComponent,
     total: number,
-    burnPct: number,
-    treasuryPct: number,
-    burnAddress: string,
-    treasuryAddress: string,
-    senderAddress: string,
     txHash: string,
     isRollback: boolean,
 ): GCREditBalance[] {
     if (total <= 0) return []
+    const { burnPct, treasuryPct } =
+        componentName === "network_fee" ? fd.networkFee : fd.additionalFee
     const edits: GCREditBalance[] = []
     const burnAmount = Math.floor((total * burnPct) / 100)
     const treasuryAmount = total - burnAmount // remainder to treasury
 
-    edits.push(
-        makeBalanceEdit(
-            "remove",
-            senderAddress,
-            total,
-            txHash,
-            isRollback,
-        ),
-    )
     if (burnAmount > 0) {
         edits.push(
             makeBalanceEdit(
                 "add",
-                burnAddress,
+                fd.burnAddress,
                 burnAmount,
                 txHash,
                 isRollback,
@@ -183,7 +169,7 @@ function emitTwoRecipientSplit(
         edits.push(
             makeBalanceEdit(
                 "add",
-                treasuryAddress,
+                fd.treasuryAddress,
                 treasuryAmount,
                 txHash,
                 isRollback,
@@ -194,6 +180,47 @@ function emitTwoRecipientSplit(
         `[FeeDistribution] ${componentName} split total=${total} burn=${burnAmount}(${burnPct}%) treasury=${treasuryAmount}(remainder of ${treasuryPct}%)`,
     )
     return edits
+}
+
+/**
+ * Emit the burn / treasury distribution edits for a two-recipient
+ * component (network_fee or additional_fee). Returns an array of 0..3
+ * edits: one `remove` from the sender plus up to two `add`s to burn and
+ * treasury. Recipients with a 0% share contribute nothing.
+ *
+ * Treasury captures the rounding remainder so the sum of the
+ * `add` amounts equals the `remove` amount exactly.
+ */
+function emitTwoRecipientSplit(
+    fd: FeeDistribution,
+    componentName: TwoRecipientComponent,
+    total: number,
+    senderAddress: string,
+    txHash: string,
+    isRollback: boolean,
+): GCREditBalance[] {
+    if (total <= 0) return []
+    return [
+        makeBalanceEdit("remove", senderAddress, total, txHash, isRollback),
+        ...twoRecipientCredits(fd, componentName, total, txHash, isRollback),
+    ]
+}
+
+/**
+ * The credits for a debit the sender signed and pays as is (the flat gas of a
+ * non-native transaction, a TLSNotary burn): routed like a network fee, split
+ * between burn and treasury, with no sender debit of their own. `amount` is in
+ * the ledger units apply deducts the debit in. Empty when the distribution is
+ * not primed (see `requireFeeDistribution`).
+ */
+export function generateNetworkFeeCredits(
+    amount: number,
+    txHash: string,
+    isRollback: boolean,
+): GCREditBalance[] {
+    const fd = requireFeeDistribution()
+    if (!fd) return []
+    return twoRecipientCredits(fd, "network_fee", amount, txHash, isRollback)
 }
 
 /**
@@ -237,12 +264,9 @@ export function generateFeeDistributionEdits(
     // --- network_fee block ---
     edits.push(
         ...emitTwoRecipientSplit(
+            fd,
             "network_fee",
             networkFee,
-            fd.networkFee.burnPct,
-            fd.networkFee.treasuryPct,
-            fd.burnAddress,
-            fd.treasuryAddress,
             senderAddress,
             txHash,
             isRollback,
@@ -297,12 +321,9 @@ export function generateFeeDistributionEdits(
     // --- additional_fee block ---
     edits.push(
         ...emitTwoRecipientSplit(
+            fd,
             "additional_fee",
             additionalFee,
-            fd.additionalFee.burnPct,
-            fd.additionalFee.treasuryPct,
-            fd.burnAddress,
-            fd.treasuryAddress,
             senderAddress,
             txHash,
             isRollback,

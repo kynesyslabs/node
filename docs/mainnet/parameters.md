@@ -22,7 +22,7 @@ built-in values or `docker-compose.yml` drift apart.
 ## How the values reach the node
 
 1. Copy every `KEY=value` line of `parameters.env` into `.env` (INSTALL.md,
-   "Run a released image", step 2). Set them explicitly even where they equal
+   "Run a released image", step 3). Set them explicitly even where they equal
    the node's built-in value, so a later change of a default can never move a
    validator off the sheet without anyone noticing.
 2. Docker passes only the variables that `docker-compose.yml` lists under the
@@ -66,7 +66,8 @@ A bare-metal node reads the process environment and then `.env`; run
 
 `node-doctor --production` fails while any of these is set:
 `DEMOS_DISABLE_FORK_MACHINERY` (the node also refuses it at boot on any chain
-id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`,
+id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`
+(refused at boot on the same chain ids),
 and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and
 `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`.
@@ -75,6 +76,10 @@ and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 
 - Chain id, shard size, fork heights, the treasury address and the sudo key
   come from the genesis file, so they match by construction.
+- The reference block room (how far behind the head a transaction's
+  reference block may be: 1, or 10 from the `referenceBlockRoom10` fork,
+  with a deep window of five times that) is a code constant chosen by the
+  genesis fork schedule, so it matches by construction too.
 - Ports, database settings, L2PS limits, rate limits and the watchdog are
   per-node: they change how one node runs, not which blocks it accepts.
 - `MAX_MESSAGE_SIZE` is parsed but never read.

@@ -39,11 +39,19 @@ key in the OpenSSH allowed-signers format:
 release@kynesyslabs.com namespaces="git" ssh-ed25519 AAAA...
 ```
 
-A signer configures git once:
+A signer configures git in the checkout used to tag. The first two lines are
+needed once; run the last four again before each tag, because the signer
+file is a copy of the list at that moment and goes stale when a signer is
+added or removed. The copy goes into the clone's own `.git`, as in
+`INSTALL.md` step 1:
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS"
 ```
 
 Keep the private key off the validators and out of CI. How a holder
@@ -89,13 +97,91 @@ The `Release` workflow then:
 
 Publish the draft after the validators have confirmed the digest they run.
 
+## Announcing a release
+
+The draft release is visible only to repository members, so a validator
+installs from the announcement alone. Before posting it, run the checks a
+validator will run, on the files you are about to send, and post nothing
+that fails them:
+
+- `docker compose run --rm --no-deps node bun scripts/genesis-hash.ts --genesis
+  /app/data/genesis.json --snapshot /app/mainnet-snapshot` with the release
+  image and the files mounted as in INSTALL.md ("Run a released image", steps
+  3 and 4) exits 0 and prints no `problem:` line. It reports a `shardSize`
+  outside 3-100, fewer validators active at block 0 (status `"2"`, `valid_at`
+  0) than the quorum of `shardSize` (2/3 + 1),
+  and a validator `connection_url` that is not an http(s) URL with a host
+  (and, if it names a port, one in 1-65535).
+- every validator `connection_url` in the genesis is exactly the
+  `EXPOSED_URL` that operator sent, port included.
+
+The announcement then carries:
+
+1. the tag, and the full `checksums.txt` (tag, commit, image digest, source
+   sha256) pasted or attached, since the draft cannot be downloaded;
+2. each signer's email and `SHA256:` fingerprint
+   ([release-signing-key.md](release-signing-key.md), "Publish the
+   fingerprint");
+3. for a new network or a reissued genesis: `genesis.json`, `snapshot.tar`
+   and a `SHA256SUMS` covering both, and the four values a validator compares
+   (genesis hash, genesis block hash, fork schedule digest with chain id,
+   snapshot manifest sha256), attached to that release when it is published
+   ([../mainnet/genesis-hash.md](../mainnet/genesis-hash.md), "Publication").
+   Any other release links that published release and repeats the four
+   values, so a validator installing for the first time from a later release
+   finds the network's files and checks them the same way;
+4. the peer list: one `public key -> EXPOSED_URL` line per validator, the
+   same URLs as the genesis;
+5. whether `docs/mainnet/parameters.env` changed and whether the release adds
+   a migration.
+
+A reissued genesis is a new chain: say so, and point the validators at
+INSTALL.md, "After the genesis is reissued".
+
 ## What a validator runs
+
+Before changing `IMAGE_TAG`, verify and check out the release tag, so the
+compose file, scripts and parameter sheet match the image. The signer list
+goes into the clone's own `.git`, as in `INSTALL.md` step 1:
+
+```bash
+TAG=v1.0.0-rc.1
+
+OLD_HEAD="$(git rev-parse HEAD)" &&
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
+git merge-base --is-ancestor "$TAG" origin/stabilisation &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+The first line records the commit the checkout is at now. If this chain
+stops, do not continue the upgrade. A good signature from a key you cannot
+match is a failure: the email `git verify-tag` prints must be a signer the
+announcement names, and the `SHA256:` fingerprint the one that signer
+published outside GitHub (see `INSTALL.md` step 1). The chain has already
+checked out the new tag by then, so before anything else go back to the
+commit the first line recorded, in the same shell: `git checkout "$OLD_HEAD"`.
+Then do not continue the upgrade.
+
+Run the chain once; to read the signature again, run `git verify-tag "$TAG"`,
+which moves nothing. If the shell is gone or the chain ran twice, `OLD_HEAD`
+is empty or holds the new tag's commit. Go back instead to the release named
+by `IMAGE_TAG` in `.env`, the part before `@` (`git checkout vX.Y.Z` for
+`IMAGE_TAG=vX.Y.Z@sha256:<digest>`): it still names the release the node
+runs, because this chain runs before `IMAGE_TAG` changes. If `IMAGE_TAG` is
+still `local` (an image built from this checkout), find the way back in
+`git reflog`: the oldest `checkout: moving from <place> to <tag>` line of
+this upgrade names the commit or branch to check out.
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
 `docs/mainnet/parameters.env`, the announcement says so and every validator
 updates the same lines in `.env` before restarting; `node-doctor --production`
-fails until they match.
+fails until they match. `SUFFIX` is the install's `INSTANCE_SUFFIX`, empty
+on a host with one install (INSTALL.md, "Run a released image", step 3).
 
 ```
 IMAGE_NAME=ghcr.io/kynesyslabs/node
@@ -106,7 +192,7 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ./scripts/node-doctor --production &&
 docker compose pull node &&
 docker compose up -d --wait postgres &&
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:show
 ```
 
 `migration:show` is read-only; each `[ ]` line is a pending migration. If it
@@ -117,7 +203,7 @@ block above ended without an error:
 ```bash
 ./scripts/node-doctor --production &&
 docker compose stop reaper node &&
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:run &&
 docker compose up -d --no-build &&
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
@@ -140,13 +226,14 @@ the same for every release. A node started with migrations still pending
 refuses to boot and names the command.
 Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
-A bare-metal validator (`./run`) checks out the tag instead and verifies it
-locally before starting:
+A bare-metal validator (`./run`) runs the same verify-and-checkout chain, then
+starts `./run`:
 
 ```bash
 git fetch --tags origin stabilisation &&
-git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
-git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
 git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation &&
 git verify-tag v1.0.0-rc.1 &&
 git checkout v1.0.0-rc.1 &&
@@ -214,8 +301,9 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
 - From `v1.0.0-rc.6`:
   - The node uses the host clock and no longer corrects it from NTP servers.
     Keep host NTP running (chrony or systemd-timesyncd). With `PROD=true` a
-    node refuses to boot when at least two NTP servers agree that the host
-    clock is further off than `BLOCK_TIMESTAMP_TOLERANCE`.
+    node refuses to boot when its clock is more than 5 s ahead or behind the
+    median of the largest group of NTP servers that agree within 2 s of each
+    other (at least two, and only if no other group is as large).
   - A balance edit larger than the balance fails on every node. Before, a node
     with `PROD=false` clamped the balance to 0 instead.
   - Mainnet validators append `docs/mainnet/parameters.env` to `.env`, and
@@ -231,6 +319,135 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     [Changing the schedule](fork-schedule-policy.md#changing-the-schedule): a
     height more than 50 blocks ahead, with every validator on the new genesis
     before the window opens.
+- From `v1.0.0-rc.7`:
+  - Identity proofs verify with the final key of the identity ceremony
+    (kynesyslabs/zk_ceremony, drand round 6629366 beacon). Proofs made with an
+    earlier development key are refused; clients need `@kynesyslabs/demosdk`
+    4.0.20 or later. Block apply and sync verify each attestation again with
+    the key in the image, so a chain that already holds attestations made
+    under an earlier key cannot be replayed or synced by rc.7. No supported
+    procedure covers such a chain; the release supports chains without them
+    (mainnet from genesis, the rc.6 test network). rc.6 validators still
+    confirm proofs made with the development key, so no client may submit an
+    identity attestation from the start of the upgrade until the final checks
+    pass. Before upgrading each validator, wait until it is at the network's
+    current tip (a node that is behind has not seen later blocks), then run
+    the check for its install; after the last validator, run it once more on
+    every validator, and resume attestations only when all of these return 0.
+    The result must be 0:
+    - Docker stack (`./run --docker`): query the instance's own database
+      container, which uses the database's own user and name, so custom
+      `PG_USER` and `PG_DATABASE` work. The container is `demos-postgres`
+      followed by the instance's `INSTANCE_SUFFIX` (empty by default,
+      `_<port>` for `--port <port>`), or `demos-postgres-devnet` for
+      `--devnet`; `docker ps` lists it:
+      `docker exec <container> sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "SELECT count(*) FROM used_nullifiers"'`
+    - `./run` install: `docker exec postgres_<PG_PORT> psql -U demosuser -d demos -At -c "SELECT count(*) FROM used_nullifiers"`
+    - External database: the same query with the node's `PG_*` connection
+      settings.
+  - L2PS batch proofs are off unless `L2PS_ZK_ENABLED=true`. Before, the
+    aggregator proved whenever the keys were present. The image now ships the
+    batch_5 and batch_10 proving keys. Validators do not check batch proofs
+    yet, so turning them on changes no consensus result.
+  - The ZK merkle-proof and nullifier routes accept canonical decimal as well
+    as hex.
+- From `v1.0.0-rc.8`:
+  - Two new forks, both at height 0 in the mainnet set (27 forks at 0):
+    `l2psGate` refuses every L2PS transaction and node call and starts no
+    L2PS service, and `tlsnDisabled` refuses `tlsn_request` and `tlsn_store`
+    before any fee or token. A network that does not schedule them keeps L2PS
+    and TLSNotary as before.
+  - `xmProofBinding` moves into the mainnet set at height 0: a cross-chain
+    identity proof must sign the `demos-xm:v1` message, so wallets and
+    clients that link xm identities need `@kynesyslabs/demosdk` 4.0.21. An
+    older SDK's proof (the sender's address) is refused from block 0.
+  - `launch-go-no-go` needs `--expected-treasury` (or
+    `DEMOS_EXPECTED_TREASURY`) on a mainnet chain id and is NO-GO when the
+    genesis names another treasury. A peer whose `gasFeeSeparation` treasury
+    differs is handled as a fork-schedule mismatch at any height.
+  - The mainnet template carries chain id `8587492`. `launch-go-no-go` and
+    `--plan` refuse chain ids `0`, `1`, `1337` and `31337`.
+  - A node on a mainnet chain id refuses to boot with
+    `DEMOS_ALLOW_UNPINNED_GENESIS` set, pinned or not.
+  - `node-doctor --production` fails when `GITHUB_TOKEN`,
+    `DISCORD_BOT_TOKEN`, `RAPID_API_KEY` or `RAPID_API_HOST` is empty: web2
+    identity links stay on and the node checks them against the providers.
+  - The Omni per-identity cap counts inbound connections only. Run one
+    process per validator key.
+- From `v1.0.0-rc.9`:
+  - Two new forks, both at height 0 in the mainnet set (29 forks at 0). A
+    network that does not schedule them keeps the rc.8 behaviour:
+    - `storageFeeSettlement`: the storage fee of a Storage Program create,
+      write or granular write is credited to the burn address and the
+      treasury per the network fee split, as gas already is. Before, the
+      fee left the total supply. The signed edits and admission do not
+      change; only the applied copy carries the credits.
+    - `referenceBlockRoom10`: a transaction may reference a block up to 10
+      blocks behind the head (1 before the fork), so a transaction
+      confirmed at head N stays valid for inclusion until block N+11. The
+      room is read at the tip each block is forged on, so sync of older
+      blocks applies the rule they were made under. The deep window that
+      keeps an expired transaction for inclusion as failed is 50 blocks.
+  - A validator abstaining on its own fork schedule is left out of the
+    shard after the first round it misses or refuses, so it no longer
+    slows every round or halts the chain once drawn as secretary.
+  - A web2 proxy request ends at its 30 s deadline even while the origin
+    keeps sending bytes. The GitHub and RapidAPI (Twitter) lookups behind
+    web2 identity verification have the same 30 s deadline and the
+    `web2MaxResponseBytes` size cap.
+  - `docker-compose.yml` passes `SUDO_PUBKEY` to the container; set it in
+    `.env` to answer the admin RPC. INSTALL gives the minimum per validator:
+    2 dedicated vCPU and 3 GB RAM. Keep host NTP synced: the rehearsal
+    clock skew of 4.5 s left 0.5 s before the 5 s refusal.
+  - A client whose transaction a launch gate (`l2psGate`, `tlsnDisabled`)
+    refuses at RPC validation gets the gate reason instead of
+    `GCREdit mismatch`.
+  - `node-doctor` (and `--production`) fails when the identity file is
+    readable by group or other users (`600` or stricter passes).
+- From `v1.0.0-rc.10`:
+  - A validator abstains when at least half of the staked set answers with a
+    different fork schedule (before: more than half). On an even split both
+    halves stop voting and the chain halts until an operator fixes a
+    schedule. Before, a quorum mixing both halves kept running while the
+    halves applied blocks differently (`storageFeeSettlement` changes only
+    the applied copy). A node that applied blocks under a wrong schedule must
+    be resynced from a correct peer.
+  - The web2 relay closes its outbound origin connection at the request
+    deadline and when its caller leaves early, not only the caller's side.
+  - `launch-go-no-go --plan` refuses a mainnet genesis that schedules
+    `atomicWork`.
+- From `v1.0.0-rc.11`:
+  - The web2 (DAHR) proxy caps its outbound fetches. Per caller: 2 running
+    at once, 10 started per minute, 100 MiB of origin response per hour
+    (charged with the bytes read, a refused or cut response included). Per
+    node: 32 running at once. A caller is the client address of a
+    `web2ProxyRequest` (one IPv6 /64 is one address) and the sender of a
+    `web2Request` or DemosWork tx. Over a cap the caller gets result `429`
+    `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and
+    `WHITELISTED_IPS` skip the per-caller caps. Set with
+    `WEB2_MAX_INFLIGHT_PER_CALLER`, `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER`,
+    `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` and `WEB2_MAX_INFLIGHT_TOTAL`
+    (positive integers, or the node does not start); local to the node,
+    no effect on blocks or state. Behind a reverse proxy, `TRUSTED_PROXIES`
+    must name it: otherwise every client counts as the proxy, which shares
+    one cap, or, for a proxy on the same host, is loopback and skips the
+    per-caller caps (only the node-wide cap applies).
+- From `v1.0.0-rc.12`:
+  - A validator restarted in the middle of a round rejoins the committee
+    within a round on its own. The secretary releases a late phase report
+    it already released the group from, and a validator that sees the
+    secretary open a newer round at the same height leaves its attempt
+    without signing and joins that round. Before, it could wait out its
+    green light while the round timed out, and only a second restart
+    brought it back. No setting; no effect on blocks or state.
+  - Genesis balances and validator stakes are read as decimal digits only.
+    A genesis with an amount written as `""`, with spaces, a sign, a
+    `0x`/`0b` prefix, or a JSON number above 2^53 is refused at boot
+    instead of read. Every published genesis already uses decimal strings.
+  - Launch tooling: `genesis-hash --snapshot` runs the carry-over import
+    check a node runs at boot; `launch-go-no-go` refuses a test-genesis
+    treasury on the mainnet chain id; the carry-over builder takes
+    `--zero-points`, `--drop-storage` and `--empty-storage` lists.
 
 ## Known limits
 

@@ -3,6 +3,7 @@ import { getRunConfig, writeJson } from "../../framework/io"
 import { nodeCall, NO_FALLBACKS, rpcPost } from "../../framework/rpc"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { bodyBoundAuthHeaders, fetchGenesisHash, fetchNodePublicKey } from "src/libs/network/peerHttpAuth"
 import {
   getWalletAddresses,
   getTokenTargets,
@@ -18,17 +19,17 @@ type PointsProbe = {
   error: any
 }
 
-type SignedRpcHeaders = {
-  identity: string
-  signature: string
-}
-
 function readTotalPoints(value: any): number | null {
   const raw = value?.response?.points?.totalPoints
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null
 }
 
-async function maybeBuildSudoHeaders(): Promise<SignedRpcHeaders | null> {
+/**
+ * Sudo methods take only the body-bound auth form, which signs the exact
+ * request body and names the receiving node, so the headers are built for
+ * `body` posted to `rpcUrl` and nothing else. Null when no sudo key is set.
+ */
+export async function buildSudoHeaders(body: string, rpcUrl: string): Promise<Record<string, string> | null> {
   const explicitMnemonic = (process.env.SUDO_MNEMONIC ?? "").trim()
   const walletFile = (process.env.SUDO_WALLET_FILE ?? "").trim()
   let mnemonic = explicitMnemonic
@@ -40,20 +41,19 @@ async function maybeBuildSudoHeaders(): Promise<SignedRpcHeaders | null> {
 
   if (!mnemonic) return null
 
-  const rpcUrl = normalizeRpcUrl((process.env.SUDO_RPC_URL ?? process.env.TARGETS?.split(",")[0] ?? "http://node-1:53551").trim())
   const demos = new Demos()
   await demos.connect(rpcUrl)
   await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
   const identity = await demos.crypto.getIdentity("ed25519")
   const publicKeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
-  const signatureHex = uint8ArrayToHex(
-    (await demos.crypto.sign("ed25519", new TextEncoder().encode(publicKeyHex))).signature,
-  )
 
-  return {
+  return bodyBoundAuthHeaders({
+    genesisHash: await fetchGenesisHash(rpcUrl),
+    audience: await fetchNodePublicKey(rpcUrl),
     identity: `ed25519:${publicKeyHex}`,
-    signature: signatureHex,
-  }
+    body,
+    sign: async message => (await demos.crypto.sign("ed25519", message)).signature as Uint8Array,
+  })
 }
 
 async function probePoints(rpcUrl: string, address: string): Promise<PointsProbe> {
@@ -115,10 +115,12 @@ export async function runGcrPointsSmoke() {
     method: "awardPoints",
     params: [{ message: [{ address: recipientAddress, points: pointsDelta }] }],
   }
-  const sudoHeaders = await maybeBuildSudoHeaders()
+  // rpcPost sends JSON.stringify(awardRequest), the bytes signed here.
+  const sudoHeaders = await buildSudoHeaders(JSON.stringify(awardRequest), rpcBootstrap)
   const awardRes = await rpcPost(rpcBootstrap, awardRequest, sudoHeaders ? { headers: sudoHeaders } : {})
   const awardJson = awardRes.json
-  const unauthorized = awardJson?.result === 401
+  // Skipped only without a sudo key; a signed call refused is a failure.
+  const unauthorized = !sudoHeaders && awardJson?.result === 401
 
   const settled = unauthorized
     ? { ok: true, attempts: 0, probes: before }

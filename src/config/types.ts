@@ -59,6 +59,11 @@ export interface CoreConfig {
     /** Max seconds a block's timestamp may lead the verifier's clock. */
     blockTimestampTolerance: number
     logLevel: string
+    /**
+     * Directory the per-node `logs_<port>_<identity>/` folder is created in.
+     * Empty means the working directory. The image sets it to its logs volume.
+     */
+    logsDir: string
     whitelistedIPs: string[]
     whitelistedKeys: string[]
     /**
@@ -311,6 +316,14 @@ export interface OutboundConfig {
     web2SessionTtlMs: number
     /** Dev only: skip certificate checks on web2 HTTPS targets. Refused with PROD. */
     web2InsecureTls: boolean
+    /** web2 fetches one caller (client IP or tx sender) may have running at once. */
+    web2MaxInflightPerCaller: number
+    /** web2 fetches one caller may start per minute. */
+    web2MaxFetchesPerMinutePerCaller: number
+    /** web2 response bytes one caller may pull per hour. */
+    web2MaxBytesPerHourPerCaller: number
+    /** web2 fetches running at once on this node, all callers and paths together. */
+    web2MaxInflightTotal: number
     /** Target ports the TLSNotary relay may connect to. */
     tlsnotaryAllowedPorts: number[]
     /** Dev only: let the TLSNotary relay reach private and loopback addresses. */

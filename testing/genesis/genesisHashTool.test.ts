@@ -11,7 +11,19 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { generateGenesisBlock } from "src/libs/blockchain/chainGenesis"
-import { genesisValues, readGenesisFile, verifiedSnapshot } from "../../scripts/genesis-hash"
+import { SHARD_SIZE_MAX, SHARD_SIZE_MIN } from "src/libs/consensus/genesisShardSize"
+import { quorumThreshold } from "src/libs/consensus/v2/quorum"
+import {
+    connectionUrlProblem,
+    genesisNetworkFindings,
+    genesisNetworkProblems,
+    genesisValues,
+    parseArgs,
+    readGenesisFile,
+    snapshotValidators,
+    activeAtBlockZero,
+    verifiedSnapshot,
+} from "../../scripts/genesis-hash"
 
 class Stop extends Error {}
 
@@ -171,5 +183,192 @@ describe("genesis-hash tool", () => {
             expect(run.exitCode).toBe(1)
             expect(run.stdout.toString()).toContain("problem: a node would refuse the snapshot at boot")
         }, 60_000)
+    })
+
+    describe("network checks a pinned hash does not make", () => {
+        const validator = (i: number, url: unknown = `http://10.0.0.${i}:53550`) => ({
+            address: "0x" + i.toString(16).padStart(64, "0"),
+            status: "2",
+            connection_url: url,
+            staked_amount: "1000000000000",
+            first_seen: 0,
+            valid_at: 0,
+        })
+        const network = (shardSize: unknown, validators: unknown[]) => {
+            const g = launchGenesis()
+            g.properties = { ...g.properties, shardSize }
+            g.validators = validators
+            return g
+        }
+        const many = (n: number) => Array.from({ length: n }, (_, i) => validator(i + 1))
+
+        it("reports a shardSize the node refuses at boot", () => {
+            for (const bad of [SHARD_SIZE_MIN - 1, SHARD_SIZE_MAX + 1, 1, "10", undefined]) {
+                const problems = genesisNetworkProblems(network(bad, many(10)))
+                expect([bad, problems.some(p => p.includes("properties.shardSize"))]).toEqual([bad, true])
+            }
+            const ok = genesisNetworkProblems(network(SHARD_SIZE_MIN, many(SHARD_SIZE_MIN)))
+            expect(ok).toEqual([])
+            expect(genesisNetworkProblems(network(1, many(1))).join("\n")).toContain(
+                `must be within [${SHARD_SIZE_MIN}, ${SHARD_SIZE_MAX}], got 1: a node refuses this genesis at boot`,
+            )
+        })
+
+        it("reports fewer validators than the node's quorum of shardSize", () => {
+            for (const shardSize of [SHARD_SIZE_MIN, 4, 10, SHARD_SIZE_MAX]) {
+                const quorum = quorumThreshold(shardSize)
+                const short = genesisNetworkProblems(network(shardSize, many(quorum - 1)))
+                expect(short).toEqual([
+                    `${quorum - 1} validators in genesis validators, below the quorum of ${quorum} ` +
+                        `(2/3 + 1 of shardSize ${shardSize}): a node boots on this genesis but no block after block 0 can be forged`,
+                ])
+                expect(genesisNetworkProblems(network(shardSize, many(quorum)))).toEqual([])
+            }
+            // The rehearsal genesis that never forged: one validator, shardSize 10
+            expect(genesisNetworkProblems(network(10, many(1)))[0]).toStartWith("1 validators in genesis validators, below the quorum of 7")
+        })
+
+        it("counts the snapshot's validators when the snapshot carries them, as the node seeds them", () => {
+            expect(genesisNetworkProblems(network(10, many(1)), many(7))).toEqual([])
+            expect(genesisNetworkProblems(network(10, many(10)), many(6))[0]).toStartWith(
+                "6 validators in the snapshot's validators.jsonl, below the quorum of 7",
+            )
+            const dir = mkdtempSync(join(tmpdir(), "genesis-hash-rows-"))
+            expect(snapshotValidators(dir)).toBeNull()
+            writeFileSync(join(dir, "manifest.json"), JSON.stringify({ files: { "gcr_main.jsonl": { rows: 3 } } }))
+            expect(snapshotValidators(dir)).toBeNull()
+            writeFileSync(join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: 2 } } }))
+            writeFileSync(join(dir, "validators.jsonl"), many(2).map(v => JSON.stringify(v)).join("\n") + "\n")
+            expect(snapshotValidators(dir)).toEqual(many(2))
+            writeFileSync(join(dir, "validators.jsonl"), "{ not json\n")
+            expect(() => snapshotValidators(dir)).toThrow("validators.jsonl line 1 is not JSON")
+            writeFileSync(join(dir, "manifest.json"), "{ not json")
+            expect(snapshotValidators(dir)).toBeNull()
+        })
+
+        it("counts only the validators active at block 0, as the committee of block 1 is drawn", () => {
+            expect(activeAtBlockZero(validator(1))).toBe(true)
+            expect(activeAtBlockZero({ ...validator(1), valid_at: 1 })).toBe(false)
+            expect(activeAtBlockZero({ ...validator(1), valid_at: null })).toBe(false)
+            expect(activeAtBlockZero({ ...validator(1), status: "1" })).toBe(false)
+            expect(activeAtBlockZero({ ...validator(1), status: 2 })).toBe(false)
+
+            // Seven rows, one of them not yet valid and one unstaking: five vote, quorum is 7
+            const rows = many(7)
+            rows[5] = { ...rows[5], valid_at: 1 }
+            rows[6] = { ...rows[6], status: "1" }
+            for (const problems of [genesisNetworkProblems(network(10, rows)), genesisNetworkProblems(network(10, []), rows)]) {
+                expect(problems).toHaveLength(1)
+                expect(problems[0]).toContain('5 validators in')
+                expect(problems[0]).toContain('(of 7 listed; only status "2" with valid_at 0 vote from block 1), below the quorum of 7')
+            }
+        })
+
+        it("checks the URLs of the set block 0 seeds", () => {
+            // The snapshot owns the set: its URLs are checked, the genesis list is not used
+            const rows = many(7)
+            rows[2] = validator(3, "http://45.13.233.189:65550")
+            const { connection_url: _, ...noUrl } = validator(4)
+            rows[3] = noUrl
+            rows[4] = validator(5, "")
+            rows[5] = validator(6, null)
+            rows[6] = validator(7, "not a url")
+            const problems = genesisNetworkProblems(network(10, []), rows)
+            expect(problems).toEqual([
+                `validators.jsonl row 3 (${validator(3).address}) connection_url "http://45.13.233.189:65550" port 65550 is outside 1-65535`,
+                `validators.jsonl row 7 (${validator(7).address}) connection_url "not a url" is not a valid URL`,
+            ])
+        })
+
+        it("reports a validator URL no peer can dial", () => {
+            expect(connectionUrlProblem("http://45.13.233.189:65550")).toBe("port 65550 is outside 1-65535")
+            expect(connectionUrlProblem("http://node.example.com:0/")).toBe("port 0 is outside 1-65535")
+            expect(connectionUrlProblem("not a url")).toBe("is not a valid URL")
+            expect(connectionUrlProblem("ftp://node.example.com:21")).toBe("is not an http or https URL")
+            expect(connectionUrlProblem("")).toBe("must be null or a non-empty string")
+            expect(connectionUrlProblem(53550)).toBe("must be null or a non-empty string")
+            for (const ok of [null, "https://node2.demos.sh", "http://45.13.233.189:65535", "http://[::1]:53550/"]) {
+                expect([ok, connectionUrlProblem(ok)]).toEqual([ok, null])
+            }
+
+            const validators = many(7)
+            validators[2] = validator(3, "http://45.13.233.189:65550")
+            const { connection_url: _, ...noUrl } = validator(4)
+            validators[3] = noUrl as ReturnType<typeof validator>
+            const problems = genesisNetworkProblems(network(10, validators))
+            expect(problems).toEqual([
+                `validators[2] (${validator(3).address}) connection_url "http://45.13.233.189:65550" port 65550 is outside 1-65535`,
+                `validators[3] (${validator(4).address}) connection_url undefined must be null or a non-empty string`,
+            ])
+        })
+
+        it("fails the command line on them and answers --help", () => {
+            const g = network(10, many(7))
+            g.validators[0] = validator(1, "http://45.13.233.189:65550")
+            const file = writeGenesis(g)
+            const run = Bun.spawnSync(["bun", "scripts/genesis-hash.ts", "--genesis", file], {
+                stdout: "pipe",
+                stderr: "pipe",
+                env: { ...process.env, DEMOS_SNAPSHOT_DIR: "" },
+            })
+            expect(run.exitCode).toBe(1)
+            expect(run.stdout.toString()).toContain("connection_url \"http://45.13.233.189:65550\" port 65550 is outside 1-65535")
+
+            const help = Bun.spawnSync(["bun", "scripts/genesis-hash.ts", "--help"], { stdout: "pipe", stderr: "pipe" })
+            expect(help.exitCode).toBe(0)
+            expect(help.stdout.toString()).toContain("usage: bun scripts/genesis-hash.ts --genesis FILE")
+        }, 60_000)
+
+        it("--allow-unforgeable turns only the quorum finding into a warning", () => {
+            const unforgeable = network(10, many(4))
+            expect(genesisNetworkFindings(unforgeable).problems).toEqual([])
+            expect(genesisNetworkFindings(unforgeable).unforgeable[0]).toStartWith(
+                "4 validators in genesis validators, below the quorum of 7",
+            )
+            expect(parseArgs(["--genesis", "g.json", "--allow-unforgeable"], {}).allowUnforgeable).toBe(true)
+            expect(parseArgs(["--genesis", "g.json"], {}).allowUnforgeable).toBe(false)
+
+            const env = { ...process.env, DEMOS_SNAPSHOT_DIR: "" }
+            const file = writeGenesis(unforgeable)
+            const strict = Bun.spawnSync(["bun", "scripts/genesis-hash.ts", "--genesis", file, "--json"], {
+                stdout: "pipe",
+                stderr: "pipe",
+                env,
+            })
+            expect(strict.exitCode).toBe(1)
+            const allowed = Bun.spawnSync(
+                ["bun", "scripts/genesis-hash.ts", "--genesis", file, "--json", "--allow-unforgeable"],
+                { stdout: "pipe", stderr: "pipe", env },
+            )
+            expect(allowed.exitCode).toBe(0)
+            const out = JSON.parse(allowed.stdout.toString().slice(allowed.stdout.toString().indexOf("{")))
+            expect(out.problems).toEqual([])
+            expect(out.warnings).toHaveLength(1)
+            expect(out.warnings[0]).toStartWith("4 validators in genesis validators, below the quorum of 7")
+
+            // What a node refuses stays a problem under the flag
+            const refused = network(1, many(4))
+            refused.validators[0] = validator(1, "http://45.13.233.189:65550")
+            const bad = Bun.spawnSync(
+                ["bun", "scripts/genesis-hash.ts", "--genesis", writeGenesis(refused), "--allow-unforgeable"],
+                { stdout: "pipe", stderr: "pipe", env },
+            )
+            expect(bad.exitCode).toBe(1)
+            const text = bad.stdout.toString()
+            expect(text).toContain("problem: ")
+            expect(text).toContain("a node refuses this genesis at boot")
+            expect(text).toContain("port 65550 is outside 1-65535")
+        }, 60_000)
+
+        it("reads the snapshot from DEMOS_SNAPSHOT_DIR when --snapshot is not given", () => {
+            expect(parseArgs(["--genesis", "g.json"], { DEMOS_SNAPSHOT_DIR: "/app/mainnet-snapshot" }).snapshot).toBe(
+                "/app/mainnet-snapshot",
+            )
+            expect(
+                parseArgs(["--genesis", "g.json", "--snapshot", "s"], { DEMOS_SNAPSHOT_DIR: "/app/mainnet-snapshot" }).snapshot,
+            ).toBe("s")
+            expect(parseArgs(["--genesis", "g.json"], {}).snapshot).toBeNull()
+            expect(() => parseArgs(["--genesis", "g.json", "--bogus"], {})).toThrow("unknown argument --bogus")
+        })
     })
 })
