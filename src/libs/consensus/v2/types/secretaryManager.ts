@@ -32,6 +32,12 @@ export const PEERLIST_PHASE = 3
 // passing it over: long enough for a status report in flight, short against
 // the block time.
 export const HEAD_ALIGN_WAIT_MS = 2000
+/**
+ * What a member's phase report resolves to once the secretary has moved the
+ * height on to a newer round: this attempt cannot finish, the next one joins
+ * that round.
+ */
+export const SUPERSEDED_ROUND = "supersededRound"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -102,6 +108,14 @@ export default class SecretaryManager {
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
+    /**
+     * Secretary only: the highest phase this round released to the group.
+     * The group release for a phase happens once, so a member reporting such
+     * a phase later is released on its report.
+     */
+    private releasedPhase = 0
+    /** Member only: a newer round of the secretary for this height, once seen. */
+    public supersededBy: number | null = null
 
     constructor() {}
 
@@ -232,6 +246,8 @@ export default class SecretaryManager {
         this.behindMembers = new Set<string>()
         this.blockTimestamp = null
         this.mergedPeerlist = null
+        this.releasedPhase = 0
+        this.supersededBy = null
         this.registerUnderShardBlockRef()
         freezeLocalSyncObservations(this.shard.blockRef)
 
@@ -530,6 +546,7 @@ export default class SecretaryManager {
             await this.handleNodesGoneOffline(waitingMembers)
 
         const ourPhase = this.ourValidatorPhase.currentPhase
+        this.releasedPhase = Math.max(this.releasedPhase, ourPhase)
         const notAhead = (pubKey: string) =>
             (this.shard.validationPhases[pubKey]?.currentPhase ?? 0) <=
             ourPhase
@@ -800,11 +817,22 @@ export default class SecretaryManager {
             return res
         }
 
-        // INFO: Check if node is behind us
-        if (theirPhase < this.ourValidatorPhase.currentPhase) {
+        // A member behind us, or at a phase whose group release is already
+        // done (a validator that restarted, or whose report came late), gets
+        // its greenlight now: no other release for that phase is coming, and
+        // waiting would keep it out of the round until its own timeout.
+        if (
+            theirPhase < this.ourValidatorPhase.currentPhase ||
+            theirPhase <= this.releasedPhase
+        ) {
             log.debug(
-                `[SECRETARY ROUTINE] Releasing ${memberKey} as they are behind us`,
+                `[SECRETARY ROUTINE] Releasing ${memberKey} at phase ${theirPhase}: behind us or already released`,
             )
+            // The answer below can resolve the member's wait before the
+            // greenlight call does, so it must carry the peerlist itself.
+            if (theirPhase === PEERLIST_PHASE) {
+                await this.ensureMergedPeerlist()
+            }
             this.releaseWaitingMembers(
                 [memberKey],
                 theirPhase,
@@ -834,6 +862,10 @@ export default class SecretaryManager {
             if (this.ourValidatorPhase.currentPhase === PEERLIST_PHASE) {
                 await this.ensureMergedPeerlist()
             }
+            this.releasedPhase = Math.max(
+                this.releasedPhase,
+                this.ourValidatorPhase.currentPhase,
+            )
 
             // INFO: If we are in the last phase, stop the secretary routine
             if (this.ourValidatorPhase.currentPhase === 6) {
@@ -1047,6 +1079,19 @@ export default class SecretaryManager {
             return false
         }
 
+        // The secretary releases a phase below ours only from a round it
+        // started after ours: the round we are in is over.
+        if (
+            this.isNewerRound(secretaryBlockTimestamp) &&
+            validatorPhase < this.ourValidatorPhase.currentPhase
+        ) {
+            this.leaveSupersededRound(
+                secretaryBlockTimestamp,
+                `phase ${validatorPhase} greenlight`,
+            )
+            return true
+        }
+
         if (secretaryBlockTimestamp < this.blockTimestamp) {
             log.debug(
                 "Greenlight received for an older block,returning false ...",
@@ -1078,6 +1123,12 @@ export default class SecretaryManager {
         }
 
         if (this.ourValidatorPhase.currentPhase <= validatorPhase) {
+            // The attempt ended while the peerlist was checked: a key held
+            // now would outlive its cleanup and resolve the next attempt's
+            // wait without that attempt's peerlist.
+            if (this.ended) {
+                return false
+            }
             log.debug(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
             log.debug(`Is Waiting for key: ${Waiter.isWaiting(waiterKey)}`)
             log.debug(
@@ -1113,7 +1164,7 @@ export default class SecretaryManager {
      */
     private acceptSecretaryTimestamp(
         timestamp: unknown,
-        source: "greenlight" | "getBlockTimestamp",
+        source: "greenlight" | "getBlockTimestamp" | "phase report answer",
     ): boolean {
         const verdict = checkCosignTimestamp(timestamp, getNetworkTimestamp())
         if (verdict.valid) return true
@@ -1121,6 +1172,38 @@ export default class SecretaryManager {
             `[SECRETARY] Refusing the ${source} timestamp from ${this.secretary?.identity} for block ${this.shard?.blockRef}: ${verdict.reason}`,
         )
         return false
+    }
+
+    /** Whether `timestamp` is a round of the secretary started after ours. */
+    private isNewerRound(timestamp: unknown): timestamp is number {
+        return (
+            typeof timestamp === "number" &&
+            Number.isFinite(timestamp) &&
+            this.blockTimestamp !== null &&
+            this.blockTimestamp !== undefined &&
+            timestamp > this.blockTimestamp
+        )
+    }
+
+    /**
+     * Ends this attempt's wait for the secretary: it restarted the height in
+     * a newer round, and the release this wait expects belongs to a round
+     * no member is in any more. Nothing is signed on this path.
+     */
+    private leaveSupersededRound(timestamp: number, source: string): void {
+        if (this.supersededBy === null) {
+            log.warning(
+                `[SECRETARY] Secretary ${this.secretary?.identity} moved block ${this.shard.blockRef} on to round ${timestamp} (${source}) while we are in round ${this.blockTimestamp}: leaving this attempt to join it`,
+            )
+        }
+        this.supersededBy = Math.max(this.supersededBy ?? 0, timestamp)
+        const waiterKey =
+            Waiter.keys.GREEN_LIGHT +
+            this.shard.blockRef +
+            this.ourValidatorPhase.currentPhase
+        if (Waiter.isWaiting(waiterKey)) {
+            Waiter.resolve(waiterKey, SUPERSEDED_ROUND)
+        }
     }
 
     /**
@@ -1154,6 +1237,10 @@ export default class SecretaryManager {
         log.debug("Sending our validator phase to the secretary")
         log.debug(`Our phase: ${this.ourValidatorPhase.currentPhase}`)
         log.debug(`Shard block ref: ${this.shard.blockRef}`)
+
+        if (this.supersededBy !== null) {
+            return SUPERSEDED_ROUND
+        }
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT +
@@ -1311,6 +1398,18 @@ export default class SecretaryManager {
             const greenlight = Boolean(res.extra.greenlight) || false
             const timestamp = Number(res.extra.timestamp) || null
             // const blockRef = res.extra.blockRef
+
+            // Our report reached a round the secretary started after ours,
+            // which holds no place for this attempt.
+            if (
+                !greenlight &&
+                res.extra.blockRef === this.shard.blockRef &&
+                this.isNewerRound(timestamp) &&
+                this.acceptSecretaryTimestamp(timestamp, "phase report answer")
+            ) {
+                this.leaveSupersededRound(timestamp, "phase report answer")
+                return null
+            }
 
             if (greenlight) {
                 log.debug(
