@@ -38,6 +38,7 @@ import {
 } from "src/libs/blockchain/genesis/loadSnapshot"
 import Datasource from "src/model/datasource"
 import { Validators } from "src/model/entities/Validators"
+import { decimalBigInt } from "src/libs/blockchain/genesis/decimalAmount"
 import log from "src/utilities/logger"
 
 export interface GenesisValidatorSeed {
@@ -276,12 +277,10 @@ function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
     // Split the BigInt() parse from the positivity check so the
     // operator sees a distinct, actionable message for each failure
     // mode — matches `seedValidators.ts::validateSeed` exactly.
-    let stake: bigint
-    try {
-        stake = BigInt(seed.staked_amount)
-    } catch {
+    const stake = decimalBigInt(seed.staked_amount)
+    if (stake === null) {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
+            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}" (decimal digits only)`,
         )
     }
     if (stake <= 0n) {

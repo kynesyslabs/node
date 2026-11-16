@@ -538,7 +538,7 @@ export async function serverRpcBun() {
     })
 
     // ── Feature routes (lazy loaded) ──────────────────────────
-    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+    if (Config.getInstance().tlsnotary.enabled) {
         try {
             const { registerTLSNotaryRoutes } =
                 await import("@/features/tlsnotary/routes")
