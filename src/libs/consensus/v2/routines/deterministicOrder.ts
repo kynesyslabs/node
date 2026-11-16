@@ -13,6 +13,25 @@ export function orderDeterministically<T extends Transaction>(txs: T[]): T[] {
 }
 
 /**
+ * Whether the canonical order can place `tx`. The comparison throws on a
+ * sender that is not a string and on a missing hash, so a caller that sorts
+ * transactions no signature check has vetted refuses these first: a throw
+ * there stalls only the node that hit it.
+ */
+export function canonicallyOrderable(tx: {
+    hash?: unknown
+    content?: { from_ed25519_address?: unknown } | null
+}): boolean {
+    const sender = tx?.content?.from_ed25519_address
+    return (
+        typeof sender === "string" &&
+        sender.length > 0 &&
+        typeof tx.hash === "string" &&
+        tx.hash.length > 0
+    )
+}
+
+/**
  * Compare two txs by (sender ASC, nonce ASC, hash ASC). Plain string/number
  * comparison only — NO localeCompare (locale-sensitive, would diverge across
  * nodes with different locales).

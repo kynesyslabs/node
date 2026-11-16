@@ -401,6 +401,12 @@ describe("a failing settlement is included as failed with no edits", () => {
         await expectFailed(batch(proven([pay(ALICE, BOB.account, OS, 5n)], plannedOn)), "proof does not verify")
     })
 
+    it("a sender that is not an address, which the canonical order cannot place", async () => {
+        const tx = batch(proven([pay(ALICE, BOB.account, OS, 5n)], tipBalances()))
+        tx.content.from_ed25519_address = { bytes: 1 }
+        await expectFailed(tx, "no sender address")
+    })
+
     it("no settlement record (the format before the fork)", async () => {
         const tx = batch(undefined)
         delete tx.content.data[1].settlement

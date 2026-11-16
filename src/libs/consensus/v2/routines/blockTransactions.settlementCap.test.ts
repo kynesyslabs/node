@@ -68,6 +68,15 @@ describe("judgeBlockTransactions and the settlement batch cap", () => {
         expect(judged.txs.map(t => t.hash).sort()).toEqual(expected.map(t => t.hash).sort())
     })
 
+    it("leaves out a batch with no sender address instead of throwing", async () => {
+        forks(0)
+        const broken = batch(999)
+        broken.content.from_ed25519_address = 42
+        const other = batch(1)
+        const judged = await judgeBlockTransactions([broken, other], 101, CAPS as any)
+        expect(judged.txs.map(t => t.hash)).toEqual([other.hash])
+    })
+
     it("leaves the pool uncapped before the fork", async () => {
         forks(null)
         const judged = await judgeBlockTransactions(pool, 101, CAPS as any)

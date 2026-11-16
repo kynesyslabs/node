@@ -7,7 +7,7 @@ import {
 import { DEFAULT_BLOCK_CAPS, selectBlockTransactions, type BlockCaps } from "./blockCaps"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { settlementBatchesOverCap } from "@/libs/l2ps/settlement/blockCap"
-import { orderDeterministically } from "./deterministicOrder"
+import { canonicallyOrderable, orderDeterministically } from "./deterministicOrder"
 import { pqcTxsRefusedAt } from "@/libs/blockchain/validation/txSignatureRules"
 import { IdentityPrefetchError } from "@/libs/blockchain/validation/identityPrefetchError"
 import { ErrorCode } from "@/errors"
@@ -45,10 +45,24 @@ export async function judgeBlockTransactions(
     if (!l2psSettlementActive()) return judged
     // Apply fails every settlement batch past the per-block cap, so forging
     // leaves them pooled for a later block instead. A batch spends no
-    // account nonce, so leaving one out changes no other tx's verdict.
-    const over = settlementBatchesOverCap(orderDeterministically(judged.txs))
-    if (over.size === 0) return judged
-    return { ...judged, txs: judged.txs.filter(tx => !over.has(tx.hash)) }
+    // account nonce, so leaving one out changes no other tx's verdict. Only
+    // batches count toward the cap, so only they are ordered; one the order
+    // cannot place is left out rather than stalling this forger.
+    const batches = judged.txs.filter(tx => tx.content?.type === "l2psBatch")
+    const unorderable = new Set(
+        batches.filter(tx => !canonicallyOrderable(tx)).map(tx => tx.hash),
+    )
+    if (unorderable.size > 0) {
+        log.warning(`[judgeBlockTransactions] Leaving out ${unorderable.size} l2psBatch tx(s) with no sender address`)
+    }
+    const over = settlementBatchesOverCap(
+        orderDeterministically(batches.filter(tx => !unorderable.has(tx.hash))),
+    )
+    if (over.size === 0 && unorderable.size === 0) return judged
+    return {
+        ...judged,
+        txs: judged.txs.filter(tx => !over.has(tx.hash) && !unorderable.has(tx.hash)),
+    }
 }
 
 async function judgeWithinCaps(

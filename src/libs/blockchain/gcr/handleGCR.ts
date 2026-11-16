@@ -120,7 +120,10 @@ import {
     settledEdits,
     splitSettlement,
 } from "@/libs/atomic-work/feeAndNonce"
-import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
+import {
+    canonicallyOrderable,
+    orderDeterministically,
+} from "@/libs/consensus/v2/routines/deterministicOrder"
 import {
     applyAtomicStoragePut,
     type StoragePutEdit,
@@ -2341,9 +2344,16 @@ export default class HandleGCR {
             return prepared
         }
 
-        // Counted over every batch of the block, refused or not, in canonical
-        // order: the same set forge selection counts.
-        const overCap = settlementBatchesOverCap(orderDeterministically(batches))
+        // The canonical order throws on a batch with no sender address; such
+        // a batch fails here instead, and forging leaves it out of the cap too.
+        for (const tx of batches) {
+            if (!canonicallyOrderable(tx)) refuse(tx, "no sender address to order it by")
+        }
+        // Counted over every orderable batch of the block, refused or not, in
+        // canonical order: the same set forge selection counts.
+        const overCap = settlementBatchesOverCap(
+            orderDeterministically(batches.filter(canonicallyOrderable)),
+        )
         // Stale parameters would refuse correctly priced batches on this node alone.
         await ensureNetworkParametersCurrent()
         // The parameters are the same on every node, so a fee that is not an
