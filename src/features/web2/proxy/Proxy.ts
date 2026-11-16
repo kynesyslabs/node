@@ -560,11 +560,12 @@ export class Proxy {
             }
         }
 
-        // Only set Content-Type if not provided by user
-        if (
-            ["POST", "PUT", "PATCH"].includes(targetMethod) &&
-            !headers["Content-Type"]
-        ) {
+        // Only set Content-Type if not provided by user, in any letter case:
+        // a second key would replace the caller's value on the wire
+        const hasContentType = Object.keys(headers).some(
+            k => k.toLowerCase() === "content-type",
+        )
+        if (["POST", "PUT", "PATCH"].includes(targetMethod) && !hasContentType) {
             headers["Content-Type"] = "application/json"
         }
 

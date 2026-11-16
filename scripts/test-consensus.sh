@@ -22,6 +22,7 @@ SUITE_FILES=(
     src/config/loader.gossip.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/features/web2/proxy/Proxy.contentType.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
