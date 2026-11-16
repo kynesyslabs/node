@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
 import { committeeFloor, drillPreconditionError, signatureQuorum } from "./lib/haltDrill"
 import {
+    DRILL_REQUIRED_FORKS,
     DrillInputError,
     type DrillInput,
     formatReport,
@@ -103,6 +104,80 @@ describe("input parsing", () => {
         const raw = loadRaw("halt-n10s10.pass")
         delete raw.preStopHeight
         expect(() => parseDrillInput(raw)).toThrow("preStopHeight")
+    })
+})
+
+describe("the forks the pass criteria rest on", () => {
+    const FIXTURE_NAMES = [
+        "halt-n10s10.pass",
+        "halt-n10s10.settle-subquorum",
+        "halt-n10s10.survivor-crash",
+        "halt-n13s10.hold-advance",
+        "halt-n13s10.pass",
+        "halt-n13s10.recovery-fork",
+        "ride-n13s10.pass",
+        "ride-n13s10.stalled",
+    ]
+    it("are the three drill_inputs.py requires, and every fixture has them at 0", () => {
+        expect([...DRILL_REQUIRED_FORKS]).toEqual(["quorumParity", "committeeBinding", "commitLock"])
+        for (const name of FIXTURE_NAMES) {
+            expect(load(name).forks).toMatchObject({ quorumParity: 0, committeeBinding: 0, commitLock: 0 })
+        }
+    })
+    for (const fork of DRILL_REQUIRED_FORKS) {
+        it(`refuses, naming it, a fork set with ${fork} off, at another height or missing`, () => {
+            for (const [value, got] of [[null, "null"], [5, "5"], [undefined, "no entry"]] as const) {
+                const raw = loadRaw("halt-n10s10.pass")
+                if (value === undefined) delete raw.forks[fork]
+                else raw.forks[fork] = value
+                expect(() => parseDrillInput(raw)).toThrow(DrillInputError)
+                expect(() => parseDrillInput(raw)).toThrow(
+                    `forks.${fork}: the drill needs ${fork} active at block 0, got ${got}`,
+                )
+            }
+        })
+    }
+    it("names every one that is not active at 0", () => {
+        const raw = loadRaw("ride-n13s10.pass")
+        raw.forks = { quorumParity: 0, committeeBinding: null }
+        let error: DrillInputError | undefined
+        try {
+            parseDrillInput(raw)
+        } catch (e) {
+            error = e as DrillInputError
+        }
+        expect(error?.problems).toEqual([
+            "forks.committeeBinding: the drill needs committeeBinding active at block 0, got null",
+            "forks.commitLock: the drill needs commitLock active at block 0, got no entry",
+        ])
+    })
+    it("gives no verdict on such a run, pass fixture or not: exit 2 (run.sh's ERROR), the fork named on stderr", () => {
+        const dir = mkdtempSync(join(tmpdir(), "judge-forks-"))
+        const out = join(dir, "verdict.json")
+        const quiet = process.stdout.write
+        const quietErr = process.stderr.write
+        let err = ""
+        process.stdout.write = (() => true) as typeof process.stdout.write
+        process.stderr.write = ((s: string) => {
+            err += s
+            return true
+        }) as typeof process.stderr.write
+        try {
+            for (const name of ["halt-n10s10.pass", "ride-n13s10.pass", "halt-n10s10.settle-subquorum"]) {
+                const raw = loadRaw(name)
+                raw.forks.commitLock = null
+                const file = join(dir, `${name}.json`)
+                writeFileSync(file, JSON.stringify(raw))
+                err = ""
+                expect(main([file, "--out", out])).toBe(2)
+                expect(err).toContain("forks.commitLock: the drill needs commitLock active at block 0, got null")
+            }
+            expect(existsSync(out)).toBe(false)
+        } finally {
+            process.stdout.write = quiet
+            process.stderr.write = quietErr
+            rmSync(dir, { recursive: true, force: true })
+        }
     })
 })
 

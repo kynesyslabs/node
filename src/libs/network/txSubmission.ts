@@ -1,4 +1,5 @@
 import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
+import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
 import { isWithinDeepWindow } from "src/libs/blockchain/referenceBlockWindow"
 import GossipManager from "src/libs/gossip/GossipManager"
@@ -19,8 +20,8 @@ export interface TxSubmissionResult {
 export const UNPUBLISHED_MAX = 1000
 
 // Envelopes the mesh has not taken yet, by tx hash. Retried from the
-// gossip heights tick until published or until the reference window
-// closes on them.
+// gossip heights tick until published, until they leave our mempool, or
+// until the reference window closes on them.
 const unpublished = new Map<string, ValidityData>()
 
 export function unpublishedCount(): number {
@@ -59,10 +60,38 @@ function holdForRetry(validityData: ValidityData): void {
 }
 
 /**
+ * False once a held tx has left our mempool: a block included it, or the
+ * pool removed it (age, eviction, failed execution). A failed lookup
+ * keeps it: re-offering an included tx is harmless, receivers dedup it.
+ */
+async function stillPending(hash: string): Promise<boolean> {
+    try {
+        if (await Mempool.checkTransactionByHash(hash)) return true
+        if (await Chain.checkTxExists(hash)) {
+            log.debug(`[TX SUBMIT] ${hash} is on chain; no longer held`)
+        } else {
+            log.warning(
+                `[TX SUBMIT] ${hash} left our mempool without reaching the chain (expired, evicted or failed); no longer held`,
+            )
+        }
+        return false
+    } catch (e) {
+        log.debug(
+            `[TX SUBMIT] lookup of held ${hash} failed; offering it anyway: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return true
+    }
+}
+
+/**
  * Re-offers held envelopes to the mesh. Called from the gossip heights
  * tick, so a sidecar that was down at submit time gets the tx as soon as
  * it is back. Entries whose reference block left the deep window are
- * dropped: no committee would admit them any more.
+ * dropped: no committee would admit them any more. So are entries no
+ * longer in our mempool: a block included them (we may be the only
+ * staked node) or the pool removed them.
  */
 export async function retryUnpublishedTxs(): Promise<void> {
     if (unpublished.size === 0) return
@@ -73,6 +102,10 @@ export async function retryUnpublishedTxs(): Promise<void> {
             log.warning(
                 `[TX SUBMIT] ${hash} expired before the mesh took it (reference block ${validityData.data.reference_block}, head ${head})`,
             )
+            continue
+        }
+        if (!(await stillPending(hash))) {
+            unpublished.delete(hash)
             continue
         }
         if (await tryPublish(validityData)) {
@@ -89,10 +122,10 @@ export async function retryUnpublishedTxs(): Promise<void> {
  *
  * The publish has no ack; receivers dedup on the tx hash and the per-block
  * mempool merge repairs anything the mesh dropped between committee
- * members. A publish that cannot happen now (sidecar down, not staked yet)
- * is held and retried, since a tx known only to a node outside the
- * committee reaches no block otherwise. The returned block number is an
- * estimate.
+ * members. A publish that cannot happen now (sidecar down, not staked yet,
+ * no peer on the tx topic) is held and retried, since a tx known only to a
+ * node outside the committee reaches no block otherwise. The returned block
+ * number is an estimate.
  */
 export async function submitValidatedTx(
     validityData: ValidityData,
