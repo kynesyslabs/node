@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 
 import { demToOs } from "@kynesyslabs/demosdk/utils"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import { parseNodeUrl } from "../src/config/nodeUrl"
 
 const DEFAULT_AMOUNT_DEM = "1_000"
 const PEERLIST_FILE = "demos_peerlist.json"
@@ -86,12 +87,21 @@ function firstPeerlistRpc(): string {
             typeof value === "object" && value !== null && "url" in value
                 ? value.url
                 : value
-        if (typeof url === "string" && url.trim() !== "") {
-            return url
+        if (typeof url !== "string" || url.trim() === "") {
+            console.error(
+                `${PEERLIST_FILE} entry ${JSON.stringify(key)} is not a peer URL or an object with a url, skipping`,
+            )
+            continue
         }
-        console.error(
-            `${PEERLIST_FILE} entry ${JSON.stringify(key)} is not a peer URL or an object with a url, skipping`,
-        )
+        // An unedited copy of the example holds a placeholder such as
+        // https://<host>:53550; naming it here beats a connect failure later.
+        if (!parseNodeUrl(url)) {
+            console.error(
+                `${PEERLIST_FILE} entry ${JSON.stringify(key)} has no usable URL (${JSON.stringify(url)}). Set a real validator URL, skipping`,
+            )
+            continue
+        }
+        return url
     }
     exitWith(`${PEERLIST_FILE} has no usable entries. Pass --rpc <url>.`)
 }

@@ -32,7 +32,7 @@ import {
     type ForkConfigLike,
 } from "./forkScheduleAgreement"
 import { requestScheduleCheck } from "./forkScheduleWatch"
-import { Config } from "src/config"
+import { Config, parseNodeUrl } from "src/config"
 import { replaceFileAtomically } from "./replaceFileAtomically"
 import {
     AnchorRefusal,
@@ -439,6 +439,23 @@ function startDeferredAnchorChecks(
     return checks
 }
 
+/**
+ * Why a peer list URL must be skipped. The list is keyed by public key, so a
+ * copied template or a stale file can name us under another key. The exact
+ * bound host, or a numeric loopback URL when the bind is a wildcard
+ * (`0.0.0.0`/`::`), on our RPC port, is skipped here. Other spellings,
+ * including localhost and the public URL, are dialed; a signed self reply
+ * refuses boot.
+ */
+async function skipPeerUrlReason(connection: string): Promise<string | null> {
+    const url = parseNodeUrl(connection)
+    if (!url) return null
+    if (await PeerManager.urlIsOurAddress(url)) {
+        return "is this node's own address"
+    }
+    return null
+}
+
 // ANCHOR Main function
 export default async function peerBootstrap(
     localList: Peer[],
@@ -470,11 +487,27 @@ export default async function peerBootstrap(
     ourGenesisDataHash = hashGenesisData(genesisData)
     ourGenesisCoreHash = hashGenesisCore(genesisData)
 
-    const anchors = localList
-        .filter(peer => peer.identity !== getSharedState.publicKeyHex)
-        .map(peer => new Peer(peer.connection.string, peer.identity))
+    const anchors: Peer[] = []
+    for (const peer of localList) {
+        if (peer.identity.toLowerCase() === getSharedState.publicKeyHex.toLowerCase()) continue
+        const reason = await skipPeerUrlReason(peer.connection.string)
+        if (reason) {
+            log.warning(
+                `[BOOTSTRAP] Skipping peer ${peer.identity}: its URL ${peer.connection.string} ${reason}`,
+            )
+        } else {
+            anchors.push(new Peer(peer.connection.string, peer.identity))
+        }
+    }
     for (const peer of anchors) {
         log.debug("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
+    }
+    if (anchors.length === 0) {
+        const message =
+            `[BOOTSTRAP] No usable peers in ${getSharedState.peerListFile}: this node has nobody to pair with. ` +
+            "Add the public key and URL of a known validator and restart to join a network."
+        if (localList.length === 0) log.info(message)
+        else log.warning(message)
     }
 
     const { paired, unreachable } = await pairAnchorsAtBoot(
