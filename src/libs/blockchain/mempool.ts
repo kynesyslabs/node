@@ -672,7 +672,7 @@ export default class Mempool {
         }
         // The producer pools its batch on the verdict the merge gives it on
         // every peer: one only its producer holds keeps blocks from agreeing.
-        if (transaction.content?.type === "l2psBatch" && l2psSettlementActive()) {
+        if ((transaction.content?.type as string) === "l2psBatch" && l2psSettlementActive()) {
             let refusal: string | null
             try {
                 refusal = await settlementBatchRefusal(transaction)
