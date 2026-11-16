@@ -117,6 +117,18 @@ describe("RPC validation", () => {
         const out = await handleValidateTransaction(await numericGas(), sender)
 
         expect(out.data.valid).toBe(false)
+        expect(out.data.message).toContain("GCREdit mismatch")
+        expect(out.data.message).toContain("gcr_edits do not match regenerated set")
+    })
+
+    it("keeps the generic mismatch for a changed edit while editBinding is dormant", async () => {
+        chainIs(true, null)
+        const tx = onTheWire(await DemosTransactions.pay(PEER, 3n * OS, demos))
+        edits(tx).find(e => e.type === "nonce")!.amount = 2
+
+        const out = await handleValidateTransaction(tx, sender)
+
+        expect(out.data.valid).toBe(false)
         expect(out.data.message).toBe("GCREdit mismatch")
     })
 

@@ -1,9 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const SCRIPT = join(import.meta.dir, "validator.ts")
+
+it("runs the validator CLI and dormant-mode checks in consensus CI", () => {
+    const suite = readFileSync(join(import.meta.dir, "test-consensus.sh"), "utf8")
+    expect(suite).toContain("scripts/validator.test.ts")
+    expect(suite).toContain("docs/runbooks/dormant-mode.test.ts")
+})
 
 describe("validator.ts peer list handling", () => {
     let dir: string
@@ -75,6 +81,22 @@ describe("validator.ts peer list handling", () => {
         expect(r.out).toContain('demos_peerlist.json entry "bad1" is not a peer URL')
         expect(r.out).toContain('demos_peerlist.json entry "bad2" is not a peer URL')
         expect(r.out).not.toContain("bad3")
+        expect(r.out).not.toContain("has no usable entries")
+        expect(r.out).toContain("unknown command: bogus")
+    })
+
+    it("names the example's placeholder URL instead of trying to reach it", () => {
+        const r = run(JSON.stringify({ "0xexample": "https://<host>:53550" }))
+        expect(r.code).toBe(1)
+        expect(r.out).toContain(
+            'demos_peerlist.json entry "0xexample" has no usable URL ("https://<host>:53550"). Set a real validator URL, skipping',
+        )
+        expect(r.out).toContain("demos_peerlist.json has no usable entries. Pass --rpc <url>.")
+    })
+
+    it("skips a placeholder URL and goes on to the next usable entry", () => {
+        const r = run('{"0xexample":{"url":"https://<host>:53550"},"good":"http://a"}')
+        expect(r.out).toContain('entry "0xexample" has no usable URL')
         expect(r.out).not.toContain("has no usable entries")
         expect(r.out).toContain("unknown command: bogus")
     })

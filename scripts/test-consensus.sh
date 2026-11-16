@@ -17,7 +17,9 @@ SUITE_FILES=(
     scripts/launch-go-no-go.prover.test.ts
     scripts/launch-height1-check.test.ts
     scripts/node-doctor.test.ts
+    scripts/validator.test.ts
     scripts/validator-prove-signing.test.ts
+    docs/runbooks/dormant-mode.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
     src/config/loader.logsDir.test.ts
@@ -77,19 +79,23 @@ SUITE_FILES=(
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
     src/libs/network/broadcastReferenceWindow.test.ts
+    src/libs/network/endpointValidation.admissionReason.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
     src/libs/network/helloGenesisGate.test.ts
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
+    src/libs/network/outboundEntryGate.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/network/rateLimiter.loopback.test.ts
+    src/libs/network/rpcGossipSize.test.ts
     src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.head.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.status.test.ts
+    src/libs/network/rpcEditBinding.test.ts
     src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
@@ -125,6 +131,7 @@ SUITE_FILES=(
     testing/genesis/normalizeGenesisForHash.test.ts
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
+    src/libs/abstraction/web2/githubToken.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
     src/features/incentive/pointsApplyPure.test.ts
     src/libs/blockchain/gcr/applyTime.test.ts
