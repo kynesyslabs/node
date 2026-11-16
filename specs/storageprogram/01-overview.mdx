@@ -21,7 +21,7 @@ StorageProgram is a general-purpose storage system that allows:
 | Feature | Description |
 |---------|-------------|
 | **Dual Encoding** | Support for JSON objects and binary (base64) data |
-| **Robust ACL** | Owner-only, public, or restricted with allowed/blacklisted addresses and groups |
+| **Robust ACL** | Owner-only, public, or restricted with allowed/blacklisted addresses and groups. Controls writes and node API reads; data is stored unencrypted ([Access Control](./04-acl.mdx#what-the-acl-protects)) |
 | **Max 1MB** | Data size limit of 1MB per storage program |
 | **Simple Pricing** | 1 DEM per 10KB chunk |
 | **Soft Delete** | Programs can be deleted but records are preserved for auditability |
