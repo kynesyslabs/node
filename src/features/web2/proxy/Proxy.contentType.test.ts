@@ -4,32 +4,26 @@
  * adding it next to a caller's `content-type` replaced the caller's value.
  */
 
-import { afterEach, describe, expect, it, jest, mock } from "bun:test"
+import { afterEach, describe, expect, it, mock } from "bun:test"
 import http from "node:http"
 import type { AddressInfo } from "node:net"
+import { mockLogger } from "src/utilities/testSupport/coreMocks"
 
-const quietLog = {
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    warning: jest.fn(),
-    error: jest.fn(),
-    only: jest.fn(),
-}
-mock.module("@/utilities/logger", () => ({ __esModule: true, default: quietLog }))
-mock.module("src/utilities/logger", () => ({ __esModule: true, default: quietLog }))
-mock.module("@/utilities/sharedState", () => ({
-    __esModule: true,
-    default: { getInstance: () => ({ PROD: false }) },
-}))
 // The origin under test listens on loopback, which the relay refuses by design.
 const allowLoopback = () => ({
     __esModule: true,
     isPublicAddress: () => true,
     publicOnlyLookup: undefined,
 })
-mock.module("src/utilities/outboundAddress", allowLoopback)
-mock.module("@/utilities/outboundAddress", allowLoopback)
+// The relay's modules import these by both specifiers.
+for (const root of ["@/utilities", "src/utilities"]) {
+    mockLogger(`${root}/logger`)
+    mock.module(`${root}/outboundAddress`, allowLoopback)
+}
+mock.module("@/utilities/sharedState", () => ({
+    __esModule: true,
+    default: { getInstance: () => ({ PROD: false }) },
+}))
 
 const { Proxy } = await import("./Proxy")
 
