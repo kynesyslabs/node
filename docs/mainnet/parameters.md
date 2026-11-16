@@ -113,8 +113,10 @@ and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 The sheet uses the current built-in values. These are product decisions
 rather than technical constraints:
 
-- Fees of 1 DEM per component, 3 DEM per transaction (the code still carries
-  a note that the three should later add up to 1 DEM).
+- Fees of 1 DEM per component (the code still carries a note that the three
+  should later add up to 1 DEM). A native send pays `NETWORK_FEE` +
+  `RPC_FEE` = 2 DEM; `BURN_FEE` is not charged on top, the burn share comes
+  out of the network fee (INSTALL.md, "Fees charged per native send").
 - The 1000 DEM validator stake floor.
 - 10 points per ZK attestation.
 - The 10 s block time and the 1 s / 60 s timestamp bounds (the time policy
