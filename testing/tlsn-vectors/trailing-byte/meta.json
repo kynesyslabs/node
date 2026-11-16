@@ -2,6 +2,10 @@
   "description": "valid-local plus one trailing zero byte (strict decode must refuse)",
   "root": "test-ca.der",
   "verifier": "refused",
+  "refusal": {
+    "class": "decode",
+    "contains": "bytes remaining"
+  },
   "nodePolicy": "refuse",
   "expect": {
     "server": "api.demos-spike.test",

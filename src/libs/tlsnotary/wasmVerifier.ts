@@ -8,8 +8,12 @@
  * - every call runs in a fresh instance, so the verdict cannot depend on the
  *   heap state earlier calls left behind (a near-limit allocation could
  *   otherwise pass on one node and fail on another);
- * - a trap (panic, or an allocation past the 64 MiB cap a crafted
- *   presentation can force during decode) is a refusal, never a throw;
+ * - a wasm trap (panic, or an allocation past the 64 MiB cap a crafted
+ *   presentation can force during decode) is a refusal, never a throw; a
+ *   failure that depends on the host (instance or stack exhaustion) throws,
+ *   because it is no verdict at all;
+ * - the root store is the compiled-in one; a test root needs the separate,
+ *   explicitly named verifyWithTestRoot;
  * - a refusal carries no reason: error texts are not stable between runs, so
  *   they reach only the optional log hook, never the result.
  */
@@ -68,11 +72,6 @@ export type TlsnVerifyResult =
     | { ok: false }
 
 export interface TlsnVerifyOptions {
-    /**
-     * Replaces the compiled-in webpki-roots set with exactly this DER root.
-     * Local test vectors only; consensus code must not pass it.
-     */
-    pinnedRootDer?: Uint8Array
     /** Receives the refusal reason for logs. Never a consensus value. */
     onRefusal?: (reason: string) => void
 }
@@ -88,6 +87,18 @@ export class TlsnVerifierLoadError extends Error {
     constructor(message: string) {
         super(message)
         this.name = "TlsnVerifierLoadError"
+    }
+}
+
+/**
+ * The verifier could not run on this node (instance or stack exhaustion, an
+ * engine error), so there is no verdict. Not a refusal: other nodes may well
+ * verify the same bytes, so the caller must not vote on them.
+ */
+export class TlsnVerifierUnavailableError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "TlsnVerifierUnavailableError"
     }
 }
 
@@ -130,6 +141,17 @@ function readOut(e: VerifierExports): string | null {
     }
 }
 
+/** The `error` field of a refusal JSON, for logs. */
+function refusalText(raw: string | null): string {
+    if (raw === null) return "unreadable"
+    try {
+        const v = JSON.parse(raw) as { error?: unknown }
+        return typeof v.error === "string" ? v.error : raw
+    } catch {
+        return raw
+    }
+}
+
 function isVerifiedShape(v: unknown): v is TlsnVerifiedPresentation {
     if (!v || typeof v !== "object") return false
     const o = v as Record<string, unknown>
@@ -169,7 +191,12 @@ export class TlsnWasmVerifier {
                 `TLSN verifier wasm sha256 ${actual} does not match the pinned ${expected}`,
             )
         }
-        const module = new WebAssembly.Module(new Uint8Array(bytes))
+        let module: WebAssembly.Module
+        try {
+            module = new WebAssembly.Module(new Uint8Array(bytes))
+        } catch (err) {
+            throw new TlsnVerifierLoadError(`TLSN verifier wasm does not compile: ${(err as Error).message}`)
+        }
         // The pinned hash already fixes these; checking them keeps a wrong
         // pin (or a test override) from running a module with host access.
         const imports = WebAssembly.Module.imports(module)
@@ -186,15 +213,23 @@ export class TlsnWasmVerifier {
             )
         }
         const verifier = new TlsnWasmVerifier(module)
-        const e = verifier.instantiate()
-        if (e.tv_abi_version() !== TLSN_VERIFY_ABI_VERSION) {
+        let abi: number
+        let cap: number
+        try {
+            const e = verifier.instantiate()
+            abi = e.tv_abi_version()
+            cap = e.tv_max_input()
+        } catch (err) {
+            throw new TlsnVerifierLoadError(`TLSN verifier wasm does not start: ${(err as Error).message}`)
+        }
+        if (abi !== TLSN_VERIFY_ABI_VERSION) {
             throw new TlsnVerifierLoadError(
-                `TLSN verifier ABI ${e.tv_abi_version()}, expected ${TLSN_VERIFY_ABI_VERSION}`,
+                `TLSN verifier ABI ${abi}, expected ${TLSN_VERIFY_ABI_VERSION}`,
             )
         }
-        if (e.tv_max_input() !== TLSN_MAX_PRESENTATION_BYTES) {
+        if (cap !== TLSN_MAX_PRESENTATION_BYTES) {
             throw new TlsnVerifierLoadError(
-                `TLSN verifier input cap ${e.tv_max_input()}, expected ${TLSN_MAX_PRESENTATION_BYTES}`,
+                `TLSN verifier input cap ${cap}, expected ${TLSN_MAX_PRESENTATION_BYTES}`,
             )
         }
         return verifier
@@ -204,8 +239,40 @@ export class TlsnWasmVerifier {
         return new WebAssembly.Instance(this.module, {}).exports as unknown as VerifierExports
     }
 
-    /** Never throws. Any failure, including a trap, is `{ ok: false }`. */
+    /**
+     * Verifies serialized presentation bytes against the compiled-in root
+     * store. Every refusal, including a wasm trap, is `{ ok: false }`.
+     * Throws only TlsnVerifierUnavailableError, when this node could not run
+     * the verifier at all and so has no verdict.
+     */
     verifyPresentation(bytes: Uint8Array, opts: TlsnVerifyOptions = {}): TlsnVerifyResult {
+        return this.run(bytes, undefined, opts)
+    }
+
+    /**
+     * Same, with the root store replaced by exactly one DER root. For the
+     * local test vectors, whose server uses a test CA; consensus code must
+     * use verifyPresentation.
+     */
+    verifyWithTestRoot(
+        bytes: Uint8Array,
+        rootDer: Uint8Array,
+        opts: TlsnVerifyOptions = {},
+    ): TlsnVerifyResult {
+        if (!(rootDer instanceof Uint8Array) || rootDer.length === 0) {
+            throw new TypeError("verifyWithTestRoot needs a DER root")
+        }
+        if (rootDer.length > MAX_PINNED_ROOT_BYTES) {
+            throw new TypeError("verifyWithTestRoot: root too large")
+        }
+        return this.run(bytes, rootDer, opts)
+    }
+
+    private run(
+        bytes: Uint8Array,
+        root: Uint8Array | undefined,
+        opts: TlsnVerifyOptions,
+    ): TlsnVerifyResult {
         const refuse = (reason: string): { ok: false } => {
             if (opts.onRefusal) {
                 try {
@@ -222,19 +289,12 @@ export class TlsnWasmVerifier {
         if (bytes.length > TLSN_MAX_PRESENTATION_BYTES) {
             return refuse(`input: too_large ${bytes.length} bytes`)
         }
-        const root = opts.pinnedRootDer
-        if (root !== undefined) {
-            if (!(root instanceof Uint8Array) || root.length === 0) {
-                return refuse("input: bad pinned root")
-            }
-            if (root.length > MAX_PINNED_ROOT_BYTES) return refuse("input: pinned root too large")
-        }
 
         let e: VerifierExports
         try {
             e = this.instantiate()
         } catch (err) {
-            return refuse(`instantiate: ${(err as Error).message}`)
+            throw new TlsnVerifierUnavailableError(`instantiate: ${(err as Error).message}`)
         }
 
         let verified: number
@@ -249,15 +309,21 @@ export class TlsnWasmVerifier {
                 new Uint8Array(e.memory.buffer, rPtr, rLen).set(root)
             }
             verified = e.tv_verify(pPtr, bytes.length, rPtr, rLen)
-        } catch {
+        } catch (err) {
+            // Only a wasm trap (panic=abort, or an allocation past the memory
+            // cap) follows from the input alone. Anything else, such as a
+            // RangeError from stack exhaustion, depends on this host.
+            if (!(err instanceof WebAssembly.RuntimeError)) {
+                throw new TlsnVerifierUnavailableError(`verify: ${(err as Error)?.message ?? String(err)}`)
+            }
             // The instance is dropped here; the next call gets a new one.
-            const text = readOut(e)
-            return refuse(text ? `trap: ${text}` : "trap")
+            const text = refusalText(readOut(e))
+            return refuse(text.startsWith("trap") ? text : `trap: ${text}`)
         }
 
         const raw = readOut(e)
         if (raw === null) return refuse("output: unreadable")
-        if (verified !== 1) return refuse(raw)
+        if (verified !== 1) return refuse(refusalText(raw))
         let parsed: unknown
         try {
             parsed = JSON.parse(raw)
@@ -282,8 +348,10 @@ export function loadTlsnVerifier(): TlsnWasmVerifier {
 
 /**
  * Verifies serialized presentation bytes (bincode, the `data` field of a
- * tlsn-js presentation) with the pinned verifier. Refusals are `{ ok: false }`;
- * only a verifier that cannot be loaded throws (TlsnVerifierLoadError).
+ * tlsn-js presentation) with the pinned verifier and the compiled-in root
+ * store. Refusals are `{ ok: false }`. Throws TlsnVerifierLoadError when the
+ * pinned verifier cannot be loaded and TlsnVerifierUnavailableError when it
+ * cannot run on this node: in both cases the node has no verdict.
  */
 export function verifyPresentation(
     bytes: Uint8Array,

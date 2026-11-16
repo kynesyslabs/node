@@ -2,6 +2,10 @@
   "description": "valid-local with one byte of the revealed X-Demos-Bind sender changed (1 -> 9)",
   "root": "test-ca.der",
   "verifier": "refused",
+  "refusal": {
+    "class": "verify",
+    "contains": "transcript error"
+  },
   "nodePolicy": "refuse",
   "expect": {
     "server": "api.demos-spike.test",

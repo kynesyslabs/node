@@ -2,6 +2,10 @@
   "description": "wrong-notary-key with the embedded verifying key replaced by the trusted key A (signature is still B's)",
   "root": "test-ca.der",
   "verifier": "refused",
+  "refusal": {
+    "class": "verify",
+    "contains": "attestation error"
+  },
   "nodePolicy": "refuse",
   "expect": {
     "server": "api.demos-spike.test",

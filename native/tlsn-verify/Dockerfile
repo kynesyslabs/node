@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 #
 # Reproducible build of the TLSNotary verifier wasm. Run through build.sh.
 # Everything that can change the output is pinned: the base image by digest,
@@ -10,9 +10,12 @@
 # toolchain. Bump the tag and digest together.
 FROM --platform=linux/amd64 rust:1.87.0-bookworm@sha256:251cec8da4689d180f124ef00024c2f83f79d9bf984e43c180a598119e326b84 AS toolchain
 
-# ring compiles C for wasm32. An exact version: if Debian ever drops it the
-# build fails instead of silently producing a different wasm.
-RUN apt-get update \
+# ring compiles C for wasm32. The packages come from a dated Debian snapshot
+# at an exact version, so the same clang stays installable after the live
+# mirror moves on.
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
+ && echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20251101T000000Z bookworm main" > /etc/apt/sources.list \
+ && apt-get -o Acquire::Retries=5 update \
  && apt-get install -y --no-install-recommends clang-14=1:14.0.6-12 llvm-14=1:14.0.6-12 \
  && rm -rf /var/lib/apt/lists/*
 RUN rustup target add wasm32-unknown-unknown

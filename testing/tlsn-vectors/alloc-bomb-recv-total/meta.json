@@ -2,6 +2,10 @@
   "description": "valid-local with CompressedPartialTranscript.recv_total (offset 2036) set to 1e9: tlsn-core allocates 1 GB during decode. Uncapped wasm: ~954 MiB then refusal; with --max-memory=64MiB: deterministic trap.",
   "root": "test-ca.der",
   "verifier": "refused",
+  "refusal": {
+    "class": "trap",
+    "contains": "allocation failure"
+  },
   "nodePolicy": "refuse",
   "expect": {
     "server": "api.demos-spike.test",

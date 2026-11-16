@@ -2,6 +2,9 @@
   "description": "valid-local minus its last byte",
   "root": "test-ca.der",
   "verifier": "refused",
+  "refusal": {
+    "class": "decode"
+  },
   "nodePolicy": "refuse",
   "expect": {
     "server": "api.demos-spike.test",

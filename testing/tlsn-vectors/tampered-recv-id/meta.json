@@ -2,6 +2,10 @@
   "description": "valid-local with the revealed response \"id\":4242 changed to 4243",
   "root": "test-ca.der",
   "verifier": "refused",
+  "refusal": {
+    "class": "verify",
+    "contains": "transcript error"
+  },
   "nodePolicy": "refuse",
   "expect": {
     "server": "api.demos-spike.test",

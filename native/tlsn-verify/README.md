@@ -36,11 +36,17 @@ transcriptLength{sent,received}, sent, sentAuthed, recv, recvAuthed, extensions
 
 On refusal the output is `{"ok":false,"error":...}`. The error text is for logs only: some tlsn messages depend on HashMap order (F4). The TS loader returns `{ ok: false }` with no reason and passes the text only to an optional log hook.
 
-The pinned-root argument exists for local test vectors, whose server uses a test CA. Consensus code must not pass it.
+The loader separates a refusal from "no verdict":
+
+- a wasm trap is a refusal, because it follows from the input alone;
+- a host failure, such as instance or stack exhaustion, throws `TlsnVerifierUnavailableError`, because another node may verify the same bytes;
+- a wasm that does not match the pin throws `TlsnVerifierLoadError`.
+
+The pinned-root argument exists for local test vectors, whose server uses a test CA. In TS it is reachable only through `verifyWithTestRoot`; consensus code uses `verifyPresentation`.
 
 ## Build
 
-Docker only; no Rust toolchain on the host. The image is pinned by digest (`rust:1.87.0-bookworm`, the tlsn alpha.12 CI toolchain), clang/llvm 14 by exact Debian version, crates by `Cargo.lock` (`--locked`) and tlsn by git rev. Sources sit at fixed paths in the image, and the paths are remapped (`.cargo/config.toml`), so the host checkout path does not reach the artifact.
+Docker only; no Rust toolchain on the host. The image and the Dockerfile syntax are pinned by digest (`rust:1.87.0-bookworm`, the tlsn alpha.12 CI toolchain), clang/llvm 14 by exact version from a dated `snapshot.debian.org` source, crates by `Cargo.lock` (`--locked`) and tlsn by git rev. Sources sit at fixed paths in the image, and the paths are remapped (`.cargo/config.toml`), so the host checkout path does not reach the artifact.
 
 ```
 ./build.sh          # writes dist/demos_tlsn_verify.wasm and dist/demos_tlsn_verify.wasm.sha256
@@ -59,12 +65,13 @@ After a rebuild, update `TLSN_VERIFY_WASM_SHA256` in `src/libs/tlsnotary/wasmVer
 - `presentation.bin`: the bincode bytes, the same as tlsn-js `presentation.data`;
 - `meta.json`:
   - `verifier`: `ok` or `refused`;
+  - `refusal` (refused vectors only): the reason class (`decode`, `verify` or `trap`) and a stable phase substring;
   - `root`: the pinned test root, or `null` for webpki-roots;
   - `nodePolicy`: the verdict the design's node policy gives. It is for W4 and is not checked here;
   - `expect`: the server, path and bind header the policy expects;
 - `output.json` (accepted vectors only): the exact bytes the wasm emits.
 
-`src/libs/tlsnotary/wasmVerifier.test.ts` requires every accepted vector to be byte-identical and every refused one to be `{ ok: false }`. The vectors come from the W1a spike. All keys, the CA and the bind values are test-only, and Authorization values are absent: they are redacted, so the presentations do not carry them.
+`src/libs/tlsnotary/wasmVerifier.test.ts` requires every accepted vector to be byte-identical, and every refused one to be `{ ok: false }` for its stated reason. The vectors come from the W1a spike. All keys, the CA and the bind values are test-only, and Authorization values are absent: they are redacted, so the presentations do not carry them.
 
 ## Bumping tlsn or the root store
 

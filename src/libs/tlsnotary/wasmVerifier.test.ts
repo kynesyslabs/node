@@ -9,7 +9,9 @@ import {
     TLSN_VERIFY_WASM_PATH,
     TLSN_VERIFY_WASM_SHA256,
     TlsnVerifierLoadError,
+    TlsnVerifierUnavailableError,
     TlsnWasmVerifier,
+    type TlsnVerifyOptions,
     verifyPresentation,
 } from "./wasmVerifier"
 
@@ -21,6 +23,8 @@ interface VectorMeta {
     root: string | null
     verifier: "ok" | "refused"
     nodePolicy: "accept" | "refuse"
+    /** Refusal class (the fixed prefix of the log reason) and a stable phase. */
+    refusal?: { class: "decode" | "verify" | "trap"; contains?: string }
     sameOutputAs?: string
 }
 
@@ -54,8 +58,10 @@ const vectors = loadVectors()
 const byName = (n: string) => vectors.find(v => v.name === n)!
 const verifier = TlsnWasmVerifier.load()
 
-function run(v: Vector, inst: TlsnWasmVerifier = verifier) {
-    return inst.verifyPresentation(v.bytes, { pinnedRootDer: v.root })
+function run(v: Vector, inst: TlsnWasmVerifier = verifier, opts: TlsnVerifyOptions = {}) {
+    return v.root
+        ? inst.verifyWithTestRoot(v.bytes, v.root, opts)
+        : inst.verifyPresentation(v.bytes, opts)
 }
 
 describe("pinned wasm", () => {
@@ -93,7 +99,8 @@ describe("golden vectors", () => {
 
     for (const v of vectors) {
         it(`${v.name}: ${v.meta.verifier}`, () => {
-            const r = run(v)
+            const reasons: string[] = []
+            const r = run(v, verifier, { onRefusal: reason => reasons.push(reason) })
             if (v.meta.verifier === "ok") {
                 expect(r.ok).toBe(true)
                 if (!r.ok) return
@@ -105,6 +112,10 @@ describe("golden vectors", () => {
                 // No reason, no error text: only the verdict is a consensus value.
                 expect(r).toEqual({ ok: false })
                 expect(Object.keys(r)).toEqual(["ok"])
+                // Refused for the reason the vector is named for, not any.
+                expect(reasons).toHaveLength(1)
+                expect(reasons[0].split(":")[0]).toBe(v.meta.refusal!.class)
+                if (v.meta.refusal!.contains) expect(reasons[0]).toContain(v.meta.refusal!.contains)
             }
         })
     }
@@ -146,13 +157,11 @@ describe("refusals never escape as throws", () => {
     it("the allocation bomb traps into a refusal and the process keeps working (F1)", () => {
         const bomb = byName("alloc-bomb-recv-total")
         const reasons: string[] = []
-        const r = verifier.verifyPresentation(bomb.bytes, {
-            pinnedRootDer: bomb.root,
-            onRefusal: reason => reasons.push(reason),
-        })
+        const r = run(bomb, verifier, { onRefusal: reason => reasons.push(reason) })
         expect(r).toEqual({ ok: false })
         expect(reasons).toHaveLength(1)
-        expect(reasons[0]).toStartWith("trap")
+        expect(reasons[0]).toStartWith("trap: ")
+        expect(reasons[0]).not.toStartWith("trap: trap")
 
         const valid = byName("valid-local")
         const after = run(valid)
@@ -172,6 +181,49 @@ describe("refusals never escape as throws", () => {
         expect(reasons).toEqual(["input: too_large 1048577 bytes", "input: empty", "input: not bytes"])
     })
 
+    it("near the host stack limit a call verifies or throws, never refuses", () => {
+        // Stack depth depends on the engine and the caller, so a stack
+        // overflow is no verdict: it must not come back as { ok: false }.
+        const v = byName("valid-local")
+        const outcomes: ("ok" | "refused" | "threw")[] = []
+        const attempt = () => {
+            try {
+                const r = run(v)
+                if (r.ok) expect(Buffer.from(r.raw).equals(v.output!)).toBe(true)
+                outcomes.push(r.ok ? "ok" : "refused")
+            } catch (err) {
+                expect(
+                    err instanceof RangeError || err instanceof TlsnVerifierUnavailableError,
+                ).toBe(true)
+                outcomes.push("threw")
+            }
+        }
+        const recurse = (): void => {
+            try {
+                recurse()
+            } catch (err) {
+                attempt()
+                // Retry at each of the next frames up, closer to the limit's edge.
+                if (outcomes.length < 200) throw err
+            }
+        }
+        try {
+            recurse()
+        } catch {
+            // The last rethrow after enough attempts.
+        }
+        expect(outcomes).toHaveLength(200)
+        expect(outcomes).not.toContain("refused")
+        expect(outcomes).toContain("threw")
+        expect(run(v).ok).toBe(true)
+    })
+
+    it("a test root must be given explicitly", () => {
+        const v = byName("valid-local")
+        expect(() => verifier.verifyWithTestRoot(v.bytes, new Uint8Array(0))).toThrow(TypeError)
+        expect(() => verifier.verifyWithTestRoot(v.bytes, new Uint8Array(32 << 10))).toThrow(TypeError)
+    })
+
     it("a throwing log hook does not turn a refusal into a throw", () => {
         const r = verifier.verifyPresentation(byName("truncated").bytes, {
             onRefusal: () => {
@@ -188,7 +240,7 @@ describe("refusals never escape as throws", () => {
         for (let off = 0; off < v.bytes.length; off += 13) {
             const m = v.bytes.slice()
             m[off] ^= 0x01
-            const r = verifier.verifyPresentation(m, { pinnedRootDer: v.root })
+            const r = verifier.verifyWithTestRoot(m, v.root!)
             if (!r.ok) refused++
             else {
                 expect(Buffer.from(r.raw).equals(v.output!)).toBe(true)
