@@ -388,6 +388,22 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     must name it: otherwise every client counts as the proxy, which shares
     one cap, or, for a proxy on the same host, is loopback and skips the
     per-caller caps (only the node-wide cap applies).
+- From `v1.0.0-rc.12`:
+  - A validator restarted in the middle of a round rejoins the committee
+    within a round on its own. The secretary releases a late phase report
+    it already released the group from, and a validator that sees the
+    secretary open a newer round at the same height leaves its attempt
+    without signing and joins that round. Before, it could wait out its
+    green light while the round timed out, and only a second restart
+    brought it back. No setting; no effect on blocks or state.
+  - Genesis balances and validator stakes are read as decimal digits only.
+    A genesis with an amount written as `""`, with spaces, a sign, a
+    `0x`/`0b` prefix, or a JSON number above 2^53 is refused at boot
+    instead of read. Every published genesis already uses decimal strings.
+  - Launch tooling: `genesis-hash --snapshot` runs the carry-over import
+    check a node runs at boot; `launch-go-no-go` refuses a test-genesis
+    treasury on the mainnet chain id; the carry-over builder takes
+    `--zero-points`, `--drop-storage` and `--empty-storage` lists.
 
 ## Known limits
 
