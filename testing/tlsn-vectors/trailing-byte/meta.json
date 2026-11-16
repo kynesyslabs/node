@@ -1,0 +1,12 @@
+{
+  "description": "valid-local plus one trailing zero byte (strict decode must refuse)",
+  "root": "test-ca.der",
+  "verifier": "refused",
+  "nodePolicy": "refuse",
+  "expect": {
+    "server": "api.demos-spike.test",
+    "method": "GET",
+    "path": "/user",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

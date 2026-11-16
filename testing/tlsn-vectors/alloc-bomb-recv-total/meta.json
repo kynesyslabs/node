@@ -1,0 +1,13 @@
+{
+  "description": "valid-local with CompressedPartialTranscript.recv_total (offset 2036) set to 1e9: tlsn-core allocates 1 GB during decode. Uncapped wasm: ~954 MiB then refusal; with --max-memory=64MiB: deterministic trap.",
+  "root": "test-ca.der",
+  "verifier": "refused",
+  "nodePolicy": "refuse",
+  "expect": {
+    "server": "api.demos-spike.test",
+    "method": "GET",
+    "path": "/user",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "nativeDiffers": "native x86_64 allocates 1 GB lazily and refuses later; the capped wasm traps. Both refuse; only the wasm verdict counts."
+}
