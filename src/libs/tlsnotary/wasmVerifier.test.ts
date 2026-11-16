@@ -218,6 +218,33 @@ describe("refusals never escape as throws", () => {
         expect(run(v).ok).toBe(true)
     })
 
+    it("a host failure reading an accepted result throws; a trap stays a refusal", () => {
+        const valid = byName("valid-local")
+        const bomb = byName("alloc-bomb-recv-total")
+        const realDecoder = globalThis.TextDecoder
+        // Stands in for host memory or stack exhaustion while the output is
+        // copied out of the wasm.
+        class FailingDecoder {
+            decode(): string {
+                throw new RangeError("simulated host failure")
+            }
+        }
+        globalThis.TextDecoder = FailingDecoder as unknown as typeof TextDecoder
+        try {
+            expect(() => run(valid)).toThrow(TlsnVerifierUnavailableError)
+            // The trap verdict does not depend on reading its log text.
+            const reasons: string[] = []
+            expect(run(bomb, verifier, { onRefusal: r => reasons.push(r) })).toEqual({ ok: false })
+            expect(reasons).toEqual(["trap: unreadable"])
+            // Nor does a plain refusal.
+            expect(run(byName("truncated"))).toEqual({ ok: false })
+        } finally {
+            globalThis.TextDecoder = realDecoder
+        }
+        const r = run(valid)
+        expect(r.ok && Buffer.from(r.raw).equals(valid.output!)).toBe(true)
+    })
+
     it("a test root must be given explicitly", () => {
         const v = byName("valid-local")
         expect(() => verifier.verifyWithTestRoot(v.bytes, new Uint8Array(0))).toThrow(TypeError)

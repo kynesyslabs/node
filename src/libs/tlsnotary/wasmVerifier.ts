@@ -129,13 +129,19 @@ const REQUIRED_EXPORTS = [
 
 const REFUSED: { ok: false } = Object.freeze({ ok: false as const })
 
-function readOut(e: VerifierExports): string | null {
+/** The JSON the last tv_verify left. Throws on any failure. */
+function readOut(e: VerifierExports): string {
+    const ptr = e.tv_out_ptr()
+    const len = e.tv_out_len()
+    return new TextDecoder("utf-8", { fatal: true }).decode(
+        new Uint8Array(e.memory.buffer, ptr, len).slice(),
+    )
+}
+
+/** Best effort, only to log a refusal that is already decided. */
+function readOutForLog(e: VerifierExports): string | null {
     try {
-        const ptr = e.tv_out_ptr()
-        const len = e.tv_out_len()
-        return new TextDecoder("utf-8", { fatal: true }).decode(
-            new Uint8Array(e.memory.buffer, ptr, len).slice(),
-        )
+        return readOut(e)
     } catch {
         return null
     }
@@ -317,20 +323,32 @@ export class TlsnWasmVerifier {
                 throw new TlsnVerifierUnavailableError(`verify: ${(err as Error)?.message ?? String(err)}`)
             }
             // The instance is dropped here; the next call gets a new one.
-            const text = refusalText(readOut(e))
+            const text = refusalText(readOutForLog(e))
             return refuse(text.startsWith("trap") ? text : `trap: ${text}`)
         }
 
-        const raw = readOut(e)
-        if (raw === null) return refuse("output: unreadable")
-        if (verified !== 1) return refuse(refusalText(raw))
+        if (verified === 0) return refuse(refusalText(readOutForLog(e)))
+        if (verified !== 1) {
+            throw new TlsnVerifierUnavailableError(`verify: unexpected status ${verified}`)
+        }
+
+        // The wasm accepted the presentation. Failing to read or parse its
+        // output from here on says nothing about the input (host memory,
+        // stack, or a loader/wasm mismatch), so it is no verdict, not a
+        // refusal.
+        let raw: string
         let parsed: unknown
         try {
+            raw = readOut(e)
             parsed = JSON.parse(raw)
-        } catch {
-            return refuse("output: not JSON")
+        } catch (err) {
+            throw new TlsnVerifierUnavailableError(
+                `output: ${(err as Error)?.message ?? String(err)}`,
+            )
         }
-        if (!isVerifiedShape(parsed)) return refuse("output: unexpected shape")
+        if (!isVerifiedShape(parsed)) {
+            throw new TlsnVerifierUnavailableError("output: unexpected shape")
+        }
         return { ok: true, out: parsed, raw }
     }
 }

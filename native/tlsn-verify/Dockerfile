@@ -28,8 +28,11 @@ FROM toolchain AS build
 RUN cargo build --locked --release --target wasm32-unknown-unknown --lib \
  && cp target/wasm32-unknown-unknown/release/demos_tlsn_verify.wasm /demos_tlsn_verify.wasm
 
+# Export-only stages: build.sh copies their files out and never runs them.
+# A non-root user anyway, so a stray `docker run` of one is not root.
 FROM scratch AS wasm
 COPY --from=build /demos_tlsn_verify.wasm /
+USER 65534
 
 # Native twin over the golden vectors: the cross-engine oracle (spike F2).
 # The vectors come in as the named build context `vectors`.
@@ -49,3 +52,4 @@ RUN mkdir /native-out \
 
 FROM scratch AS parity
 COPY --from=parity-run /native-out/ /
+USER 65534
