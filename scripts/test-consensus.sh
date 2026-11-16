@@ -134,6 +134,7 @@ SUITE_FILES=(
     src/libs/l2ps/l2psApplyTime.test.ts
     src/libs/network/peerHttpAuth.test.ts
     src/libs/network/sudoReplayFloor.test.ts
+    src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
 )
