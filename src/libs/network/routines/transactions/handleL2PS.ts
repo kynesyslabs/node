@@ -21,6 +21,7 @@ import {
     type QueuedTransfer,
 } from "@/libs/l2ps/settlement/transfer"
 import type { DecryptedTransfer } from "@/libs/l2ps/settlement/types"
+import { L2PS_GATE_REFUSAL, l2psOff } from "@/forks/l2psGate"
 
 /**
  * Create an error response with the given status code and message
@@ -221,6 +222,11 @@ export default async function handleL2PS(
     l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
     const response = structuredClone(emptyResponse)
+
+    // Ahead of any decryption, balance read or queue write.
+    if (l2psOff()) {
+        return createErrorResponse(response, 403, L2PS_GATE_REFUSAL)
+    }
 
     // Validate transaction structure
     const structureError = validateL2PSStructure(l2psTx)

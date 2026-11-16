@@ -1,6 +1,7 @@
 import fs from "fs"
 import { Server } from "bun"
 import ipaddr from "ipaddr.js"
+import { rateLimitSubject } from "./rateLimitSubject"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
@@ -42,25 +43,6 @@ interface RateLimitData {
      * The block expiry time in milliseconds
      */
     blockExpiry?: number
-}
-
-/**
- * What a client is counted as. An IPv6 customer is routinely handed a whole
- * /64, so counting each address separately would give one client as many
- * quotas as it has addresses; every address in a /64 shares one.
- */
-function rateLimitSubject(ip: string): string {
-    if (!ip.includes(":")) return ip
-    try {
-        const parsed = ipaddr.parse(ip)
-        if (parsed.kind() !== "ipv6") return ip
-        const v6 = parsed as ipaddr.IPv6
-        if (v6.isIPv4MappedAddress()) return v6.toIPv4Address().toString()
-        const network = ipaddr.IPv6.networkAddressFromCIDR(`${ip}/64`)
-        return `${network.toRFC5952String()}/64`
-    } catch {
-        return ip
-    }
 }
 
 /** Counter key: one per limit bucket per client subject. */
@@ -260,6 +242,25 @@ function resolveXffMode(
     return hasTrustedList ? "strict" : "off"
 }
 
+/**
+ * The XFF mode an operator asked for, or undefined when none was: the config
+ * value first, then the XFF_MODE env override. Empty means unset. The
+ * constructor and the boot check (xffModeProblem) both read the mode here. A
+ * value that is not one of the three modes is ignored by `resolveXffMode`, so
+ * it is not returned.
+ */
+export function explicitXffMode(
+    configValue?: string | null,
+    env: Record<string, string | undefined> = process.env,
+): XffMode | undefined {
+    const configMode =
+        configValue && configValue.length > 0 ? configValue : undefined
+    const mode = configMode ?? env.XFF_MODE
+    return mode === "off" || mode === "strict" || mode === "legacy"
+        ? mode
+        : undefined
+}
+
 export class RateLimiter {
     public ipRequests = new Map<string, RateLimitData>()
     public config: RateLimitConfig
@@ -308,15 +309,10 @@ export class RateLimiter {
             : []
         this.trustedProxies = parseTrustedProxies(fromConfig ?? fromEnv)
 
-        // Config may pass "" to mean "auto" — coerce to undefined so the
-        // env-var override is consulted next.
-        const configMode =
-            config.xffMode && config.xffMode.length > 0
-                ? (config.xffMode as XffMode)
-                : undefined
-        const envOverride = process.env.XFF_MODE as XffMode | undefined
+        // Config may pass "" to mean "auto" — explicitXffMode coerces it to
+        // unset so the env-var override is consulted next.
         this.xffMode = resolveXffMode(
-            configMode ?? envOverride,
+            explicitXffMode(config.xffMode),
             this.trustedProxies.length > 0,
         )
 
@@ -692,11 +688,13 @@ export class RateLimiter {
             : AUTH_FAILURE_BUCKET
     }
 
+    /** Whether `ip` is on the operator's whitelist (loopback included). */
+    public isWhitelistedIP(ip: string | undefined): boolean {
+        return !!ip && this.config.whitelistedIPs.includes(ip)
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
-        if (
-            clientIP &&
-            this.config.whitelistedIPs.includes(clientIP)
-        ) {
+        if (this.isWhitelistedIP(clientIP)) {
             return true
         }
 

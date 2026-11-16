@@ -62,11 +62,36 @@ A bare-metal node reads the process environment and then `.env`; run
 | `EXPECTED_GENESIS_HASH` | published with the genesis | `findGenesisBlock`, `genesisMismatch` | Without it a fresh node can adopt whatever genesis its first peers serve. The value is added to `parameters.env` when the genesis is published ([genesis-hash.md](genesis-hash.md)); until then `node-doctor` checks only that it is a 64-hex hash. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | published with the genesis | `findGenesisBlock` | Two genesis files with one genesis hash can still build different blocks 0; this pin refuses any other block 0. Same publication as above. |
 
+### Launch settings
+
+These keys do not decide whether a block is valid, so a node with another
+value stays on the chain. They are on the sheet so that every validator
+starts with the same public surface, and `node-doctor --production` checks
+them like the values above.
+
+| Variable | Mainnet | Why |
+|---|---|---|
+| `SIGNALING_ENABLED` | `false` | The WebRTC signaling server (`RPC_SIGNALING_PORT`, 3005) serves instant-messaging clients; consensus does not use it. While it runs, each online message becomes a node-signed `instantMessaging` transaction with no fee, and the online path has no per-sender cap. When it is off, the node logs `Signaling server disabled (SIGNALING_ENABLED=false)` and `/health` lists the `signaling` subsystem as skipped. Compose still publishes the port; nothing answers on it. |
+| `XM_ENABLED`, `DEMOSWORK_ENABLED` | TBD (owner) | Cross-chain (XM) execution is on by default (`src/config/defaults.ts`). If the owner turns it off at launch, both lines go on the sheet as `false` before the genesis is published; DemosWork steps share the XM dispatch path. Web2 requests stay on either way. |
+
+The `v1.0.0-rc.11` tag carries a sheet without these lines. A validator
+installing that tag appends `SIGNALING_ENABLED=false` to `.env` by hand,
+after the sheet, and confirms the container has it:
+
+```bash
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" | grep '^SIGNALING_ENABLED='
+```
+
+L2PS and TLSNotary are not switched here: the `l2psGate` and `tlsnDisabled`
+forks are at block 0 in the mainnet genesis, so every node refuses them
+whatever its environment says ([genesis.md](genesis.md)).
+
 ### Must stay unset
 
 `node-doctor --production` fails while any of these is set:
 `DEMOS_DISABLE_FORK_MACHINERY` (the node also refuses it at boot on any chain
-id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`,
+id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`
+(refused at boot on the same chain ids),
 and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and
 `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`.
@@ -75,6 +100,10 @@ and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 
 - Chain id, shard size, fork heights, the treasury address and the sudo key
   come from the genesis file, so they match by construction.
+- The reference block room (how far behind the head a transaction's
+  reference block may be: 1, or 10 from the `referenceBlockRoom10` fork,
+  with a deep window of five times that) is a code constant chosen by the
+  genesis fork schedule, so it matches by construction too.
 - Ports, database settings, L2PS limits, rate limits and the watchdog are
   per-node: they change how one node runs, not which blocks it accepts.
 - `MAX_MESSAGE_SIZE` is parsed but never read.
@@ -84,8 +113,10 @@ and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 The sheet uses the current built-in values. These are product decisions
 rather than technical constraints:
 
-- Fees of 1 DEM per component, 3 DEM per transaction (the code still carries
-  a note that the three should later add up to 1 DEM).
+- Fees of 1 DEM per component (the code still carries a note that the three
+  should later add up to 1 DEM). A native send pays `NETWORK_FEE` +
+  `RPC_FEE` = 2 DEM; `BURN_FEE` is not charged on top, the burn share comes
+  out of the network fee (INSTALL.md, "Fees charged per native send").
 - The 1000 DEM validator stake floor.
 - 10 points per ZK attestation.
 - The 10 s block time and the 1 s / 60 s timestamp bounds (the time policy

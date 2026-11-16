@@ -24,7 +24,6 @@ const NODE = "0x" + "ab".repeat(32)
 const saved = {
     forkConfig: getSharedState.forkConfig,
     lastBlockNumber: getSharedState.lastBlockNumber,
-    referenceBlockRoom: getSharedState.referenceBlockRoom,
 }
 
 function batch(i: number) {
@@ -53,7 +52,6 @@ function forks(settlement: number | null) {
 
 beforeEach(() => {
     getSharedState.lastBlockNumber = 100
-    getSharedState.referenceBlockRoom = 1
 })
 
 afterEach(() => {

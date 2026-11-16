@@ -12,6 +12,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { sanitizeForLog } from "@/utilities/logSafe"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
+import { l2psOff, L2PS_GATE_REFUSAL } from "@/forks/l2psGate"
 import {
     L2PSMessagingService,
     parseHistoryPage,
@@ -350,6 +351,14 @@ export class L2PSMessagingServer {
         }
         if (!frame.type || typeof frame.type !== "string" || !frame.payload || typeof frame.payload !== "object") {
             this.sendError(ws, "INVALID_MESSAGE", "Missing or invalid type/payload", frame.requestId)
+            return
+        }
+
+        // Checked per frame, not only at startup: a server started below a
+        // later l2psGate height would otherwise keep queueing L2PS traffic
+        // that the pool and block apply refuse once the gate is active.
+        if (l2psOff()) {
+            this.sendError(ws, "L2PS_DISABLED", L2PS_GATE_REFUSAL, frame.requestId)
             return
         }
 

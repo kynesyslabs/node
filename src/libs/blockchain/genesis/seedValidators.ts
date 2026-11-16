@@ -17,6 +17,7 @@ import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
 import { Validators } from "src/model/entities/Validators"
+import { decimalBigInt } from "./decimalAmount"
 
 // Matches `0x` followed by exactly 64 hex characters.
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
@@ -48,12 +49,10 @@ function validateSeed(seed: GenesisValidatorSeed, index: number): void {
         )
     }
 
-    let stakeAsBigInt: bigint
-    try {
-        stakeAsBigInt = BigInt(seed.staked_amount)
-    } catch {
+    const stakeAsBigInt = decimalBigInt(seed.staked_amount)
+    if (stakeAsBigInt === null) {
         throw new Error(
-            `[GENESIS][VALIDATORS] seed[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
+            `[GENESIS][VALIDATORS] seed[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}" (decimal digits only)`,
         )
     }
     if (stakeAsBigInt <= 0n) {

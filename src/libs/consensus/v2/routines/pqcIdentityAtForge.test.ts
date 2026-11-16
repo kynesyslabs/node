@@ -8,9 +8,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
 
+const logError = jest.fn()
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
-    default: { debug: jest.fn(), info: jest.fn(), warning: jest.fn(), warn: jest.fn(), error: jest.fn(), only: jest.fn(), custom: jest.fn() },
+    default: { debug: jest.fn(), info: jest.fn(), warning: jest.fn(), warn: jest.fn(), error: logError, only: jest.fn(), custom: jest.fn() },
 }))
 
 mock.module("src/libs/blockchain/gcr/gcr", () => ({
@@ -22,13 +23,21 @@ mock.module("src/libs/blockchain/gcr/gcr", () => ({
     },
 }))
 
-// The identity rows of the state the block is built on.
-let identityRows: Array<{ pubkey: string; identities: unknown }> = []
+// The identity rows of the state the block is built on; an Error stands for
+// a read that fails.
+let identityRows: Array<{ pubkey: string; identities: unknown }> | Error = []
 const datasource = {
     __esModule: true,
     default: {
         getInstance: async () => ({
-            getDataSource: () => ({ getRepository: () => ({ find: async () => identityRows }) }),
+            getDataSource: () => ({
+                getRepository: () => ({
+                    find: async () => {
+                        if (identityRows instanceof Error) throw identityRows
+                        return identityRows
+                    },
+                }),
+            }),
         }),
     },
 }
@@ -42,6 +51,8 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ErrorCode } from "@/errors"
 import { verifyBlockTxSignatures } from "@/libs/blockchain/validation/verifyBlockTxSignatures"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
+import { IdentityPrefetchError } from "@/libs/blockchain/validation/identityPrefetchError"
+import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
 import { judgeBlockTransactions } from "./blockTransactions"
 
 const HEIGHT = 101
@@ -157,5 +168,43 @@ describe("a PQC-only tx the validator could not judge", () => {
         } finally {
             validate.mockRestore()
         }
+    })
+})
+
+describe("identity records the forger cannot read", () => {
+    // PoRBFT's round catch takes a StateReadError as a failed state read and
+    // sits the round out; any block forged here would lack the PQC txs.
+    it("ends the forge with a state read error instead of a block without the PQC txs", async () => {
+        const pqcTx = inPool(await DemosTransactions.pay(PEER, 1n, pqc))
+        const edTx = inPool(await DemosTransactions.pay(PEER, 1n, ed))
+        identityRows = new Error("connection terminated")
+        logError.mockClear()
+
+        const forged = judgeBlockTransactions([pqcTx, edTx], HEIGHT, {
+            capped: false,
+            osDenominationActive: true,
+        })
+
+        const error = await forged.then(
+            () => null,
+            (e: unknown) => e,
+        )
+        expect(error).toBeInstanceOf(IdentityPrefetchError)
+        expect(error).toBeInstanceOf(StateReadError)
+        expect((error as Error).message).toContain("connection terminated")
+        expect(logError).toHaveBeenCalledWith(
+            expect.stringContaining(`Cannot judge the PQC-only txs for block ${HEIGHT}, sitting the round out`),
+        )
+    })
+
+    it("does not read them, and forges, when the pool holds no PQC-only tx", async () => {
+        const edTx = inPool(await DemosTransactions.pay(PEER, 1n, ed))
+        identityRows = new Error("connection terminated")
+
+        const judged = await judgeBlockTransactions([edTx], HEIGHT, {
+            capped: false,
+            osDenominationActive: true,
+        })
+        expect(judged.txs.map(t => t.hash)).toEqual([edTx.hash])
     })
 })

@@ -11,13 +11,17 @@ import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import { l2psOff } from "@/forks/l2psGate"
 import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
 import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import ParallelNetworks from "./parallelNetworks"
-import { EXPIRED_TX_DEEP_WINDOW_MULTIPLIER } from "@/libs/blockchain/referenceBlockWindow"
+import {
+    EXPIRED_TX_DEEP_WINDOW_MULTIPLIER,
+    REFERENCE_BLOCK_ROOM,
+} from "@/libs/blockchain/referenceBlockWindow"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { SETTLEMENT_TRANSFERS } from "./settlement/encoding"
 import {
@@ -283,6 +287,15 @@ export class L2PSBatchAggregator {
 
         // Service shutdown check
         if (!this.isRunning) {
+            return
+        }
+
+        // The stake hook that starts and stops this service does not fire
+        // when l2psGate activates at a later height on a node that stays
+        // staked, so each cycle checks the gate itself.
+        if (l2psOff()) {
+            log.info("[L2PS Batch Aggregator] L2PS is off at the tip (fork l2psGate): stopping")
+            await this.stop()
             return
         }
 
@@ -931,8 +944,9 @@ export class L2PSBatchAggregator {
             minBatchSize: this.MIN_BATCH_SIZE,
             maxBatchesPerCycle: this.MAX_BATCHES_PER_CYCLE,
             queueWindow: 4 * SETTLEMENT_TRANSFERS * this.MAX_BATCHES_PER_CYCLE,
-            expiryBlocks:
-                EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * Math.max(getSharedState.referenceBlockRoom ?? 1, 1) + 1,
+            // The widest deep window any tip allows: a batch re-planned while
+            // the first one can still land races it for the same transfers.
+            expiryBlocks: EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * REFERENCE_BLOCK_ROOM + 1,
             deferredTtlBlocks: SETTLEMENT_DEFERRED_TTL_BLOCKS,
             proverBackoffMs: 5_000,
             proverBackoffMaxMs: 300_000,

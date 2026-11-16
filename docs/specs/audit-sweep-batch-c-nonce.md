@@ -76,7 +76,31 @@ Close the replay-protection gap end-to-end:
 
 ### Semantics
 
-Strict sequential per-sender:
+> **Current rule (`nonceIntegrity`, superseding the formula below).** The
+> strict `account.nonce + 1 + pending_count` admission rule was replaced by
+> a window, because a client sending a batch through several RPCs cannot
+> know how many of its own transactions each pool already holds:
+>
+> ```text
+> admitted at the mempool iff
+>   account.nonce < tx.content.nonce <= account.nonce + MEMPOOL_MAX_NONCE_AHEAD (16)
+>   and no pending tx from the same sender carries the same nonce
+>       (pending = reference_block within the reference block room of the tip)
+>
+> applied in a block iff
+>   tx.content.nonce === account.nonce + 1 on the state the earlier
+>   transactions of the block left (a tx that then fails still spends it)
+> ```
+>
+> RPC confirm refuses `nonce <= account.nonce` and, under `nonceIntegrity`,
+> `nonce > account.nonce + MEMPOOL_MAX_NONCE_AHEAD`. A sender holds at most
+> `MEMPOOL_MAX_PENDING_PER_SENDER` (64) pending transactions. Ordering is
+> enforced where every node reads the same state (apply), so a gap at
+> admission is harmless: the tx waits until the earlier nonces land or its
+> reference block falls out of the window. The rest of this section is the
+> original design, kept for history.
+
+Original design, strict sequential per-sender:
 
 ```text
 incoming tx is valid iff
@@ -234,6 +258,9 @@ the tx is rolled back).
   at N) for future fee-bump semantics? **Decision: no.** Strict
   sequential. If a tx is dropped, the user re-broadcasts with the
   same nonce; out-of-order future-nonce txs are not supported.
+  *Superseded by `nonceIntegrity`*: admission accepts a nonce up to
+  `MEMPOOL_MAX_NONCE_AHEAD` (16) past the confirmed one; apply stays
+  strictly sequential (see §Semantics).
 - Should `expectedPrior` be required (not optional) post-fork? Optional
   for backwards-compat with rolled-up pre-fork snapshots. Post-fork
   emission always populates it.

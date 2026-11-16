@@ -14,7 +14,6 @@ const sharedState = {
     PROD: true,
     signingAlgorithm: "ed25519",
     lastBlockNumber: 100,
-    referenceBlockRoom: 10,
 }
 
 const submitValidatedTx = jest.fn(async (..._args: unknown[]) => ({
@@ -41,6 +40,7 @@ jest.mock("../blockchain/gcr/handleGCR", () => ({
     default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
 }))
 jest.mock("./txSubmission", () => ({ submitValidatedTx }))
+jest.mock("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 jest.mock("src/libs/consensus/stakedSet", () => ({ isSelfStaked }))
 jest.mock("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: {} }))

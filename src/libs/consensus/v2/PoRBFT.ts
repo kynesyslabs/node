@@ -17,6 +17,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
     AbortConsensusError,
     PEERLIST_PHASE,
+    SUPERSEDED_ROUND,
 } from "./types/secretaryManager"
 import {
     BlockInvalidError,
@@ -52,7 +53,10 @@ import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
 } from "./routines/forkScheduleAbstain"
-import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
+import {
+    ensureWindowChecked,
+    onShardMemberUnresponsive,
+} from "@/libs/peer/routines/forkScheduleWatch"
 import {
     filterMempoolByRefBlock,
     type FailedTranscation,
@@ -65,6 +69,7 @@ import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { isForkActive } from "@/forks/forkGates"
+import { l2psOffAt } from "@/forks/l2psGate"
 import {
     MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
@@ -581,7 +586,7 @@ export async function consensusRoutine(): Promise<void> {
 
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all transactions in the block are either confirmed or failed
-            const states = new Set([
+            const states = new Set<string>([
                 TRANSACTION_STATUS.CONFIRMED,
                 TRANSACTION_STATUS.FAILED,
             ])
@@ -604,7 +609,9 @@ export async function consensusRoutine(): Promise<void> {
             // Before l2psSettlement only the entry node held these proofs, so
             // only it moved the balances (DEM-816). Under the fork a batch
             // settles inside applyTransactions on every node instead.
-            if (!l2psSettlementActive()) {
+            // Under l2psGate none apply: a proof debits the L2 fee with no
+            // credit, and the proofs a node holds are its own, not the block's.
+            if (!l2psSettlementActive() && !l2psOffAt(blockRef - 1)) {
                 // Their edits join the block's pending state and commit with it.
                 const l2psStart = Date.now()
                 const l2psResult = await L2PSConsensus.applyPendingProofs(
@@ -1553,8 +1560,19 @@ async function updateValidatorPhase(
         )}`,
     )
 
+    if (res === SUPERSEDED_ROUND) {
+        // Not a fault of the secretary: it restarted the height in a newer
+        // round, and the next attempt reports into that one.
+        throw new AbortConsensusError(
+            `The secretary started a newer round for block ${blockRef}; leaving this attempt to join it`,
+        )
+    }
+
     if (res === ("abortConsensus" as any)) {
         log.error("[consensusRoutine] Abort consensus routine")
+        // The secretary may be a validator that abstains on its own fork
+        // schedule; only a comparison round can leave it out of the next shard.
+        void onShardMemberUnresponsive()
         throw new AbortConsensusError("500 error received from secretary")
     }
 

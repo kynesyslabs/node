@@ -1,6 +1,6 @@
 {
   "properties": {
-    "id": "FILL: mainnet chain id, an integer no other Demos network uses (testnet 1 and devnet 1337 are refused)",
+    "id": 8587492,
     "name": "FILL: network name (testnet: DEMOS)",
     "currency": "FILL: currency symbol (testnet: DEM)",
     "shardSize": 10,
@@ -86,8 +86,20 @@
     "tlsnProofEnforcement": {
       "activationHeight": 0
     },
+    "l2psGate": {
+      "activationHeight": 0
+    },
+    "tlsnDisabled": {
+      "activationHeight": 0
+    },
     "xmProofBinding": {
-      "activationHeight": null
+      "activationHeight": 0
+    },
+    "storageFeeSettlement": {
+      "activationHeight": 0
+    },
+    "referenceBlockRoom10": {
+      "activationHeight": 0
     },
     "atomicWork": {
       "activationHeight": null
@@ -102,7 +114,7 @@
   "snapshot": {
     "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
   },
-  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, in the snapshot's unit (DEM over a DEM snapshot, OS over a migrated one; see genesis.md)",
+  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, whole starting balances in OS (1 DEM = 10^9 OS; see genesis.md)",
   "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
   "status": "confirmed",
   "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\", \"first_seen\": 0, \"valid_at\": 0}"

@@ -48,6 +48,8 @@ import { readState } from "@/libs/blockchain/gcr/stateReadError"
 import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 import { governanceGateRefusal } from "@/forks/governanceGate"
 import { tokenStakingOpen, tokenStakingRefusal } from "@/forks/tokenStakingGate"
+import { l2psGateRefusal, l2psOffAt } from "@/forks/l2psGate"
+import { tlsnDisabledAt, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
@@ -141,7 +143,8 @@ async function osDenominationActive(): Promise<boolean> {
  * tip so admission and apply judge them alike, and so are the value rules
  * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) and
  * `stakingOpen`, whether token staking is open (`tokenStakingGate`,
- * `tokenStaking`); `tip` is that tip.
+ * `tokenStaking`), and `l2psOff` and `tlsnOff`, the `l2psGate` and
+ * `tlsnDisabled` states; `tip` is that tip.
  */
 export interface EditBindingState extends ValueRules {
     active: boolean
@@ -152,6 +155,8 @@ export interface EditBindingState extends ValueRules {
     messageBinding: boolean
     stakeChecks: boolean
     stakingOpen: boolean
+    l2psOff: boolean
+    tlsnOff: boolean
     tip: number
 }
 
@@ -166,6 +171,8 @@ export async function editBindingState(): Promise<EditBindingState> {
         messageBinding: isForkActive("instantMessagingBinding", tip),
         stakeChecks: isForkActive("stakeApplyChecks", tip),
         stakingOpen: tokenStakingOpen(tip),
+        l2psOff: l2psOffAt(tip),
+        tlsnOff: tlsnDisabledAt(tip),
         sendBound: isForkActive("nativeSendBinding", tip),
         canonical: isForkActive("canonicalAddresses", tip),
         feeBound: isForkActive("feeBinding", tip),
@@ -222,6 +229,18 @@ export async function loadAdmissionReads(
     const { messageBinding, feeBound } = await reads.state()
     if (feeBound && txs.length > 0) await reads.parameters()
     if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
+}
+
+/**
+ * Why `tx` is refused because the feature it uses is off on this network
+ * (`l2psGate`, `tlsnDisabled`), or null. Judged before any edit is looked
+ * at, so a refused transaction pays no fee and spends no nonce.
+ */
+export function featureGateRefusal(
+    tx: { content?: unknown },
+    state: Pick<EditBindingState, "l2psOff" | "tlsnOff">,
+): string | null {
+    return l2psGateRefusal(tx, state.l2psOff) ?? tlsnDisabledRefusal(tx, state.tlsnOff)
 }
 
 /**
@@ -558,8 +577,8 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
  * bound as well: the value-edit projection does not look at it. The
- * `networkGovernance`, `tokenStakingGate`, `txTypeAllowList` and
- * `instantMessagingBinding` rules and the value rules (`nativeSendBinding`,
+ * `networkGovernance`, `tokenStakingGate`, `txTypeAllowList`, `l2psGate`,
+ * `tlsnDisabled` and `instantMessagingBinding` rules and the value rules (`nativeSendBinding`,
  * `canonicalAddresses`, `feeBinding`) also hold on either side of
  * `editBinding`.
  *
@@ -576,6 +595,8 @@ export async function verifyAdmissionEdits(
             state
         const typeRefusal = typeAllowList ? blockTxTypeRefusal(tx) : null
         if (typeRefusal) return refuse(typeRefusal)
+        const featureRefusal = featureGateRefusal(tx, state)
+        if (featureRefusal) return refuse(featureRefusal)
         if (messageBinding && isNodeMessage(tx)) {
             const messageRefusal = nodeMessageRefusal(tx, await reads.validators())
             if (messageRefusal) return refuse(messageRefusal)
@@ -626,14 +647,16 @@ async function verifyAdmissionEditsBeforeBinding(tx: Transaction): Promise<EditV
  * apply step refuse.
  *
  * Inactive: only the nonce edit (under `nonceIntegrity`) and the
- * `networkGovernance` and `tokenStakingGate` rules, because RPC intake keeps
- * the comparison it always made. `tx` must carry the edits as the sender
- * signed them.
+ * `networkGovernance`, `tokenStakingGate`, `l2psGate` and `tlsnDisabled`
+ * rules, because RPC intake keeps the comparison it always made. `tx` must
+ * carry the edits as the sender signed them.
  */
 export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
     try {
         const state = await editBindingState()
         const { active, nonceBound, governance } = state
+        const featureRefusal = featureGateRefusal(tx, state)
+        if (featureRefusal) return refuse(featureRefusal)
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
         const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)

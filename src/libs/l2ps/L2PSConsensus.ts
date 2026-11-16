@@ -29,6 +29,7 @@ import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { L2PS_GATE_REFUSAL, l2psOffAt } from "@/forks/l2psGate"
 
 /**
  * Result of applying a single proof
@@ -186,6 +187,12 @@ export default class L2PSConsensus {
             affectedAccountsCount: 0,
             l1BatchTxHashes: [],
             proofResults: [],
+        }
+
+        // Block N is applied on tip N - 1, the height every gate reads.
+        if (l2psOffAt(blockNumber - 1)) {
+            result.message = L2PS_GATE_REFUSAL
+            return result
         }
 
         // Local proofs move balances on the entry node alone (DEM-816);

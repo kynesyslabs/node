@@ -84,3 +84,42 @@ export function mockXmLocalSdk(): void {
         APTOS: load("aptos.js").APTOS,
     }))
 }
+
+/**
+ * Serves an empty repository per entity through both datasource specifiers:
+ * every read finds nothing and every save returns its row.
+ */
+export function mockEntityDatasource(): void {
+    const repoFor = (name: string) => ({
+        target: { name },
+        create: (row: unknown) => ({ ...(row as object) }),
+        findOneBy: async () => null,
+        findOne: async () => null,
+        find: async () => [],
+        save: async (row: unknown) => row,
+    })
+    const dataSource = { getRepository: (entity: any) => repoFor(entity?.name ?? String(entity)) }
+    const factory = () => ({
+        __esModule: true,
+        dataSource,
+        default: { getInstance: async () => ({ getDataSource: () => dataSource }) },
+    })
+    mock.module("src/model/datasource", factory)
+    mock.module("@/model/datasource", factory)
+}
+
+/**
+ * Keeps `l2psGate` dormant without loading it. The real gate reads the node's
+ * shared state, whose module graph the stubs of a handler test cannot load;
+ * the gate has its own tests.
+ */
+export function mockL2psGateDormant(): void {
+    mock.module("@/forks/l2psGate", () => ({
+        L2PS_TX_TYPES: new Set<string>(),
+        L2PS_GATE_REFUSAL: "L2PS is not enabled on this network (fork l2psGate)",
+        l2psOff: () => false,
+        l2psOffAt: () => false,
+        isL2psTx: () => false,
+        l2psGateRefusal: () => null,
+    }))
+}
