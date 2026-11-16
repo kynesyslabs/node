@@ -130,7 +130,6 @@ beforeEach(() => {
     hashGCRTables.mockResolvedValue({ native_subnets_txs: "a" })
     getTransactionsFromHashes.mockReset()
     getTransactionsFromHashes.mockResolvedValue([])
-    getSharedState.referenceBlockRoom = 1
 })
 
 describe("verifyBlockTransactions", () => {
@@ -362,6 +361,63 @@ describe("planBlockOutcome", () => {
         getExistingTransactionHashes.mockResolvedValue(new Set([replay.hash]))
 
         await expect(planBlockOutcome(makeBlock([replay]), [replay])).rejects.toBeInstanceOf(
+            SyncBlockRejectedError,
+        )
+    })
+})
+
+describe("reference block room of the block's own tip", () => {
+    const head = HEIGHT - 1
+    const roomFrom = (height: number | null) => {
+        getSharedState.forkConfig.referenceBlockRoom10 = { activationHeight: height }
+    }
+    const behind = (blocks: number, options: TxOptions = {}) =>
+        makeTx(alice, { ...options, attrs: { ...options.attrs, reference_block: head - blocks } })
+
+    it("applies a transaction 5 blocks behind once referenceBlockRoom10 is active at the tip", async () => {
+        roomFrom(head)
+        const tx = behind(5)
+        const plan = await planBlockOutcome(makeBlock([tx]), [tx])
+        expect(plan.toApply.map(t => t.hash)).toEqual([tx.hash])
+        expect(plan.failedBeforeApply.size).toBe(0)
+    })
+
+    it("fails the same transaction before apply when the block's tip is below the activation height", async () => {
+        roomFrom(head + 1)
+        const failed = behind(5, { status: "failed" })
+        const plan = await planBlockOutcome(makeBlock([failed]), [failed])
+        expect(plan.failedBeforeApply.get(failed.hash)).toBe(
+            "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE",
+        )
+
+        const claimedConfirmed = behind(5)
+        await expect(
+            planBlockOutcome(makeBlock([claimedConfirmed]), [claimedConfirmed]),
+        ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+    })
+
+    it("verifies an old block with the room it was forged under, whatever the local tip", async () => {
+        const lastBlockNumber = getSharedState.lastBlockNumber
+        try {
+            getSharedState.lastBlockNumber = HEIGHT + 100
+            roomFrom(HEIGHT + 50)
+            const claimedConfirmed = behind(5)
+            await expect(
+                planBlockOutcome(makeBlock([claimedConfirmed]), [claimedConfirmed]),
+            ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+        } finally {
+            getSharedState.lastBlockNumber = lastBlockNumber
+        }
+    })
+
+    it("rejects a block holding a transaction past the 50-block deep window", async () => {
+        roomFrom(0)
+        const deep = behind(11, { status: "failed" })
+        const plan = await planBlockOutcome(makeBlock([deep]), [deep])
+        expect(plan.failedBeforeApply.get(deep.hash)).toBe("TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE")
+
+        const ancient = makeTx(alice, { status: "failed", attrs: { reference_block: head - 51 } })
+        await expect(planBlockOutcome(makeBlock([ancient]), [ancient])).rejects.toBeInstanceOf(
             SyncBlockRejectedError,
         )
     })

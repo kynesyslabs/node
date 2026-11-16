@@ -28,6 +28,10 @@ import type {
     TokenStakingConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
+    L2psGateConfig,
+    TlsnDisabledConfig,
+    StorageFeeSettlementConfig,
+    ReferenceBlockRoom10Config,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -436,6 +440,20 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.xmRemoveCanonical =
                 config as XmRemoveCanonicalConfig
             return
+        case "l2psGate":
+            getSharedState.forkConfig.l2psGate = config as L2psGateConfig
+            return
+        case "tlsnDisabled":
+            getSharedState.forkConfig.tlsnDisabled = config as TlsnDisabledConfig
+            return
+        case "storageFeeSettlement":
+            getSharedState.forkConfig.storageFeeSettlement =
+                config as StorageFeeSettlementConfig
+            return
+        case "referenceBlockRoom10":
+            getSharedState.forkConfig.referenceBlockRoom10 =
+                config as ReferenceBlockRoom10Config
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -601,6 +619,14 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as TelegramSenderBindingConfig
         case "xmRemoveCanonical":
             return base as XmRemoveCanonicalConfig
+        case "l2psGate":
+            return base as L2psGateConfig
+        case "tlsnDisabled":
+            return base as TlsnDisabledConfig
+        case "storageFeeSettlement":
+            return base as StorageFeeSettlementConfig
+        case "referenceBlockRoom10":
+            return base as ReferenceBlockRoom10Config
         default: {
             const _exhaustive: never = name
             void _exhaustive

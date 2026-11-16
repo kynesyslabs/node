@@ -8,6 +8,7 @@ import {
 import log from "src/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 import prefetchIdentities from "./prefetchIdentities"
+import { IdentityPrefetchError } from "./identityPrefetchError"
 import { validateTx } from "./txValidator"
 import type { TxSignatureDomain } from "./txValidator"
 
@@ -460,7 +461,9 @@ export default class TxValidatorPool {
     /**
      * A failed chunk says nothing about its transactions, so they are judged
      * here instead; one that cannot be judged at all is undecided, never
-     * invalid.
+     * invalid. Unreadable identity records are not a verdict on a transaction
+     * but on this node's state, so that error goes to the caller, as it does
+     * from the first prefetch in validate().
      */
     private async rejudgeInline(
         txs: Transaction[],
@@ -471,6 +474,7 @@ export default class TxValidatorPool {
         try {
             return await this.validateInline(txs, isPostFork, signatureDomain)
         } catch (err) {
+            if (err instanceof IdentityPrefetchError) throw err
             const reason = `validator pool error: ${poolReason}; inline: ${errorText(err)}`
             log.error(`[TxValidatorPool] ${txs.length} txs left undecided: ${reason}`)
             return txs.map(tx => ({ hash: tx.hash, valid: false, undecided: true, reason }))

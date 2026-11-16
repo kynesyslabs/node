@@ -39,3 +39,18 @@ describe("identity provider settings in docker-compose.yml", () => {
         }
     })
 })
+
+describe("the admin RPC key in docker-compose.yml", () => {
+    // The node answers its admin RPC only to SUDO_PUBKEY; a key the compose
+    // file does not pass leaves the admin RPC closed inside the container.
+    it("is passed to the node container", () => {
+        expect(composeNodeService()).toMatch(
+            new RegExp(`^\\s+${EnvKey.SUDO_PUBKEY}: \\$\\{${EnvKey.SUDO_PUBKEY}:-\\}$`, "m"),
+        )
+    })
+
+    it("is listed in .env.example", () => {
+        const example = fs.readFileSync(path.join(repo, ".env.example"), "utf8")
+        expect(example).toMatch(/^SUDO_PUBKEY=$/m)
+    })
+})

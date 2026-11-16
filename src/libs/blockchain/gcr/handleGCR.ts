@@ -45,11 +45,14 @@ import {
     governanceGateRefusal,
 } from "@/forks/governanceGate"
 import { tokenStakingRefusal } from "@/forks/tokenStakingGate"
+import { isL2psTx } from "@/forks/l2psGate"
+import { carriesTlsn } from "@/forks/tlsnDisabledGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
     derivedGasEdit,
     editBindingState,
+    featureGateRefusal,
     stakeSenderRefusal,
     verifyEditsAtApply,
     verifyNonceEditBinding,
@@ -60,7 +63,9 @@ import {
     isWorkReplay,
     legacyGasCredited,
     legacyGasRetired,
+    storageFeeCredited,
     tlsnBurnCredited,
+    withStorageFeeCredit,
     withTrailingDebitCredit,
     withoutLegacyGas,
 } from "src/libs/blockchain/validation/legacyGas"
@@ -554,12 +559,16 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  * copy leaves that gas edit out, so the sender pays the fee once and every
  * debit has its credit. Where the gas is a non-native transaction's whole
  * fee (`legacyGasCredited`), the copy keeps it and credits it right after,
- * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`).
+ * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`)
+ * and the storage fee of a Storage Program write (`storageFeeCredited`).
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
     if (legacyGasCredited(tx)) {
         const signed = tx.content.gcr_edits ?? []
-        const credited = withTrailingDebitCredit(signed, tx.hash ?? "")
+        const withFee = storageFeeCredited(tx)
+            ? withStorageFeeCredit(signed, tx.hash ?? "")
+            : signed
+        const credited = withTrailingDebitCredit(withFee, tx.hash ?? "")
         if (credited === signed) return tx
         return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
             content: {
@@ -1227,6 +1236,26 @@ export default class HandleGCR {
         simulate: boolean,
         clock?: BlockClock,
     ): Promise<GCRApplyResult> {
+        // A block refuses these in its pre-pass. This covers the callers that
+        // apply one transaction directly: the simulation that issues a
+        // TLSNotary token and the L2PS proof apply. Ahead of the edit-free
+        // skip, since an l2psBatch ships none.
+        if (!isRollback && (isL2psTx(tx) || carriesTlsn(tx))) {
+            const refusal = featureGateRefusal(tx, await editBindingState())
+            if (refusal) {
+                log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${refusal}`)
+                return {
+                    success: false,
+                    entities,
+                    message: refusal,
+                    sideEffects: [],
+                    deferredWrites: [],
+                    appliedEditsCount: 0,
+                    unproven: true,
+                }
+            }
+        }
+
         // Skip txs without GCR edits (valid but no state changes)
         if (
             !tx.content.gcr_edits ||
@@ -1973,7 +2002,8 @@ export default class HandleGCR {
     /**
      * The transactions of a block refused before apply: those of a type the
      * node does not implement (`txTypeAllowList` fork), a fee-free message
-     * not signed by a staked validator (`instantMessagingBinding`), those the
+     * not signed by a staked validator (`instantMessagingBinding`), those of
+     * a feature that is off (`l2psGate`, `tlsnDisabled`), those the
      * `networkGovernance` or `tokenStakingGate` rule or a value rule
      * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) refuses,
      * whether or not `editBinding` is active, and those whose shipped edits
@@ -2026,6 +2056,7 @@ export default class HandleGCR {
         for (const tx of txs) {
             const reason =
                 (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
+                featureGateRefusal(tx, state) ??
                 governanceGateRefusal(tx, governance) ??
                 tokenStakingRefusal(tx, stakingOpen) ??
                 (stakeChecks ? stakeSenderRefusal(tx) : null)

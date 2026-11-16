@@ -140,6 +140,36 @@ describe("node-doctor --production against the parameter sheet", () => {
     }, 60_000)
 })
 
+describe("node-doctor --production web2 identity credentials", () => {
+    const credentials = {
+        GITHUB_TOKEN: "ghp_test",
+        DISCORD_BOT_TOKEN: "discord-test",
+        RAPID_API_KEY: "rapid-key",
+        RAPID_API_HOST: "twitter-api.example.com",
+    }
+
+    it("passes when every provider credential is set, without printing it", () => {
+        const { lines } = run(credentials)
+        for (const key of Object.keys(credentials)) {
+            expect(line(lines, key)).toBe(`PASS ${key}: set`)
+        }
+        expect(lines.some(l => l.includes("ghp_test"))).toBe(false)
+    }, 60_000)
+
+    it("fails each credential that is missing, empty or only whitespace", () => {
+        const { status, lines } = run({
+            GITHUB_TOKEN: "",
+            DISCORD_BOT_TOKEN: "  ",
+            RAPID_API_KEY: "rapid-key",
+        })
+        expect(status).toBe(1)
+        expect(line(lines, "GITHUB_TOKEN")).toStartWith("FAIL GITHUB_TOKEN: empty: this node would refuse every GitHub identity link")
+        expect(line(lines, "DISCORD_BOT_TOKEN")).toStartWith("FAIL DISCORD_BOT_TOKEN: empty: this node would refuse every Discord identity link")
+        expect(line(lines, "RAPID_API_KEY")).toBe("PASS RAPID_API_KEY: set")
+        expect(line(lines, "RAPID_API_HOST")).toStartWith("FAIL RAPID_API_HOST: empty: this node would refuse every Twitter/X identity link")
+    }, 60_000)
+})
+
 const BASH = Bun.which("bash") as string
 const GREP = Bun.which("grep") as string
 
@@ -454,3 +484,76 @@ describe("node-doctor --production genesis file", () => {
     })
 })
 
+
+describe("node-doctor identity file mode", () => {
+    let dir: string
+    let tools: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-key-"))
+        tools = path.join(dir, "bin")
+        fs.mkdirSync(tools)
+        for (const name of ["stat", "wc", "grep"]) {
+            fs.symlinkSync(Bun.which(name) as string, path.join(tools, name))
+        }
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    const keyWithMode = (mode: number): string => {
+        const file = path.join(dir, ".demos_identity")
+        fs.writeFileSync(file, "0x" + "ab".repeat(64))
+        fs.chmodSync(file, mode)
+        return file
+    }
+
+    const sourced = (script: string, env: Record<string, string> = {}) =>
+        Bun.spawnSync([BASH, "-c", `source "${doctor}"; ${script}`], {
+            env: { PATH: tools, ...env },
+        }).stdout.toString().trim().split("\n")
+
+    const production = (file: string) => {
+        const lines = sourced(
+            `NODE_ENV_VALUES[IDENTITY_FILE]="${file}"; check_identity_file_mode; echo "fails=$PROD_FAILS warns=$PROD_WARNS"`,
+        )
+        return { line: lines[0], counts: lines.at(-1) }
+    }
+
+    it("--production passes 600 and stricter", () => {
+        for (const mode of [0o600, 0o400]) {
+            const file = keyWithMode(mode)
+            const out = production(file)
+            expect(out.line).toBe(`PASS identity file mode: ${file} ${mode.toString(8)}`)
+            expect(out.counts).toBe("fails=0 warns=0")
+        }
+    })
+
+    it("--production fails a key file group or other users can read", () => {
+        for (const mode of [0o640, 0o604, 0o644, 0o660]) {
+            const file = keyWithMode(mode)
+            const out = production(file)
+            expect(out.line).toStartWith(`FAIL identity file mode: ${file} has mode ${mode.toString(8)}`)
+            expect(out.line).toContain(`chmod 600 ${file}`)
+            expect(out.counts).toBe("fails=1 warns=0")
+        }
+    })
+
+    it("--production warns when the file is not on this host path", () => {
+        const out = production(path.join(dir, "missing"))
+        expect(out.line).toStartWith("WARN identity file mode:")
+        expect(out.counts).toBe("fails=0 warns=1")
+    })
+
+    it("the general identity check reports an open mode as a problem", () => {
+        const file = keyWithMode(0o644)
+        const lines = sourced(
+            `check_identity_file; echo "failed=$CHECKS_FAILED"; printf '%s\\n' "\${PROBLEM_MESSAGES[@]}"`,
+            { IDENTITY_FILE: file },
+        )
+        expect(lines[0]).toBe("failed=1")
+        expect(lines[1]).toContain("has mode 644")
+
+        fs.chmodSync(file, 0o600)
+        expect(sourced(`check_identity_file; echo "failed=$CHECKS_FAILED"`, { IDENTITY_FILE: file })[0]).toBe(
+            "failed=0",
+        )
+    })
+})

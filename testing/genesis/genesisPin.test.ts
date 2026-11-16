@@ -122,6 +122,25 @@ describe("pinRequirementProblem", () => {
         expect(pinRequirementProblem("ab".repeat(32), {}, 4242)).toBeNull()
     })
 
+    it("refuses the opt-out on a mainnet chain id, even beside a pin, with or without a stored block 0", () => {
+        for (const value of ["true", "1", "yes", " TRUE "]) {
+            for (const pin of ["", "ab".repeat(32)]) {
+                const problem = pinRequirementProblem(pin, { DEMOS_ALLOW_UNPINNED_GENESIS: value }, 4242)
+                expect(problem).toContain("DEMOS_ALLOW_UNPINNED_GENESIS is set and the genesis has chain id 4242")
+                expect(problem).toContain("remove it")
+            }
+        }
+        expect(pinRequirementProblem("ab".repeat(32), { DEMOS_ALLOW_UNPINNED_GENESIS: "false" }, 4242)).toBeNull()
+        expect(pinRequirementProblem("ab".repeat(32), { DEMOS_ALLOW_UNPINNED_GENESIS: "" }, 4242)).toBeNull()
+    })
+
+    it("still allows the opt-out on the testnet, the devnet and an id-less genesis", () => {
+        const env = { NODE_ENV: "production", DEMOS_ALLOW_UNPINNED_GENESIS: "true" }
+        for (const chainId of [1, 1337, undefined]) {
+            expect(pinRequirementProblem("", env, chainId)).toBeNull()
+        }
+    })
+
     it("leaves the testnet, the devnet and an id-less genesis to NODE_ENV", () => {
         expect(pinRequirementProblem("", { NODE_ENV: "development" }, 1)).toBeNull()
         expect(pinRequirementProblem("", { NODE_ENV: "development" }, 1337)).toBeNull()

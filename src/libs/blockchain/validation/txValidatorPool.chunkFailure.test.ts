@@ -12,6 +12,7 @@ mockLogger()
 mock.module("./prefetchIdentities", () => ({ __esModule: true, default: async () => ({}) }))
 
 const { default: TxValidatorPool } = await import("./txValidatorPool")
+const { IdentityPrefetchError } = await import("./identityPrefetchError")
 
 const txs = [{ hash: "a" }, { hash: "b" }, { hash: "c" }] as any[]
 const domain = { active: false, chainId: 0 }
@@ -42,5 +43,12 @@ describe("TxValidatorPool when a worker chunk fails", () => {
         expect(results.map((r: any) => [r.hash, r.valid, r.undecided])).toEqual(
             txs.map(tx => [tx.hash, false, true]),
         )
+    })
+
+    it("passes unreadable identity records on to the caller instead of calling them undecided", async () => {
+        const pool = poolWithFailingChunks(async () => {
+            throw new IdentityPrefetchError(new Error("database down"))
+        })
+        await expect(pool.validate(txs, true, domain)).rejects.toBeInstanceOf(IdentityPrefetchError)
     })
 })

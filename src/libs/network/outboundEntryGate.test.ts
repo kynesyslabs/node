@@ -17,7 +17,6 @@ const sharedState = {
     PROD: false,
     signingAlgorithm: "ed25519",
     lastBlockNumber: 100,
-    referenceBlockRoom: 10,
 }
 
 const submitValidatedTx = jest.fn(async (..._args: unknown[]) => ({

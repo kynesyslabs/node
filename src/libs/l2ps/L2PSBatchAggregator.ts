@@ -11,6 +11,7 @@ import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import { l2psOff } from "@/forks/l2psGate"
 import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
 import { RetentionSweepGate } from "./retentionSweepGate"
@@ -249,6 +250,15 @@ export class L2PSBatchAggregator {
 
         // Service shutdown check
         if (!this.isRunning) {
+            return
+        }
+
+        // The stake hook that starts and stops this service does not fire
+        // when l2psGate activates at a later height on a node that stays
+        // staked, so each cycle checks the gate itself.
+        if (l2psOff()) {
+            log.info("[L2PS Batch Aggregator] L2PS is off at the tip (fork l2psGate): stopping")
+            await this.stop()
             return
         }
 

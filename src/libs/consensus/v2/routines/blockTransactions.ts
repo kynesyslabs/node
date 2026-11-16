@@ -6,7 +6,9 @@ import {
 } from "./mempoolFilters"
 import { DEFAULT_BLOCK_CAPS, selectBlockTransactions, type BlockCaps } from "./blockCaps"
 import { pqcTxsRefusedAt } from "@/libs/blockchain/validation/txSignatureRules"
+import { IdentityPrefetchError } from "@/libs/blockchain/validation/identityPrefetchError"
 import { ErrorCode } from "@/errors"
+import log from "src/utilities/logger"
 
 export interface BlockTransactions {
     txs: MempoolTransaction[]
@@ -74,12 +76,29 @@ export async function judgeBlockTransactions(
  * this block would refuse it for that. Failed as well as applied txs are
  * judged, since Sync checks the signature of every tx a block lists. A tx
  * the validator could not judge is left out unfailed, for a later block.
+ *
+ * @throws IdentityPrefetchError when the identity records cannot be read.
+ *   Every PQC-only tx would then be undecided, and a block forged without
+ *   them differs from the one the members that read the records forge, so
+ *   the round's catch takes it as a failed state read: the member sits the
+ *   round out and prevotes nothing.
  */
 export async function leaveOutRefusedPqcTxs(
     txs: MempoolTransaction[],
     height: number,
 ): Promise<{ kept: MempoolTransaction[]; failedTxs: FailedTranscation[] }> {
-    const { refused, undecided } = await pqcTxsRefusedAt(height, txs as never)
+    let verdicts: Awaited<ReturnType<typeof pqcTxsRefusedAt>>
+    try {
+        verdicts = await pqcTxsRefusedAt(height, txs as never)
+    } catch (error) {
+        if (error instanceof IdentityPrefetchError) {
+            log.error(
+                `[consensusRoutine] Cannot judge the PQC-only txs for block ${height}, sitting the round out: ${error.message}`,
+            )
+        }
+        throw error
+    }
+    const { refused, undecided } = verdicts
     if (refused.size === 0 && undecided.size === 0) return { kept: txs, failedTxs: [] }
     const failedTxs: FailedTranscation[] = []
     for (const [txhash, reason] of refused) {
