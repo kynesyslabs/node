@@ -484,6 +484,14 @@ this restart is a fallback there.
     bare `GCREdit mismatch`. A reason the node does not list as public still
     gets the bare text, and the node log has it. Launch-gate refusals keep
     their own text, with no prefix.
+  - An empty `RAPID_API_HOST` passes `node-doctor --production` and uses the
+    Twitter API45 default.
+  - Each RapidAPI (Twitter) provider read is capped at 4.5 s (was 30 s) and
+    at most 4 MiB, or `WEB2_MAX_RESPONSE_BYTES` if that is smaller (was
+    `WEB2_MAX_RESPONSE_BYTES` alone).
+  - A missing `RAPID_API_KEY` is now refused before any request is sent.
+    Before, the request went out without a key and RapidAPI refused it.
+    Either way the Twitter check fails.
 
 ## Known limits
 

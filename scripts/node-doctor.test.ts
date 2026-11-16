@@ -168,7 +168,7 @@ describe("node-doctor --production web2 identity credentials", () => {
         expect(lines).toContain("PASS GitHub token: accepted by GitHub")
     }, 60_000)
 
-    it("fails each credential that is missing, empty or only whitespace", () => {
+    it("fails missing provider credentials while accepting the default RapidAPI host", () => {
         const { status, lines } = run({
             GITHUB_TOKEN: "",
             DISCORD_BOT_TOKEN: "  ",
@@ -178,7 +178,19 @@ describe("node-doctor --production web2 identity credentials", () => {
         expect(line(lines, "GITHUB_TOKEN")).toStartWith("FAIL GITHUB_TOKEN: empty: this node would refuse every GitHub identity link")
         expect(line(lines, "DISCORD_BOT_TOKEN")).toStartWith("FAIL DISCORD_BOT_TOKEN: empty: this node would refuse every Discord identity link")
         expect(line(lines, "RAPID_API_KEY")).toBe("PASS RAPID_API_KEY: set")
-        expect(line(lines, "RAPID_API_HOST")).toStartWith("FAIL RAPID_API_HOST: empty: this node would refuse every Twitter/X identity link")
+        expect(line(lines, "RAPID_API_HOST")).toBe("PASS RAPID_API_HOST: empty: using Twitter API45 default (twitter-api45.p.rapidapi.com)")
+    }, 60_000)
+
+    it("uses the default for an explicitly empty RapidAPI host while requiring its key", () => {
+        const { lines } = run({ ...credentials, RAPID_API_HOST: "", RAPID_API_KEY: "" })
+        expect(line(lines, "RAPID_API_HOST")).toBe("PASS RAPID_API_HOST: empty: using Twitter API45 default (twitter-api45.p.rapidapi.com)")
+        expect(line(lines, "RAPID_API_KEY")).toStartWith("FAIL RAPID_API_KEY: empty:")
+    }, 60_000)
+
+    it("fails a whitespace-only RapidAPI host", () => {
+        const { status, lines } = run({ ...credentials, RAPID_API_HOST: " \t " })
+        expect(status).toBe(1)
+        expect(line(lines, "RAPID_API_HOST")).toBe("FAIL RAPID_API_HOST: RAPID_API_HOST is whitespace only; the node will not fall back to the default for it")
     }, 60_000)
 })
 
