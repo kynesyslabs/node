@@ -134,6 +134,28 @@ describe("judgeCycle", () => {
         const r = judgeCycle(cycle(5, 0, [forging(T0 - 5_000, 39), precommit(T0 - 3_000), forging(T0 + 30_000, 42), precommit(T0 + 33_000)]), LIMITS)
         expect(r).toMatchObject({ pass: true, signedRound: 1, roundsDrawn: 1 })
     })
+    it("keeps the new process' first round at a height the old process had opened", () => {
+        // 42 opened before the restart and retried after it: the retry is round 1,
+        // so the precommit at 48 is the third round, not the second
+        const log = [
+            forging(T0 - 5_000, 42),
+            forging(T0 + 30_000, 42),
+            forging(T0 + 50_000, 45),
+            forging(T0 + 70_000, 48),
+            precommit(T0 + 72_000),
+        ]
+        expect(parseVictimLog(log, T0).rounds.map(r => [r.height, r.startMs])).toEqual([
+            [42, T0 + 30_000],
+            [45, T0 + 50_000],
+            [48, T0 + 70_000],
+        ])
+        const r = judgeCycle(cycle(5, 0, log), LIMITS)
+        expect(r).toMatchObject({ pass: false, signedRound: 3, roundsDrawn: 3 })
+    })
+    it("does not give a pre-restart precommit to a round the new process opened", () => {
+        const log = [forging(T0 + 30_000, 42), precommit(T0 - 1_000)]
+        expect(judgeCycle(cycle(5, 0, log), LIMITS)).toMatchObject({ pass: false, signedRound: null })
+    })
 })
 
 describe("longestGap", () => {
@@ -209,5 +231,21 @@ describe("run.sh wiring", () => {
     it("runs the n30 drills on the launch fork set with gossip on", () => {
         expect(sh).toMatch(/case "\$\{SCENARIO\}" in [^)]*\|\*-n30s10\) FORK_SET=launch ;; esac/)
         expect(sh).toMatch(/case "\$\{SCENARIO\}" in [^)]*\|\*-n30s10\) export GOSSIP_ENABLED=true ;; esac/)
+    })
+    it("reads the victim's log and restart count bounded, and never restarts a victim not drawn", () => {
+        const body = (name: string) => {
+            const m = new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}$`, "m").exec(sh)
+            expect(m).not.toBeNull()
+            return (m as RegExpExecArray)[0]
+        }
+        expect(body("round_markers")).toMatch(/bdocker logs --timestamps/)
+        expect(body("round_markers")).not.toMatch(/(^|[^b])docker logs --timestamps/)
+        expect(body("restart_count_of")).toMatch(/bdocker inspect/)
+        const cycleBody = body("restart_cycle")
+        expect(cycleBody).toMatch(/\[ "\$\{drawn\}" = 1 \] \|\| restart_error/)
+        expect(cycleBody).not.toMatch(/restarting it anyway/)
+        // the count is read as soon as the victim serves, before the sync wait
+        expect(cycleBody.indexOf("restart_count_of")).toBeGreaterThan(cycleBody.indexOf("t_serving=$(now_ms)"))
+        expect(cycleBody.indexOf("restart_count_of")).toBeLessThan(cycleBody.indexOf("REJOIN_SYNC_S"))
     })
 })

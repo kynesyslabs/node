@@ -142,6 +142,9 @@ mh_init() {
     MH_DIRS_MADE=()
 }
 
+# Plain HTTP because the node serves its RPC port without TLS (validators sit
+# behind an operator's proxy for that); the URL is the one in the drill's
+# genesis and EXPOSED_URL, on hosts HOSTS.md restricts to the drill's addresses
 mh_url() { echo "http://${MH_IP[${MH_HOST_OF[$1]}]}:$(port_of "$1")"; }
 mh_nodes_on() { local n="${MH_NODES[$1]}"; echo "${n//,/ }" | wc -w; }
 

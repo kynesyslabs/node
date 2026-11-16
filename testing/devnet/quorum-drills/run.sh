@@ -1226,17 +1226,43 @@ drop_outcome() { # $1 k
     esac
 }
 
-# Stopped validators the peerlist of block $1 still lists (nothing when none)
-listed_stopped() { # $1 height, $2.. stopped nodes
-    local pl v h="$1"; shift
-    pl=$(block_at "$(reader)" "${h}" | jq -r '.content.peerlist[]? | if type == "string" then . else (.identity // .publicKey // tostring) end' |
+# The peerlist of block $2 could not be read ($3 why) in phase $1: an empty
+# read would pass for "none of the stopped validators listed", ERROR
+peerlist_error() { # $1 phase, $2 height, $3 why
+    say "ERROR: $1: the peerlist of block $2 could not be read ($3)"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }$1: peerlist of block $2 unreadable ($3)"
+    write_verdict
+    exit 2
+}
+
+# Stopped validators the peerlist of block $2 still lists, into LISTED_STILL
+# (empty when none). PHASE_END may come from a node ahead of the reader, so the
+# reader is given up to 3 rounds to reach that height before the read.
+listed_stopped() { # $1 phase, $2 height, $3.. stopped nodes
+    local phase="$1" h="$2" r hr block deadline v pl; shift 2
+    r=$(reader "$@")
+    [ -n "${r}" ] || peerlist_error "${phase}" "${h}" "no running node to read it from"
+    deadline=$((SECONDS + 3 * CONSENSUS_TIME + 30))
+    while :; do
+        hr=$(read_head "${r}") || peerlist_error "${phase}" "${h}" "node-${r} does not answer its head"
+        [ "${hr}" -ge "${h}" ] && break
+        [ ${SECONDS} -lt ${deadline} ] || peerlist_error "${phase}" "${h}" "node-${r} still at ${hr}"
+        sleep 1
+    done
+    block=$(block_at "${r}" "${h}")
+    jq -e '.content.peerlist | type == "array" and length > 0' <<< "${block}" > /dev/null 2>&1 ||
+        peerlist_error "${phase}" "${h}" "node-${r} gave no block with a peerlist"
+    pl=$(jq -r '.content.peerlist[] | if type == "string" then . else (.identity // .publicKey // tostring) end' <<< "${block}" |
         tr 'A-Z' 'a-z')
-    for v in "$@"; do grep -qxF "${PUB[v]}" <<< "${pl}" && printf 'node-%s ' "${v}"; done
+    LISTED_STILL=""
+    for v in "$@"; do grep -qxF "${PUB[v]}" <<< "${pl}" && LISTED_STILL+="node-${v} "; done
+    return 0
 }
 
 scenario_drop() {
     lockstep_or_abort 3
-    local ok=1 k victim live expect outcome watcher wait_s stopped=() still
+    local ok=1 k victim live expect outcome watcher wait_s stopped=()
     expect_progress "all-up" "${LOCK_HEIGHT}" || ok=0
     for k in $(seq 1 "${STOPS}"); do
         victim=$((N - k + 1))
@@ -1258,9 +1284,9 @@ scenario_drop() {
             # Above shardSize the chain moves on without the stopped
             # validators only because they leave the committed peerlist
             if [ "${N}" -gt "${SHARD}" ] && [ "$(tail -1 "${PHASES}" | cut -f9)" = progress ]; then
-                still=$(listed_stopped "${PHASE_END}" "${stopped[@]}")
-                if [ -n "${still}" ]; then
-                    say "down-${k}: block ${PHASE_END} still lists the stopped ${still}"; ok=0
+                listed_stopped "down-${k}" "${PHASE_END}" "${stopped[@]}"
+                if [ -n "${LISTED_STILL}" ]; then
+                    say "down-${k}: block ${PHASE_END} still lists the stopped ${LISTED_STILL}"; ok=0
                 else
                     say "down-${k}: block ${PHASE_END} lists none of the stopped validators"
                 fi
@@ -1713,24 +1739,55 @@ scenario_ride() {
 # The run records what it saw in ${RUN_DIR}/restart-input.json and
 # testing/forks/rehearsal/lib/judgeRestartDrill.ts gives the verdict.
 
+# A read the restart drill needs failed or did not answer, or the victim was
+# never drawn: a cycle not seen whole gives no verdict, ERROR
+restart_error() { # $1 victim, $2 why
+    say "ERROR: restart node-$1: $2"
+    event "restart node-$1: $2"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }restart node-$1: $2"
+    write_verdict
+    exit 2
+}
+
 # Node $1's committee-round markers logged since unix time $2, with the
-# daemon's timestamps (judgeRestartDrill.ts parseVictimLog)
+# daemon's timestamps (judgeRestartDrill.ts parseVictimLog), into MARKERS.
+# Each read is bounded (bdc, bdocker), so a daemon that stops answering ends
+# the drill instead of holding a wait loop past its deadline.
 round_markers() { # $1 node, $2 since
-    docker logs --timestamps --since "$2" "$(cid_of "$1")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
-        grep -aE 'We are forging block [0-9]+|\[commitLock\] Precommit tally for block|Restart signing floor|Timeout waiting for green light'
+    local cid rc out
+    cid=$(cid_of "$1"); rc=$?
+    [ "${rc}" = 0 ] || restart_error "$1" "docker compose ps $(bounded_why "${rc}")"
+    [ -n "${cid}" ] || restart_error "$1" "no container"
+    out=$(bdocker logs --timestamps --since "$2" "${cid}" 2>&1); rc=$?
+    [ "${rc}" = 0 ] || restart_error "$1" "docker logs $(bounded_why "${rc}")"
+    MARKERS=$(sed 's/\x1b\[[0-9;]*m//g' <<< "${out}" |
+        grep -aE 'We are forging block [0-9]+|\[commitLock\] Precommit tally for block|Restart signing floor|Timeout waiting for green light')
+}
+
+# Restart count of node $1's container into RESTART_COUNT, bounded
+restart_count_of() { # $1 node
+    local cid rc
+    cid=$(cid_of "$1"); rc=$?
+    [ "${rc}" = 0 ] && [ -n "${cid}" ] || restart_error "$1" "no container to read the restart count of"
+    RESTART_COUNT=$(bdocker inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null); rc=$?
+    [ "${rc}" = 0 ] || restart_error "$1" "docker inspect $(bounded_why "${rc}")"
+    [[ "${RESTART_COUNT}" =~ ^[0-9]+$ ]] || restart_error "$1" "docker inspect gave no restart count"
 }
 
 # One cycle on node $1, its record written to $2 (restartCountEnd filled in later)
 restart_cycle() { # $1 victim, $2 record file
-    local v="$1" h since phase_ms t_restart t_serving=null t_synced=null head=null rc_serving=null deadline hv lines t_since
+    local v="$1" h since phase_ms t_restart t_serving=null t_synced=null head=null rc_serving=null deadline hv lines t_since drawn=0
     h=$(read_head "${v}") || read_error "restart node-${v}"
     since=$(date -u +%s)
     deadline=$((SECONDS + REJOIN_TIMEOUT))
     while [ ${SECONDS} -lt ${deadline} ]; do
-        round_markers "${v}" "${since}" | grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | grep -q . && break
+        round_markers "${v}" "${since}"
+        grep -aoE 'We are forging block [0-9]+' <<< "${MARKERS}" | awk -v h="${h}" '$5 > h' | grep -q . && { drawn=1; break; }
         sleep 0.3
     done
-    [ ${SECONDS} -ge ${deadline} ] && say "node-${v} was not drawn within ${REJOIN_TIMEOUT}s; restarting it anyway"
+    # A restart outside a committee round is not the drill, as in stop_mid_round
+    [ "${drawn}" = 1 ] || restart_error "${v}" "not drawn into a committee past ${h} within ${REJOIN_TIMEOUT}s; not restarted"
     phase_ms=$(( RANDOM % (CONSENSUS_TIME * 1000) ))
     sleep "$(awk -v m="${phase_ms}" 'BEGIN { printf "%.3f", m / 1000 }')"
     dc restart -t 0 "node-${v}" >> "${STEP_LOG}" 2>&1 || { say "ABORT: restarting node-${v} failed"; exit 2; }
@@ -1740,6 +1797,10 @@ restart_cycle() { # $1 victim, $2 record file
     event "node-${v} restarted ${phase_ms} ms into its round past ${h}"
     if wait_serve "${v}" "${REJOIN_BOOT_S}"; then
         t_serving=$(now_ms)
+        # Read at once: a crash and recovery during the sync wait below would
+        # otherwise be in this count too and look like no extra restart
+        restart_count_of "${v}"
+        rc_serving="${RESTART_COUNT}"
         head=$(max_head) || read_error "restart node-${v}"
         deadline=$((SECONDS + REJOIN_SYNC_S + 30))
         while [ ${SECONDS} -lt ${deadline} ]; do
@@ -1747,16 +1808,16 @@ restart_cycle() { # $1 victim, $2 record file
             [[ "${hv}" =~ ^[0-9]+$ ]] && [ "${hv}" -ge "${head}" ] && { t_synced=$(now_ms); break; }
             sleep 1
         done
-        rc_serving=$(docker inspect -f '{{.RestartCount}}' "$(cid_of "${v}")" 2>/dev/null)
-        [[ "${rc_serving}" =~ ^[0-9]+$ ]] || rc_serving=null
         # Until it signs a round, or REJOIN_TIMEOUT: the judge says which round that was
         deadline=$((SECONDS + REJOIN_TIMEOUT))
         while [ ${SECONDS} -lt ${deadline} ]; do
-            round_markers "${v}" "${t_since}" | grep -q 'Precommit tally' && break
+            round_markers "${v}" "${t_since}"
+            grep -q 'Precommit tally' <<< "${MARKERS}" && break
             sleep 2
         done
     fi
-    lines=$(round_markers "${v}" "$((t_restart / 1000 - 1))" | jq -Rn '[inputs]')
+    round_markers "${v}" "$((t_restart / 1000 - 1))"
+    lines=$(printf '%s' "${MARKERS}" | jq -Rn '[inputs]')
     say "node-${v}: served $([ "${t_serving}" = null ] && echo never || echo "$(( (t_serving - t_restart) / 1000 ))s") after the restart; $(jq 'map(select(test("Precommit tally"))) | length' <<< "${lines}") precommit(s) since"
     jq -nc --argjson victim "${v}" --argjson tr "${t_restart}" --argjson ts "${t_serving}" --argjson head "${head}" \
         --argjson tsy "${t_synced}" --argjson rcs "${rc_serving}" --argjson log "${lines}" \

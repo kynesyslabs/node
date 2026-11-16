@@ -51,7 +51,7 @@ systemctl enable --now chrony >/dev/null 2>&1 || true
 if ! dpkg -s docker-ce docker-compose-plugin >/dev/null 2>&1; then
     install -m 0755 -d /etc/apt/keyrings
     if [ ! -s /etc/apt/keyrings/docker.asc ]; then
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        curl -fsSL --proto '=https' --tlsv1.2 https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
         chmod a+r /etc/apt/keyrings/docker.asc
     fi
     repo="deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable"

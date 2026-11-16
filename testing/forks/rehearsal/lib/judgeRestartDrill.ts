@@ -106,9 +106,11 @@ function tsMs(line: string): number | null {
  * The victim's committee rounds from its log. "We are forging block B" is
  * logged by committee members of B only (secretaryManager), once per attempt,
  * so the first one of a height opens it. A precommit tally belongs to the
- * height opened last before it.
+ * height opened last before it. Lines stamped before `sinceMs` are dropped
+ * before any grouping: a height the old process opened and the new one
+ * retries then opens at the new process' first attempt, not the old one.
  */
-export function parseVictimLog(lines: string[]): VictimLog {
+export function parseVictimLog(lines: string[], sinceMs = -Infinity): VictimLog {
     const rounds: CommitteeRound[] = []
     const byHeight = new Map<number, CommitteeRound>()
     let current: CommitteeRound | null = null
@@ -116,7 +118,7 @@ export function parseVictimLog(lines: string[]): VictimLog {
     let signingFloor: string | null = null
     for (const line of lines) {
         const at = tsMs(line)
-        if (at === null) continue
+        if (at === null || at < sinceMs) continue
         const f = FORGING.exec(line)
         if (f) {
             const height = Number(f[1])
@@ -160,7 +162,8 @@ const secs = (ms: number) => Math.round(ms / 100) / 10
 
 export function judgeCycle(c: RestartCycle, limits: RestartLimits): CycleResult {
     const reasons: string[] = []
-    const log = parseVictimLog(c.log)
+    // The log may begin a little before the restart: only the new process' lines
+    const log = parseVictimLog(c.log, c.tRestartMs)
     const bootS = c.tServingMs === null ? null : secs(c.tServingMs - c.tRestartMs)
     const syncS = c.tServingMs === null || c.tSyncedMs === null ? null : secs(c.tSyncedMs - c.tServingMs)
     if (bootS === null) reasons.push(`node-${c.victim} never served after the restart`)
@@ -169,8 +172,7 @@ export function judgeCycle(c: RestartCycle, limits: RestartLimits): CycleResult 
         if (syncS === null) reasons.push(`node-${c.victim} never reached head ${c.servingHead ?? "?"} after serving`)
         else if (syncS > limits.syncS) reasons.push(`node-${c.victim} reached head ${c.servingHead} ${syncS}s after serving (> ${limits.syncS}s)`)
     }
-    // Only rounds opened after the restart: the log may begin a little before it
-    const rounds = log.rounds.filter(r => r.startMs >= c.tRestartMs)
+    const rounds = log.rounds
     let signedRound: number | null = null
     let signedAfterS: number | null = null
     for (let k = 0; k < rounds.length; k++) {
