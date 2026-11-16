@@ -9,8 +9,7 @@
 
 import * as fs from "fs"
 import * as path from "path"
-import { Demos } from "@kynesyslabs/demosdk/websdk"
-import { ucrypto, Hashing, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { newDemosIdentity } from "./demos-identity"
 
 const OUT_DIR = path.join(process.cwd(), ".test-identity")
 // Optional --name <slug> writes to <slug>.mnemonic / <slug>.pubkey instead
@@ -44,19 +43,7 @@ if (fs.existsSync(MNEMONIC_FILE) && !FORCE) {
     process.exit(0)
 }
 
-const demos = new Demos()
-const mnemonic = demos.newMnemonic()
-
-// Mirror src/libs/identity/identity.ts:mnemonicToSeed exactly: sha3_512
-// over the raw mnemonic, then the hex-string of that hash is the seed.
-// Using bip39.mnemonicToSeed produces a DIFFERENT key (PBKDF2 path).
-const seedHash = Hashing.sha3_512(mnemonic)
-const seedHashHex = uint8ArrayToHex(seedHash).slice(2)
-const seedBytes = new TextEncoder().encode(seedHashHex)
-
-await ucrypto.generateAllIdentities(seedBytes)
-const identity = await ucrypto.getIdentity("ed25519")
-const pubkey = "0x" + identity.publicKey.toString("hex")
+const { mnemonic, address: pubkey } = await newDemosIdentity()
 
 fs.mkdirSync(OUT_DIR, { recursive: true })
 fs.writeFileSync(MNEMONIC_FILE, mnemonic, { mode: 0o600 })

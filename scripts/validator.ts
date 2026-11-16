@@ -11,23 +11,15 @@ import {
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
 import { parseNodeUrl } from "../src/config/nodeUrl"
-import {
-    MEMO_PROGRAM_IDS,
-    PROOF_MEMO_PREFIX,
-    associatedTokenAddress,
-    buildProofTransaction,
-    decodeProofTransaction,
-} from "../src/features/staking/proofBytes"
+import { MEMO_PROGRAM_IDS, PROOF_MEMO_PREFIX } from "../src/features/staking/proofBytes"
+import { PUBLIC_SOLANA_RPC, proveNft } from "./solana-proof"
 import { ACCEPTED_SECRET_FORMATS, loadSolanaSigner, type SolanaSigner } from "./solana-signer"
 
 const PEERLIST_FILE = "demos_peerlist.json"
 const DEFAULT_IDENTITY_FILE = ".demos_identity"
-const PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 
 const CONFIRM_TIMEOUT_MS = 20_000
 const CONFIRM_POLL_INTERVAL_MS = 3_000
-const SOLANA_FINALITY_TIMEOUT_MS = 180_000
-const SOLANA_POLL_INTERVAL_MS = 5_000
 
 // Global context: parsed flags shared across every sub-command.
 interface ValidatorContext {
@@ -227,10 +219,7 @@ function loadSolanaKeypair(file: string): Keypair {
     return signer.keypair
 }
 
-/**
- * Sign the proof locally, send it to Solana, then wait for finality.
- * Returns the Solana signature.
- */
+/** Warn when the mint already backs a seat, then make the proof. Returns the Solana signature. */
 async function sendNftProof(
     keypair: Keypair,
     mint: PublicKey,
@@ -243,47 +232,11 @@ async function sendNftProof(
             yellow(`mint ${mint.toBase58()} backs the seat of ${holder.address}; staking with this proof evicts it\n`),
         )
     }
-
-    const connection = solanaConnection()
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("finalized")
-    const tx = buildProofTransaction({
-        owner: keypair.publicKey,
-        mint,
-        tokenAccount: associatedTokenAddress(keypair.publicKey, mint),
-        demosAddress,
-        blockhash,
-        lastValidBlockHeight,
-    })
-    tx.sign(keypair)
-    const bytes = tx.serialize()
-    const decoded = decodeProofTransaction(bytes)
-    if (decoded.ok === false) exitWith(`built proof does not pass the node's checks: ${decoded.reason}`)
-    const signature = decoded.proof.signature
-
-    console.log(`Proving NFT ${mint.toBase58()} for ${demosAddress}...`)
     try {
-        await connection.sendRawTransaction(bytes)
+        return await proveNft(solanaConnection(), keypair, mint, demosAddress, line => console.log(line))
     } catch (e) {
-        exitWith(`Solana refused the proof: ${e instanceof Error ? e.message : String(e)}`)
+        exitWith(e instanceof Error ? e.message : String(e))
     }
-    console.log(`Solana signature: ${purple(signature)}`)
-
-    console.log("Waiting for Solana finality...")
-    const started = Date.now()
-    while (Date.now() - started < SOLANA_FINALITY_TIMEOUT_MS) {
-        const { value: [status] } = await connection.getSignatureStatuses([signature])
-        if (status?.err) exitWith(`proof transaction failed on Solana: ${JSON.stringify(status.err)}`)
-        if (status?.confirmationStatus === "finalized") {
-            console.log(green("✅ proof finalized \n"))
-            return signature
-        }
-        if (!status && (await connection.getBlockHeight()) > lastValidBlockHeight) {
-            exitWith("the blockhash expired before the proof landed on Solana; run the command again")
-        }
-        await sleep(SOLANA_POLL_INTERVAL_MS)
-    }
-    console.log(yellow(`finality not seen after ${SOLANA_FINALITY_TIMEOUT_MS / 1000}s; verify ${signature} before staking`))
-    return signature
 }
 
 interface DerivedProof {
