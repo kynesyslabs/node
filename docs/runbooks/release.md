@@ -221,6 +221,26 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show   # from the node che
 PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> <other launcher options>
 ```
 
+## Rolling upgrades
+
+On a running network, validators upgrade one at a time, whatever the number
+of validators:
+
+1. Upgrade one validator with the blocks above.
+2. Wait until it is back in the committee: healthy, at the network head, and
+   signing blocks. The check is in
+   [chain-halt-recovery.md](chain-halt-recovery.md), "Restart and upgrade
+   rule". Post its running digest on the release thread.
+3. Only then start the next one.
+
+Each stop costs the committees it sits in one vote, and a restarted node sits
+out rounds until its restart signing floor passes, so two validators down at
+once can stop a committee that holds both. If a just-restarted validator
+logs `Timeout waiting for green light` for the same block twice, restart it
+once more (`docker compose restart node`). From `v1.0.0-rc.12` the validator
+leaves a round the secretary abandoned and joins the newer one on its own, so
+this restart is a fallback there.
+
 ## Upgrade notes
 
 - From the first release after `v1.0.0-rc.5`: a node started with `--proxy`
@@ -388,6 +408,11 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     must name it: otherwise every client counts as the proxy, which shares
     one cap, or, for a proxy on the same host, is loopback and skips the
     per-caller caps (only the node-wide cap applies).
+  - Rolling restart finding (U-1): a validator restarted while its
+    committee was in a round could stay out of every later round at that
+    height. On the 3-validator rehearsal this halted the chain for about
+    10 minutes until a second restart of that validator. Apply the restart
+    rule in [Rolling upgrades](#rolling-upgrades).
 
 ## Known limits
 

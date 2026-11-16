@@ -11,6 +11,20 @@ How launch day decides whether the chain starts, and the two tools behind
 that decision. The rule below is **proposed** and becomes binding only once
 it is approved for the launch; until then treat it as the working draft.
 
+## Owner decisions
+
+| Decision | Value |
+|---|---|
+| Rule approved for launch (then `status: approved` above) | TBD (owner) |
+| GO margin: members of block 1's committee that must be proven online | 7 of 10 (the quorum) unless the owner sets 8 or 9: TBD (owner) |
+| Launch time T (unix seconds, at least 24 h after the genesis record is published) | TBD (owner) |
+| Fallback slot after a NO-GO | TBD (owner) |
+| Launch coordinator (collects the T-24h posts and the genesis acknowledgements) | TBD (owner) |
+
+At GO with exactly 7, one more committee member lost stops the chain
+before block 1. A margin of 8 or 9 is checked by people from the tool's
+per-validator output: the tool itself returns GO at `q`.
+
 ## The quorum in one paragraph
 
 A block needs `q = floor(2 * shardSize / 3) + 1` signatures
@@ -25,7 +39,10 @@ chain still makes blocks; a 4th stops it until one comes back.
 
 1. **T-24h:** every launch validator posts its identity, the image digest
    it will run, and a signing proof (below) for the agreed genesis block
-   hash.
+   hash. With them it posts, from its production host, the output of
+   `./scripts/node-doctor --production --env-from compose` (exit 0, no FAIL
+   line) and the INSTALL.md step 10 check that prints `parameters match`,
+   both run against the container it will launch with.
 2. **Operator and provider cap:** no single operator and no single cloud
    provider runs more than `min(launch validators, shardSize) − q` launch
    validators: at most 3 with `shardSize` 10 and 10 or more validators, 2
@@ -37,7 +54,8 @@ chain still makes blocks; a 4th stops it until one comes back.
    bound committee; `q` of `shardSize` 10) are online on the agreed genesis
    block and release commit, each proven to hold its identity key, and the
    cap holds. Online validators outside that committee do not count toward
-   it. Otherwise NO-GO, and retry at the next agreed slot.
+   it, and the GO margin above holds. Otherwise NO-GO, and retry at the
+   fallback slot.
 4. A validator counts only after it has made a signed block on the
    rehearsal network from its production host, key and image. Its first
    start there and at launch follows `INSTALL.md` step 8, which runs
@@ -113,7 +131,13 @@ and an operator map:
 }
 ```
 
-Run it from any machine that can reach the validators' RPC ports:
+Run it from any machine that can reach the validators' RPC ports.
+Each `--rpc` URL, and each peerlist or genesis URL the tool probes, must be
+that node's `EXPOSED_URL`, spelled as the node advertises it (same scheme,
+host and port). A node signs its hello reply over the URL it advertises, so
+the same node reached under another spelling (an IP instead of its DNS name,
+another port) answers but shows as `unproven-identity` and is not counted:
+a false NO-GO. Collect each validator's `EXPOSED_URL` with its T-24h post.
 
 ```bash
 bun scripts/launch-go-no-go.ts \
@@ -297,6 +321,16 @@ Every proof must come from a launch validator, name the agreed genesis
 (and date), and verify; `--require-all` also fails on any launch
 validator without a proof. Always pass `--require-all` for the rule 1
 check: without it a partial set passes. Exit 0 ok, 1 not ok, 2 bad input.
+
+## Restarts on launch day
+
+From T-0 on, restart or upgrade launch validators one at a time, and wait
+until each is back in the committee (signing blocks) before the next. A
+just-restarted validator that logs `Timeout waiting for green light` for the
+same block twice is restarted once more. From `v1.0.0-rc.12` the validator
+leaves a round the secretary abandoned and joins the newer one on its own,
+so this is a fallback there. The rule, the signing check and the recovery
+tiers are in [chain-halt-recovery.md](chain-halt-recovery.md).
 
 ## Failure drills behind the numbers
 
