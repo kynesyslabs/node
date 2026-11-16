@@ -7,7 +7,7 @@ status: active
 
 # Mainnet genesis hash
 
-Line references are to `stabilisation` at `4225f583`. Every value below is
+Line references are to `v1.0.0-rc.11` (`167cf232`). Every value below is
 printed by one command, which runs the node's own code:
 
 ```bash
@@ -37,7 +37,7 @@ sets both pins.
 ### File checksum
 
 `sha256sum` of the file as published. No node computes it: the node parses the
-file (`src/libs/blockchain/routines/findGenesisBlock.ts:72-78`, a JSON string
+file (`readGenesisFile`, `src/libs/blockchain/routines/findGenesisBlock.ts:83-89`, a JSON string
 holding JSON is parsed a second time), so whitespace never reaches either hash.
 It is the only value that changes on every byte, which is why operators confirm
 it under the 24 h rule below.
@@ -59,27 +59,40 @@ it under the 24 h rule below.
 4. `Hashing.sha256` (`src/libs/crypto/hashing.ts:15-16`): SHA-256 of the
    UTF-8 string, as 64 lowercase hex characters with no `0x`.
 
-So the data hash is unaffected by validator URLs, validator order, key order and
-whitespace. Changing anything else changes it, including the forks block, the
-chain id, the timestamp, a balance and the snapshot binding.
+So the genesis file's own validator URLs, validator order, key order and
+whitespace do not enter the data hash. Changing anything else changes it,
+including the forks block, the chain id, the timestamp, a balance and the
+snapshot binding.
+
+Under `identityCarryover` (the mainnet path) a validator URL does change the
+data hash. Block 0 seeds the validators from the snapshot's
+`validators.jsonl`, which holds each `connection_url`
+([genesis-import.md](genesis-import.md)). Its sha256 is listed in
+`manifest.json`, the manifest's sha256 is `snapshot.manifestSha256` in the
+genesis, and that field is part of the data hash. A changed URL therefore
+means a new snapshot, a new genesis, new hashes and a new 24 h window
+([genesis.md](genesis.md)). `scripts/genesis-hash.ts` does not compare the
+genesis `validators` URLs with `validators.jsonl`; `launch-go-no-go.ts --plan`
+does, so run `--plan` before the hash step.
 
 Where the node uses it:
 
 - On a fresh database it hashes the genesis file (`data/genesis.json`, or
   `DEMOS_GENESIS_FILE`) and refuses to boot on a mismatch with
-  `EXPECTED_GENESIS_HASH` (`src/libs/blockchain/genesis/genesisPin.ts:178-183`,
-  called from `findGenesisBlock.ts:196-203`). A production node with no pin
+  `EXPECTED_GENESIS_HASH` (`freshGenesisProblems`,
+  `src/libs/blockchain/genesis/genesisPin.ts:283-288`, called from
+  `findGenesisBlock.ts:241-250`). A production node with no pin
   refuses to start unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; a node whose genesis
   has the mainnet chain id refuses to start without a pin in any mode, and
   refuses to start while `DEMOS_ALLOW_UNPINNED_GENESIS=true` is set, pinned or
   not (`pinRequirementProblem` in `genesisPin.ts`).
 - `getGenesisDataHash` hashes the genesis data stored inside block 0
-  (`src/libs/network/handlers/blockHandlers.ts:15-33`), so it reports what the
+  (`src/libs/network/handlers/blockHandlers.ts:18-36`), so it reports what the
   node actually started from.
 
 Checked by hand: recomputing steps 1 to 4 outside the node (Python,
 `sort_keys`, compact separators) on `testing/devnet/genesis.devnet.json` gives
-the data hash the tool prints, `a468396e…a2076bc`.
+the data hash the tool prints, `bb672b88…54b0741f`.
 
 ### Genesis block hash (block 0 hash)
 
@@ -100,18 +113,19 @@ Two files with the same data hash can therefore build different blocks 0. Two
 such cases are an edited validator URL and a re-ordered key. Nodes on different
 blocks 0 cannot pair. `EXPECTED_GENESIS_BLOCK_HASH` closes this: a fresh node
 refuses to write any other block 0, and an existing node refuses to run on one
-(`genesisPin.ts:95-103`, `findGenesisBlock.ts:175-176`, `:219-222`). The genesis
-needs a fixed positive integer timestamp, or the hash is per host and the tool
-prints none (`genesisPin.ts:126-140`).
+(`blockPinProblem`, `genesisPin.ts:145-153`, called at `findGenesisBlock.ts:207-208`
+and `:267-270`). The genesis needs a fixed positive integer timestamp, or the
+hash is per host and the tool prints none (`genesisTimestampProblem`,
+`genesisPin.ts:176-191`).
 
-`/genesisBlock` serves the stored block 0 record (`src/libs/network/server_rpc.ts:315-328`).
+`/genesisBlock` serves the stored block 0 record (`src/libs/network/server_rpc.ts:342-355`).
 A RESTORE overlay would change block 0, so it is refused whenever a pin is set
-(`genesisPin.ts:184-186`, checked by `findGenesisBlock.ts:196-203` before the
-overlay at `:208-211` is applied).
+(`genesisPin.ts:290-292`, checked by `findGenesisBlock.ts:241-250` before the
+overlay at `:255-258` is applied).
 
 ### Fork schedule digest
 
-`forkScheduleDigest` in `src/libs/peer/routines/forkScheduleAgreement.ts:56-68`
+`forkScheduleDigest` in `src/libs/peer/routines/forkScheduleAgreement.ts:71-83`
 takes the loaded fork config (genesis entries over code defaults). It keeps every
 fork whose `activationHeight` is not null, drops `description`, and hashes
 `stableStringify({ chainId, forks })` with SHA-256. A fork the genesis leaves
@@ -121,11 +135,12 @@ each validator to report this digest.
 ### Snapshot manifest sha256
 
 `snapshotManifestHash` is the SHA-256 of the raw `manifest.json` bytes
-(`src/libs/blockchain/genesis/loadSnapshot.ts:509-514`; the tool's copy is
+(`src/libs/blockchain/genesis/loadSnapshot.ts:536-541`; the tool's copy is
 `scripts/genesis-hash.ts`, `snapshotManifestSha256`). The genesis binds it as
-`snapshot.manifestSha256` (`genesisPin.ts:106-120`). A node refuses a snapshot
-that hashes differently, and a pinned genesis that binds no snapshot while one
-is present (`genesisPin.ts:162-174`, `:189-194`). The manifest lists a sha256
+`snapshot.manifestSha256` (`declaredManifestHash`, `genesisPin.ts:156-170`). A
+node refuses a snapshot that hashes differently, and a pinned genesis that binds
+no snapshot while one is present (`freshGenesisProblems`, `genesisPin.ts:247-258`,
+`:294-299`). The manifest lists a sha256
 per snapshot file, which the loader verifies, so this one value binds the
 whole snapshot. It is inside the genesis, so it is also covered by the data
 hash and the block 0 hash.
@@ -133,9 +148,9 @@ hash and the block 0 hash.
 Measured on this commit (the devnet file, not mainnet's):
 
 ```
-genesis block hash:  54e13ed33554454ca0456fc356799b55a8d5e519eedf108ea1814dcd5c901dce
-genesis data hash:   a468396ed985f25e96916482a85a8a6ff57335f8543d8e9d433a00e85a2076bc
-fork schedule digest: 2860496c472240cd9d6c416046d16e488f81dd022ce38816c7e1987e4bf55d52 (chain id 1337)
+genesis block hash:  1bf42791b45d91e5d6ad09e50ba07bee952ee73142989e771b3c8d5be58be241
+genesis data hash:   bb672b8824101838c51f7c396d921947be2d69ada5e026fdf5c51a7a54b0741f
+fork schedule digest: 49e37fba014fe35aa733bc1cf61fdaf089fc178e69163e0781a347a97c33780d (chain id 1337)
 ```
 
 ## Publication
@@ -166,6 +181,17 @@ release:                  <tag> <commit> <image@digest>
   "Pin the network's genesis").
 - Each operator acknowledges by posting the file sha256 of the copy they
   mounted. The launch coordinator tracks the acknowledgements.
+- The same release notes carry the announcement copy of
+  [`parameters.env`](parameters.env). In that copy the two commented pin
+  lines at the end are replaced by
+  `EXPECTED_GENESIS_HASH=<genesis data hash>` and
+  `EXPECTED_GENESIS_BLOCK_HASH=<genesis block hash>`, copied from the record
+  above. Operators append that copy to `.env` (INSTALL.md, "Run a released
+  image", step 3) and run
+  `./scripts/node-doctor --production --parameters <announcement copy>`,
+  which fails when either pin differs from the copy. The pin lines in the
+  repository file stay commented until the genesis is published; the
+  release that follows publication fills them in.
 
 ## The 24 h rule
 
@@ -215,9 +241,9 @@ osDenomination migration (x 10^9) runs at block 0, before genesis validators
 are seeded, when its effective height (the genesis entry, or the code default
 0 when the entry is absent) is 0 and the snapshot is not already migrated; an
 already migrated snapshot under any other height is refused
-(`src/libs/blockchain/genesis/applyForksAtGenesis.ts:93-116`). At a later
+(`src/libs/blockchain/genesis/applyForksAtGenesis.ts:92-118`). At a later
 height it runs through the block hook over every row
-(`src/libs/blockchain/chainBlocks.ts:370-385`). A value off by exactly 10^9 is
+(`src/libs/blockchain/chainBlocks.ts:420-440`). A value off by exactly 10^9 is
 named as such. The node replies with amounts as decimal strings, and any other
 shape is reported as unreadable.
 
