@@ -464,6 +464,12 @@ For exchanges and wallets that reconcile balances. Amounts are in OS (1 DEM = 1 
 - A transaction included in a block that then fails pays its fee (or, for a non-native type, its gas with the same credits) and spends its nonce; the amount does not move. If the balance cannot cover the fee, only the nonce is spent.
 - The fee values, `additional_fee` (0 at launch) and the split percentages are network parameters that governance can change; read them from the transaction's `transaction_fee`, not from this page.
 
+### Crediting deposits
+
+- **Protocol finality is one block.** A block is final once it carries a quorum certificate: the signatures of 7 of the 10 members of its committee. Blocks are never reorganised after that. Check a deposit with `getTransactionStatus` (`state: "included"`; `failed` never credits the amount) and, to verify without trusting the node, `getTransactionProof` and `getFinalizedHead`. The calls and their answers are in [docs/runbooks/finality-read-api.md](docs/runbooks/finality-read-api.md).
+- **Launch margin.** For the first weeks after launch, credit a deposit only once its block is at least 3 blocks below the finalized head (about 30 s at the 10 s block time). This is an operational margin while the network is new, not a protocol rule. The date it ends is announced: TBD (owner).
+- The full integration guide (address format, statuses, failed transactions, expiry, halt notices) is [docs/mainnet/exchange-integration.md](docs/mainnet/exchange-integration.md).
+
 ### Network Exposure
 
 When running on a VPS or any machine you want peers to connect to, you must allow inbound connections on these ports. Each row names the `.env` variable that moves it; Docker publishes host and container port 1:1, so the node listens on the same number.
