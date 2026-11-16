@@ -130,6 +130,9 @@ class GenInputs30On4Hosts(unittest.TestCase):
         g = self.load("inputs", "genesis.json")
         self.assertEqual(g["properties"]["shardSize"], 10)
         self.assertEqual(len(g["validators"]), 30)
+        # the halt judge refuses a genesis without these active at block 0
+        for fork in ("quorumParity", "committeeBinding", "commitLock"):
+            self.assertEqual(g["forks"][fork]["activationHeight"], 0, fork)
         for i, v in enumerate(g["validators"], start=1):
             self.assertEqual(v["connection_url"], f"http://{self.ip_of[i]}:{node_port(i)}")
         self.assertEqual(self.load("hosts", "1", "inputs", "genesis.json"), g)
