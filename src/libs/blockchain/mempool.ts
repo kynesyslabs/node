@@ -17,6 +17,7 @@ import {
     admissionReads,
     expectsNonceEdit,
     loadAdmissionReads,
+    settlementBatchRefusal,
     verifyAdmissionEdits,
 } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
@@ -34,6 +35,7 @@ import {
 } from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
@@ -667,6 +669,19 @@ export default class Mempool {
         const oversize = this.blockSizeRefusal(transaction)
         if (oversize !== null) {
             return { confirmationBlock: null, error: oversize }
+        }
+        // The producer pools its batch on the verdict the merge gives it on
+        // every peer: one only its producer holds keeps blocks from agreeing.
+        if (transaction.content?.type === "l2psBatch" && l2psSettlementActive()) {
+            let refusal: string | null
+            try {
+                refusal = await settlementBatchRefusal(transaction)
+            } catch (error) {
+                refusal = `settlement batch could not be checked: ${error instanceof Error ? error.message : String(error)}`
+            }
+            if (refusal !== null) {
+                return { confirmationBlock: null, error: refusal }
+            }
         }
 
         const txExists = await Chain.checkTxExists(transaction.hash)

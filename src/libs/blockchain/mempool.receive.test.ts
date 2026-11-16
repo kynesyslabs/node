@@ -86,6 +86,9 @@ jest.mock("src/libs/blockchain/validation/systemRelayTx", () => ({
 const editsVerdict: { ok: boolean; reason?: string } = { ok: true }
 jest.mock("src/libs/blockchain/validation/editBinding", () => ({
     verifyAdmissionEdits: jest.fn(async () => editsVerdict),
+    // The reads feed verifyAdmissionEdits alone, mocked above.
+    admissionReads: () => ({}),
+    loadAdmissionReads: jest.fn(async () => {}),
 }))
 
 let insertedRows: Array<Record<string, unknown>> = []
