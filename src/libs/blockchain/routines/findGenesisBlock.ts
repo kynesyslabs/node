@@ -137,17 +137,31 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
     genesisData["balances"] = Object.entries(finalBalances)
 }
 
+/** Read as getShard and peerlistMerge read it: only the exact string "true" switches it on. */
+function requireValidatorsEnabled(): boolean {
+    return process.env.DEMOS_REQUIRE_VALIDATORS === "true"
+}
+
+/**
+ * The genesis file's data, or `fallback` when no file was read (`undefined`).
+ * A file that holds JSON `null` is still data, so only `undefined` falls back.
+ */
+function fileGenesisOr<T>(fileGenesis: unknown, fallback: T) {
+    return fileGenesis === undefined ? fallback : fileGenesis
+}
+
 /** The XFF mode the rate limiter will run with when it is set explicitly. */
 function configuredXffMode(): string | undefined {
     return explicitXffMode(Config.getInstance().core.xffMode)
 }
 
-/** Every refusal of this node's pin, PROD and XFF_MODE settings for a genesis with this chain id. */
+/** Every refusal of this node's pin, PROD, XFF_MODE and DEMOS_REQUIRE_VALIDATORS settings for a genesis with this chain id. */
 function bootSettingProblems(pin: string, chainId: unknown): string[] {
     return settingProblems(pin, chainId, {
         env: process.env,
         prod: Config.getInstance().core.prod,
         xffMode: configuredXffMode(),
+        requireValidators: requireValidatorsEnabled(),
     })
 }
 
@@ -175,7 +189,7 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const fileGenesis = hasGenesisFile ? readGenesisFile() : null
+    const fileGenesis = hasGenesisFile ? readGenesisFile() : undefined
     refuse(bootSettingProblems(pin, chainIdOf(fileGenesis)))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
@@ -190,18 +204,15 @@ export default async function findGenesisBlock() {
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
         refuse(bootSettingProblems(pin, chainIdOf(stored)))
-        // Without a file only the pin can be checked; the schedule check
-        // still sees the defaults this node would run with.
-        const fileOrStored = fileGenesis ?? stored
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: fileGenesis,
+                fileGenesisData: fileGenesisOr(fileGenesis, null),
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(fileOrStored)
+        warnDefaultTreasury(fileGenesisOr(fileGenesis, stored))
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -209,7 +220,9 @@ export default async function findGenesisBlock() {
         refuse(
             restartGenesisProblems({
                 storedGenesisData: stored,
-                fileGenesisData: fileOrStored,
+                // Without a file only the pin can be checked; the schedule check
+                // still sees the defaults this node would run with.
+                fileGenesisData: fileGenesisOr(fileGenesis, stored),
                 pin,
             }),
         )
@@ -241,8 +254,8 @@ export default async function findGenesisBlock() {
         )
     }
 
-    // Loading the genesis block
-    const genesisData = readGenesisFile()
+    // Block 0 is built from the data the boot-setting checks already ran on
+    const genesisData = fileGenesis
 
     // Everything is checked before the first write: a refused node must leave
     // an empty database, or its next boot finds a block 0 and trusts it.
