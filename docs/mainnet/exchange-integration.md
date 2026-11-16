@@ -138,8 +138,9 @@ There are two kinds of `failed`:
 
 ### Expiry
 
-Each transaction names a reference block. Counting from the block that
-would include it:
+Each transaction names a reference block. Counting back from the chain head
+when the next block is built (the parent of the block that would include
+it):
 
 | Reference block is | Outcome |
 |---|---|
@@ -156,8 +157,10 @@ Either way, never credit a failed transaction.
 ## Sending withdrawals
 
 - Fund the hot wallet with the amount plus 2 DEM per send.
-- Read the next nonce with `getAddressNonce {address}`. Keep your own nonce
-  counter per hot wallet and send one transaction per nonce.
+- `getAddressNonce {address}` returns the last nonce the account used. The
+  next transaction takes that value plus 1. Keep your own nonce counter per
+  hot wallet, start it from that value plus 1, and send one transaction per
+  nonce.
 - Keep at most 64 pending transactions per sender. The node refuses more, and
   refuses a nonce more than 16 ahead of the account.
 - Store the transaction hash before you broadcast. Track it with
@@ -177,7 +180,8 @@ After a timeout:
    - the chain head is more than 50 blocks past the transaction's reference
      block (see "Expiry");
    - more than 10 minutes have passed since its signed timestamp;
-   - `getAddressNonce` for the hot wallet has not moved past its nonce.
+   - `getAddressNonce` for the hot wallet is still below its nonce (equal
+     means that nonce is used).
 4. If you must send again, sign with the same nonce
    (`pay(to, amount, { nonce })` in the SDK). The node holds only one
    pending transaction per nonce, so at most one of the two can execute.

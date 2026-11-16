@@ -80,28 +80,25 @@ Before the genesis record is published, every allocation address and the
 treasury prove that their holder controls the key. This is a blocking step:
 a genesis is not published while any proof is missing.
 
-Two ways, either one per key:
+The proof is a **signed challenge**: the holder signs a fixed text with the
+key and sends the signature and the address. No transaction is ever sent
+with a mainnet key before launch, not even on a devnet: that would break the
+fresh-key rule above. `scripts/validator-prove-signing.ts` signs with any
+identity file:
 
-- **Signed challenge.** The holder signs a fixed text with the key and sends
-  the signature and the address. `scripts/validator-prove-signing.ts` signs
-  with any identity file:
+```bash
+bun scripts/validator-prove-signing.ts --genesis-hash <genesis block hash> \
+  --identity-file <key file> --out proof.json
+```
 
-  ```bash
-  bun scripts/validator-prove-signing.ts --genesis-hash <genesis block hash> \
-    --identity-file <key file> --out proof.json
-  ```
+It signs `demos-launch-proof:<genesis block hash>:<date>`, prints no secret,
+and writes `{ identity, algorithm, challenge, signature }`. Its `--verify`
+mode accepts only launch validators, so it cannot check these proofs. No
+script in the repository verifies a proof for a non-validator address: the
+genesis owner checks each one by hand with the SDK's ed25519 verify
+(`ucrypto.verify`) against the address, and records the result.
 
-  It signs `demos-launch-proof:<genesis block hash>:<date>`, prints no
-  secret, and writes `{ identity, algorithm, challenge, signature }`. Its
-  `--verify` mode accepts only launch validators, so it cannot check these
-  proofs. No script in the repository verifies a proof for a non-validator
-  address: the genesis owner checks each one by hand with the SDK's ed25519
-  verify (`ucrypto.verify`) against the address, and records the result.
-- **Test send.** Start a throwaway devnet whose genesis funds the address, and
-  have the holder send 1 OS out with that key. The proof is the confirmed
-  transaction. Wipe the devnet afterwards.
-
-Pass: every proof verifies (or every send confirms), and the custody record
+Pass: every proof verifies, and the custody record
 names the holder of every address.
 
 ## Rotation
