@@ -108,6 +108,24 @@ describe("validator.ts peer list handling", () => {
         })
     }
 
+    // An error thrown inside a command must reach the operator as its message
+    // alone, not as a dump of the error object, and the exit code stays 1.
+    it("prints only the message of an unexpected error and exits 1", async () => {
+        // A port that was just open and is now closed refuses the connection.
+        const closed = Bun.serve({ port: 0, fetch: () => new Response("{}") })
+        const origin = closed.url.origin
+        closed.stop(true)
+        const r = Bun.spawnSync(
+            [process.execPath, SCRIPT, "unstake", "--rpc", origin],
+            { cwd: dir, stdout: "pipe", stderr: "pipe" },
+        )
+        const err = String(r.stderr)
+        expect(r.exitCode).toBe(1)
+        expect(err).toContain("ECONNREFUSED")
+        expect(err).not.toContain("isAxiosError")
+        expect(err.trim().split("\n")).toHaveLength(1)
+    })
+
     // Each case maps the first and second local server to peer list entries;
     // "used" is the server the tool must contact, the other must stay unused.
     for (const [name, entries, used] of [
