@@ -49,6 +49,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/handleGCR.l2psSettlement.test.ts
     src/libs/blockchain/gcr/handleGCR.nativeValue.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/identityContextKeys.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/handleGCR.supply.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
