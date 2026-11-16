@@ -277,11 +277,11 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
             "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "gasFeeSeparation",
-            "web2ProofBinding", "tlsnProofEnforcement", "tlsnDisabled", "xmProofBinding", "l2psSettlement",
+            "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "l2psSettlement", "tlsnVerified",
         ]) {
             expect(expected[n]).toBe(0)
         }
-        for (const n of ["atomicWork", "networkGovernance", "l2psGate"]) {
+        for (const n of ["atomicWork", "networkGovernance", "l2psGate", "tlsnDisabled"]) {
             expect(expected[n]).toBeNull()
         }
     })
@@ -374,6 +374,18 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             expect(withLaunchForks(base, active).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x(?!0{64}$)[0-9a-f]{64}$/)
         }
         expect(withLaunchForks(own, active).forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
+    })
+    it("gives an active tlsnVerified the devnet payload when the genesis has none, and keeps one it has", () => {
+        const active = template({ ...MIN, tlsnVerified: { activationHeight: 0, notaryKeys: [{ hex: "FILL" }] } })
+        const devnet = JSON.parse(readFileSync(resolve(import.meta.dir, "../../devnet/genesis.devnet.json"), "utf8"))
+        const { activationHeight: _h, ...devnetPayload } = devnet.forks.tlsnVerified
+        expect(withLaunchForks(genesis(), active).forks.tlsnVerified).toEqual({ activationHeight: 0, ...devnetPayload })
+        const ownPayload = { ...devnetPayload, maxPresentationBytes: 4096 }
+        const own = { ...genesis(), forks: { tlsnVerified: { activationHeight: null, ...ownPayload } } }
+        expect(withLaunchForks(own, active).forks.tlsnVerified).toEqual({ activationHeight: 0, ...ownPayload })
+        // off, it needs no payload and gets none
+        const off = template({ ...MIN, tlsnVerified: { activationHeight: null } })
+        expect(withLaunchForks(genesis(), off).forks.tlsnVerified).toEqual({ activationHeight: null })
     })
     it("keeps the rest of the genesis and does not modify its input", () => {
         const input = genesis()

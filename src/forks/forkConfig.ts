@@ -469,6 +469,42 @@ export type L2psGateConfig = BaseForkConfig
  */
 export type TlsnDisabledConfig = BaseForkConfig
 
+/** A notary signing key, in the form the verifier reports `verifyingKey`. */
+export interface TlsnNotaryKey {
+    /** Operator label; names the key in refusals and logs. */
+    id: string
+    alg: "k256"
+    /** 33-byte SEC1 compressed secp256k1 public key, lowercase hex (66 chars). */
+    hex: string
+}
+
+/** The `tlsnVerified` payload, complete once the loader has accepted it. */
+export interface TlsnVerifiedParams {
+    /** The notaries whose attestations the node accepts. */
+    notaryKeys: readonly TlsnNotaryKey[]
+    /** sha256 of the verifier wasm this chain verifies with. */
+    verifierWasmSha256: string
+    /** Largest presentation, in bytes, the node verifies or stores. */
+    maxPresentationBytes: number
+    /** How old, in seconds before the block time, an attested connection may be. */
+    freshnessWindowSec: number
+    /** How far, in seconds, an attested time may lie after the block time. */
+    futureSkewSec: number
+}
+
+/**
+ * `tlsnVerified` fork: the node verifies a TLSNotary presentation itself, in
+ * the pinned wasm verifier, against the notary keys listed here, instead of
+ * checking its structure only. Keys rotate through a release that schedules a
+ * new payload, since governance is dormant at launch. `tlsnDisabled`, once
+ * scheduled, still refuses every TLSNotary transaction. Dormant by default;
+ * a mainnet genesis sets 0 with the keys from the notary key ceremony.
+ *
+ * The payload may be absent only while the fork is unscheduled (the code
+ * default); the loader refuses a scheduled entry without it.
+ */
+export interface TlsnVerifiedConfig extends BaseForkConfig, Partial<TlsnVerifiedParams> {}
+
 /**
  * `storageFeeSettlement` fork: the storage fee of a Storage Program create or
  * write is credited like a network fee, split between burn and treasury.
@@ -628,6 +664,7 @@ export type ForkConfig =
     | L2psSettlementConfig
     | L2psGateConfig
     | TlsnDisabledConfig
+    | TlsnVerifiedConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -668,6 +705,7 @@ export type ForkName =
     | "tlsnDisabled"
     | "storageFeeSettlement"
     | "referenceBlockRoom10"
+    | "tlsnVerified"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -707,6 +745,7 @@ export interface ForkConfigByName {
     tlsnDisabled: TlsnDisabledConfig
     storageFeeSettlement: StorageFeeSettlementConfig
     referenceBlockRoom10: ReferenceBlockRoom10Config
+    tlsnVerified: TlsnVerifiedConfig
 }
 
 /**
@@ -1053,6 +1092,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A transaction's reference block may be up to 10 blocks behind the head " +
             "(deep window 50) instead of 1 (deep window 5).",
     },
+    tlsnVerified: {
+        // Dormant by default and without keys: a node cannot verify a
+        // presentation without the notary keys the chain agreed on, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0
+        // with its payload.
+        activationHeight: null,
+        description:
+            "TLSNotary presentations are verified by the node in the pinned wasm verifier " +
+            "against the notary keys of the fork payload.",
+    },
 }
 
 /**
@@ -1096,5 +1145,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
         storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
         referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
+        tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
     }
 }
