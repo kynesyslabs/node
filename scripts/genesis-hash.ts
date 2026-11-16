@@ -45,6 +45,9 @@ import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { getSharedState } from "src/utilities/sharedState"
+import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
+import { carryoverSnapshotProblems } from "src/libs/blockchain/genesis/carryover"
+import { identityCarryoverScheduledAtZero } from "src/forks/identityCarryoverGate"
 
 export const USAGE =
     "usage: bun scripts/genesis-hash.ts --genesis FILE [--snapshot DIR] [--json] [--allow-unforgeable]"
@@ -127,6 +130,31 @@ export async function verifiedSnapshot(
             problems: [`a node would refuse the snapshot at boot: ${(e as Error).message}`],
         }
     }
+}
+
+/**
+ * What the node's carry-over import would refuse in the snapshot (balances
+ * left in, rows out of form, a validator set other than the genesis one).
+ * The node checks this at boot only under identityCarryover at block 0, and
+ * only after the hash was published, so a launch genesis is checked here.
+ */
+export async function carryoverImportProblems(genesis: unknown, snapshotDir: string): Promise<string[]> {
+    if (!identityCarryoverScheduledAtZero(genesis)) return []
+    const previous = process.env.DEMOS_SNAPSHOT_DIR
+    process.env.DEMOS_SNAPSHOT_DIR = path.resolve(snapshotDir)
+    let loader: Awaited<ReturnType<typeof loadSnapshot>>
+    try {
+        loader = await loadSnapshot()
+    } finally {
+        if (previous === undefined) delete process.env.DEMOS_SNAPSHOT_DIR
+        else process.env.DEMOS_SNAPSHOT_DIR = previous
+    }
+    // verifiedSnapshot already reports a snapshot the node cannot read
+    if (!loader.available) return []
+    const validators = (genesis as { validators?: unknown }).validators
+    return (await carryoverSnapshotProblems(loader, validators)).map(
+        p => `a node would refuse the identityCarryover import at boot: ${p}`,
+    )
 }
 
 /** The validator set block 0 seeds, and where it comes from. */
@@ -374,6 +402,9 @@ async function main(): Promise<number> {
     const snapshot = args.snapshot ? await verifiedSnapshot(args.snapshot) : null
     const result = genesisValues(genesis, manifestSha256, snapshot?.forkState ?? null)
     result.problems.push(...(snapshot?.problems ?? []))
+    if (args.snapshot && snapshot?.problems.length === 0) {
+        result.problems.push(...(await carryoverImportProblems(genesis, args.snapshot)))
+    }
     let snapshotRows: unknown[] | null = null
     try {
         snapshotRows = args.snapshot ? snapshotValidators(args.snapshot) : null

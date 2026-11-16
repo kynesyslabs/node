@@ -224,6 +224,17 @@ describe("seedValidators — input validation (no DB)", () => {
         )
     })
 
+    it.each(["", " 1000", "0x10", "+5", "1e3", "1_000"])(
+        "staked_amount %j → throws: decimal digits only",
+        async stake => {
+            const em = {} as unknown as import("typeorm").EntityManager
+            const bad = makeValidSeed({ staked_amount: stake })
+            await expect(seedValidators(em, [bad])).rejects.toThrow(
+                /staked_amount is not a valid bigint: .*\(decimal digits only\)/i,
+            )
+        },
+    )
+
     it("negative first_seen → throws", async () => {
         const em = {} as unknown as import("typeorm").EntityManager
         const bad = makeValidSeed({ first_seen: -1 })

@@ -725,6 +725,20 @@ export function treasuryReasons(
     const expected = typeof expectedTreasury === "string" && expectedTreasury.trim() ? normTreasury(expectedTreasury) : null
     const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
     const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (mainnet) {
+        const named = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+            ?.treasuryAddress
+        const test = [named, expected]
+            .filter((a): a is string => typeof a === "string")
+            .map(normTreasury)
+            .filter(a => KNOWN_TEST_TREASURIES.includes(a))
+        if (test.length > 0) {
+            return [
+                `the treasury ${test[0]} is the treasury of a test genesis in this repository; ` +
+                    "its key is not held by the owners alone, so the mainnet treasury needs a key generated for it",
+            ]
+        }
+    }
     if (expected === null) {
         return mainnet
             ? [
@@ -743,6 +757,16 @@ export function treasuryReasons(
     }
     return []
 }
+
+/**
+ * Treasuries of the devnet, rehearsal and fixture genesis files in this
+ * repository. Their keys come from shared test mnemonics, so one copied into
+ * the mainnet genesis would hand the fees to anyone holding those.
+ */
+export const KNOWN_TEST_TREASURIES: readonly string[] = [
+    "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23",
+    "0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface",
+]
 
 function normTreasury(address: string): string {
     return address.trim().toLowerCase()
