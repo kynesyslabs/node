@@ -351,7 +351,7 @@ export async function insertBlock(
             )
         }
 
-        const status = new Set([
+        const status = new Set<string>([
             TRANSACTION_STATUS.CONFIRMED,
             TRANSACTION_STATUS.FAILED,
         ])

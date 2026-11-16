@@ -54,6 +54,7 @@ mock.module("src/libs/gossip/GossipManager", () => ({
     __esModule: true,
     default: { isEnabled: () => gossipOn },
 }))
+mock.module("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 mock.module("src/libs/consensus/stakedSet", () => ({ isSelfStaked: async () => true }))
 const handleDemosWorkRequest = jest.fn(async (..._args: unknown[]) => ({ result: 200, response: {} }))
 mock.module("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({

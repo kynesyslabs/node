@@ -44,6 +44,7 @@ jest.mock("src/libs/gossip/GossipManager", () => ({
     __esModule: true,
     default: { isEnabled: () => true },
 }))
+jest.mock("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 jest.mock("src/libs/consensus/stakedSet", () => ({ isSelfStaked }))
 jest.mock("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: {} }))

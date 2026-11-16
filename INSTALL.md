@@ -592,26 +592,49 @@ docker volume inspect "$STATE_VOLUME"
 
 ### Backup the node identity
 
-Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up this install's whole state volume (`$STATE_VOLUME`, with `HELPER_IMAGE` from the same step 3), encrypted, and keep the backup off this host:
+Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up this install's whole state volume (`$STATE_VOLUME`, with `SUFFIX` and `HELPER_IMAGE` from the same step 3; a source build sets them the same way), encrypted, and keep the backup off this host:
 
 ```bash
+export GPG_TTY=$(tty)
 out="node-state$SUFFIX-$(date +%F-%H%M%S).tar.gz.gpg"
 if docker compose stop node; then
-  ( set -o pipefail
+  if ( set -o pipefail
     docker run --rm --entrypoint tar -v "$STATE_VOLUME":/src:ro "$HELPER_IMAGE" czf - -C /src . \
-      | gpg --symmetric --cipher-algo AES256 -o "$out"
-  ) || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
-  docker compose up -d --no-build    # a source build: ./run --docker -d
+      | gpg --symmetric --no-symkey-cache --cipher-algo AES256 -o "$out"
+  ) && gpg --decrypt --no-symkey-cache "$out" > /dev/null; then
+    docker compose up -d --no-build
+  else
+    echo "backup FAILED; removing $out" >&2
+    rm -f "$out"
+    docker compose up -d --no-build
+    false
+  fi
 else
   echo "the node did not stop; no backup taken" >&2
+  false
 fi
 ```
 
-A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup.
+A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup. On a source build with no `INSTANCE_SUFFIX` in `.env`, replace both `docker compose up -d --no-build` lines with `./run --docker -d`, so the node comes back with the profiles `./run` started, which can differ from `COMPOSE_PROFILES`. With a suffix, keep the block as it is: `./run --docker` resets `INSTANCE_SUFFIX` to empty, so it would start the default-named stack and leave this install's node stopped.
 
-`gpg` asks for a passphrase; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
+The block cannot clean up after an interrupt: if you press Ctrl-C at a passphrase prompt or the SSH session drops, it stops where it is and can leave the node stopped. Then run `docker compose up -d --no-build` (a source build with no `INSTANCE_SUFFIX` in `.env`: `./run --docker -d`) and delete this run's `node-state$SUFFIX-<date>-<time>.tar.gz.gpg` file, which the block did not finish checking.
+
+`GPG_TTY` lets `gpg` ask for the passphrase on this terminal, so `tty` must print a terminal path (not `not a tty`): use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file.
+
+GnuPG older than 2.2.7 rejects `--no-symkey-cache`, so the block fails, removes the file and restarts the node. On such a host, delete `--no-symkey-cache` from both `gpg` commands and paste the block again. Its decrypt check then reads the passphrase from the agent's cache, so right after it, in the same shell, flush the cache and check the file with the passphrase typed again:
+
+```bash
+gpgconf --reload gpg-agent &&
+gpg --decrypt "$out" > /dev/null &&
+gpgconf --reload gpg-agent ||
+{ echo "backup FAILED; removing $out" >&2; rm -f "$out"; false; }
+```
+
+`gpg` asks for a passphrase and asks again for the decrypt check; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
 
 Restoring is not the reverse of this: an old copy can make the key vote against a vote it already cast. Follow the restore rules in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) (newest complete copy, network head above the key's last possible vote, never two hosts running the key).
+
+This volume does not hold the genesis snapshot (`./mainnet/snapshot` above): keep the genesis snapshot on every validator for the life of the chain; with `identityCarryover` active a node without it refuses to start ([docs/mainnet/genesis-import.md](docs/mainnet/genesis-import.md)).
 
 ### View logs
 
@@ -708,6 +731,8 @@ docker volume ls --filter "name=^demos_.*$SUFFIX\$"    # left over; without a su
 ```
 
 `down -v` removes only the volumes labelled with this project, which every volume this guide seeds is, since the seeding steps run `docker compose create` first. A volume made outside compose (an older `docker run -v demos_node_state:...` seed) has no label: `down -v` prints `Volume ... was not created by Docker Compose` and keeps it. Remove such a volume by its exact name (`docker volume rm demos_node_state$SUFFIX`), and only once you have checked that no other install uses it. Never run `docker volume prune` or `down -v` from another install's checkout to clean up this one.
+
+Through the launcher, `./run --docker down -v` (or `./scripts/docker-run down -v`, also as `--volumes` or in a flag group such as `-vt 0`; as in compose, the last of these settings counts, so a later `--volumes=false` turns it off) first lists the stack's declared named volumes (the ten `demos_*` ones) and asks you to type `delete`; `down -v` also removes the anonymous volumes attached to the containers, which are not listed. Where there is no terminal (scripts, CI) it stops unless you add `--yes-delete-volumes`.
 
 ### Troubleshooting
 
@@ -959,6 +984,8 @@ For the bare-metal path, override these in `.env`:
 - `PG_HOST=localhost`
 - `PG_PORT=5332` (the host-mapped port the `./run` Postgres sidecar uses)
 - `TLSNOTARY_HOST=localhost`
+
+With your own PostgreSQL (`./run -e` or `--external-db`), set `PG_HOST` and `PG_PORT` to that server. `./run -e` takes `PG_PORT` from `-d`, else from the shell, else from `.env`; earlier versions used 5332 unless `-d` was given, so check `PG_PORT` in `.env` before upgrading.
 
 Set `EXPOSED_URL` based on your setup:
 
