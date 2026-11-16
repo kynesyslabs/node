@@ -17,7 +17,9 @@ SUITE_FILES=(
     scripts/launch-go-no-go.prover.test.ts
     scripts/launch-height1-check.test.ts
     scripts/node-doctor.test.ts
+    scripts/validator.test.ts
     scripts/validator-prove-signing.test.ts
+    docs/runbooks/dormant-mode.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
     src/config/loader.logsDir.test.ts
