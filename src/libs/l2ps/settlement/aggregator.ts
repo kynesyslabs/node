@@ -62,7 +62,29 @@ export type HistoryStatus = "pending" | "batched" | "confirmed" | "failed"
  */
 export type SubmitResult =
     | { ok: true; l1TxHash: string }
-    | { ok: false; permanent: boolean; reason: string }
+    | {
+          ok: false
+          permanent: boolean
+          reason: string
+          /** The mempool insert threw: the batch may be in, so it is followed, not re-queued. */
+          maybeSent?: boolean
+      }
+
+/**
+ * What a submission asks of the loop just before the batch enters the
+ * mempool, after its hash is known and every slow step (nonce, signature,
+ * tip) is done.
+ */
+export interface SubmitGate {
+    /** True once the loop is closed: a batch not yet in the mempool stays out. */
+    stopped(): boolean
+    /**
+     * Durably ties the rows to the batch about to go out. Throws to keep the
+     * batch out of the mempool: a batch that lands with its rows still
+     * queued is planned again and its transfers fail on their spent nonces.
+     */
+    beforeSend(l1TxHash: string): Promise<void>
+}
 
 /** Everything the settlement loop touches outside itself, injectable for tests. */
 export interface SettlementDeps {
@@ -81,8 +103,13 @@ export interface SettlementDeps {
         nonces: Map<string, bigint>,
     ): SettlementPlan
     prove(plan: SettlementPlan): Promise<SettlementProofResult>
-    /** Submits the batch to the mempool. */
-    submit(l2psUid: string, record: SettlementRecord, rows: L2PSMempoolTx[]): Promise<SubmitResult>
+    /** Submits the batch to the mempool, through `gate` right before it goes in. */
+    submit(
+        l2psUid: string,
+        record: SettlementRecord,
+        rows: L2PSMempoolTx[],
+        gate: SubmitGate,
+    ): Promise<SubmitResult>
     status(l1TxHash: string): Promise<TxStatus>
     setRows(hashes: string[], status: L2PSStatus): Promise<void>
     history(
@@ -339,11 +366,41 @@ export class SettlementAggregator {
             `[L2PS Settlement] Proved a ${plan.transfers.length}-transfer batch for ${l2psUid} in ${outcome.ms} ms`,
         )
 
+        const rowHashes = batch.rows.map(row => row.hash)
+        // The batch link is written before the batch can land, history first:
+        // a row that reads batched always finds its batch after a restart.
+        const link: { to: string | null } = { to: null }
+        const gate: SubmitGate = {
+            stopped: () => this.closed,
+            beforeSend: async l1TxHash => {
+                if (this.closed) throw new Error("the settlement loop is closed")
+                link.to = l1TxHash
+                for (const hash of rowHashes) {
+                    await this.deps.history(hash, "batched", "Included in an L1 settlement batch", l1TxHash)
+                }
+                await this.deps.setRows(rowHashes, L2PS_STATUS.BATCHED)
+            },
+        }
         let sent: SubmitResult
         try {
-            sent = await this.deps.submit(l2psUid, settlementRecord(plan, outcome.proof), batch.rows)
+            sent = await this.deps.submit(l2psUid, settlementRecord(plan, outcome.proof), batch.rows, gate)
         } catch (error) {
             sent = { ok: false, permanent: false, reason: getErrorMessage(error) }
+        }
+        if (sent.ok === false && link.to !== null) {
+            if (sent.maybeSent) {
+                this.follow(batch, link.to)
+                log.warning(
+                    `[L2PS Settlement] Batch ${link.to.slice(0, 16)}... for ${l2psUid} may be in the mempool (${sent.reason}); following it until it lands or expires`,
+                )
+                return
+            }
+            await this.unlink(batch, link.to, sent.reason)
+        }
+        if (sent.ok === false && this.closed) {
+            // The shutdown kept it out; that says nothing about the transfers.
+            log.info(`[L2PS Settlement] A ${plan.transfers.length}-transfer batch for ${l2psUid} was not sent: shutting down`)
+            return
         }
         if (sent.ok === false) {
             // Proving it again at once would be refused again; the subnet
@@ -363,29 +420,51 @@ export class SettlementAggregator {
         tally.submitted++
         tally.transfers += plan.transfers.length
 
-        // Followed from here on whatever the row writes below do: the mempool
-        // holds the batch, so its accounts stay locked until it lands or fails.
-        const rowHashes = batch.rows.map(row => row.hash)
+        // The mempool holds the batch, so its accounts stay locked until it
+        // lands or fails; its rows were marked batched before it went in.
+        this.follow(batch, l1TxHash)
+        log.info(
+            `[L2PS Settlement] Submitted batch ${l1TxHash.slice(0, 16)}... for ${l2psUid}: ${plan.transfers.length} transfers, ${plan.changes.length} accounts`,
+        )
+    }
+
+    private follow(batch: PlannedBatch, l1TxHash: string): void {
         this.inFlight.set(l1TxHash, {
-            l2psUid,
+            l2psUid: batch.l2psUid,
             l1TxHash,
-            rowHashes,
+            rowHashes: batch.rows.map(row => row.hash),
             accounts: batch.accounts,
             submittedAt: this.deps.head(),
             alone: batch.alone,
             bound: batch.bound,
         })
-        log.info(
-            `[L2PS Settlement] Submitted batch ${l1TxHash.slice(0, 16)}... for ${l2psUid}: ${plan.transfers.length} transfers, ${plan.changes.length} accounts`,
-        )
+    }
+
+    /**
+     * Puts the rows of a batch that never entered the mempool back in the
+     * queue. When that write fails the batch is followed as if sent: the
+     * chain never sees it, so it expires and its rows are queued again then,
+     * across a restart too, since the rows still name it.
+     */
+    private async unlink(batch: PlannedBatch, l1TxHash: string, reason: string): Promise<void> {
+        const rowHashes = batch.rows.map(row => row.hash)
         try {
-            await this.deps.setRows(rowHashes, L2PS_STATUS.BATCHED)
+            await this.deps.setRows(rowHashes, L2PS_STATUS.EXECUTED)
+        } catch (error) {
+            this.follow(batch, l1TxHash)
+            log.error(
+                `[L2PS Settlement] Batch ${l1TxHash.slice(0, 16)}... was not sent and its rows could not be queued again; they are queued once it expires: ${getErrorMessage(error)}`,
+            )
+            return
+        }
+        try {
             for (const hash of rowHashes) {
-                await this.deps.history(hash, "batched", "Included in an L1 settlement batch", l1TxHash)
+                await this.deps.history(hash, "pending", `L1 batch not sent: ${reason}`)
             }
         } catch (error) {
-            log.error(
-                `[L2PS Settlement] Batch ${l1TxHash.slice(0, 16)}... is submitted but its rows could not be marked batched; it is followed until it lands: ${getErrorMessage(error)}`,
+            // Only the status a sender reads is stale: the queued row is what plans it.
+            log.warning(
+                `[L2PS Settlement] Could not record that batch ${l1TxHash.slice(0, 16)}... was not sent: ${getErrorMessage(error)}`,
             )
         }
     }

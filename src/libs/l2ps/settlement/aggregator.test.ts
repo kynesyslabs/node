@@ -57,6 +57,12 @@ let refusedSubnets: Set<string>
 /** Subnets whose batches the mempool refuses for now (pool full). */
 let busySubnets: Set<string>
 let minimumFee: bigint
+/** Resolves when the submission's signing is done. */
+let signing: Promise<void>
+/** The mempool insert refuses after the batch link is written. */
+let insertRefuses: boolean
+/** The mempool insert throws after the batch went in. */
+let insertThrows: boolean
 
 /** A planner that takes transfers in order while the sender can pay and the nonce is next. */
 function plan(transfers: DecryptedTransfer[], balances: Map<string, bigint>, nonces: Map<string, bigint>): SettlementPlan {
@@ -98,11 +104,22 @@ function deps(): SettlementDeps {
             if (p.transfers.some(t => poisoned.has(t.txHash))) throw new Error("witness builder refused the batch")
             return { proof: { id: `proof${proveCalls}` }, publicSignals: [] }
         },
-        submit: async (_uid, record, batchRows) => {
+        // The real submission's order: refusals the pool knows up front, the
+        // slow signing, the stop check, the batch link, then the insert.
+        submit: async (_uid, record, batchRows, gate) => {
             if (submitRefuses || refusedSubnets.has(_uid)) return { ok: false, permanent: true, reason: "unstorable" }
             if (busySubnets.has(_uid)) return { ok: false, permanent: false, reason: "mempool full" }
+            await signing
             const l1 = `l1_${submitted.length + 1}`
+            if (gate.stopped()) return { ok: false, permanent: false, reason: "stopping" }
+            try {
+                await gate.beforeSend(l1)
+            } catch (error) {
+                return { ok: false, permanent: false, reason: String(error) }
+            }
+            if (insertRefuses) return { ok: false, permanent: false, reason: "nonce taken" }
             submitted.push({ l1, record, rows: batchRows.map(r => r.hash) })
+            if (insertThrows) return { ok: false, permanent: false, reason: "connection reset", maybeSent: true }
             statuses.set(l1, { state: "pending" })
             return { ok: true, l1TxHash: l1 }
         },
@@ -176,6 +193,9 @@ beforeEach(() => {
     refusedSubnets = new Set()
     busySubnets = new Set()
     minimumFee = FEE
+    signing = Promise.resolve()
+    insertRefuses = false
+    insertThrows = false
 })
 
 describe("SettlementAggregator", () => {
@@ -657,9 +677,9 @@ describe("a submission that throws", () => {
         queue(fine, L2PS_STATUS.EXECUTED, innerTx(fine), "subnet_b")
         const d = deps()
         const submit = d.submit
-        d.submit = async (uid, record, batchRows) => {
+        d.submit = async (uid, record, batchRows, gate) => {
             if (uid === "subnet_a") throw new Error("database unavailable")
-            return submit(uid, record, batchRows)
+            return submit(uid, record, batchRows, gate)
         }
         const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
 
@@ -673,7 +693,7 @@ describe("a submission that throws", () => {
         expect(proveCalls).toBe(2)
     })
 
-    it("follows a batch the mempool took even when marking its rows fails", async () => {
+    it("keeps a batch out of the mempool while its rows cannot be marked batched", async () => {
         const t = pay(ALICE, BOB.account, 1n, 5n)
         queue(t)
         const d = deps()
@@ -685,17 +705,115 @@ describe("a submission that throws", () => {
         }
         const agg = new SettlementAggregator(d, LIMITS)
 
-        expect(await agg.cycle()).toEqual({ submitted: 1, transfers: 1 })
-        expect(agg.inFlightBatches().has("l1_1")).toBe(true)
-        down = false
+        expect(await agg.cycle()).toEqual({ submitted: 0, transfers: 0 })
+        expect(submitted).toHaveLength(0)
+        expect(statusOf(t)).toBe(L2PS_STATUS.EXECUTED)
+        expect(history.at(-1)?.status).toBe("pending")
+        // Says nothing about the transfer.
+        expect(agg.failuresOf(t.txHash)).toBeUndefined()
 
-        // Its accounts stay locked: the row still reads queued, but is not proved again.
+        down = false
+        now += LIMITS.proverBackoffMs
+        expect(await agg.cycle()).toEqual({ submitted: 1, transfers: 1 })
+        expect(statusOf(t)).toBe(L2PS_STATUS.BATCHED)
+    })
+})
+
+describe("the batch link", () => {
+    it("is written before the batch enters the mempool, history first", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        const d = deps()
+        const order: string[] = []
+        const history = d.history
+        d.history = async (...args) => {
+            order.push(`history:${args[1]}`)
+            return history(...args)
+        }
+        const setRows = d.setRows
+        d.setRows = async (hashes, status) => {
+            order.push(`rows:${status}`)
+            return setRows(hashes, status)
+        }
+        const submit = d.submit
+        d.submit = async (uid, record, batchRows, gate) => {
+            const sent = await submit(uid, record, batchRows, gate)
+            order.push("insert")
+            return sent
+        }
+
+        await new SettlementAggregator(d, LIMITS).cycle()
+
+        expect(order).toEqual(["history:batched", `rows:${L2PS_STATUS.BATCHED}`, "insert"])
+        expect(historyBatch.get(t.txHash)).toBe("l1_1")
+    })
+
+    it("lets a restart confirm a landed batch instead of failing its transfers on their spent nonces", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        await new SettlementAggregator(deps(), LIMITS).cycle()
+        expect(submitted).toHaveLength(1)
+
+        // The node restarts; the batch lands meanwhile.
+        statuses.set("l1_1", { state: "included", blockNumber: head + 1 })
+        tip.set(ALICE.account, { balance: 96n, nonce: 5n })
+        head += 2
+        await new SettlementAggregator(deps(), LIMITS).cycle()
+
+        expect(statusOf(t)).toBe(L2PS_STATUS.CONFIRMED)
+        expect(history.some(h => h.hash === t.txHash && h.status === "failed")).toBe(false)
+        expect(submitted).toHaveLength(1)
+    })
+
+    it("is undone when the mempool refuses the batch after it was written", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        insertRefuses = true
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        await agg.cycle()
+
+        expect(statusOf(t)).toBe(L2PS_STATUS.EXECUTED)
+        expect(history.at(-1)).toMatchObject({ hash: t.txHash, status: "pending" })
+        expect(agg.inFlightBatches().size).toBe(0)
+    })
+
+    it("keeps a batch whose insert threw followed, not queued again", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        insertThrows = true
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        await agg.cycle()
+
+        expect(statusOf(t)).toBe(L2PS_STATUS.BATCHED)
+        expect(agg.inFlightBatches().has("l1_1")).toBe(true)
+        // Its accounts stay locked, so it is not proved again while it may land.
         await agg.cycle()
         expect(proveCalls).toBe(1)
-        statuses.set("l1_1", { state: "included", blockNumber: head + 1 })
-        head += 1
-        await agg.cycle()
-        expect(statusOf(t)).toBe(L2PS_STATUS.CONFIRMED)
+    })
+})
+
+describe("close() during a submission", () => {
+    it("keeps the batch out of the mempool and leaves its transfers queued and unblamed", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        let signed!: () => void
+        signing = new Promise(resolve => {
+            signed = resolve
+        })
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        const cycle = agg.cycle()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        agg.close()
+        signed()
+        await cycle
+
+        expect(submitted).toHaveLength(0)
+        expect(statusOf(t)).toBe(L2PS_STATUS.EXECUTED)
+        expect(history.filter(h => h.status === "batched")).toHaveLength(0)
+        expect(agg.failuresOf(t.txHash)).toBeUndefined()
     })
 })
 

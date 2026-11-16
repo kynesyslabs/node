@@ -28,6 +28,7 @@ import {
     SETTLEMENT_DEFERRED_TTL_BLOCKS,
     SettlementAggregator,
     type SettlementDeps,
+    type SubmitGate,
     type SubmitResult,
 } from "./settlement/aggregator"
 import { openSettlementTransfer } from "./settlement/transfer"
@@ -122,6 +123,8 @@ export class L2PSBatchAggregator {
 
     /** The settlement loop under `l2psSettlement`; built on first use. */
     private settlement: SettlementAggregator | null = null
+    /** Settles when the cycle in progress ends, stop() or not. */
+    private cycleDone: Promise<void> | null = null
 
     /**
      * Create initial statistics object
@@ -170,6 +173,13 @@ export class L2PSBatchAggregator {
         log.info("[L2PS Batch Aggregator] Starting batch aggregation service")
 
         this.isRunning = true
+        // A cycle a timed-out stop() left behind still runs on the old loop;
+        // a new loop started beside it would recover and plan the same rows.
+        if (this.cycleDone) {
+            log.info("[L2PS Batch Aggregator] Waiting for the previous cycle to end")
+            await this.cycleDone
+        }
+        if (!this.isRunning) return
         this.isAggregating = false
 
         // Off unless L2PS_ZK_ENABLED=true: the image ships the proving keys, and
@@ -302,6 +312,10 @@ export class L2PSBatchAggregator {
         this.stats.totalCycles++
         const cycleStartTime = Date.now()
 
+        let ended!: () => void
+        this.cycleDone = new Promise(resolve => {
+            ended = resolve
+        })
         try {
             this.isAggregating = true
             if (l2psSettlementActive()) {
@@ -328,8 +342,13 @@ export class L2PSBatchAggregator {
             // Retention runs whether or not this cycle aggregated anything.
             // A subnet whose submission is failing is precisely the one that
             // would otherwise hold data past the day it agreed to delete it.
-            await this.pruneHistoryRetention()
-            this.isAggregating = false
+            try {
+                await this.pruneHistoryRetention()
+            } finally {
+                this.isAggregating = false
+                this.cycleDone = null
+                ended()
+            }
         }
     }
 
@@ -765,7 +784,7 @@ export class L2PSBatchAggregator {
     }
 
     /** Submits the batch, telling a refusal no retry can change from one that may pass later. */
-    private async sendBatch(batchPayload: L2PSBatchPayload): Promise<SubmitResult> {
+    private async sendBatch(batchPayload: L2PSBatchPayload, gate?: SubmitGate): Promise<SubmitResult> {
         const refused = (reason: string, permanent = false): SubmitResult => ({ ok: false, permanent, reason })
         try {
             const sharedState = getSharedState
@@ -871,8 +890,26 @@ export class L2PSBatchAggregator {
                 return refused(unfit, true)
             }
 
-            // Submit to main mempool
-            const result = await Mempool.addTransaction(batchTransaction as any)
+            // Nonce, signature and tip above each awaited; a service stopped
+            // meanwhile must not put a batch in after its teardown.
+            if (gate?.stopped()) return refused("the service is stopping")
+            if (gate) {
+                try {
+                    await gate.beforeSend(hash)
+                } catch (error) {
+                    return refused(`the batch could not be recorded: ${getErrorMessage(error)}`)
+                }
+                if (gate.stopped()) return refused("the service is stopping")
+            }
+
+            let result: Awaited<ReturnType<typeof Mempool.addTransaction>>
+            try {
+                result = await Mempool.addTransaction(batchTransaction as any)
+            } catch (error) {
+                const message = getErrorMessage(error)
+                log.error(`[L2PS Batch Aggregator] Adding batch ${hash.slice(0, 16)}... to the mempool threw: ${message}`)
+                return { ok: false, permanent: false, reason: message, maybeSent: true }
+            }
 
             if (result.error) {
                 log.error(`[L2PS Batch Aggregator] Failed to add batch to mempool: ${result.error}`)
@@ -916,8 +953,8 @@ export class L2PSBatchAggregator {
             },
             plan: planSettlement,
             prove: proveSettlement,
-            submit: async (l2psUid, record, rows) =>
-                this.sendBatch(await this.createBatchPayload(l2psUid, rows, record)),
+            submit: async (l2psUid, record, rows, gate) =>
+                this.sendBatch(await this.createBatchPayload(l2psUid, rows, record), gate),
             status: hash => Chain.getTransactionStatus(hash),
             // Both writes throw on failure, so the settlement loop keeps the
             // batch and writes again instead of losing track of its rows.
