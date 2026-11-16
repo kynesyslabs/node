@@ -33,6 +33,7 @@ const ROUND_2 = NOW - 5
 const PEERLIST = [A, B, C]
 const GREENLIGHT_TIMEOUT_MS = 400
 let mergeDelayMs = 0
+let validateDelayMs = 0
 
 const sharedState: Record<string, any> = {
     lastBlockNumber: BLOCK - 1,
@@ -57,8 +58,12 @@ jest.mock("../routines/peerlistMerge", () => ({
         }
         return PEERLIST
     },
-    validateMergedPeerlist: async (_ref: number, list: unknown) =>
-        Array.isArray(list) ? list : null,
+    validateMergedPeerlist: async (_ref: number, list: unknown) => {
+        if (validateDelayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, validateDelayMs))
+        }
+        return Array.isArray(list) ? list : null
+    },
 }))
 
 const secretaryModule = await import("./secretaryManager")
@@ -187,6 +192,7 @@ beforeEach(() => {
     secretaryRound = null
     greenlightsToA = []
     mergeDelayMs = 0
+    validateDelayMs = 0
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "rejoin-"))
     identityFile = path.join(dir, "identity")
 })
@@ -449,6 +455,62 @@ describe("a validator that restarts mid-round", () => {
         // The attempt ends while its report is in flight.
         attempt.ended = true
         expect(await answered).not.toBe(ROUND_1)
+    })
+
+    test("a greenlight whose peerlist check outlives its attempt does not release the next attempt", async () => {
+        const ended = startMemberAttempt()
+        ended.blockTimestamp = ROUND_1
+        await ended.setOurValidatorPhase(3, true)
+        const key = waiter.keys.GREEN_LIGHT + BLOCK + 3
+        ended.sendOurValidatorPhaseToSecretary = async () => null as any
+        void waiter.wait(key, GREENLIGHT_TIMEOUT_MS).catch(() => "timeout")
+
+        validateDelayMs = 50
+        const handled = ended.receiveGreenLight(ROUND_1, 3, PEERLIST)
+        // The attempt ends and the next one starts waiting while the
+        // peerlist is being checked.
+        await settle()
+        ended.ended = true
+        for (const entry of waiter.waitList.values()) clearTimeout(entry.timeoutId)
+        waiter.waitList.clear()
+        ;(secretaryManager as any).instances.clear()
+        const next = startMemberAttempt()
+        await next.setOurValidatorPhase(3, true)
+        const waiting = waiter.wait(key, GREENLIGHT_TIMEOUT_MS).catch(() => "timeout")
+
+        expect(await handled).toBe(false)
+        expect(waiter.isWaiting(key)).toBe(true)
+        expect(waiter.preHeld.has(key)).toBe(false)
+        expect(next.mergedPeerlist).toBeNull()
+        expect(await waiting).toBe("timeout")
+    })
+
+    test("an answer whose peerlist check outlives its attempt does not release the next attempt", async () => {
+        openSecretaryRound(ROUND_1, 3, {
+            [A]: phase(1, false),
+            [B]: phase(3, false),
+            [C]: phase(3, false),
+        }, 3)
+        const ended = startMemberAttempt()
+        ended.blockTimestamp = ROUND_1
+        memberAttempt = null
+        await ended.setOurValidatorPhase(3, true)
+        const key = waiter.keys.GREEN_LIGHT + BLOCK + 3
+
+        validateDelayMs = 80
+        void ended.sendOurValidatorPhaseToSecretary(2).catch(() => "timeout")
+        await settle()
+        ended.ended = true
+        for (const entry of waiter.waitList.values()) clearTimeout(entry.timeoutId)
+        waiter.waitList.clear()
+        ;(secretaryManager as any).instances.clear()
+        const next = startMemberAttempt()
+        await next.setOurValidatorPhase(3, true)
+        const waiting = waiter.wait(key, GREENLIGHT_TIMEOUT_MS).catch(() => "timeout")
+
+        await new Promise(resolve => setTimeout(resolve, 120))
+        expect(waiter.isWaiting(key)).toBe(true)
+        expect(await waiting).toBe("timeout")
     })
 
     test("an attempt told of a newer round does not wait on its next phase", async () => {

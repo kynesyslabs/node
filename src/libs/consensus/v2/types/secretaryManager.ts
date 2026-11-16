@@ -1112,6 +1112,14 @@ export default class SecretaryManager {
             await this.receiveMergedPeerlist(peerlist)
         }
 
+        // The attempt may have ended while the peerlist was checked. Waiter
+        // keys are per height and phase, so resolving or holding one now
+        // would release the next attempt's wait without that attempt's
+        // peerlist.
+        if (this.ended) {
+            return false
+        }
+
         const waiterKey =
             Waiter.keys.GREEN_LIGHT + this.shard.blockRef + validatorPhase
         log.debug(`Waiter key: ${waiterKey}`)
@@ -1123,12 +1131,6 @@ export default class SecretaryManager {
         }
 
         if (this.ourValidatorPhase.currentPhase <= validatorPhase) {
-            // The attempt ended while the peerlist was checked: a key held
-            // now would outlive its cleanup and resolve the next attempt's
-            // wait without that attempt's peerlist.
-            if (this.ended) {
-                return false
-            }
             log.debug(`[SECRETARY ROUTINE] Pre-holding the key: ${waiterKey}`)
             log.debug(`Is Waiting for key: ${Waiter.isWaiting(waiterKey)}`)
             log.debug(
@@ -1429,6 +1431,9 @@ export default class SecretaryManager {
 
                 if (Array.isArray(res.extra.peerlist)) {
                     await this.receiveMergedPeerlist(res.extra.peerlist)
+                    if (this.ended) {
+                        return null
+                    }
                 }
 
                 // INFO: Resolve the waiter with the timestamp
