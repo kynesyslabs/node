@@ -476,6 +476,69 @@ describe("truncatedError", () => {
     expect(cut.message).not.toMatch(RAW_CONTROL)
   })
 
+  it("cuts and escapes exactly as the per-character loop did", () => {
+    // Copies of headOf and of the loop cutEscaped used before it escaped the kept head
+    // in one call. truncatedError(text, maxChars).message is cutEscaped(text, maxChars).
+    const loopHeadOf = (text: string, maxChars: number) => {
+      const head = text.slice(0, maxChars)
+      const last = head.codePointAt(head.length - 1) ?? 0
+      const splitsPair = text.length > maxChars && last >= 0xd800 && last <= 0xdbff
+      return splitsPair ? head.slice(0, -1) : head
+    }
+    const loopCutEscaped = (text: string, maxChars: number) => {
+      let shown = ""
+      for (const char of loopHeadOf(text, maxChars)) {
+        const escaped = escapeControlChars(char)
+        if (shown.length + escaped.length > maxChars) return `${shown}…(${text.length} chars)`
+        shown += escaped
+      }
+      return text.length > maxChars ? `${shown}…(${text.length} chars)` : shown
+    }
+
+    for (const maxChars of [500, 1_000]) {
+      // Escaped head of exactly maxChars: 10 two-character and 10 six-character escapes.
+      const exact = "\n".repeat(10) + "\u001b".repeat(10) + "a".repeat(maxChars - 80)
+      expect(escapeControlChars(exact)).toHaveLength(maxChars)
+      expect(truncatedError(exact, maxChars).message).toBe(escapeControlChars(exact))
+      const inputs = [
+        "",
+        "short ASCII text",
+        "a".repeat(maxChars),
+        "a".repeat(maxChars + 1),
+        "a".repeat(999) + "😀" + "tail",
+        "a".repeat(maxChars - 2) + "😀" + "tail",
+        "a".repeat(maxChars - 1) + "\ud83d",
+        "\u0085".repeat(500),
+        "[Confirm] rejected:\n\r\t\u001b\u007f\u0085‮ 😀 ".repeat(60),
+        "a".repeat(maxChars) + "\n\u001b",
+        "a".repeat(maxChars - 3) + "\u001b".repeat(3),
+        "\n" + "a".repeat(maxChars - 1),
+        exact,
+        exact + "\u001b",
+      ]
+      for (const text of inputs) {
+        const message = truncatedError(text, maxChars).message
+        expect({ maxChars, text, message }).toEqual({ maxChars, text, message: loopCutEscaped(text, maxChars) })
+      }
+    }
+  })
+
+  it("escapes a head that fits the cap in one pass", () => {
+    // escapeControlChars is one String.prototype.replace call; the per-character loop
+    // made one call per kept character.
+    const replaceSpy = spyOn(String.prototype, "replace")
+    let message = ""
+    let replaceCalls = 0
+    try {
+      message = truncatedError(new Error("x".repeat(600))).message
+      replaceCalls = replaceSpy.mock.calls.length
+    } finally {
+      replaceSpy.mockRestore()
+    }
+    expect(message).toBe(`${"x".repeat(500)}…(600 chars)`)
+    expect(replaceCalls).toBe(1)
+  })
+
   it("logs a confirm rejection of 600 ESC characters as one record with the original length marker", () => {
     const lines: string[] = []
     const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {

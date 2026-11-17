@@ -114,9 +114,16 @@ function cutText(text: string, maxChars: number): string {
 // cutText for text that is escaped here: escapes can make the text up to six times
 // longer, so whole escapes are kept up to `maxChars` and the marker gives the original
 // length. Later cuts and escaping then leave the copy and its marker as they are.
+// A head whose escaped text fits is escaped in one call; the loop keeps every
+// character of such a head, so the output is the same.
 function cutEscaped(text: string, maxChars: number): string {
+  const head = headOf(text, maxChars)
+  const escapedHead = escapeControlChars(head)
+  if (escapedHead.length <= maxChars) {
+    return text.length > maxChars ? `${escapedHead}…(${text.length} chars)` : escapedHead
+  }
   let shown = ""
-  for (const char of headOf(text, maxChars)) {
+  for (const char of head) {
     const escaped = escapeControlChars(char)
     if (shown.length + escaped.length > maxChars) return `${shown}…(${text.length} chars)`
     shown += escaped
