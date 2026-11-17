@@ -83,16 +83,17 @@ function snapshotFallback<T>(call: string, rpcUrl: string, fallback: T) {
 const REPLY_PREVIEW_CHARS = 200
 
 // Bounded log text for a failed reply: its result code and a preview of its response
-// (a string's first characters and length, else its type). The reply's response has no
-// size limit, so the reply itself is never serialized.
+// (a string's length and first characters, else its type). The reply's response has no
+// size limit, so the reply itself is never serialized. The preview comes last, so a cut
+// of the log message only shortens the preview.
 function failedReplyPreview(res: unknown): string {
   if (typeof res !== "object" || res === null) return res === null ? "null" : typeof res
   const { result, response } = res as { result?: unknown; response?: unknown }
   const isText = typeof response === "string"
   return JSON.stringify({
     result: typeof result === "number" ? result : typeof result,
-    response: isText ? response.slice(0, REPLY_PREVIEW_CHARS) : typeof response,
     ...(isText ? { responseLength: response.length } : {}),
+    response: isText ? response.slice(0, REPLY_PREVIEW_CHARS) : typeof response,
   })
 }
 

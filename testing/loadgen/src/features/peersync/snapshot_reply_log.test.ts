@@ -125,8 +125,33 @@ describe("peersync getNodeSnapshot with failed RPC replies", () => {
       const lines = snapshotLines(rpcUrl).filter(line => line.includes(`peersync.getNodeSnapshot.${call}: `))
       expect(lines).toHaveLength(1)
       expect(lines[0]).toContain(
-        `reply without result 200: {"result":500,"response":"${preview}","responseLength":4000200}`)
+        `reply without result 200: {"result":500,"responseLength":4000200,"response":"${preview}"}`)
       expect(lines[0].length).toBeLessThan(1_000)
+    }
+  })
+
+  it("keeps the result code and the response length when the logger cuts the preview", async () => {
+    // Each ESC in the 200-character preview is written as the 6-character JSON escape
+    // \u001b, so the message passes the logger's 1,000-character cut. The cut may only
+    // shorten the preview: the result code and the length come before it.
+    const response = `${"\u001b".repeat(200)}TAIL`
+    const reply = { result: 500, response }
+    rpcReply = async () => ({ ok: false, status: 500, json: async () => reply }) as unknown as Response
+    const rpcUrl = "http://node-e.invalid:53550"
+
+    const snapshot = await getNodeSnapshot(rpcUrl)
+
+    expect(snapshot.blockHash).toBe(response)
+    expect(snapshotLines(rpcUrl)).toHaveLength(3)
+    for (const call of READS) {
+      const lines = snapshotLines(rpcUrl).filter(line => line.includes(`peersync.getNodeSnapshot.${call}: `))
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toContain(`reply without result 200: {"result":500,"responseLength":204,"response":"\\u001b`)
+      expect(lines[0]).toContain(`"responseLength":204`)
+      // The message was cut: its marker is in the line and the end of the preview is not.
+      expect(lines[0]).toMatch(/…\(\d+ chars\) \{"rpcUrl":/)
+      expect(lines[0]).not.toContain(String.raw`\u001b"}`)
+      expect(lines[0]).not.toContain("\u001b")
     }
   })
 
