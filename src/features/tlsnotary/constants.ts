@@ -83,6 +83,8 @@ export const PROXY_LIMITS = {
   SESSION_MAX_LIFETIME_MS: 5 * 60 * 1000,
   /** End of a connected session that relays nothing in either direction. */
   SESSION_IDLE_MS: 60 * 1000,
+  /** How long a client may take to read what the target sent before it closed. */
+  CLOSE_DRAIN_MS: 10 * 1000,
   /**
    * Room over the notary's plaintext limits for the TLS handshake (the
    * server's certificate chain dominates), record framing and alerts.

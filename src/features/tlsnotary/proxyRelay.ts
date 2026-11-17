@@ -21,7 +21,7 @@ import {
     releasePort,
     type PortPoolState,
 } from "./portAllocator"
-import { PORT_CONFIG } from "./constants"
+import { PORT_CONFIG, PROXY_LIMITS } from "./constants"
 
 export interface RelayLimits {
     maxLifetimeMs: number
@@ -192,10 +192,29 @@ export function endRelaySession(session: RelaySession, reason: RelayEndReason): 
         } catch {
             // already closed
         }
-        try {
-            inner.server?.stop(true)
-        } catch {
-            // already stopped
+        const server = inner.server
+        if (server && reason === "target-closed") {
+            // The target's last bytes may still sit in the websocket's send
+            // buffer; a forced stop would drop them. Stop listening now and
+            // force the stop only if the client never drains.
+            try {
+                server.stop(false)
+            } catch {
+                // already stopped
+            }
+            setTimeout(() => {
+                try {
+                    server.stop(true)
+                } catch {
+                    // already stopped
+                }
+            }, PROXY_LIMITS.CLOSE_DRAIN_MS).unref?.()
+        } else {
+            try {
+                server?.stop(true)
+            } catch {
+                // already stopped
+            }
         }
     }
     releasePort(state.portPool, session.port)

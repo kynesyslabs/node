@@ -247,6 +247,64 @@ describe("TLSNotary relay session", () => {
         for (const port of ports) expect(await portFree(port)).toBe(true)
     })
 
+    it("delivers every byte of a response the target sends before it closes", async () => {
+        const SIZE = 4 * 1024 * 1024
+        const body = new Uint8Array(SIZE).map((_, i) => i % 251)
+        // A server that answers once and closes, as an HTTP/1.0 target does.
+        const closer = Bun.listen<{ rest: Uint8Array }>({
+            hostname: "127.0.0.1",
+            port: 0,
+            socket: {
+                data(socket) {
+                    socket.data = { rest: body }
+                    const pump = () => {
+                        const n = socket.write(socket.data.rest)
+                        socket.data.rest = socket.data.rest.subarray(Math.max(n, 0))
+                        if (socket.data.rest.byteLength === 0) socket.end()
+                    }
+                    pump()
+                },
+                drain(socket) {
+                    const n = socket.write(socket.data.rest)
+                    socket.data.rest = socket.data.rest.subarray(Math.max(n, 0))
+                    if (socket.data.rest.byteLength === 0) socket.end()
+                },
+            },
+        })
+        try {
+            const session = (await openRelaySession({
+                tokenId: "c".repeat(64),
+                owner: "0xowner",
+                clientKey: "127.0.0.1",
+                domain: "example.test",
+                dialHost: "127.0.0.1",
+                targetPort: closer.port,
+                limits: { ...LIMITS, maxRecvBytes: SIZE * 2 },
+            })) as any
+            const ws = await connect(session, `/${session.sessionId}`)
+            let received = 0
+            let mismatch = false
+            ws.onmessage = ev => {
+                const chunk = new Uint8Array(ev.data as ArrayBuffer)
+                for (let i = 0; i < chunk.byteLength; i++) {
+                    if (chunk[i] !== (received + i) % 251) mismatch = true
+                }
+                received += chunk.byteLength
+            }
+            const code = new Promise<number>(resolve => {
+                ws.onclose = ev => resolve(ev.code)
+            })
+            ws.send(new Uint8Array([1]))
+            expect(await code).toBe(1000)
+            expect(received).toBe(SIZE)
+            expect(mismatch).toBe(false)
+            expect(await session.ended).toBe("target-closed")
+            expect(await portFree(session.port)).toBe(true)
+        } finally {
+            closer.stop(true)
+        }
+    })
+
     it("ends when the target cannot be reached", async () => {
         const dead = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
         const port = dead.port
