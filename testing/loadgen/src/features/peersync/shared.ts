@@ -1,4 +1,4 @@
-import { envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeRpcUrl, sleep } from "../../framework/common"
+import { envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeRpcUrl, sleep, textOrType } from "../../framework/common"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
 import { getConsensusTargets, getLastBlockNumber, waitForConsensusTargets } from "../consensus/shared"
 
@@ -45,13 +45,13 @@ export async function waitForPeerSyncTargets(rpcUrls: string[], requireTx = fals
   await waitForConsensusTargets(rpcUrls, requireTx)
 }
 
-export async function getLastBlockHash(rpcUrl: string, muid: string): Promise<string | null> {
-  const res = await nodeCall(rpcUrl, "getLastBlockHash", {}, muid, NO_FALLBACKS)
+export async function getLastBlockHash(rpcUrl: string, muid: string, call = nodeCall): Promise<string | null> {
+  const res = await call(rpcUrl, "getLastBlockHash", {}, muid, NO_FALLBACKS)
   return typeof res?.response === "string" && res.response.length > 0 ? res.response : null
 }
 
-export async function getPeerlist(rpcUrl: string, muid: string): Promise<PeerShape[]> {
-  const res = await nodeCall(rpcUrl, "getPeerlist", {}, muid, NO_FALLBACKS)
+export async function getPeerlist(rpcUrl: string, muid: string, call = nodeCall): Promise<PeerShape[]> {
+  const res = await call(rpcUrl, "getPeerlist", {}, muid, NO_FALLBACKS)
   return Array.isArray(res?.response) ? res.response : []
 }
 
@@ -67,20 +67,35 @@ export async function getNodeIdentity(rpcUrl: string): Promise<string | null> {
   }
 }
 
-// Logs a failed snapshot read once per node and call, then returns the fallback.
+// Logs a failed snapshot read once per node and call.
+function logSnapshotRead(call: string, rpcUrl: string, error: unknown) {
+  logNonCriticalErrorOnce(`peersync.getNodeSnapshot.${call}:${rpcUrl}`, `peersync.getNodeSnapshot.${call}`, error, { rpcUrl })
+}
+
+// Logs a rejected snapshot read, then returns the fallback.
 function snapshotFallback<T>(call: string, rpcUrl: string, fallback: T) {
   return (error: unknown): T => {
-    logNonCriticalErrorOnce(`peersync.getNodeSnapshot.${call}:${rpcUrl}`, `peersync.getNodeSnapshot.${call}`, error, { rpcUrl })
+    logSnapshotRead(call, rpcUrl, error)
     return fallback
   }
+}
+
+// nodeCall resolves on transport and HTTP errors too: rpcPost turns a failed fetch into a
+// result 599 reply, and nodeCall drops the HTTP status and passes the body on
+// (framework/rpc.ts). A node reply that succeeded carries result 200, so any other reply
+// is logged like a rejection; the read then handles it as before.
+const snapshotNodeCall: typeof nodeCall = async (rpcUrl, message, ...rest) => {
+  const res = await nodeCall(rpcUrl, message, ...rest)
+  if (res?.result !== 200) logSnapshotRead(message, rpcUrl, `reply without result 200: ${textOrType(res)}`)
+  return res
 }
 
 export async function getNodeSnapshot(rpcUrl: string): Promise<NodeSnapshot> {
   const [identity, peerlist, blockNumber, blockHash] = await Promise.all([
     getNodeIdentity(rpcUrl),
-    getPeerlist(rpcUrl, `peersync:peerlist:${rpcUrl}`).catch(snapshotFallback("getPeerlist", rpcUrl, [] as PeerShape[])),
-    getLastBlockNumber(rpcUrl, `peersync:block:number:${rpcUrl}`).catch(snapshotFallback("getLastBlockNumber", rpcUrl, null)),
-    getLastBlockHash(rpcUrl, `peersync:block:hash:${rpcUrl}`).catch(snapshotFallback("getLastBlockHash", rpcUrl, null)),
+    getPeerlist(rpcUrl, `peersync:peerlist:${rpcUrl}`, snapshotNodeCall).catch(snapshotFallback("getPeerlist", rpcUrl, [] as PeerShape[])),
+    getLastBlockNumber(rpcUrl, `peersync:block:number:${rpcUrl}`, snapshotNodeCall).catch(snapshotFallback("getLastBlockNumber", rpcUrl, null)),
+    getLastBlockHash(rpcUrl, `peersync:block:hash:${rpcUrl}`, snapshotNodeCall).catch(snapshotFallback("getLastBlockHash", rpcUrl, null)),
   ])
 
   const peerIdentities = peerlist

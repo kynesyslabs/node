@@ -138,6 +138,7 @@ SUITE_FILES=(
     # Loadgen error logging (#708), including the guard against silent catches
     testing/loadgen/src/features/omni/close_log.test.ts
     testing/loadgen/src/features/peersync/shared.test.ts
+    testing/loadgen/src/features/peersync/snapshot_reply_log.test.ts
     testing/loadgen/src/features/tlsnotary/shared.test.ts
     testing/loadgen/src/framework/common.test.ts
     testing/loadgen/src/framework/silent_catch.test.ts
