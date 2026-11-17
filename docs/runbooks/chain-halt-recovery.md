@@ -115,7 +115,7 @@ Public updates follow the launch-week communication plan.
 block twice is restarted once more (`docker compose restart node`). On rc.11
 such a validator could stay out of every round at that height (rehearsal: a
 10 min halt on a 3-validator chain, cleared by one more restart). From
-`v1.0.0-rc.12` the validator leaves a round the secretary abandoned and joins
+`v1.0.0-rc.13` the validator leaves a round the secretary abandoned and joins
 the newer one on its own, so the rule is a fallback there.
 
 ### Timings from the rehearsals

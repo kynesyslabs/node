@@ -120,7 +120,7 @@ describe("Twitter provider reads", () => {
             "utf8",
         )
         const note = runbook
-            .split("- From `v1.0.0-rc.12`:")[1]
+            .split("- From `v1.0.0-rc.13`:")[1]
             ?.split("\n## ")[0]
             .replace(/\s+/g, " ")
         expect(note).toContain("capped at 4.5 s")
