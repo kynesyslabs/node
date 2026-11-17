@@ -238,6 +238,8 @@ describe("verify CLI", () => {
             validators: [row(keys[0].identity), row(keys[3].identity)],
             timestamp: 1793318400,
             snapshot: { manifestSha256: sha256(manifest) },
+            // A node pinned to this genesis refuses one that declares no fork schedule
+            forks: {},
         }
         edit(data)
         writeFileSync(genesis, JSON.stringify(data))

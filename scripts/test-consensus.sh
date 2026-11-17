@@ -29,6 +29,7 @@ SUITE_FILES=(
     src/features/tlsnotary/proxyToken.test.ts
     src/features/tlsnotary/proxyRelay.test.ts
     src/features/tlsnotary/relayTarget.test.ts
+    src/features/tlsnotary/notaryUnreachable.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts

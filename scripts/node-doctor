@@ -836,6 +836,44 @@ check_genesis_file() {
 		"${GENESIS_SHARD_SIZE_MIN}" "${GENESIS_SHARD_SIZE_MAX}" <<<"${COMPOSE_CONFIG_JSON}")
 }
 
+# The fork schedule check the node runs on its genesis at boot
+# (genesisScheduleProblems), run as the node would run it: in the node image
+# under compose (no Bun on a Docker host), with Bun on a bare-metal host. A
+# pinned hash accepts a genesis that this check refuses, and the node would
+# report that only after it was stopped for the upgrade.
+GENESIS_SCHEDULE_CHECK=scripts/genesis-schedule-check.ts
+check_genesis_schedule() {
+	local item="genesis fork schedule" out code line failed=0
+	local -a cmd
+	if [[ -n "${COMPOSE_CONFIG_JSON}" ]]; then
+		cmd=(docker compose run --rm --no-deps -T node bun "${GENESIS_SCHEDULE_CHECK}")
+	elif command -v bun &>/dev/null; then
+		cmd=(env "DEMOS_GENESIS_FILE=$(node_env DEMOS_GENESIS_FILE)"
+			"EXPECTED_GENESIS_HASH=$(node_env EXPECTED_GENESIS_HASH)"
+			"EXPECTED_GENESIS_BLOCK_HASH=$(node_env EXPECTED_GENESIS_BLOCK_HASH)"
+			bun "${GENESIS_SCHEDULE_CHECK}")
+	else
+		prod_line WARN "${item}" "skipped: bun is needed to run the node's boot check of the genesis (${GENESIS_SCHEDULE_CHECK})"
+		return
+	fi
+	out=$("${cmd[@]}" 2>&1)
+	code=$?
+	if [[ ${code} -eq 0 ]]; then
+		prod_line PASS "${item}" "the node's boot check accepts it"
+		return
+	fi
+	if [[ ${code} -eq 1 ]]; then
+		while IFS= read -r line; do
+			[[ "${line}" == "problem: "* ]] || continue
+			prod_line FAIL "${item}" "the node refuses to boot on it: ${line#problem: }"
+			failed=1
+		done <<<"${out}"
+		[[ ${failed} -eq 1 ]] && return
+	fi
+	line=$(printf '%s\n' "${out}" | grep -v '^[[:space:]]*$' | tail -n 1)
+	prod_line FAIL "${item}" "the node's boot check did not run (exit ${code}): ${line:-no output}"
+}
+
 # The provider credentials the node verifies web2 identity links with. No
 # node setting refuses those links, so a mainnet validator always takes
 # them: without a credential it refuses every link of that provider (proof
@@ -928,6 +966,7 @@ run_production_checks() {
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
 	check_genesis_file
+	check_genesis_schedule
 	check_web2_identity_credentials
 	check_github_token
 	check_identity_file_mode
@@ -965,7 +1004,8 @@ OPTIONS:
                     mismatch policy, block timing, fees, stake floor, ZK points),
                     clock sync, outbound NTP, genesis pins, the genesis file the
                     node reads (shardSize range, validators against the quorum,
-                    validator URLs), the identity file mode (600 or stricter),
+                    validator URLs, and the node's own boot check of its fork
+                    schedule), the identity file mode (600 or stricter),
                     the GitHub token (one request to api.github.com),
                     and one-start switches left set; one
                     PASS/WARN/FAIL line each, exit 1 on any FAIL

@@ -105,10 +105,11 @@ genesis file, the snapshot and the table exist, with no node running:
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json --snapshot mainnet/snapshot \
   --operators mainnet/launch-validators.json \
-  --expected-treasury <agreed treasury address> [--json]
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony> [--json]
 ```
 
-One `PASS`/`FAIL` line per check: genesis forks, treasury, chain id, shard size,
+One `PASS`/`FAIL` line per check: genesis forks, treasury, notary keys, chain id, shard size,
 genesis values (no template `FILL` left), genesis file (a node would load it), block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
 provider and region for each), operator and provider cap, voting power per
@@ -147,6 +148,7 @@ bun scripts/launch-go-no-go.ts \
   --genesis-hash <agreed genesis block hash> \
   --commit <release commit SHA> \
   --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony> \
   [--peerlist demos_peerlist.json] [--rpc https://v1.example:53550,...] \
   [--json]
 ```
@@ -154,7 +156,8 @@ bun scripts/launch-go-no-go.ts \
 `--genesis-hash`, `--commit` and `--snapshot` are required for GO; without
 any of them the result is NO-GO and says which one is missing. On the
 mainnet chain id (any `properties.id` other than testnet `1` and devnet
-`1337`) `--expected-treasury` is required as well, for GO and for `--plan`.
+`1337`) `--expected-treasury` and `--expected-notary-keys` are required as
+well, for GO and for `--plan`.
 
 - `--expected-treasury` is the agreed `gasFeeSeparation` treasury address,
   taken from the owners' sign-off, not from the genesis file being checked.
@@ -165,6 +168,21 @@ mainnet chain id (any `properties.id` other than testnet `1` and devnet
   `DEMOS_EXPECTED_TREASURY`. It is exit 2 when the value is not `0x` and 64
   hex characters. On the testnet and devnet chain ids it is optional and
   checked only when given.
+
+- `--expected-notary-keys` is the list of notary public keys the notary key
+  ceremony produced (`docs/runbooks/tlsn-notary.md`, section 3), as
+  comma-separated `id:hex` entries, for example
+  `demos-notary-1:<hex>,demos-notary-standby:<hex>`, taken from the
+  holders' sign-off, not from the genesis file being checked. The genesis
+  `forks.tlsnVerified.notaryKeys` must hold exactly these id and key pairs
+  (order, hex case and surrounding spaces are ignored), or the result is
+  NO-GO: the node only checks that a key is a well-formed secp256k1 point,
+  so any key whose private half someone else holds would otherwise attest
+  identity links from block 0. Without the flag the tool reads
+  `DEMOS_EXPECTED_NOTARY_KEYS`. It is exit 2 when an entry is not `id:hex`,
+  an id or key the node would refuse in a genesis, or a repeated id or key.
+  On the testnet and devnet chain ids it is optional and checked only when
+  given.
 
 - `--genesis-hash` is the agreed genesis block hash (above). The tool also
   builds block 0 from `--genesis` and is NO-GO when the two differ, so the
@@ -202,8 +220,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
   `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
-  (`--expected-treasury`), gives `tlsnVerified` the notary keys from the
-  notary key ceremony (NO-GO on the template's placeholder keys, on no keys,
+  (`--expected-treasury`), gives `tlsnVerified` exactly the notary keys from
+  the notary key ceremony (`--expected-notary-keys`; NO-GO on the template's placeholder keys, on no keys,
   on a payload the node would refuse and on a devnet, spike or test-vector
   key, `KNOWN_TEST_NOTARY_KEYS`),
   uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`
@@ -221,8 +239,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   block, other genesis data (`getGenesisDataHash`), another fork schedule
   digest, one of the mainnet forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
-- Exit 2: bad input, including a malformed `--genesis-hash`, `--commit` or
-  `--expected-treasury`, and a `--shard-size` that differs from the genesis.
+- Exit 2: bad input, including a malformed `--genesis-hash`, `--commit`,
+  `--expected-treasury` or `--expected-notary-keys`, and a `--shard-size` that differs from the genesis.
 
 **Identity proof.** `/info` is a claim anyone can make, so an endpoint
 (for example a `--rpc` URL) could otherwise answer for an offline

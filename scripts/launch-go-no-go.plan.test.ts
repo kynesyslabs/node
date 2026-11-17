@@ -19,7 +19,7 @@ import {
     mainnetGenesisReasons,
     validatorTable,
 } from "./launch-go-no-go"
-import { tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
+import { notaryKeyHex, tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
 
 const ROOT = join(import.meta.dir, "..")
 const TEMPLATE = join(ROOT, "docs/mainnet/genesis.template.json")
@@ -27,6 +27,8 @@ const readTemplate = () => JSON.parse(readFileSync(TEMPLATE, "utf8"))
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
 const isFill = (v: unknown) => typeof v === "string" && v.startsWith("FILL")
 const TREASURY = "0x" + "ab".repeat(32)
+/** The notary keys tlsnVerifiedPayload() lists, as --expected-notary-keys names them. */
+const NOTARY_KEYS = `demos-notary-1:${notaryKeyHex(0x11)},demos-notary-standby:${notaryKeyHex(0x22)}`
 
 /** The template with every FILL field given a value, as the owners would. */
 function filledTemplate(validators = 10) {
@@ -147,7 +149,7 @@ describe("mainnet genesis template", () => {
     it("shows unset notary keys on the genesis forks line of --plan", () => {
         const g = filledTemplate()
         g.forks.tlsnVerified = readTemplate().forks.tlsnVerified
-        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY })
+        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toContain("genesis forks")
         expect(checks.find(c => c.name === "genesis forks")?.details.join("\n")).toContain("placeholder or unset notary keys")
     })
@@ -223,7 +225,7 @@ describe("mainnetGenesisReasons", () => {
         for (const chainId of REFUSED_MAINNET_CHAIN_IDS) {
             const g = filledTemplate()
             g.properties.id = chainId
-            const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY })
+            const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
             expect(failing(checks)).toEqual(["chain id"])
         }
     })
@@ -284,6 +286,7 @@ describe("validator table", () => {
             operators: table(10),
             genesisFileProblems: [],
             expectedTreasury: TREASURY,
+            expectedNotaryKeys: NOTARY_KEYS,
         })
         expect(failing(checks)).toEqual([])
     })
@@ -299,6 +302,7 @@ describe("validator table", () => {
             operators: table(10),
             genesisFileProblems: [],
             expectedTreasury: TREASURY,
+            expectedNotaryKeys: NOTARY_KEYS,
         })
         expect(failing(checks)).toEqual(["genesis values"])
         const details = checks.find(c => c.name === "genesis values").details.join("\n")
@@ -314,6 +318,7 @@ describe("validator table", () => {
             operators: table(10, i => (i < 4 ? { operator: "big-op" } : { operator: `op-${i}` })),
             genesisFileProblems: [],
             expectedTreasury: TREASURY,
+            expectedNotaryKeys: NOTARY_KEYS,
         })
         expect(failing(checks)).toEqual(["operator and provider cap", "voting power per operator and provider"])
         expect(checks.find(c => c.name === "voting power per operator and provider").details.join("\n")).toContain(
@@ -330,6 +335,7 @@ describe("validator table", () => {
             operators: table(10, i => (i < 4 ? { provider: spellings[i] } : { provider: `cloud-${i}` })),
             genesisFileProblems: [],
             expectedTreasury: TREASURY,
+            expectedNotaryKeys: NOTARY_KEYS,
         })
         expect(failing(checks)).toContain("operator and provider cap")
         expect(checks.find(c => c.name === "operator and provider cap").details.join("\n")).toContain("provider aws runs 4 of 10")
@@ -339,7 +345,7 @@ describe("validator table", () => {
         const ops = table(10)
         delete (ops[id(2)] as Record<string, string>).region
         delete ops[id(3)]
-        const checks = launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: ops, genesisFileProblems: [], expectedTreasury: TREASURY })
+        const checks = launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: ops, genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toEqual(["validator table"])
         const details = checks.find(c => c.name === "validator table").details.join("\n")
         expect(details).toContain(`have no region: ${id(2)}`)
@@ -347,7 +353,7 @@ describe("validator table", () => {
     })
 
     it("fails fewer launch validators than the quorum", () => {
-        const checks = launchPlanChecks({ genesis: filledTemplate(6), blockZero: blockZero(6), shardSize: 10, operators: table(6), genesisFileProblems: [], expectedTreasury: TREASURY })
+        const checks = launchPlanChecks({ genesis: filledTemplate(6), blockZero: blockZero(6), shardSize: 10, operators: table(6), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toContain("launch validators")
     })
 
@@ -356,15 +362,27 @@ describe("validator table", () => {
         g.properties.id = 1
         g.properties.shardSize = 4
         g.forks.commitLock = { activationHeight: null }
-        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 4, operators: table(10), genesisFileProblems: ["x"], expectedTreasury: TREASURY })
+        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 4, operators: table(10), genesisFileProblems: ["x"], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toEqual(
             expect.arrayContaining(["genesis forks", "chain id", "shard size", "genesis file"]),
         )
     })
 
+    it("fails the notary keys check without the agreed keys, or with others in the genesis", () => {
+        const plan = (expectedNotaryKeys: string | null) =>
+            launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys })
+        const missing = plan(null)
+        expect(failing(missing)).toEqual(["notary keys"])
+        expect(missing.find(c => c.name === "notary keys").details.join("\n")).toContain("no --expected-notary-keys given")
+        const wrong = plan(`demos-notary-1:${notaryKeyHex(0x11)},demos-notary-standby:${notaryKeyHex(0x33)}`)
+        expect(failing(wrong)).toEqual(["notary keys"])
+        expect(wrong.find(c => c.name === "notary keys").details.join("\n")).toContain("are not the agreed notary keys")
+        expect(failing(plan(NOTARY_KEYS))).toEqual([])
+    })
+
     it("fails the treasury check without the agreed treasury, or with another one in the genesis", () => {
         const plan = (expectedTreasury: string | null, g = filledTemplate()) =>
-            launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury })
+            launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury, expectedNotaryKeys: NOTARY_KEYS })
         const missing = plan(null)
         expect(failing(missing)).toEqual(["treasury"])
         expect(missing.find(c => c.name === "treasury").details.join("\n")).toContain("no --expected-treasury given")

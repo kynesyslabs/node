@@ -76,11 +76,13 @@ bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
   --operators mainnet/launch-validators.json \
-  --expected-treasury <agreed treasury address>
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony>
 ```
 
 It prints one `PASS` or `FAIL` line per check (genesis forks, the
-treasury against `--expected-treasury`, chain id,
+treasury against `--expected-treasury`, the `tlsnVerified` notary keys
+against `--expected-notary-keys`, chain id,
 shard size, genesis values (no template `FILL` left), whether a node
 would load the file, block 0 validator set,
 launch validators against the quorum, the validator table, the operator

@@ -79,7 +79,7 @@ function isIntIn(value: unknown, [min, max]: readonly [number, number]): value i
 
 const show = (value: unknown) => JSON.stringify(value)?.slice(0, 120) ?? String(value)
 
-function notaryKeyProblems(raw: unknown, at: string): string[] {
+export function notaryKeyProblems(raw: unknown, at: string): string[] {
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
         return [`${at} must be an object {id, alg, hex}, got ${show(raw)}`]
     }

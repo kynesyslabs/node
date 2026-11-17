@@ -93,7 +93,9 @@ block, then `sudo nginx -t && sudo systemctl reload nginx`:
 #   7047 / 7147  = the TLSNotary notary (TLSNOTARY_PORT; 7047 main/testnet,
 #                  7147 devnet). Add your value here if you changed it.
 #   5[567]\d{3}  = the 55000-57999 proxy session window.
-location ~ ^/tlsn/(7047|7147|5[567]\d{3})/?(.*)$ {
+# The regex is quoted: unquoted, nginx reads the `{` of `\d{3}` as the start
+# of the block and `nginx -t` fails with "missing closing parenthesis".
+location ~ "^/tlsn/(7047|7147|5[567]\d{3})/?(.*)$" {
     # $is_args$args is REQUIRED — the notary reads sessionId from the query
     # (…/notarize?sessionId=…). Drop it and every notarize upgrade dies with
     # `CloseEvent 1006` (gotcha #2 above).
@@ -108,7 +110,7 @@ location ~ ^/tlsn/(7047|7147|5[567]\d{3})/?(.*)$ {
 
 The notary port is already covered by the class above. If your `TLSNOTARY_PORT`
 is non-default, add it to the alternation
-(`^/tlsn/(<your-port>|7047|7147|5[567]\d{3})/…`). **Do not** replace this with a
+(`"^/tlsn/(<your-port>|7047|7147|5[567]\d{3})/?(.*)$"`, keeping the quotes). **Do not** replace this with a
 bare `^/tlsn/(\d+)/` catch-all: it reaches every loopback port *and* is the shape
 that tends to lose `$is_args$args` — both failure modes have hit prod.
 

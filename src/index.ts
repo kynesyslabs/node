@@ -1218,20 +1218,35 @@ async function main() {
                     log.warning(msg)
                 }
             } catch (error) {
-                log.error(
-                    "[TLSNotary] Failed to start TLSNotary service: " + error,
-                )
-                bootTracker.fail("tlsnotary", error)
-                subsystemError(getSharedState.subsystems, "tlsnotary", error)
-                const { isTLSNotaryFatal } =
-                    await import("./features/tlsnotary")
-                if (isTLSNotaryFatal()) {
-                    log.error(
-                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                const tlsnotary = await import("./features/tlsnotary")
+                if (error instanceof tlsnotary.NotaryUnreachableError) {
+                    // requestTLSNproxy needs only TLSNOTARY_ENABLED: a node
+                    // that relays for the network's notary hosts none itself
+                    log.warning(
+                        `[TLSNotary] Relay only: ${error.message}. This node serves requestTLSNproxy ` +
+                            "sessions; provers notarize at the network's notary. To host a notary on this " +
+                            "node, start it (docker compose profile tlsnotary); TLSNOTARY_FATAL=true " +
+                            "makes a missing notary stop the node.",
                     )
-                    process.exit(1)
+                    bootTracker.ready("tlsnotary")
+                    markSubsystem(getSharedState.subsystems, "tlsnotary", "ready", {
+                        enabled: true,
+                        extra: { mode: "relay-only", notary: error.message },
+                    })
+                } else {
+                    log.error(
+                        "[TLSNotary] Failed to start TLSNotary service: " + error,
+                    )
+                    bootTracker.fail("tlsnotary", error)
+                    subsystemError(getSharedState.subsystems, "tlsnotary", error)
+                    if (tlsnotary.isTLSNotaryFatal()) {
+                        log.error(
+                            "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                        )
+                        process.exit(1)
+                    }
+                    // Continue without TLSNotary (failsafe)
                 }
-                // Continue without TLSNotary (failsafe)
             }
         } else {
             log.info(
