@@ -2,6 +2,8 @@
  * rpc_loadgen and transfer_loadgen wait for every target in parallel. When two
  * targets fail in different ways, each target's first failure must be logged,
  * not only the first failure in the process (#708).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"

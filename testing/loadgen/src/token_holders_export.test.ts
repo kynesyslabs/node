@@ -1,6 +1,8 @@
 /**
  * parseBigintOrZero falls back to 0n for a malformed amount. That fallback must
  * still happen, and the malformed value must show up in the log (#708).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"

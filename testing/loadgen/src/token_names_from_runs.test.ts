@@ -1,6 +1,8 @@
 /**
  * listTokenAddressesFromRuns skips a summary file it cannot read. That skip must
  * still happen, and the read error must show up in the log with the file (#708).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"

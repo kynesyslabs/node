@@ -2,6 +2,8 @@
  * The complex-policy scenarios parse RPC amounts with a 0n fallback. Logging the
  * malformed value must not throw from inside that fallback, even when String()
  * itself throws on the value (#708).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"

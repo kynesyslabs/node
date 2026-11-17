@@ -5,6 +5,8 @@
  * logNonCriticalErrorOnceCapped bounds how many keys are kept and logged (#708).
  * That text can also hold control characters, which must not reach the log raw,
  * and has no size limit, so the logger cuts each field and the whole record.
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { describe, expect, it, spyOn } from "bun:test"

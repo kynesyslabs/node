@@ -3,8 +3,8 @@
  * holder-pointer check. Bun's BigInt error does not name the value, so the log
  * record must carry the balance text itself (#708).
  *
- * Run this file in its own `bun test` process (scripts/test-consensus.sh does):
- * Bun's mock.module of ./token_shared and ./framework/io lasts for the whole process.
+ * Run this file in its own `bun test` process. Bun's mock.module of ./token_shared
+ * and ./framework/io lasts for the whole process; scripts/test-consensus.sh runs it alone.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"

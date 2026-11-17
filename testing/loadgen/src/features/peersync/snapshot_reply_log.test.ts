@@ -6,6 +6,8 @@
  * and a bounded preview of its response are logged; the reply is never serialized.
  *
  * Runs the real nodeCall and the real reads; only fetch and console.error are mocked.
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"

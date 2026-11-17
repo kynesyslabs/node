@@ -2,6 +2,8 @@
  * getNodeSnapshot falls back to null / [] when a read rejects. The fallbacks
  * must stay the same, and the rejection must show up in the log once per node
  * and call (#708).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"

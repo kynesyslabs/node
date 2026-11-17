@@ -3,6 +3,8 @@
  * logs the parse error. Bun's JSON.parse error quotes the offending body
  * character, so control characters the node sends must reach the log escaped,
  * on one line (#708).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"

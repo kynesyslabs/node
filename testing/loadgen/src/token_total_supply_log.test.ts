@@ -2,6 +2,8 @@
  * The mint and burn smoke tests poll token.get for totalSupply and log a value that
  * BigInt() rejects (#708). The peer chooses that value and its size, so the log
  * record must stay bounded and must not carry raw control characters.
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"

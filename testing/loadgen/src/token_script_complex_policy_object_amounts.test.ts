@@ -4,6 +4,8 @@
  * Each helper logs once per process, and token_script_complex_policy_amounts.test.ts
  * uses that one log for an amount String() cannot convert, so this case has its
  * own file (scripts/test-consensus.sh runs each file in its own process).
+ *
+ * Run this file in its own `bun test` process.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
