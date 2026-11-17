@@ -194,7 +194,8 @@ export async function isRpcReady(rpcUrl: string): Promise<boolean> {
       body: JSON.stringify({ method: "ping", params: [] }),
     })
     if (!res.ok) return false
-    const data = (await res.json().catch(() => null)) as any
+    // A malformed reply rejects into the catch below, which logs it.
+    const data = (await res.json()) as any
     return typeof data?.result === "number" && data.result >= 200 && data.result < 300
   } catch (error) {
     // Keyed per target: one worker per target waits in parallel and each can fail differently.
