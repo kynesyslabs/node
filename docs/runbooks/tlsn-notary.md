@@ -72,12 +72,17 @@ Files: `tlsnotary/notary-service/` in the node repository.
   | `tlsn_request` token lifetime | 500 blocks (about 83 min at 10 s blocks, 58 min at 7 s) | from the block the request landed in | `TLSN_REQUEST_TTL_BLOCKS`, `src/libs/tlsnotary/onchainRequests.ts` |
   | attestation age | 3600 s | from the time the notary attested to the time of the block the store or link lands in | genesis `tlsnVerified.freshnessWindowSec`, checked in `src/libs/tlsnotary/presentationGate.ts` |
 
-  A user attests after the request is included, so at 10 s blocks the age
-  limit binds: a `tlsn_store` or TLSN identity link included more than
-  3600 s after the attestation is refused with `attestation is stale`, even
-  if its token is still unused and unexpired. At faster blocks the token
-  can expire first. This is intended and safe; tell integrators to store or
-  link right after attesting. The SDK exports the value as
+  The token deadline is fixed at the request height + 500 blocks; the age
+  deadline is the attested time + 3600 s. Which comes first depends on the
+  block time and on how long the user waits between the request and
+  attesting. At 10 s blocks with a prompt attestation the age limit binds:
+  a `tlsn_store` or TLSN identity link included more than 3600 s after the
+  attestation is refused with `attestation is stale`, even if its token is
+  still unused and unexpired. A user who attests late (30 minutes after the
+  request leaves about 53 minutes of token at 10 s blocks), or a chain with
+  faster blocks, hits the token expiry first. This is intended and safe;
+  tell integrators to attest soon after the request and store or link right
+  after attesting. The SDK exports the value as
   `TLSN_ATTESTATION_MAX_AGE_SECONDS`. Support cases of "attestation is
   stale" with a live token are this rule, not a fault; a notary clock behind
   the chain (section 8) shows the same refusal sooner than an hour.
