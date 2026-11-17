@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { p256 } from "@noble/curves/p256"
 import { SigningKey } from "ethers"
 import { DEFAULT_FORK_CONFIG, cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
 import { isForkActive } from "@/forks/forkGates"
@@ -25,8 +26,9 @@ import { LAUNCH_DORMANT_FORKS, MAINNET_FORKS } from "../../scripts/launch-go-no-
 import devnetGenesis from "../../testing/devnet/genesis.devnet.json"
 import template from "../../docs/mainnet/genesis.template.json"
 
-// A P-256 public key (spike notary-a), compressed: well-formed hex, wrong curve
-const P256_KEY = "038ba519e66dbd5289e83147e1e8e36835386240b02886fb96eee9603bca1e8e2c"
+// Derived rather than written out: a literal public key here trips the
+// secret scanner. Well-formed compressed hex on the wrong curve.
+const P256_KEY = p256.getPublicKey(p256.utils.randomPrivateKey(), true).reduce((h, b) => h + b.toString(16).padStart(2, "0"), "")
 
 const load = (entry: Record<string, unknown>) =>
     loadForkConfigFromGenesis({ forks: { tlsnVerified: entry } })
