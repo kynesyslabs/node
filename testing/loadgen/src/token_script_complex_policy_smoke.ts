@@ -45,7 +45,7 @@ function parseBigintOrZero(value: any): bigint {
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     if (typeof value === "string") return BigInt(value)
   } catch (error) {
-    logNonCriticalErrorOnce("token_script_complex_policy_smoke.parseBigintOrZero", "token_script_complex_policy_smoke.parseBigintOrZero", error, { value: String(value).slice(0, 80) })
+    logNonCriticalErrorOnce("token_script_complex_policy_smoke.parseBigintOrZero", "token_script_complex_policy_smoke.parseBigintOrZero", error, { value: textOrType(value).slice(0, 80) })
   }
   return 0n
 }
