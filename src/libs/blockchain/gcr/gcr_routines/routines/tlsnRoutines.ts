@@ -17,6 +17,9 @@ import { safeGCRSave, isFirstConnection } from "./utils"
 import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
 import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
 import { TLSN_CONTEXTS } from "@/libs/identity/web2Contexts"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
+import type { GCREntityCaches } from "../../handleGCR"
 
 /**
  * Add an identity via TLSNotary proof verification.
@@ -24,6 +27,8 @@ import { TLSN_CONTEXTS } from "@/libs/identity/web2Contexts"
 export async function applyTLSNIdentityAdd(
     editOperation: any,
     accountGCR: GCRMain,
+    /** The set being applied, whose links a new one must not repeat. */
+    entities?: GCREntityCaches,
 ): Promise<GCRResult> {
     // Extract context from editOperation.data (top level)
     const { context } = editOperation.data
@@ -67,21 +72,28 @@ export async function applyTLSNIdentityAdd(
         }
     }
 
-    if (!recvHash) {
+    // Under the fork the identity is read from the verified transcript; the
+    // client's own copy of the response is not evidence and is not required.
+    const verified = isForkActive(
+        "tlsnVerified",
+        getSharedState.lastBlockNumber ?? 0,
+    )
+
+    if (!verified && !recvHash) {
         return {
             success: false,
             message: "Missing TLSN recvHash",
         }
     }
 
-    if (!proofRanges) {
+    if (!verified && !proofRanges) {
         return {
             success: false,
             message: "Missing TLSN proofRanges",
         }
     }
 
-    if (revealedRecv === undefined || revealedRecv === null) {
+    if (!verified && (revealedRecv === undefined || revealedRecv === null)) {
         return {
             success: false,
             message: "Missing TLSN revealedRecv",
@@ -127,16 +139,22 @@ export async function applyTLSNIdentityAdd(
     }
 
     // 3. Verify proof and validate recvHash/proofRanges-derived identity claims
-    const verification = await verifyTLSNProof({
-        context,
-        proof: proof as TLSNotaryPresentation,
-        recvHash,
-        proofRanges: proofRanges as TLSNProofRanges,
-        revealedRecv,
-        username: String(username),
-        userId: String(userId),
-        referralCode,
-    } as TLSNIdentityPayload)
+    const verification = await verifyTLSNProof(
+        {
+            context,
+            proof: proof as TLSNotaryPresentation,
+            recvHash,
+            proofRanges: proofRanges as TLSNProofRanges,
+            revealedRecv,
+            username: String(username),
+            userId: String(userId),
+            referralCode,
+        } as TLSNIdentityPayload,
+        {
+            sender: editOperation.account,
+            accounts: [accountGCR, ...(entities?.accounts.values() ?? [])],
+        },
+    )
 
     if (!verification.success) {
         log.warn(
@@ -170,6 +188,11 @@ export async function applyTLSNIdentityAdd(
         proofHash: proofHash,
         proofType: "tlsn", // Mark as TLSNotary-verified
         timestamp: applyTime().getTime(),
+        // The replay key: the presentation bytes are malleable, the
+        // notary-signed attestation id is not.
+        ...(verification.attestationId
+            ? { attestationId: verification.attestationId }
+            : {}),
     }
 
     accountGCR.identities.web2[context].push(data)

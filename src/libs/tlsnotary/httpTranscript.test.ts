@@ -1,0 +1,171 @@
+import { describe, expect, it } from "bun:test"
+import { parseAuthedRequest, parseAuthedResponse, singleHeader, type AuthedBytes } from "./httpTranscript"
+
+/**
+ * A transcript where `[` and `]` mark hidden spans: the brackets are dropped
+ * and the bytes between them are zeroed, as the verifier zeroes unrevealed
+ * bytes, and left out of the authed ranges.
+ */
+function transcript(marked: string): AuthedBytes {
+    const bytes: number[] = []
+    const authed: [number, number][] = []
+    let hidden = false
+    let start = 0
+    for (const ch of marked) {
+        if (ch === "[" || ch === "]") {
+            if (!hidden && bytes.length > start) authed.push([start, bytes.length])
+            hidden = ch === "["
+            if (!hidden) start = bytes.length
+            continue
+        }
+        bytes.push(hidden ? 0 : ch.charCodeAt(0))
+    }
+    if (!hidden && bytes.length > start) authed.push([start, bytes.length])
+    return { bytes: new Uint8Array(bytes), authed }
+}
+
+const body = (r: ReturnType<typeof parseAuthedResponse>) =>
+    r.ok === false ? `refused: ${r.reason}` : Buffer.from(r.value.body).toString("latin1")
+const reason = (r: { ok: boolean; reason?: string }) => (r.ok ? "accepted" : r.reason)
+
+const GET = "GET /user HTTP/1.1\r\nhost: api.example\r\n"
+
+describe("parseAuthedRequest", () => {
+    it("reads the request line and headers, skipping hidden lines", () => {
+        const r = parseAuthedRequest(transcript(`${GET}[authorization: Bearer x]\r\nx-demos-bind: v\r\n\r\n`))
+        expect(r.ok).toBe(true)
+        if (!r.ok) return
+        expect([r.value.method, r.value.target, r.value.version]).toEqual(["GET", "/user", "HTTP/1.1"])
+        expect(r.value.headers.map(h => h.name)).toEqual(["host", "x-demos-bind"])
+    })
+
+    it("reports a header whose value is hidden as present but not revealed", () => {
+        const r = parseAuthedRequest(transcript(`${GET}authorization: [Bearer x]\r\n\r\n`))
+        expect(r.ok && r.value.headers[1]).toEqual({ name: "authorization", value: null, valueRevealed: false })
+    })
+
+    it("reports a partly revealed value as revealed", () => {
+        const r = parseAuthedRequest(transcript(`${GET}cookie: a=[secret]\r\n\r\n`))
+        expect(r.ok && r.value.headers[1]).toEqual({ name: "cookie", value: null, valueRevealed: true })
+    })
+
+    it("refuses a line that reveals bytes but hides its name", () => {
+        expect(reason(parseAuthedRequest(transcript(`${GET}[authoriz]ation: Bearer x\r\n\r\n`)))).toContain(
+            "hides its name",
+        )
+    })
+
+    it("does not split lines at a hidden CRLF", () => {
+        // The hidden span could be anything; the revealed tail must not
+        // become a header line of its own.
+        const r = parseAuthedRequest(transcript(`${GET}x-a: 1[\r\n]x-demos-bind: forged\r\n\r\n`))
+        expect(r.ok && r.value.headers.map(h => [h.name, h.value])).toEqual([
+            ["host", "api.example"],
+            ["x-a", null],
+        ])
+    })
+
+    it("refuses a second request or a body after the headers", () => {
+        expect(reason(parseAuthedRequest(transcript(`${GET}\r\n${GET}\r\n`)))).toContain("more than one")
+        expect(reason(parseAuthedRequest(transcript(`${GET}\r\nbody`)))).toContain("more than one")
+    })
+
+    it("refuses a hidden end of headers, request line or other HTTP versions", () => {
+        expect(reason(parseAuthedRequest(transcript(`${GET}[\r\n\r\n]`)))).toContain("no authenticated end")
+        expect(reason(parseAuthedRequest(transcript("GET /[user] HTTP/1.1\r\n\r\n")))).toContain("not fully revealed")
+        expect(reason(parseAuthedRequest(transcript("GET /user HTTP/1.0\r\n\r\n")))).toContain("not HTTP/1.1")
+        expect(reason(parseAuthedRequest(transcript("GET  /user HTTP/1.1\r\n\r\n")))).toContain("malformed")
+    })
+
+    it("refuses too many header lines", () => {
+        const many = Array.from({ length: 200 }, (_, i) => `x-${i}: v\r\n`).join("")
+        expect(reason(parseAuthedRequest(transcript(`${GET}${many}\r\n`)))).toContain("too many")
+    })
+})
+
+describe("singleHeader", () => {
+    it("refuses a missing or repeated header", () => {
+        const r = parseAuthedRequest(transcript(`${GET}host: other\r\n\r\n`))
+        if (r.ok === false) throw new Error(r.reason)
+        expect(reason(singleHeader(r.value.headers, "host"))).toContain("repeated")
+        expect(reason(singleHeader(r.value.headers, "x-demos-bind"))).toContain("no revealed")
+    })
+})
+
+const OK = "HTTP/1.1 200 OK\r\n"
+
+describe("parseAuthedResponse", () => {
+    it("reads a Content-Length body", () => {
+        const r = parseAuthedResponse(transcript(`${OK}content-length: 7\r\n\r\n{"a":1}`))
+        expect(body(r)).toBe("{\"a\":1}")
+        expect(r.ok && r.value.status).toBe(200)
+    })
+
+    it("refuses a Content-Length that does not end the transcript", () => {
+        expect(body(parseAuthedResponse(transcript(`${OK}content-length: 5\r\n\r\n{"a":1}`)))).toContain(
+            "does not end",
+        )
+        expect(body(parseAuthedResponse(transcript(`${OK}content-length: 9\r\n\r\n{"a":1}`)))).toContain(
+            "does not end",
+        )
+    })
+
+    it("refuses a hidden or malformed Content-Length", () => {
+        expect(body(parseAuthedResponse(transcript(`${OK}content-length: [7]\r\n\r\n{"a":1}`)))).toContain(
+            "not revealed",
+        )
+        expect(body(parseAuthedResponse(transcript(`${OK}content-length: +7\r\n\r\n{"a":1}`)))).toContain(
+            "not a length",
+        )
+    })
+
+    it("decodes a chunked body without trailers", () => {
+        const r = parseAuthedResponse(transcript(`${OK}transfer-encoding: chunked\r\n\r\n3\r\n{"a\r\n4\r\n":1}\r\n0\r\n\r\n`))
+        expect(body(r)).toBe("{\"a\":1}")
+    })
+
+    it("refuses chunked bodies with trailers, hidden sizes or bytes after the end", () => {
+        const te = `${OK}transfer-encoding: chunked\r\n\r\n`
+        expect(body(parseAuthedResponse(transcript(`${te}2\r\n{}\r\n0\r\nx-t: 1\r\n\r\n`)))).toContain("does not end")
+        expect(body(parseAuthedResponse(transcript(`${te}[2]\r\n{}\r\n0\r\n\r\n`)))).toContain("not revealed")
+        expect(body(parseAuthedResponse(transcript(`${te}2;x=y\r\n{}\r\n0\r\n\r\n`)))).toContain("malformed chunk")
+        expect(body(parseAuthedResponse(transcript(`${te}2\r\n{}\r\n0\r\n\r\nmore`)))).toContain("does not end")
+        expect(body(parseAuthedResponse(transcript(`${te}9\r\n{}\r\n`)))).toContain("runs past")
+        expect(body(parseAuthedResponse(transcript(`${te}2\r\n{}xx0\r\n\r\n`)))).toContain("not CRLF-terminated")
+    })
+
+    it("reads a body framed by the end of the connection", () => {
+        expect(body(parseAuthedResponse(transcript(`${OK}connection: close\r\n\r\n{"a":1}`)))).toBe("{\"a\":1}")
+    })
+
+    it("refuses a body that is not fully revealed", () => {
+        expect(body(parseAuthedResponse(transcript(`${OK}\r\n{"a":[1]}`)))).toContain("not fully revealed")
+        expect(body(parseAuthedResponse(transcript(`${OK}content-length: 7\r\n\r\n{"a":[1]}`)))).toContain(
+            "not fully revealed",
+        )
+        const te = `${OK}transfer-encoding: chunked\r\n\r\n`
+        expect(body(parseAuthedResponse(transcript(`${te}2\r\n{[}]\r\n0\r\n\r\n`)))).toContain("not fully revealed")
+    })
+
+    it("refuses ambiguous framing and encoded bodies", () => {
+        expect(
+            body(parseAuthedResponse(transcript(`${OK}content-length: 2\r\ntransfer-encoding: chunked\r\n\r\n{}`))),
+        ).toContain("both")
+        expect(body(parseAuthedResponse(transcript(`${OK}content-length: 2\r\ncontent-length: 2\r\n\r\n{}`)))).toContain(
+            "repeated",
+        )
+        expect(body(parseAuthedResponse(transcript(`${OK}content-encoding: gzip\r\n\r\n{}`)))).toContain("encoded")
+        expect(body(parseAuthedResponse(transcript(`${OK}content-encoding: identity\r\n\r\n{}`)))).toBe("{}")
+        expect(body(parseAuthedResponse(transcript(`${OK}transfer-encoding: gzip\r\n\r\n{}`)))).toContain(
+            "unsupported",
+        )
+    })
+
+    it("reads the status of a refusing response, and refuses a hidden or malformed status line", () => {
+        const r = parseAuthedResponse(transcript("HTTP/1.1 401 Unauthorized\r\n\r\n{}"))
+        expect(r.ok && r.value.status).toBe(401)
+        expect(body(parseAuthedResponse(transcript("HTTP/1.1 [200] OK\r\n\r\n{}")))).toContain("not fully revealed")
+        expect(body(parseAuthedResponse(transcript("HTTP/1.0 200 OK\r\n\r\n{}")))).toContain("malformed status")
+        expect(body(parseAuthedResponse(transcript(`${OK}x: y`)))).toContain("no authenticated end")
+    })
+})

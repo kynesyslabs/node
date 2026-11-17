@@ -133,8 +133,9 @@ export default async function handleIdentityRequest(
                 sender,
             )
         case "tlsn_identity_assign":
-            // TLSNotary identity verification - verify proof structure
-            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
+            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload, {
+                sender,
+            })
         case "zk_commitmentadd": {
             const commitments = payload.payload as IdentityCommitmentPayload[]
             if (!Array.isArray(commitments) || commitments.length === 0) {
