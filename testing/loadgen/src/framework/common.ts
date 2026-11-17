@@ -176,6 +176,20 @@ function logFieldText(value: unknown, cut: (text: string) => string): string {
   return cut(textOrType(value))
 }
 
+// read(), or `fallback` when the read throws (a getter or Proxy trap on a thrown value).
+function readOr(read: () => unknown, fallback: string): unknown {
+  try {
+    return read()
+  } catch {
+    return fallback
+  }
+}
+
+// An Error's message, else the value itself, as textOrType text; the type if the read throws.
+function messageText(error: unknown): string {
+  return textOrType(readOr(() => (error instanceof Error ? error.message : error), typeof error))
+}
+
 // Numbers, booleans and null stay JSON values; strings, bigints and nested values
 // become cut text, so JSON.stringify sees only bounded, serializable fields.
 function stringifyLogDetails(details: Record<string, unknown> | undefined): string {
@@ -196,8 +210,7 @@ export function logNonCriticalError(
   error: unknown,
   details?: Record<string, unknown>,
 ) {
-  const message = logFieldText(error instanceof Error ? error.message : error,
-    text => cutEscaped(text, LOG_MESSAGE_MAX_CHARS))
+  const message = cutEscaped(messageText(error), LOG_MESSAGE_MAX_CHARS)
   const line = `[loadgen] Non-critical error in ${context}: ${message}${stringifyLogDetails(details)}`
   console.error(cutText(escapeControlChars(line), LOG_RECORD_MAX_CHARS))
 }
@@ -241,8 +254,9 @@ export function loggedNonCriticalKeyCount(): number {
   return loggedNonCriticalKeys.size
 }
 
+// The error's name, or its type when there is none or reading it throws.
 function errorName(error: unknown): string {
-  return textOrType((error as { name?: unknown } | null | undefined)?.name ?? typeof error)
+  return textOrType(readOr(() => (error as { name?: unknown } | null | undefined)?.name ?? typeof error, typeof error))
 }
 
 // Error text from a peer has no size limit (e.g. a confirm rejection message): a new
@@ -250,8 +264,7 @@ function errorName(error: unknown): string {
 // `maxChars` plus a "…(N chars)" marker with the original length. Key and log this copy,
 // not the original, so neither scans nor prints the full text.
 export function truncatedError(error: unknown, maxChars = 500): Error {
-  const message = textOrType(error instanceof Error ? error.message : error)
-  const cut = new Error(cutEscaped(message, maxChars))
+  const cut = new Error(cutEscaped(messageText(error), maxChars))
   cut.name = errorName(error)
   return cut
 }
@@ -260,7 +273,7 @@ export function truncatedError(error: unknown, maxChars = 500): Error {
 // error name plus the message with hex runs and digits replaced, capped at 200 chars.
 export function errorShapeKey(error: unknown): string {
   const name = errorName(error)
-  const message = error instanceof Error ? error.message : textOrType(error)
+  const message = messageText(error)
   const shape = message.replace(/0x[0-9a-f]+|\b(?=[0-9a-f]*\d)[0-9a-f]+\b|\d+/gi, "#")
   return `${name}:${shape}`.slice(0, 200)
 }

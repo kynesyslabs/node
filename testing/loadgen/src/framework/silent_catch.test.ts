@@ -15,8 +15,9 @@ const SRC_ROOT = path.resolve(import.meta.dir, "..")
 // Binding-less catches that report the failure another way. Counts are exact so
 // a new silent catch in one of these files still fails the test.
 const REPORTED_ELSEWHERE: Record<string, number> = {
-  // The logger itself cannot log its own failure.
-  "framework/common.ts": 1,
+  // The logger itself cannot log its own failure: its String() guard (textOrType) and
+  // its guard on reading the logged error's name and message (readOr).
+  "framework/common.ts": 2,
   // Falls back to String(value), which is still the diagnostic text.
   "features/gcr/gcr_identity_loadgen.ts": 1,
   // Returns null and the caller lists the holder under `invalid`.

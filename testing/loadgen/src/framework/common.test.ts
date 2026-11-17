@@ -440,6 +440,51 @@ describe("truncatedError", () => {
     }
   })
 
+  it("logs the type when reading the error's message or name throws", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    const throwingGetter = (what: string) => ({
+      get() {
+        throw new Error(`${what} getter`)
+      },
+    })
+    try {
+      const badMessage = new Error("hidden")
+      Object.defineProperty(badMessage, "message", throwingGetter("message"))
+      const badName = new Error("visible")
+      Object.defineProperty(badName, "name", throwingGetter("name"))
+      const trapped = new Proxy(new Error("proxied"), throwingGetter("proxy"))
+
+      // Before the guard, each case threw out of the logger or of the worker's catch.
+      const results = [badMessage, badName, trapped].map((error, workerId) => {
+        const before = lines.length
+        logNonCriticalError("test.badprops", error, { workerId })
+        const loggedOnce = lines.length - before === 1
+        const cut = truncatedError(error)
+        logNonCriticalErrorOnceCapped("test.badpropsworker", 50, errorShapeKey(cut), cut, { workerId })
+        return [loggedOnce, cut.name, cut.message, errorShapeKey(error)]
+      })
+
+      expect(results).toEqual([
+        [true, "Error", "object", "Error:object"],
+        [true, "object", "visible", "object:visible"],
+        [true, "object", "object", "object:object"],
+      ])
+      expect(lines).toEqual([
+        `[loadgen] Non-critical error in test.badprops: object {"workerId":0}`,
+        `[loadgen] Non-critical error in test.badpropsworker: object {"workerId":0}`,
+        `[loadgen] Non-critical error in test.badprops: visible {"workerId":1}`,
+        `[loadgen] Non-critical error in test.badpropsworker: visible {"workerId":1}`,
+        `[loadgen] Non-critical error in test.badprops: object {"workerId":2}`,
+        `[loadgen] Non-critical error in test.badpropsworker: object {"workerId":2}`,
+      ])
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("is what the transfer_loadgen worker keys and logs", () => {
     const source = fs.readFileSync(path.resolve(import.meta.dir, "../transfer_loadgen.ts"), "utf8")
     const calls = source.match(/logNonCriticalErrorOnceCapped\([^\n]*/g) ?? []
