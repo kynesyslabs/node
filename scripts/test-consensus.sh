@@ -26,6 +26,7 @@ SUITE_FILES=(
     src/config/loader.rapidApi.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/features/tlsnotary/proxyToken.test.ts
     src/features/tlsnotary/proxyRelay.test.ts
     src/features/tlsnotary/relayTarget.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
@@ -55,6 +56,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/gcr_routines/routines/identityContextKeys.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/handleGCR.supply.test.ts
+    src/libs/blockchain/gcr/handleGCR.tlsnOnchain.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/gcr/storableRows.test.ts
@@ -90,6 +92,7 @@ SUITE_FILES=(
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
+    src/libs/network/handlers/tlsnotaryGetInfo.test.ts
     src/libs/network/handlers/requestTlsnProxy.test.ts
     src/libs/network/helloGenesisGate.test.ts
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
@@ -116,6 +119,8 @@ SUITE_FILES=(
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/tlsnotary/httpTranscript.test.ts
+    src/libs/tlsnotary/storedPresentation.test.ts
+    src/libs/tlsnotary/tlsnOnchainPg.test.ts
     src/libs/tlsnotary/tlsnVerifiedIdentity.test.ts
     src/libs/tlsnotary/wasmVerifier.test.ts
     src/libs/utils/clockProbe.test.ts

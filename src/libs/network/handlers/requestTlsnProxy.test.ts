@@ -30,7 +30,10 @@ const chain = {
     blockTime: new Map<number, number>(),
 }
 mock.module("@/libs/tlsnotary/tlsnChainReads", () => ({
-    findTlsnRequest: async (hash: string) => chain.requests.get(hash) ?? null,
+    findTlsnRequestTx: async (hash: string) => chain.requests.get(hash) ?? null,
+    // tlsnVerified is dormant here: these are the pre-fork transaction checks.
+    findTlsnRequest: async () => null,
+    findTlsnLinkedToken: async () => null,
     blockTimestampSec: async (n: number) => chain.blockTime.get(n) ?? null,
     findTlsnLinkHits: async () => ({ userIdLinked: false, attestationUsed: false }),
     tipBlockTimestampSec: async () => NOW_SEC,

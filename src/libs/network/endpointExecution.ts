@@ -14,6 +14,7 @@ import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemo
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { tlsnAdmissionCopy } from "../blockchain/gcr/tlsnTransitions"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import { web2CallerForAddress } from "@/features/web2/web2FetchLimiter"
@@ -468,10 +469,21 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const entities = await HandleGCR.prepareEntities([queriedTx])
+        // Under tlsnVerified a TLSNotary tx is simulated with the edit the
+        // block will derive for it, so a store the block would refuse or
+        // fail is refused here, before it pays.
+        const tlsn = tlsnAdmissionCopy(queriedTx)
+        if (tlsn.ok === false) {
+            log.error(`[handleExecuteTransaction] TLSNotary tx refused: ${tlsn.reason}`)
+            result.success = false
+            result.response = false
+            result.extra = { error: tlsn.reason }
+            return result
+        }
+        const entities = await HandleGCR.prepareEntities([tlsn.tx])
         const simulateResult = await HandleGCR.applyTransaction(
             entities,
-            queriedTx,
+            tlsn.tx,
             false,
             true,
         )

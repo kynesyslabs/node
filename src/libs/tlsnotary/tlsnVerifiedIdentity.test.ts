@@ -6,8 +6,8 @@
  *
  * The golden vectors fix the sender and the tlsn_request their bind header
  * names, so a link here is built by the SDK builder and then given the
- * vector's sender; the tlsn_request itself is a chain row the fake chain
- * reads return. The local vectors come from a test server under a test CA,
+ * vector's sender; the tlsn_request itself is the token row its apply
+ * wrote, which the fake chain reads return. The local vectors come from a test server under a test CA,
  * which the stand-in verifier passes as the root; consensus code uses the
  * compiled-in roots.
  */
@@ -39,9 +39,17 @@ const chain = {
     failing: false,
 }
 const chainReads = () => ({
-    findTlsnRequest: async (hash: string) => {
-        if (chain.failing) throw new StateReadError("tlsn_request lookup", "database down")
+    findTlsnRequest: async (hash: string, held?: ReadonlyMap<string, any>) => {
+        if (held?.has(hash)) return held.get(hash) ?? null
+        if (chain.failing) throw new StateReadError("tlsn_request token", "database down")
         return chain.requests.get(hash) ?? null
+    },
+    findTlsnLinkedToken: async (txhash: string, held?: ReadonlyMap<string, any>) => {
+        for (const row of held?.values() ?? []) {
+            if (row?.status === "linked" && row.txhash === txhash) return row
+        }
+        const row = [...chain.requests.values()].find(r => r.status === "linked" && r.txhash === txhash)
+        return row && !held?.has(row.tokenId as string) ? row : null
     },
     findTlsnLinkHits: async (q: {
         context: string
@@ -171,20 +179,25 @@ function forkAt(payload: Record<string, unknown> = {}): void {
     } as never
 }
 
-/** Endpoints and the chain's tlsn_request for a vector's server and path. */
-function serve(v: Vector, request: Record<string, unknown> = {}): void {
+/** Endpoints and the chain's tlsn_request token for a vector's server and path. */
+function serve(v: Vector, token: Record<string, unknown> = {}): void {
     const { server, method, path } = v.meta.expect
     setTlsnIdentityEndpointsForTests({ github: { ...TLSN_IDENTITY_ENDPOINTS.github, server, method, path } })
     useTestRoot = v.meta.root !== null
     chain.requests.set(REQUEST_HASH, {
-        hash: REQUEST_HASH,
-        status: "confirmed",
-        blockNumber: 400,
-        sender: BIND_SENDER,
-        type: "native",
-        nativeOperation: "tlsn_request",
-        targetUrl: `https://${server}${path}`,
-        ...request,
+        tokenId: REQUEST_HASH,
+        owner: BIND_SENDER,
+        domain: server,
+        proof: null,
+        storageType: null,
+        txhash: REQUEST_HASH,
+        proofTimestamp: "0",
+        status: "pending",
+        requestHeight: 400,
+        expiresAtHeight: 900,
+        attestationId: null,
+        storedAtHeight: null,
+        ...token,
     })
 }
 
@@ -520,10 +533,12 @@ describe("transcript rules", () => {
 describe("the tlsn_request the bind header names", () => {
     const cases: [string, Record<string, unknown> | null, string][] = [
         ["missing", null, "names no tlsn_request on chain"],
-        ["failed in its block", { status: "failed" }, "not a confirmed tlsn_request"],
-        ["another native operation", { nativeOperation: "tlsn_store" }, "not a confirmed tlsn_request"],
-        ["another sender's", { sender: SDK_SENDER }, "tlsn_request of another account"],
-        ["for another server", { targetUrl: "https://example.com/user" }, "tlsn_request for another server"],
+        ["another sender's", { owner: SDK_SENDER }, "tlsn_request of another account"],
+        ["for another server", { domain: "example.com" }, "tlsn_request for another server"],
+        // The link lands at 501, one past the last block the token is usable in.
+        ["expired", { expiresAtHeight: 500 }, "names an expired tlsn_request"],
+        ["used by a store", { status: "stored", attestationId: "ab" }, "names a tlsn_request already used"],
+        ["used by a link", { status: "linked", attestationId: "ab" }, "names a tlsn_request already used"],
     ]
     for (const [label, change, message] of cases) {
         it(`refuses a request that is ${label}`, async () => {
@@ -611,6 +626,103 @@ describe("replay and uniqueness", () => {
         ])
         expect(groups.map(g => g.map(t => t.hash))).toContainEqual(["h1", "h2", "h3"])
         expect(groups.map(g => g.map(t => t.hash))).toContainEqual(["h4"])
+    })
+})
+
+describe("one request backs one attestation", () => {
+    const LINK_TX = "e1".repeat(32)
+    const linkEdit = async () => {
+        const { tx, edit } = await link({ hex: K256().hex, ...claimed(K256()) })
+        return { tx, edit: { ...edit, txhash: LINK_TX } }
+    }
+
+    it("a link uses its request token up, in the block and once committed", async () => {
+        const { tx, edit } = await linkEdit()
+        const entities = caches(account(BIND_SENDER))
+        expect((await applyAt(BLOCK_TIME, edit, entities)).success).toBe(true)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({
+            tokenId: REQUEST_HASH,
+            status: "linked",
+            attestationId: K256().output!.attestationId,
+            txhash: LINK_TX,
+            storedAtHeight: 501,
+            proof: null,
+        })
+
+        // The same request again in the same block: its token is used.
+        entities.accounts.set(BIND_SENDER, account(BIND_SENDER))
+        const again = await applyAt(BLOCK_TIME, edit, entities)
+        expect(again.message).toContain("names a tlsn_request already used")
+
+        // And once the block is committed.
+        chain.requests.set(REQUEST_HASH, entities.tlsNotaries.get(REQUEST_HASH))
+        expect((await admit(tx)).message).toContain("names a tlsn_request already used")
+    })
+
+    it("a refused link leaves its token unused", async () => {
+        const { edit } = await linkEdit()
+        edit.data.data.username = "someone-else"
+        const entities = caches(account(BIND_SENDER))
+        expect((await applyAt(BLOCK_TIME, edit, entities)).success).toBe(false)
+        expect(entities.tlsNotaries.has(REQUEST_HASH)).toBe(false)
+    })
+
+    it("the undo of a link frees its token", async () => {
+        const { edit } = await linkEdit()
+        const holder = account(BIND_SENDER)
+        const entities = caches(holder)
+        expect((await applyAt(BLOCK_TIME, edit, entities)).success).toBe(true)
+
+        const undone = await withBlockTime(BLOCK_TIME, () =>
+            HandleGCR.applyGCREdit(structuredClone(edit), entities, true, false),
+        )
+        expect(undone.success).toBe(true)
+        expect(holder.identities.web2.github).toHaveLength(0)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({
+            status: "pending",
+            attestationId: null,
+            storedAtHeight: null,
+            txhash: REQUEST_HASH,
+        })
+    })
+
+    it("the undo of a committed link frees the token the database holds", async () => {
+        const { edit } = await linkEdit()
+        chain.requests.set(REQUEST_HASH, {
+            ...chain.requests.get(REQUEST_HASH),
+            status: "linked",
+            attestationId: K256().output!.attestationId,
+            txhash: LINK_TX,
+            storedAtHeight: 450,
+        })
+        const holder = account(BIND_SENDER, {
+            github: [{ ...claimed(K256()), proofType: "tlsn", attestationId: K256().output!.attestationId }],
+        })
+        const entities = caches(holder)
+        const undone = await withBlockTime(BLOCK_TIME, () =>
+            HandleGCR.applyGCREdit(structuredClone(edit), entities, true, false),
+        )
+        expect(undone.success).toBe(true)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({ status: "pending", attestationId: null })
+    })
+
+    it("an unlink leaves the token used", async () => {
+        const { edit } = await linkEdit()
+        const holder = account(BIND_SENDER)
+        const entities = caches(holder)
+        expect((await applyAt(BLOCK_TIME, edit, entities)).success).toBe(true)
+        const unlink = {
+            type: "identity",
+            context: "tlsn",
+            operation: "remove",
+            account: BIND_SENDER,
+            txhash: "e2".repeat(32),
+            isRollback: false,
+            data: { context: "github", username: claimed(K256()).username },
+        }
+        expect((await applyAt(BLOCK_TIME + 7, unlink, entities)).success).toBe(true)
+        expect(holder.identities.web2.github).toHaveLength(0)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({ status: "linked", txhash: LINK_TX })
     })
 })
 

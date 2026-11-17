@@ -7,6 +7,7 @@ import type { AcceptedPresentation } from "./presentationGate"
 import {
     parseAuthedRequest,
     parseAuthedResponse,
+    parseAuthedResponseHead,
     singleHeader,
     type HeaderLine,
 } from "./httpTranscript"
@@ -197,4 +198,57 @@ export function judgeIdentityTranscript(
             bind,
         },
     }
+}
+
+/** The bind purpose of a `tlsn_store`. */
+export const STORE_BIND_PURPOSE = "store"
+
+export type StoreTranscriptVerdict = { ok: true; bind: BindClaim } | { ok: false; reason: string }
+
+/**
+ * Judges the transcript of an accepted presentation a `tlsn_store` puts on
+ * chain for `sender` under the request `requestTxHash`. A store proves any
+ * response, so only the request and the response heads are read: the
+ * response body may be revealed in part, and the request may carry one
+ * Content-Length body (a POST to an API), revealed or not. Credentials are refused in both directions,
+ * since a stored proof is public for good.
+ */
+export function judgeStoreTranscript(
+    p: AcceptedPresentation,
+    sender: string,
+    requestTxHash: string,
+): StoreTranscriptVerdict {
+    const request = parseAuthedRequest({ bytes: p.sent, authed: p.sentAuthed }, { allowBody: true })
+    if (request.ok === false) return { ok: false, reason: `request: ${request.reason}` }
+    const leak = revealedSecret(request.value.headers, SECRET_REQUEST_HEADERS)
+    if (leak) return { ok: false, reason: `presentation reveals the ${leak} header value` }
+
+    const response = parseAuthedResponseHead({ bytes: p.recv, authed: p.recvAuthed }, request.value.method)
+    if (response.ok === false) return { ok: false, reason: `response: ${response.reason}` }
+    for (const block of [...response.value.interim, response.value.headers]) {
+        const cookie = revealedSecret(block, SECRET_RESPONSE_HEADERS)
+        if (cookie) return { ok: false, reason: `presentation reveals the ${cookie} response header value` }
+    }
+
+    const host = singleHeader(request.value.headers, "host")
+    if (host.ok === false) return { ok: false, reason: `request: ${host.reason}` }
+    if (host.value.value === null || host.value.value.toLowerCase() !== p.serverName.toLowerCase()) {
+        return { ok: false, reason: `request Host is not ${p.serverName}` }
+    }
+
+    const bindHeader = singleHeader(request.value.headers, BIND_HEADER)
+    if (bindHeader.ok === false) return { ok: false, reason: `request: ${bindHeader.reason}` }
+    if (bindHeader.value.value === null) return { ok: false, reason: "X-Demos-Bind header is not fully revealed" }
+    const bind = parseBindValue(bindHeader.value.value)
+    if (!bind) return { ok: false, reason: "X-Demos-Bind header is malformed" }
+    if (bind.purpose !== STORE_BIND_PURPOSE) {
+        return { ok: false, reason: `X-Demos-Bind names ${bind.purpose}, not a store` }
+    }
+    if (bind.sender !== bindSenderForm(sender)) {
+        return { ok: false, reason: "X-Demos-Bind names another account than the transaction sender" }
+    }
+    if (bind.requestTxHash !== requestTxHash) {
+        return { ok: false, reason: "X-Demos-Bind names another tlsn_request than the store" }
+    }
+    return { ok: true, bind }
 }

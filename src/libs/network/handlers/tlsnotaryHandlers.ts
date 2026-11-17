@@ -78,7 +78,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
     "tlsnotary.getToken": async (data, response) => {
         try {
-            const { getTokenByTxHash, getToken } = await import(
+            const { lookupToken } = await import(
                 "@/features/tlsnotary/tokenManager"
             )
 
@@ -87,12 +87,8 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 txHash?: string
             }
 
-            let token
-            if (tokenId) {
-                token = getToken(tokenId)
-            } else if (txHash) {
-                token = getTokenByTxHash(txHash)
-            } else {
+            const id = tokenId || txHash
+            if (typeof id !== "string" || !id) {
                 response.result = 400
                 response.response = {
                     error: "INVALID_REQUEST",
@@ -101,6 +97,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
 
+            const token = await lookupToken(id)
             if (!token) {
                 response.result = 404
                 response.response = {
@@ -108,16 +105,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                     message: "No token found for the provided identifier",
                 }
             } else {
-                response.response = {
-                    token: {
-                        id: token.id,
-                        owner: token.owner,
-                        domain: token.domain,
-                        status: token.status,
-                        expiresAt: token.expiresAt,
-                        retriesLeft: token.retriesLeft,
-                    },
-                }
+                response.response = { token }
             }
         } catch (error) {
             log.error("[manageNodeCall] tlsnotary.getToken error: " + error)

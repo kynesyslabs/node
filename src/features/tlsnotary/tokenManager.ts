@@ -9,8 +9,11 @@
 
 // REVIEW: TLSNotary token management for paid attestation access
 import { randomUUID } from "crypto"
+import { isForkActive } from "@/forks/forkGates"
+import { getOnChainTlsnRequest } from "@/libs/tlsnotary/onchainRequests"
 import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
+import { PROXY_LIMITS } from "./constants"
 
 /**
  * Token configuration constants
@@ -304,6 +307,53 @@ export function getTokenByTxHash(txHash: string): AttestationToken | undefined {
         }
     }
     return undefined
+}
+
+/** A token as `tlsnotary.getToken` reports it. */
+export interface TokenView {
+    id: string
+    owner: string
+    domain: string
+    status: TokenStatus
+    /** This node's proxy bookkeeping, ms; null when it has not served the token yet. */
+    expiresAt: number | null
+    /** Last block height the chain accepts the token at (tlsnVerified only). */
+    expiresAtHeight?: number
+    retriesLeft: number
+}
+
+/**
+ * The token `idOrTxHash` names. Under tlsnVerified it is the committed
+ * request, so a client finds it as soon as the request is in a block, with
+ * the proxy sessions this node has left for it.
+ */
+export async function lookupToken(idOrTxHash: string): Promise<TokenView | null> {
+    const tip = getSharedState.lastBlockNumber ?? 0
+    if (!isForkActive("tlsnVerified", tip)) {
+        const token = getToken(idOrTxHash) ?? getTokenByTxHash(idOrTxHash)
+        if (!token) return null
+        const { id, owner, domain, status, expiresAt, retriesLeft } = token
+        return { id, owner, domain, status, expiresAt, retriesLeft }
+    }
+    const request = await getOnChainTlsnRequest(idOrTxHash)
+    if (!request) return null
+    const { proxyTokenUse } = await import("./proxyAccess")
+    const use = proxyTokenUse(request.tokenId)
+    let status = TokenStatus.PENDING
+    if (request.status === "stored") status = TokenStatus.STORED
+    // Used up by an identity link: attested, nothing stored.
+    else if (request.status === "linked") status = TokenStatus.COMPLETED
+    else if (tip + 1 > request.expiresAtHeight) status = TokenStatus.EXPIRED
+    else if (use?.sessionsLeft === 0) status = TokenStatus.EXHAUSTED
+    return {
+        id: request.tokenId,
+        owner: request.owner,
+        domain: request.domain,
+        status,
+        expiresAt: use?.expiresAtMs ?? null,
+        expiresAtHeight: request.expiresAtHeight,
+        retriesLeft: use?.sessionsLeft ?? PROXY_LIMITS.MAX_SESSIONS_PER_TOKEN,
+    }
 }
 
 /**

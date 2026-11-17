@@ -9,8 +9,53 @@
  */
 import { StateReadError, readState } from "@/libs/blockchain/gcr/stateReadError"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
+import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
+import { TLSN_TOKEN_ID, tlsnRequestOf } from "./onchainRequests"
 
-/** A committed transaction as the bind check needs it. */
+/**
+ * The token row of the `tlsn_request` with this hash: the one the block
+ * being applied holds in `held` when it holds it (written or used earlier in
+ * the block), else the one the last committed block left, or null. Only
+ * `tlsnVerified` tokens count; a pre-fork proof row is no request.
+ */
+export async function findTlsnRequest(
+    hash: string,
+    held?: ReadonlyMap<string, GCRTLSNotary | null>,
+): Promise<GCRTLSNotary | null> {
+    if (!TLSN_TOKEN_ID.test(hash)) return null
+    if (held?.has(hash)) {
+        const row = held.get(hash) ?? null
+        return tlsnRequestOf(row) ? row : null
+    }
+    const { dataSource } = await import("@/model/datasource")
+    const row = await readState("tlsn_request token", () =>
+        dataSource.getRepository(GCRTLSNotary).findOneBy({ tokenId: hash }),
+    )
+    return tlsnRequestOf(row) ? row : null
+}
+
+/**
+ * The token row an identity link of transaction `txhash` used, for its
+ * undo: held by the block when it holds it, else as committed.
+ */
+export async function findTlsnLinkedToken(
+    txhash: string,
+    held?: ReadonlyMap<string, GCRTLSNotary | null>,
+): Promise<GCRTLSNotary | null> {
+    for (const row of held?.values() ?? []) {
+        if (row && row.status === "linked" && row.txhash === txhash) return row
+    }
+    const { dataSource } = await import("@/model/datasource")
+    const row = await readState("tlsn linked token", () =>
+        dataSource.getRepository(GCRTLSNotary).findOneBy({ txhash, status: "linked" }),
+    )
+    // The block's copy is the current one: a row it holds and changed is
+    // not the committed one any more.
+    if (!row || held?.has(row.tokenId)) return null
+    return row
+}
+
+/** A committed `tlsn_request` transaction, as the pre-fork proxy check reads it. */
 export interface TlsnRequestRecord {
     hash: string
     /** "confirmed" or "failed", as the block recorded it. */
@@ -31,7 +76,7 @@ export interface TlsnRequestRecord {
  * none. Only transactions of earlier blocks are in the table while a block
  * applies, so the answer is the same on every node applying that block.
  */
-export async function findTlsnRequest(hash: string): Promise<TlsnRequestRecord | null> {
+export async function findTlsnRequestTx(hash: string): Promise<TlsnRequestRecord | null> {
     const { getTransactionsRepo } = await import("@/libs/blockchain/chainDb")
     const row = await readState("tlsn_request lookup", () =>
         getTransactionsRepo().findOneBy({ hash }),

@@ -119,11 +119,16 @@ export async function verifyBlockTransactions(
 }
 
 /**
- * Left out of the comparison: its hash covers a `createdAt` the database
- * stamps with each node's own clock, so no two nodes hold the same value for
- * the same row and the entry cannot match across nodes.
+ * Left out of the comparison before `tlsnVerified`: its hash covers a
+ * `createdAt` the database stamps with each node's own clock, so no two nodes
+ * hold the same value for the same row. Under the fork the hash covers only
+ * chain-written columns and the chain writes the table, so it is compared.
  */
-const NODE_LOCAL_TABLE_HASHES = new Set(["native_tlsnotary"])
+const TLSN_TABLE_HASH = "native_tlsnotary"
+
+function nodeLocalTableHash(key: string, blockNumber: number): boolean {
+    return key === TLSN_TABLE_HASH && !isForkActive("tlsnVerified", blockNumber)
+}
 
 /**
  * The storage root. A difference is counted before the block is refused, so
@@ -149,7 +154,7 @@ export async function verifyNativeTablesHashes(block: Block): Promise<void> {
     const keys = new Set([...Object.keys(committed ?? {}), ...Object.keys(local)])
     const differing = [...keys].filter(
         key =>
-            !NODE_LOCAL_TABLE_HASHES.has(key) && committed?.[key] !== local[key],
+            !nodeLocalTableHash(key, block.number) && committed?.[key] !== local[key],
     )
     if (
         differing.includes(STORAGE_ROOT_KEY) &&

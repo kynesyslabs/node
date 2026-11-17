@@ -8,9 +8,12 @@
  *
  * @module features/tlsnotary/proxyAccess
  */
+import { isForkActive } from "@/forks/forkGates"
 import { rateLimitSubject } from "@/libs/network/middleware/rateLimitSubject"
 import { bindSenderForm } from "@/libs/tlsnotary/identityPolicy"
-import { blockTimestampSec, findTlsnRequest } from "@/libs/tlsnotary/tlsnChainReads"
+import { tlsnRequestOf, tlsnRequestRefusal, type TlsnRequestRefusal } from "@/libs/tlsnotary/onchainRequests"
+import { blockTimestampSec, findTlsnRequest, findTlsnRequestTx } from "@/libs/tlsnotary/tlsnChainReads"
+import { getSharedState } from "@/utilities/sharedState"
 import { PROXY_LIMITS, TOKEN_CONFIG } from "./constants"
 import { liveSessions, type RelaySession } from "./proxyRelay"
 
@@ -52,6 +55,8 @@ export interface ProxyGrant {
 interface TokenUse {
     sessions: number
     expiresAtMs: number
+    /** Set for an on-chain token: its counts live until the chain expires it. */
+    expiresAtHeight?: number
     inFlight: boolean
     liveProxyId?: string
 }
@@ -66,6 +71,13 @@ const pendingByOwner = new Map<string, number>()
 const pendingByIp = new Map<string, number>()
 const ipWindows = new Map<string, Window>()
 const ownerWindows = new Map<string, Window>()
+
+/** The sessions this node has left for a token it served, for tlsnotary.getToken. */
+export function proxyTokenUse(txHash: string): { sessionsLeft: number; expiresAtMs: number } | null {
+    const use = tokenUses.get(txHash)
+    if (!use) return null
+    return { sessionsLeft: Math.max(0, PROXY_LIMITS.MAX_SESSIONS_PER_TOKEN - use.sessions), expiresAtMs: use.expiresAtMs }
+}
 
 /** Forgets every counter; tests only. */
 export function resetProxyAccessState(): void {
@@ -120,10 +132,66 @@ function hostOf(url: string | null): string | null {
     }
 }
 
-function forgetExpiredTokens(now: number): void {
+function forgetExpiredTokens(now: number, nextHeight: number): void {
     for (const [hash, use] of tokenUses) {
-        if (now > use.expiresAtMs && !use.inFlight) tokenUses.delete(hash)
+        const expired =
+            use.expiresAtHeight !== undefined ? nextHeight > use.expiresAtHeight : now > use.expiresAtMs
+        if (expired && !use.inFlight) tokenUses.delete(hash)
     }
+}
+
+const TOKEN_REFUSALS: Record<TlsnRequestRefusal, [number, string, string]> = {
+    NOT_FOUND: [404, "TOKEN_NOT_FOUND", "No tlsn_request with this hash on chain"],
+    OWNER_MISMATCH: [403, "TOKEN_OWNER_MISMATCH", "The tlsn_request was sent by another account"],
+    DOMAIN_MISMATCH: [403, "TOKEN_DOMAIN_MISMATCH", "The tlsn_request is for another host"],
+    EXPIRED: [403, "TOKEN_EXPIRED", "The tlsn_request has expired"],
+    ALREADY_USED: [403, "TOKEN_ALREADY_STORED", "The tlsn_request already backs a stored or linked attestation"],
+}
+
+type TokenCheck = { expiresAtMs: number; expiresAtHeight?: number } | ProxyRefusal
+
+/**
+ * Under tlsnVerified the token is the gcr_tlsnotary row the request wrote:
+ * the same row, expiry height and single use the store and identity apply
+ * judge, so the proxy never serves a token they would refuse.
+ */
+async function checkChainToken(txHash: string, owner: string, domain: string, now: number): Promise<TokenCheck> {
+    const tip = getSharedState.lastBlockNumber ?? 0
+    const request = tlsnRequestOf(await findTlsnRequest(txHash))
+    const refusal = tlsnRequestRefusal(request, { sender: owner, height: tip + 1, domain, pendingOnly: true })
+    if (refusal !== null || !request) return refuse(...TOKEN_REFUSALS[refusal ?? "NOT_FOUND"])
+    // Wall time only bounds the relay session; expiry itself is the height.
+    const blocksLeft = request.expiresAtHeight - tip
+    return {
+        expiresAtMs: now + blocksLeft * getSharedState.getConsensusTime() * 1000,
+        expiresAtHeight: request.expiresAtHeight,
+    }
+}
+
+/** Before tlsnVerified no token row exists: the confirmed transaction is the token. */
+async function checkRequestTx(txHash: string, owner: string, domain: string, now: number): Promise<TokenCheck> {
+    const request = await findTlsnRequestTx(txHash)
+    if (!request) return refuse(404, "TOKEN_NOT_FOUND", "No tlsn_request with this hash on chain")
+    if (
+        request.status !== "confirmed" ||
+        request.type !== "native" ||
+        request.nativeOperation !== "tlsn_request"
+    ) {
+        return refuse(403, "TOKEN_NOT_CONFIRMED", "The token is not a confirmed tlsn_request")
+    }
+    if (bindSenderForm(request.sender) !== owner) {
+        return refuse(403, "TOKEN_OWNER_MISMATCH", "The tlsn_request was sent by another account")
+    }
+    if (hostOf(request.targetUrl) !== domain) {
+        return refuse(403, "TOKEN_DOMAIN_MISMATCH", "The tlsn_request is for another host")
+    }
+    const blockSec = await blockTimestampSec(request.blockNumber)
+    if (blockSec === null) {
+        return refuse(503, "TOKEN_BLOCK_UNKNOWN", "This node does not hold the block of the tlsn_request")
+    }
+    const expiresAtMs = blockSec * 1000 + TOKEN_CONFIG.EXPIRY_MS
+    if (now > expiresAtMs) return refuse(403, "TOKEN_EXPIRED", "The tlsn_request has expired")
+    return { expiresAtMs }
 }
 
 /**
@@ -167,32 +235,17 @@ export async function authorizeProxyRequest(
     const domain = hostOf(req.targetUrl)
     if (!domain) return refuse(400, "INVALID_URL", "targetUrl is not a URL")
 
-    const request = await findTlsnRequest(txHash)
-    if (!request) return refuse(404, "TOKEN_NOT_FOUND", "No tlsn_request with this hash on chain")
-    if (
-        request.status !== "confirmed" ||
-        request.type !== "native" ||
-        request.nativeOperation !== "tlsn_request"
-    ) {
-        return refuse(403, "TOKEN_NOT_CONFIRMED", "The token is not a confirmed tlsn_request")
-    }
-    if (bindSenderForm(request.sender) !== owner) {
-        return refuse(403, "TOKEN_OWNER_MISMATCH", "The tlsn_request was sent by another account")
-    }
-    if (hostOf(request.targetUrl) !== domain) {
-        return refuse(403, "TOKEN_DOMAIN_MISMATCH", "The tlsn_request is for another host")
-    }
-    const blockSec = await blockTimestampSec(request.blockNumber)
-    if (blockSec === null) {
-        return refuse(503, "TOKEN_BLOCK_UNKNOWN", "This node does not hold the block of the tlsn_request")
-    }
-    const expiresAtMs = blockSec * 1000 + TOKEN_CONFIG.EXPIRY_MS
-    if (now > expiresAtMs) return refuse(403, "TOKEN_EXPIRED", "The tlsn_request has expired")
+    const tip = getSharedState.lastBlockNumber ?? 0
+    const token = isForkActive("tlsnVerified", tip)
+        ? await checkChainToken(txHash, owner, domain, now)
+        : await checkRequestTx(txHash, owner, domain, now)
+    if ("ok" in token) return token
+    const { expiresAtMs, expiresAtHeight } = token
 
     // From here to the reservation nothing awaits, so concurrent calls see
     // each other's reservations.
-    forgetExpiredTokens(now)
-    const use = tokenUses.get(txHash) ?? { sessions: 0, expiresAtMs, inFlight: false }
+    forgetExpiredTokens(now, (getSharedState.lastBlockNumber ?? 0) + 1)
+    const use = tokenUses.get(txHash) ?? { sessions: 0, expiresAtMs, expiresAtHeight, inFlight: false }
     if (use.inFlight) {
         return refuse(409, "TOKEN_BUSY", "A proxy for this token is being opened")
     }
