@@ -139,6 +139,19 @@ describe("an unexpected error in a round", () => {
         logSpy.mockRestore()
     })
 
+    it("logs why it exits when the graceful shutdown cannot run", async () => {
+        const logSpy = spyOn(log, "error").mockImplementation(() => undefined as any)
+        exitSpy.mockImplementationOnce((() => undefined) as never)
+        gracefulShutdown.mockRejectedValueOnce(new Error("shutdown failed"))
+        stopAfterCommittedBlockFailure(new BlockCommitUnknownError(8, "lost COMMIT reply"))
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(gracefulShutdown).toHaveBeenCalledWith("committed_block_follow_up", 1)
+        expect(logSpy).toHaveBeenCalledWith("[CORE] graceful shutdown unavailable, exiting: Error: shutdown failed")
+        expect(exitSpy).toHaveBeenCalledWith(1)
+        logSpy.mockRestore()
+    })
+
     it("does not exit from the debug transaction check after a diverged round", async () => {
         debugAssertions = true
         const txsSpy = spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([

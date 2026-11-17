@@ -44,5 +44,8 @@ export function stopAfterCommittedBlockFailure(error: CommittedBlockFollowUpErro
     }
     void import("src/index")
         .then(({ gracefulShutdown }) => gracefulShutdown("committed_block_follow_up", 1))
-        .catch(() => process.exit(1))
+        .catch(e => {
+            log.error(`[CORE] graceful shutdown unavailable, exiting: ${e}`)
+            process.exit(1)
+        })
 }
