@@ -28,6 +28,7 @@ import {
     type OutboundFeature,
 } from "./outboundSwitches"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import { identityReplyExtra } from "./routines/transactions/identityReply"
 import {
     ucrypto,
     uint8ArrayToHex,
@@ -411,15 +412,8 @@ export async function handleExecuteTransaction(
         case "identity":
             try {
                 const identityResult = await handleIdentityRequest(tx, sender)
-                const status = identityResult.success
-                    ? "applied"
-                    : "not applied"
-
                 result.success = identityResult.success
-                result.extra = {
-                    message:
-                        identityResult.message + `. Transaction ${status}.`,
-                }
+                result.extra = identityReplyExtra(identityResult)
             } catch (e) {
                 log.error("[handleverifyPayload] Error in identity: " + e)
                 result.success = false

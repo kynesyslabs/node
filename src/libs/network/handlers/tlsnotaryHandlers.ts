@@ -1,6 +1,21 @@
 import { Config } from "src/config"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
+import { tlsnVerifiedParams } from "@/forks/tlsnVerifiedGate"
+import { getSharedState } from "@/utilities/sharedState"
+
+/**
+ * The presentation size cap the chain enforces at the tip, so a client can
+ * refuse an oversized proof before paying for it; undefined before the
+ * tlsnVerified fork, when the chain has none.
+ */
+export function chainMaxPresentationBytes(): number | undefined {
+    try {
+        return tlsnVerifiedParams(getSharedState.lastBlockNumber ?? 0)?.maxPresentationBytes
+    } catch {
+        return undefined
+    }
+}
 
 export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
     requestTLSNproxy: async (data, response) => {
@@ -135,11 +150,13 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
             const notaryUrl = getPublicUrl(port)
             const proxyUrl = getPublicUrl(proxyPort)
 
+            const maxPresentationBytes = chainMaxPresentationBytes()
             response.response = {
                 notaryUrl,
                 proxyUrl,
                 publicKey,
                 version: "0.1.0",
+                ...(maxPresentationBytes === undefined ? {} : { maxPresentationBytes }),
             }
         } catch (error) {
             log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)

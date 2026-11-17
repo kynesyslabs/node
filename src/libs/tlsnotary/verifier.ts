@@ -1,19 +1,17 @@
 /**
- * TLSNotary Proof Verifier for Node
+ * TLSNotary proof verification for identity links.
  *
- * Validates TLSNotary presentation structure server-side.
- *
- * NOTE: Full cryptographic verification via WASM is not currently supported
- * in Node.js CommonJS environments. This module validates proof structure
- * and trusts client-provided claims. The actual cryptographic verification
- * happens on the frontend (browser) where WASM works properly.
- *
- * TODO: Enable full WASM verification when tlsn-js supports Node.js properly.
+ * Under the `tlsnVerified` fork the node verifies the presentation itself in
+ * the pinned wasm verifier and reads the identity from the authenticated
+ * transcript (verifiedIdentity.ts). Before the fork, the presentation is
+ * only shape-checked (verifyTLSNotaryPresentation), and `tlsnProofEnforcement`
+ * refuses such a claim, since it carries no evidence beyond its own bytes.
  */
 import log from "@/utilities/logger"
 import Hashing from "@/libs/crypto/hashing"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
+import { verifyTlsnIdentity } from "./verifiedIdentity"
 
 /**
  * TLSNotary presentation format (from tlsn-js attestation)
@@ -492,15 +490,11 @@ function extractUserFromRawText(
 }
 
 /**
- * Initialize TLSNotary verifier (no-op in current implementation)
- *
- * This function exists for API compatibility. Full WASM initialization
- * is not supported in Node.js CommonJS environments.
+ * Kept for API compatibility. The wasm verifier loads lazily on the first
+ * presentation judged under `tlsnVerified`, once per process.
  */
 export async function initTLSNotaryVerifier(): Promise<void> {
-    log.info(
-        "[TLSNotary Verifier] Structure-only verification mode (WASM not available in Node.js)",
-    )
+    log.info("[TLSNotary Verifier] wasm verifier loads on first use under tlsnVerified")
 }
 
 /**
@@ -729,13 +723,37 @@ export function extractUser(
  * @param payload - The TLSN identity payload containing context, proof, username, and userId
  * @returns Verification result
  */
-export async function verifyTLSNProof(payload: TLSNIdentityPayload): Promise<{
+export interface TLSNProofOptions {
+    /** The transaction sender; the bind header must name it. */
+    sender?: string
+    /** Accounts the caller holds in memory (the block being applied). */
+    accounts?: Iterable<{ pubkey: string; identities?: { web2?: Record<string, unknown> } | null }>
+}
+
+export async function verifyTLSNProof(
+    payload: TLSNIdentityPayload,
+    options: TLSNProofOptions = {},
+): Promise<{
     success: boolean
     message: string
     extractedUsername?: string
     extractedUserId?: string
+    attestationId?: string
+    retryable?: boolean
 }> {
     const { context, proof, recvHash, revealedRecv, username, userId } = payload
+
+    // Judged at the tip like the other apply-time rules.
+    if (isForkActive("tlsnVerified", getSharedState.lastBlockNumber ?? 0)) {
+        return await verifyTlsnIdentity({
+            context,
+            proof,
+            username: String(username),
+            userId: String(userId),
+            sender: options.sender ?? "",
+            accounts: options.accounts,
+        })
+    }
 
     // Validate context
     if (!["github", "discord", "telegram"].includes(context)) {
