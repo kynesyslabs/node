@@ -118,12 +118,53 @@ function isPrintable(value: unknown): value is Printable {
   return typeof value !== "object" || value === null || value.toString !== Object.prototype.toString
 }
 
-// Log text for a value: String(), or JSON for an object String() would show as
-// "[object Object]". String() throws on values such as RPC JSON {"toString":null}, and
-// JSON.stringify on bigints and cycles; log the type instead.
+const PREVIEW_MAX_ITEMS = 20
+const PREVIEW_MAX_STRING_CHARS = 80
+
+function previewType(value: unknown): string {
+  if (value === null) return "null"
+  return Array.isArray(value) ? "array" : typeof value
+}
+
+// A string's first 80 characters (sliced before quoting) plus its length when longer.
+function previewString(text: string): string {
+  const shown = JSON.stringify(text.slice(0, PREVIEW_MAX_STRING_CHARS))
+  return text.length > PREVIEW_MAX_STRING_CHARS ? `${shown}…(${text.length} chars)` : shown
+}
+
+function previewValue(value: unknown): string {
+  if (typeof value === "string") return previewString(value)
+  const shown = value == null || typeof value === "number" || typeof value === "boolean"
+  return shown ? String(value) : previewType(value)
+}
+
+// Bounded, JSON-like preview that never serializes or walks nested values: an array's
+// length and its first 20 item types; an object's first 20 own keys (cut like strings),
+// each with a primitive value, a cut string, or the value's type, then "…(more keys)".
+function previewObject(value: object): string {
+  if (Array.isArray(value)) {
+    const types: string[] = []
+    for (let i = 0; i < Math.min(value.length, PREVIEW_MAX_ITEMS); i++) types.push(previewType(value[i]))
+    return `array(${value.length}) [${types.join(",")}${value.length > PREVIEW_MAX_ITEMS ? ",…" : ""}]`
+  }
+  const fields: string[] = []
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue
+    if (fields.length === PREVIEW_MAX_ITEMS) {
+      fields.push("…(more keys)")
+      break
+    }
+    fields.push(`${previewString(key)}:${previewValue((value as Record<string, unknown>)[key])}`)
+  }
+  return `{${fields.join(",")}}`
+}
+
+// Log text for a value: String(), or a bounded preview for an array or an object
+// String() would show as "[object Object]". String() and getters can throw (e.g. on
+// RPC JSON {"toString":null}); log the type instead. Callers cut long strings.
 export function textOrType(value: unknown): string {
   try {
-    return isPrintable(value) ? String(value) : JSON.stringify(value) ?? typeof value
+    return Array.isArray(value) || !isPrintable(value) ? previewObject(value as object) : String(value)
   } catch {
     return typeof value
   }

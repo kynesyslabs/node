@@ -16,6 +16,7 @@ import {
   loggedNonCriticalKeyCount,
   logNonCriticalError,
   logNonCriticalErrorOnceCapped,
+  textOrType,
   truncatedError,
 } from "./common"
 
@@ -75,7 +76,7 @@ describe("logNonCriticalError", () => {
       })
       expect(lines).toEqual([
         `[loadgen] Non-critical error in test.fields: bad amount {"amount":"${"7".repeat(500)}…(1000000 chars)",` +
-          `"big":"12","odd":"object","rpcUrls":"http://node-1:53550,http://node-2:53550","workerId":3,"ok":true,"balance":null}`,
+          `"big":"12","odd":"object","rpcUrls":"array(2) [string,string]","workerId":3,"ok":true,"balance":null}`,
       ])
     } finally {
       errorSpy.mockRestore()
@@ -99,7 +100,7 @@ describe("logNonCriticalError", () => {
     }
   })
 
-  it("logs an object String() shows as [object Object] as JSON, or its type when JSON fails", () => {
+  it("logs an object String() shows as [object Object] as a JSON-like preview, nested objects as their type", () => {
     const lines: string[] = []
     const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
       lines.push(args.map(String).join(" "))
@@ -115,7 +116,7 @@ describe("logNonCriticalError", () => {
       })
       expect(lines).toEqual([
         `[loadgen] Non-critical error in test.objects: {"code":-32000,"message":"nonce too low"} ` +
-          String.raw`{"amount":"{\"value\":\"5\",\"decimals\":18}","big":"object","cyclic":"object"}`,
+          String.raw`{"amount":"{\"value\":\"5\",\"decimals\":18}","big":"{\"value\":bigint}","cyclic":"{\"id\":1,\"self\":object}"}`,
       ])
       expect(errorShapeKey({ code: -32000, message: "nonce 17 too low" })).toBe(`object:{"code":-#,"message":"nonce # too low"}`)
     } finally {
@@ -157,6 +158,53 @@ describe("logNonCriticalError", () => {
     } finally {
       errorSpy.mockRestore()
     }
+  })
+})
+
+describe("textOrType", () => {
+  it("previews a large, deeply nested RPC object without serializing nested values", () => {
+    let deep: Record<string, unknown> = { leaf: true }
+    for (let i = 0; i < 10_000; i++) deep = { child: deep }
+    let toJsonCalls = 0
+    const nested = { toJSON: () => { toJsonCalls++; return "serialized" }, deep }
+    const value = { id: 7, memo: "x".repeat(1_000_000), nested, deep }
+    const stringifySpy = spyOn(JSON, "stringify")
+    let text: string
+    let stringifyArgs: unknown[]
+    try {
+      text = textOrType(value)
+      stringifyArgs = stringifySpy.mock.calls.map(call => call[0])
+    } finally {
+      stringifySpy.mockRestore()
+    }
+    expect(toJsonCalls).toBe(0)
+    // Only cut keys and string values (at most 80 characters) are ever quoted.
+    expect(stringifyArgs.length).toBeGreaterThan(0)
+    for (const arg of stringifyArgs) {
+      expect(typeof arg).toBe("string")
+      expect((arg as string).length).toBeLessThanOrEqual(80)
+    }
+    expect(text.length).toBeLessThan(1_000)
+    expect(text).toBe(`{"id":7,"memo":"${"x".repeat(80)}"…(1000000 chars),"nested":object,"deep":object}`)
+  })
+
+  it("bounds arrays, key counts and key names, and logs the type when a getter throws", () => {
+    expect(textOrType(["a", 1, null, {}, [], 2n, undefined])).toBe("array(7) [string,number,null,object,array,bigint,undefined]")
+    expect(textOrType(Array.from({ length: 25 }, (_, i) => i))).toBe(`array(25) [${Array(20).fill("number").join(",")},…]`)
+    const wide = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, i]))
+    expect(textOrType(wide)).toBe(`{${Array.from({ length: 20 }, (_, i) => `"k${i}":${i}`).join(",")},…(more keys)}`)
+    expect(textOrType({ ["k".repeat(200)]: false })).toBe(`{"${"k".repeat(80)}"…(200 chars):false}`)
+    expect(textOrType({ get amount() { throw new Error("getter") } })).toBe("object")
+  })
+
+  it("keeps String() for strings, numbers and objects with their own toString", () => {
+    expect(textOrType("12")).toBe("12")
+    expect(textOrType(12n)).toBe("12")
+    expect(textOrType({ toString: () => "status 503" })).toBe("status 503")
+    expect(textOrType(new Error("boom"))).toBe("Error: boom")
+    expect(textOrType(JSON.parse('{"toString":null}'))).toBe("object")
+    // A small flat object reads the same as its JSON.
+    expect(textOrType({ amount: "5", decimals: 18, ok: true, owner: null })).toBe(`{"amount":"5","decimals":18,"ok":true,"owner":null}`)
   })
 })
 
