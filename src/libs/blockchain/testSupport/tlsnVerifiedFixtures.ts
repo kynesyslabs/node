@@ -1,4 +1,6 @@
 import { SigningKey } from "ethers"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 /**
  * `tlsnVerified` payloads for tests. The keys are derived from a fixed byte so
@@ -18,7 +20,16 @@ export function uncompressedNotaryKeyHex(byte: number): string {
     return new SigningKey(priv).publicKey.slice(2)
 }
 
-export const VERIFIER_WASM_SHA256 = "ab".repeat(32)
+/**
+ * The pin of the verifier this build ships, read from its committed sha256
+ * file: a filled genesis pins exactly that, or launch go/no-go refuses it.
+ */
+export const VERIFIER_WASM_SHA256 = readFileSync(
+    join(import.meta.dir, "../../../../native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256"),
+    "utf8",
+)
+    .trim()
+    .split(/\s+/)[0]
 
 /** A complete payload with two notary keys, as a filled genesis carries it. */
 export function tlsnVerifiedPayload(extra: Record<string, unknown> = {}): Record<string, unknown> {

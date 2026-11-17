@@ -291,6 +291,9 @@ function stagedKeyOf(edit: GCREdit): "zk" | "validators" | "gov" | null {
     }
 }
 
+/** Identity edit contexts that link or unlink a web2 account. */
+const WEB2_LINK_CONTEXTS: ReadonlySet<string> = new Set(["web2", "tlsn"])
+
 const STAGED_CACHES_BY_KEY: Record<"zk" | "validators" | "gov", (keyof StagedSnapshot)[]> = {
     zk: ["zkCommitments", "zkNullifiers"],
     validators: ["validators"],
@@ -2034,6 +2037,13 @@ export default class HandleGCR {
                     }
                     const stagedKey = stagedKeyOf(edit)
                     if (stagedKey) keys.push(stagedKey)
+                    // A TLSN link is refused when another account of the
+                    // block already holds the same web2 account, so links
+                    // and unlinks must apply in block order, not in
+                    // concurrent groups whose interleaving varies by node.
+                    if (edit.type === "identity" && WEB2_LINK_CONTEXTS.has(String((edit as { context?: unknown }).context))) {
+                        keys.push("web2-links")
+                    }
                     // A proposal reads the proposer's validator row as
                     // the stake edits before it in the block left it.
                     if ((edit.type as string) === "networkUpgrade") {
