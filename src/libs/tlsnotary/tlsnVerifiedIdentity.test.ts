@@ -132,45 +132,23 @@ const vectors: Vector[] = readdirSync(VECTORS)
 const vector = (name: string) => vectors.find(v => v.name === name)!
 
 // Every vector binds to the same sender and tlsn_request.
-const BIND = parseBindValue(vectors[0].meta.expect.bind.replace(/:0x([0-9a-f]{64})$/, ":$1"))!
+const BIND = parseBindValue(vectors[0].meta.expect.bind)!
 const BIND_SENDER = BIND.sender
 const REQUEST_HASH = BIND.requestTxHash
 const ATTESTED = vector("valid-local-k256").output!.time as number
 const BLOCK_TIME = ATTESTED + 120
 
-/**
- * The vectors predate the SDK's bind format (sdks#194): they write the
- * request hash as 0x + hex, where the SDK, and so the node, writes it
- * without the prefix. Applied to a verified output, this drops the prefix
- * from the transcript, as a presentation the SDK makes would read; the
- * vectors' own form is refused (see "the vectors' bind form").
- */
-function inSdkBindForm(out: Record<string, any>): Record<string, any> {
-    const sent = Buffer.from(out.sent, "hex")
-    const at = sent.indexOf(`:${BIND_SENDER}:0x`, 0, "latin1")
-    if (at < 0) return out
-    const cut = at + BIND_SENDER.length + 2
-    const shift = (i: number) => (i <= cut ? i : Math.max(cut, i - 2))
-    return {
-        ...out,
-        sent: Buffer.concat([sent.subarray(0, cut), sent.subarray(cut + 2)]).toString("hex"),
-        sentAuthed: out.sentAuthed.map(([a, b]: [number, number]) => [shift(a), shift(b)]),
-    }
-}
-
 const wasm = TlsnWasmVerifier.load()
 let useTestRoot = true
-let sdkBindForm = true
 let verifyCalls = 0
 /** The pinned verifier, with the test CA as root for the local vectors. */
 const testVerifier = {
     wasmSha256: TLSN_VERIFY_WASM_SHA256,
     verify: (bytes: Uint8Array, onRefusal: (r: string) => void) => {
         verifyCalls++
-        const result: any = useTestRoot
+        return useTestRoot
             ? wasm.verifyWithTestRoot(bytes, TEST_ROOT, { onRefusal })
             : wasm.verifyPresentation(bytes, { onRefusal })
-        return result.ok && sdkBindForm ? { ...result, out: inSdkBindForm(result.out) } : result
     },
 }
 
@@ -290,7 +268,6 @@ beforeEach(() => {
     chain.failing = false
     chain.judgeReads = 0
     verifyCalls = 0
-    sdkBindForm = true
     setPresentationVerifierForTests(testVerifier)
     serve(vector("valid-local-k256"))
 })
@@ -331,17 +308,6 @@ describe("golden vectors through admission and apply", () => {
             }
         })
     }
-
-    it("the vectors' bind form, a 0x-prefixed request hash, is refused", async () => {
-        sdkBindForm = false
-        for (const v of [K256(), vector("valid-github")]) {
-            serve(v)
-            chain.tipTimeSec = v.output!.time + 120
-            const { admitted, applied } = await judgeBoth({ hex: v.hex, ...claimed(v) }, v.output!.time + 120)
-            expect(admitted.message).toContain("X-Demos-Bind header is malformed")
-            expect(applied.message).toContain("X-Demos-Bind header is malformed")
-        }
-    })
 
     it("the 'no-server-identity' vector is refused for its missing server name", async () => {
         const v = vector("no-server-identity")
@@ -422,7 +388,7 @@ describe("notary keys and time", () => {
 describe("transcript rules", () => {
     /** valid-local-k256 as the verifier reports it, changed by `edit`. */
     function forged(edit: (out: Record<string, any>) => void) {
-        const out = inSdkBindForm(structuredClone(K256().output!))
+        const out = structuredClone(K256().output!)
         edit(out)
         setPresentationVerifierForTests({
             wasmSha256: TLSN_VERIFY_WASM_SHA256,

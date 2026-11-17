@@ -124,6 +124,16 @@ function revealedSecret(headers: HeaderLine[], secret: ReadonlySet<string>): str
 }
 
 /**
+ * The request target names the endpoint in origin form (`/user`) or in the
+ * absolute form tlsn-js sends (`https://api.github.com/user`, RFC 9112
+ * 3.2.2). Nothing looser: a query, another scheme or another host is
+ * another resource.
+ */
+function isEndpointTarget(target: string, endpoint: TlsnIdentityEndpoint): boolean {
+    return target === endpoint.path || target === `https://${endpoint.server}${endpoint.path}`
+}
+
+/**
  * Judges the transcript of an accepted presentation for an identity link of
  * `context` by `sender`. The request tx named by the bind header is checked
  * by the caller, which reads the chain.
@@ -148,7 +158,7 @@ export function judgeIdentityTranscript(
     // is refused whatever else it proves, so none is ever stored on chain.
     const leak = revealedSecret(req.headers, SECRET_REQUEST_HEADERS)
     if (leak) return refuse(`presentation reveals the ${leak} header value`)
-    if (req.method !== endpoint.method || req.target !== endpoint.path) {
+    if (req.method !== endpoint.method || !isEndpointTarget(req.target, endpoint)) {
         return refuse(`request is ${req.method} ${req.target}, ${context} links need ${endpoint.method} ${endpoint.path}`)
     }
     const host = singleHeader(req.headers, "host")

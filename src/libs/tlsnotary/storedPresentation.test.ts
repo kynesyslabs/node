@@ -32,18 +32,13 @@ const SENDER = "0x" + "11".repeat(32)
 const REQUEST = "22".repeat(32)
 const SERVER = "api.demos-spike.test"
 
-/**
- * `out` with its github bind header rewritten to bind a store, ranges
- * shifted to match. `sdkForm` drops the 0x the vectors put on the request
- * hash, as the SDK writes it (sdks#194).
- */
-function asStore(out: Record<string, any>, sdkForm = true): Record<string, any> {
+/** `out` with its github bind header rewritten to bind a store, ranges shifted to match. */
+function asStore(out: Record<string, any>): Record<string, any> {
     const sent = Buffer.from(out.sent, "hex").toString("latin1")
     const from = "demos-tlsn:v1:github:"
     const at = sent.indexOf(from)
     expect(at).toBeGreaterThan(-1)
-    let rewritten = sent.replace(from, "demos-tlsn:v1:store:")
-    if (sdkForm) rewritten = rewritten.replace(`:0x${REQUEST}\r\n`, `:${REQUEST}\r\n`)
+    const rewritten = sent.replace(from, "demos-tlsn:v1:store:")
     expect(rewritten).not.toBe(sent)
     const shift = rewritten.length - sent.length
     return {
@@ -160,7 +155,7 @@ describe("verifyStoredPresentation", () => {
     })
 
     it("refuses a bind that writes the request hash with 0x: one request has one bind value", () => {
-        nextOutput = asStore(vector("valid-local-k256"), false)
+        nextOutput = over(partly(REQUEST_HEAD.replace(`:${REQUEST}\r\n`, `:0x${REQUEST}\r\n`), "Bearer s3cret"))
         expect(reasonOf(verifyStoredPresentation(input()))).toContain("X-Demos-Bind header is malformed")
     })
 
