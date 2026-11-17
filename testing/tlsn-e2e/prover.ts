@@ -191,15 +191,27 @@ export async function startProver(sdkTree: string, workDir: string, log: (s: str
         await page.waitForFunction(() => typeof (window as any).tlsnAttest === "function", undefined, { timeout: 30_000 })
         return page
     }
-    const page = await open("")
+    let page = await open("")
 
     return {
         async attest(input: AttestInput, timeoutMs = 180_000): Promise<AttestOutput> {
             const run = page.evaluate(i => (window as any).tlsnAttest(i), input) as Promise<AttestOutput>
-            const timeout = new Promise<AttestOutput>(r =>
-                setTimeout(() => r({ ok: false, error: `attest timed out after ${timeoutMs} ms`, ms: timeoutMs, statuses: [] }), timeoutMs),
-            )
-            return Promise.race([run, timeout])
+            let timer: ReturnType<typeof setTimeout> | undefined
+            const timeout = new Promise<"timeout">(r => {
+                timer = setTimeout(() => r("timeout"), timeoutMs)
+            })
+            try {
+                const out = await Promise.race([run, timeout])
+                if (out !== "timeout") return out
+            } finally {
+                clearTimeout(timer)
+            }
+            // A stalled session keeps its MPC work and sockets alive in the
+            // page; closing it keeps them out of the next attestation.
+            run.catch(() => {})
+            await page.context().close().catch(() => {})
+            page = await open("")
+            return { ok: false, error: `attest timed out after ${timeoutMs} ms`, ms: timeoutMs, statuses: [] }
         },
         /** The SDK's offline verify, in a page with or without a global Buffer. */
         async verify(presentation: any, trustedNotaryKeys: string[], withBuffer: boolean) {

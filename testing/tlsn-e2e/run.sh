@@ -163,32 +163,35 @@ say "node $(git -C "${REPO_ROOT}" rev-parse --short HEAD)$(git -C "${REPO_ROOT}"
 # ---- 3. inputs: identities, wallets, notary keys, genesis, peerlist ----------------
 step=03-inputs
 GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
-{
-    set -e
+# A subshell with an explicit exit on each failure: on the left of `||`,
+# set -e would be ignored and a failed key could boot a broken network.
+(
     for i in 1 2 3 4; do
-        out=$(cd "${REPO_ROOT}" && bun testing/devnet/scripts/generate-identity-helper.ts)
+        out=$(cd "${REPO_ROOT}" && bun testing/devnet/scripts/generate-identity-helper.ts) || exit 1
         echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "${INPUTS}/node${i}.identity"
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${INPUTS}/pub${i}"
+        [ -s "${INPUTS}/node${i}.identity" ] && [ -s "${INPUTS}/pub${i}" ] || { echo "node${i}: no identity"; exit 1; }
     done
-    chmod 600 "${INPUTS}"/node*.identity
-    (cd "${INPUTS}" && bun "${HERE}/wallets.ts")
+    chmod 600 "${INPUTS}"/node*.identity || exit 1
+    (cd "${INPUTS}" && bun "${HERE}/wallets.ts") || exit 1
     # Fresh notary keys for this run only: the private halves never leave
     # the run dir and are deleted at teardown; only public keys are printed.
     for k in 1 2 3; do
         d="${INPUTS}/notary-${k}"
-        openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:secp256k1 -out "${d}/notary.key" 2>/dev/null
+        openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:secp256k1 -out "${d}/notary.key" 2>/dev/null || exit 1
         # Read by the notary's non-root user inside its container.
-        chmod 644 "${d}/notary.key"
+        chmod 644 "${d}/notary.key" || exit 1
         openssl ec -in "${d}/notary.key" -pubout -conv_form compressed -outform DER 2>/dev/null |
             tail -c 33 | xxd -p -c 100 > "${INPUTS}/notary-${k}.pub"
+        grep -Eqx '0[23][0-9a-f]{64}' "${INPUTS}/notary-${k}.pub" || { echo "notary-${k}: no compressed public key"; exit 1; }
         echo "notary-${k} public key $(cat "${INPUTS}/notary-${k}.pub")"
     done
     wasm="${REPO_ROOT}/native/tlsn-verify/dist/demos_tlsn_verify.wasm"
-    wasm_sha=$(sha256sum "${wasm}" | cut -d' ' -f1)
+    wasm_sha=$(sha256sum "${wasm}" | cut -d' ' -f1) || exit 1
     pinned=$(awk '{print $1}' "${wasm}.sha256")
     [ "${wasm_sha}" = "${pinned}" ] || { echo "verifier wasm ${wasm_sha} != committed ${pinned}"; exit 1; }
     echo "verifier wasm sha256 ${wasm_sha}"
-    python3 - "${INPUTS}" "${REPO_ROOT}" "${GENESIS_TS}" "${wasm_sha}" <<'PY'
+    python3 - "${INPUTS}" "${REPO_ROOT}" "${GENESIS_TS}" "${wasm_sha}" <<'PY' || exit 1
 import json, sys
 inputs, repo, genesis_ts, wasm_sha = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 g = json.load(open(f"{repo}/testing/devnet/genesis.devnet.json"))
@@ -197,6 +200,7 @@ assert forks["tlsnVerified"]["activationHeight"] == 0, "devnet genesis must acti
 assert forks.get("tlsnDisabled", {}).get("activationHeight") is None, "devnet genesis must leave tlsnDisabled unscheduled"
 g["timestamp"] = genesis_ts
 pubs = [open(f"{inputs}/pub{i}").read().strip() for i in (1, 2, 3, 4)]
+assert all(pubs) and len(set(pubs)) == 4, "four distinct node public keys"
 ports = ["53551", "53553", "53555", "53557"]
 # The stock devnet's 10 is a committee floor four nodes never reach
 g["properties"]["shardSize"] = 4
@@ -223,7 +227,7 @@ json.dump({pubs[0]: "http://node-1:53551"}, open(f"{inputs}/peerlist.json", "w")
 print("genesis shardSize 4, validators", len(pubs), "balances", len(g["balances"]),
       "tlsnVerified keys", [k["id"] for k in fork["notaryKeys"]])
 PY
-} > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: generating inputs failed (see ${step}.log)"; exit 2; }
+) > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: generating inputs failed (see ${step}.log)"; exit 2; }
 say "inputs ready: $(grep '^wallets:' "${LOG_DIR}/${step}.log"), $(grep -c 'public key' "${LOG_DIR}/${step}.log") notary keys"
 
 {
