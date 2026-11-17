@@ -166,6 +166,32 @@ describe("revealedSecretHeader", () => {
         expect(revealedSecretHeader(partly(HEAD, "authorization: Bearer s3cret\r\n"))).not.toBeNull()
     })
 
+    it("refuses a hidden CRLF that folds a header into the request line", () => {
+        const head = "GET / HTTP/1.1\r\nauthorization: Bearer s3cret\r\nhost: a.test\r\n\r\n"
+        expect(revealedSecretHeader(partly(head, "HTTP/1.1\r\n"))).not.toBeNull()
+        expect(revealedSecretHeader(partly(head, "1\r\n"))).not.toBeNull()
+    })
+
+    it("accepts a request line that hides only its target", () => {
+        const head = "GET /user?key=abc HTTP/1.1\r\nhost: a.test\r\n\r\n"
+        expect(revealedSecretHeader(partly(head, "/user?key=abc"))).toBeNull()
+        expect(revealedSecretHeader(partly(head, "GET /user?key=abc HTTP/1.1"))).not.toBeNull()
+    })
+
+    it("refuses a second request revealed after the head", () => {
+        const two = "GET / HTTP/1.1\r\nhost: a.test\r\n\r\nGET / HTTP/1.1\r\nauthorization: Bearer s3cret\r\n\r\n"
+        expect(revealedSecretHeader(partly(two))).not.toBeNull()
+        // Hidden whole, it reveals nothing.
+        expect(revealedSecretHeader(partly(two, "GET / HTTP/1.1\r\nauthorization: Bearer s3cret\r\n\r\n"))).toBeNull()
+    })
+
+    it("accepts a revealed body of the declared length", () => {
+        const body = '{"q":1}'
+        const head = `POST / HTTP/1.1\r\nhost: a.test\r\ncontent-length: ${body.length}\r\n\r\n${body}`
+        expect(revealedSecretHeader(partly(head))).toBeNull()
+        expect(revealedSecretHeader(partly(head + "GET / HTTP/1.1\r\n\r\n"))).not.toBeNull()
+    })
+
     it("names the Authorization header when its value is authenticated", () => {
         const out = vector("valid-local")
         expect(revealedSecretHeader({ ...out, sentAuthed: [[0, out.transcriptLength.sent]] })).toBe("authorization")

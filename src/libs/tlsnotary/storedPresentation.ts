@@ -159,13 +159,50 @@ export function readBindHeader(
     return { ok: true, bind: { context: parts[2], sender: parts[3], requestTxHash: parts[4] } }
 }
 
+// What a request line may reveal after a hidden target: its version.
+const REQUEST_LINE_TAIL = / HTTP\/\d(?:\.\d)?$/
+
+/**
+ * Why the request line could hide a header, or null. It is revealed whole,
+ * or hides only the target, with its version and CRLF revealed: otherwise
+ * a hidden CRLF would fold the next header into it, where no header check
+ * reads it.
+ */
+function requestLineRefusal(sent: Buffer, ranges: [number, number][]): string | null {
+    const end = sent.indexOf("\r\n")
+    if (end === -1) return anyAuthed(ranges, 0, sent.length) ? "a request line without a revealed end" : null
+    if (authed(ranges, 0, end + 2)) return null
+    const line = sent.subarray(0, end).toString("latin1")
+    const tail = REQUEST_LINE_TAIL.exec(line)
+    if (tail && authed(ranges, tail.index, end + 2)) return null
+    return "a partly revealed request line"
+}
+
+/**
+ * Why revealed bytes after the request head could carry another request, or
+ * null. They must be the one body the head declares, by a revealed
+ * Content-Length equal to their length.
+ */
+function trailingRefusal(sent: Buffer, ranges: [number, number][], lines: HeaderLine[]): string | null {
+    const headEnd = sent.indexOf("\r\n\r\n")
+    if (headEnd === -1) return null
+    const bodyStart = headEnd + 4
+    if (bodyStart >= sent.length || !anyAuthed(ranges, bodyStart, sent.length)) return null
+    const declared = lines.find(
+        line => line.name === "content-length" && authed(ranges, line.start, Math.min(line.end + 2, sent.length)),
+    )
+    if (declared && declared.value === String(sent.length - bodyStart)) return null
+    return "revealed bytes after the request head that are not its declared body"
+}
+
 /**
  * Why the presentation may reveal a credential, or null. A secret header
  * (Authorization, Cookie, Proxy-Authorization) must keep its value hidden.
  * A header line is either revealed whole, with its CRLF, or reveals at most
  * its name and colon. Hidden bytes read as zeros, so a line that reveals part
  * of its value could hide the name of a secret header, or a CRLF that joins
- * a secret header to the line before it.
+ * a secret header to the line before it; the request line and anything after
+ * the head are held to the same end.
  */
 export function revealedSecretHeader(
     verified: Pick<TlsnVerifiedPresentation, "sent" | "sentAuthed">,
@@ -173,7 +210,10 @@ export function revealedSecretHeader(
     if (verified.sent === null || verified.sentAuthed === null) return null
     const sent = Buffer.from(verified.sent, "hex")
     const ranges = verified.sentAuthed
-    for (const line of headerLines(sent)) {
+    const requestLine = requestLineRefusal(sent, ranges)
+    if (requestLine) return requestLine
+    const lines = headerLines(sent)
+    for (const line of lines) {
         const lineEnd = Math.min(line.end + 2, sent.length)
         if (!anyAuthed(ranges, line.start, line.end)) continue
         if (authed(ranges, line.start, lineEnd)) {
@@ -187,7 +227,7 @@ export function revealedSecretHeader(
             return `partly revealed ${shown || "unnamed"}`
         }
     }
-    return null
+    return trailingRefusal(sent, ranges, lines)
 }
 
 /** The presentation bytes and canonical proof of a store's `proof` arg, or why it is refused. */
