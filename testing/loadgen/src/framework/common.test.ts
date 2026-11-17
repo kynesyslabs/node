@@ -364,6 +364,31 @@ describe("textOrType", () => {
     // A key is cut the same way.
     expect(textOrType({ ["k".repeat(79) + "😀"]: 1 })).toBe(`{"${"k".repeat(79)}"…(81 chars):1}`)
   })
+
+  it("shows an object with a Symbol.toStringTag by its tag instead of an empty preview", () => {
+    // Map, Set and Promise have no own keys, so the own-keys preview showed each as {}.
+    expect(textOrType(new Map([["a", 1]]))).toBe("[object Map]")
+    expect(textOrType(new Set([1]))).toBe("[object Set]")
+    expect(textOrType(Promise.resolve(1))).toBe("[object Promise]")
+  })
+
+  it("keeps the preview for untagged objects and for a Proxy whose has trap throws", () => {
+    class Amount {
+      value = "5"
+    }
+    expect(textOrType({})).toBe("{}")
+    expect(textOrType({ amount: "5" })).toBe("{\"amount\":\"5\"}")
+    expect(textOrType(new Amount())).toBe("{\"value\":\"5\"}")
+    expect(textOrType(Object.create(null))).toBe("object")
+    // `Symbol.toStringTag in` runs the has trap; when it throws, the value counts as
+    // untagged and keeps the preview it had before the tag check.
+    const trapped = new Proxy({ id: 7 }, {
+      has() {
+        throw new Error("has trap")
+      },
+    })
+    expect(textOrType(trapped)).toBe("{\"id\":7}")
+  })
 })
 
 describe("errorShapeKey", () => {

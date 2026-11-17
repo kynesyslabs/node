@@ -145,9 +145,12 @@ function cutRecord(line: string): string {
 
 type Printable = string | number | bigint | boolean | symbol | null | undefined | { toString(): string }
 
-// False only for an object whose toString is Object's own, which String() shows as "[object Object]".
+// False only for an object whose toString is Object's own and that has no Symbol.toStringTag,
+// which String() shows as "[object Object]". A tagged object (Map, Set, Promise) shows its
+// tag ("[object Map]"). A Proxy whose `has` trap throws counts as untagged.
 function isPrintable(value: unknown): value is Printable {
-  return typeof value !== "object" || value?.toString !== Object.prototype.toString
+  if (typeof value !== "object" || value === null) return true
+  return value.toString !== Object.prototype.toString || readOr(() => Symbol.toStringTag in value, false) === true
 }
 
 const PREVIEW_MAX_ITEMS = 20
@@ -210,7 +213,7 @@ function logFieldText(value: unknown, cut: (text: string) => string): string {
 }
 
 // read(), or `fallback` when the read throws (a getter or Proxy trap on a thrown value).
-function readOr(read: () => unknown, fallback: string): unknown {
+function readOr(read: () => unknown, fallback: unknown): unknown {
   try {
     return read()
   } catch {
