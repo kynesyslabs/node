@@ -126,7 +126,7 @@ async function isRpcReady(rpcUrl: string): Promise<boolean> {
       body: JSON.stringify({ method: "ping", params: [] }),
     })
     if (!res.ok) return false
-    const data = (await res.json().catch(() => null)) as any
+    const data = (await res.json()) as any
     return typeof data?.result === "number" && data.result >= 200 && data.result < 300
   } catch (error) {
     logNonCriticalErrorOnce(`token_shared.isRpcReady:${url}`, "token_shared.isRpcReady", error, { rpcUrl: url })

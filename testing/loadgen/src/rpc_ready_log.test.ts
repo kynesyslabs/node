@@ -2,7 +2,8 @@
  * rpc_loadgen and transfer_loadgen wait for every target in parallel. When two
  * targets fail in different ways, each target's first failure must be logged,
  * not only the first failure in the process (#708). A 200 reply whose body is
- * not JSON is logged the same way, instead of being read as `null`.
+ * not JSON is logged the same way, instead of being read as `null`, by these
+ * two probes and by the shared probe behind `token_shared.waitForRpcReady`.
  *
  * Run this file in its own `bun test` process.
  */
@@ -10,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import { loggedNonCriticalKeyCount } from "./framework/common"
 import { isRpcReady as rpcLoadgenIsRpcReady } from "./rpc_loadgen"
+import { waitForRpcReady } from "./token_shared"
 import { isRpcReady as transferLoadgenIsRpcReady } from "./transfer_loadgen"
 
 const failures: Record<string, string> = {
@@ -108,4 +110,25 @@ describe("readiness probe logs a malformed ping reply", () => {
       expect(loggedNonCriticalKeyCount()).toBe(keysBefore + 1)
     })
   }
+
+  it("token_shared.isRpcReady logs a 200 reply that is not JSON once, however many attempts run", async () => {
+    const context = "token_shared.isRpcReady"
+    const parseError = await new Response("not json").json().then(
+      () => "",
+      (error: unknown) => (error as Error).message,
+    )
+    expect(parseError).not.toBe("")
+    const keysBefore = loggedNonCriticalKeyCount()
+
+    // The probe is private; waitForRpcReady retries it until the 1 s deadline,
+    // then throws its usual error.
+    await expect(waitForRpcReady(target, 1)).rejects.toThrow(`RPC not ready at ${target} after 1s`)
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1)
+
+    const lines = errors.filter(line => line.includes(`Non-critical error in ${context}:`))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain(`Non-critical error in ${context}: ${parseError}`)
+    expect(lines[0]).toContain(target)
+    expect(loggedNonCriticalKeyCount()).toBe(keysBefore + 1)
+  })
 })
