@@ -108,6 +108,16 @@ async function nativeSendBalanceError(
     return null
 }
 
+function feeComponentRefusal(name: string, value: unknown): string | null {
+    // OS amounts travel as digit strings.
+    const readable = typeof value === "number"
+        ? Number.isSafeInteger(value) && value >= 0
+        : typeof value === "string" && /^\d+$/.test(value)
+    return readable
+        ? null
+        : `[Tx Validation] [FEE ERROR] transaction_fee.${name} is not a non-negative integer\n`
+}
+
 async function quoteNativeSendFee(
     tx: Transaction,
     referenceBlock: number,
@@ -135,14 +145,9 @@ async function quoteNativeSendFee(
             return "[Tx Validation] [FEE ERROR] transaction_fee is missing or not an object\n"
         }
         for (const key of ["network_fee", "rpc_fee", "additional_fee"]) {
-            // OS amounts travel as digit strings.
             const value = (fee as Record<string, unknown>)[key] ?? 0
-            const readable = typeof value === "number"
-                ? Number.isSafeInteger(value) && value >= 0
-                : typeof value === "string" && /^[0-9]+$/.test(value)
-            if (!readable) {
-                return `[Tx Validation] [FEE ERROR] transaction_fee.${key} is not a non-negative integer\n`
-            }
+            const refusal = feeComponentRefusal(key, value)
+            if (refusal) return refusal
             total += BigInt(value as number | string)
         }
     }

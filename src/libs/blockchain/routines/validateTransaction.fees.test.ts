@@ -374,6 +374,11 @@ describe("native send confirmation fee quote", () => {
         ["no transaction_fee", content => { delete content.transaction_fee }, "transaction_fee is missing or not an object"],
         ["rpc_fee 1.5", content => { content.transaction_fee.rpc_fee = "1.5" }, "transaction_fee.rpc_fee is not a non-negative integer"],
         ["network_fee -1", content => { content.transaction_fee.network_fee = -1 }, "transaction_fee.network_fee is not a non-negative integer"],
+        // Pin the inputs the component check refuses: past the safe integer
+        // range, a non-numeric type, and digits outside 0-9.
+        ["network_fee 2^53", content => { content.transaction_fee.network_fee = 2 ** 53 }, "transaction_fee.network_fee is not a non-negative integer"],
+        ["additional_fee true", content => { content.transaction_fee.additional_fee = true }, "transaction_fee.additional_fee is not a non-negative integer"],
+        ["rpc_fee in Arabic-Indic digits", content => { content.transaction_fee.rpc_fee = "١" }, "transaction_fee.rpc_fee is not a non-negative integer"],
     ]
     for (const [label, change, reason] of unreadableFees) {
         it(`refuses a fee it cannot read when the fee forks follow the reference block (${label})`, async () => {
