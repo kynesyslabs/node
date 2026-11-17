@@ -340,6 +340,17 @@ describe("ensureValidatorSeed", () => {
         ).rejects.toThrow(/staked_amount is not a valid bigint/)
     })
 
+    it.each(["", "0x10", " 7", "+7"])("rejects the non-decimal stake %j", async stake => {
+        repoCount.mockResolvedValue(0)
+        chainLastBlock.mockResolvedValue(0)
+
+        await expect(
+            ensureValidatorSeed({
+                validators: [makeSeed({ staked_amount: stake })],
+            }),
+        ).rejects.toThrow(/staked_amount is not a valid bigint: .*\(decimal digits only\)/)
+    })
+
     it("rejects negative valid_at", async () => {
         repoCount.mockResolvedValue(0)
         chainLastBlock.mockResolvedValue(0)

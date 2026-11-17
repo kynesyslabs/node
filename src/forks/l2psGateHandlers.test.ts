@@ -88,8 +88,10 @@ describe("L2PS services under l2psGate", () => {
     const spies: { mockRestore(): void }[] = []
     afterEach(() => spies.splice(0).forEach(s => s.mockRestore()))
     const savedJoined = getSharedState.l2psJoinedUids
+    const savedInitialized = getSharedState.isInitialized
     afterEach(() => {
         getSharedState.l2psJoinedUids = savedJoined
+        getSharedState.isInitialized = savedInitialized
     })
 
     const stubServices = () => {
@@ -103,6 +105,8 @@ describe("L2PS services under l2psGate", () => {
         }
         spies.push(...Object.values(s))
         getSharedState.l2psJoinedUids = ["net"]
+        // Services wait for a synced node; the gate is judged on one.
+        getSharedState.isInitialized = true
         return s
     }
 

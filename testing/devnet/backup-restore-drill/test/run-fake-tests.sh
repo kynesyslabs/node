@@ -106,8 +106,8 @@ if sel smoke-pass; then
     want_rc 0
     want_out 'SMOKE PASS' "SMOKE PASS"
     want_out 'CHECK PASS: gossip enabled on every node' "gossip check"
-    want_out 'CHECK INFO: uid 1000 write probe of the node state \(not a check: .* in these image directories: /app /app/data /app/logs; ' "the write probe is INFO and lists what it probed"
-    no_out 'CHECK PASS: node state is writable' "a PASS of the write probe"
+    want_out 'CHECK PASS: node state is writable by uid 1000 \(uid 1000 created and deleted a file in each of the [0-9]+ read-write mounts .* in these image directories they do not mount \(its working directory and declared volumes\): /app /app/data /app/logs\)' "the write probe passes and lists the image directories it probed"
+    no_out 'CHECK INFO: uid 1000 write probe' "the old INFO row of the write probe"
     want_out 'CHECK PASS: smoke: node 4 serves RPC at head >= 2' "node 4 line"
     want_out 'PHASE S smoke: up to every node serving at head >= 2: ' "the phase row says every node got there"
     want_call 'up --no-start' "up --no-start (volumes created by compose)"
@@ -236,6 +236,40 @@ if sel unwritable-image-dir; then
     want_out '/app/logs in the image' "the image's own log dir is checked"
     no_call ' up -d' "up -d"
 fi
+if sel image-read; then
+    # The image's declared volumes and its working directory are read on their own: a volume
+    # read that fails, gives nothing or no JSON stops the run though the working directory is
+    # read, and so does a working directory read that fails or gives nothing
+    k=0
+    for kv in FAKE_IMG_VOLUMES_READ=fail FAKE_IMG_VOLUMES_READ=empty 'FAKE_IMG_VOLUMES_READ={"/app/data":{}' \
+        FAKE_IMG_WORKDIR_READ=fail FAKE_IMG_WORKDIR_READ=empty; do
+        k=$((k + 1))
+        go "image-read-${k}" SMOKE=1 "${kv}"
+        want_rc 2
+        case "${kv}" in
+            *VOLUMES_READ=fail) want_out 'ABORT: cannot read the volumes .* declares \(docker image inspect .Config.Volumes\)' "${kv}: the run stops on the failed read" ;;
+            *VOLUMES_READ=empty) want_out "ABORT: the volumes .* declares \(docker image inspect .Config.Volumes\) are not one JSON object or null: ''$" "${kv}: the run stops on the read" ;;
+            *VOLUMES_READ=*) want_out "ABORT: the volumes .* declares \(docker image inspect .Config.Volumes\) are not one JSON object or null: '\{\"/app/data\":\{\}'$" "${kv}: the run stops on the read" ;;
+            *) want_out 'ABORT: cannot read the working directory of .* \(docker image inspect .Config.WorkingDir\), or it is empty' "${kv}: the run stops on the read" ;;
+        esac
+        no_out 'CHECK (PASS|INFO): (node state is writable|uid 1000 write probe)' "${kv}: a PASS or INFO row of the write probe"
+        no_call ' up -d' "up -d (nothing started)"
+        torn_down
+    done
+    # null (an image without VOLUME) and {} declare no volume: the working directory alone is probed
+    go image-read-null SMOKE=1 FAKE_NO_IMG_VOLUMES=1
+    want_rc 0
+    want_out 'CHECK PASS: node state is writable by uid 1000 \(.*\(its working directory and declared volumes\): /app\)' "null: PASS, /app probed"
+    go image-read-empty-object SMOKE=1 'FAKE_IMG_VOLUMES_READ={}'
+    want_rc 0
+    want_out 'CHECK PASS: node state is writable by uid 1000 \(.*\(its working directory and declared volumes\): /app\)' "{}: PASS, /app probed"
+    # a declared volume path with a space in it is probed as one path, not as two words
+    go image-read-space SMOKE=1 'FAKE_IMG_VOLUMES_READ={"/app/my data":{}}'
+    want_rc 0
+    want_out '\] uid 1000 can write: /app/my data \(from the image\)$' "the path with a space probed as one path"
+    no_out '\] uid 1000 can write: (/app/my|data) \(from the image\)$' "a probe of a word of that path"
+    want_out 'CHECK PASS: node state is writable by uid 1000 \(.*\(its working directory and declared volumes\): /app /app/my data\)' "PASS naming the path with a space"
+fi
 if sel unwritable-tmpfs; then
     go unwritable-tmpfs SMOKE=1 FAKE_ADD_TMPFS=/app/scratch
     want_rc 2
@@ -288,7 +322,8 @@ if sel full-isolated; then
     want_out "CHECK PASS: isolated node holds no copy of node 4's key \(own state volume mounted, no identity or state volume of node 4, different identity \(sha256 [0-9a-f]{12}\.\. vs [0-9a-f]{12}\.\.\)\)" "node-iso holds no copy of the key"
     want_out "CHECK PASS: isolated node reaches the expected head, on the validators' chain \(DB head [0-9]+; head [0-9]+ vs others [0-9]+; block ([0-9]+) hash\1\.\. on nodes iso 1 2 3 4\)" "node-iso caught up, one hash on it and the four validators"
     want_out "CHECK PASS: node 4's key is held by only the one container on its state volume \(one running node-4 container, the one started at bring-up, and the only running container on its state volume\)" "node 4's key: one holder"
-    want_out 'CHECK INFO: whether node 4 stopped or restarted during the isolated drill \(not shown: ' "the stop or restart row is INFO"
+    want_out "CHECK PASS: node 4 never stopped or restarted during the isolated drill \(the running node-4 container is the one started at bring-up \([0-9a-f]{12}\), started [0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+, restart count 0 as then\)" "node 4 never stopped or restarted: same id, start time and restart count"
+    no_out 'CHECK INFO: whether node 4 stopped' "the old INFO row"
     no_out 'untouched' "an 'untouched' row"
     want_out 'RESULT PASS: isolated drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
@@ -699,6 +734,59 @@ if sel iso-holder; then
     one_fail "node 4's key is held by only the one container on its state volume"
     torn_down
 fi
+if sel iso-restart; then
+    # From the backup on, node 4's container restarts in place: the same id, with a restart
+    # count one higher, or a later start time
+    go iso-restart-count VARIANT=isolated FAKE_RESTART_IN_PLACE=count
+    want_rc 1
+    want_out "CHECK FAIL: node 4 never stopped or restarted during the isolated drill \(node-4 running at the end: ([0-9a-f]{12}) ; started at bring-up: \1; at bring-up started (\S+), restart count 0, at the end started \2, restart count 1\)" "a higher restart count, same id: FAIL"
+    want_out "CHECK PASS: node 4's key is held by only the one container" "the id alone still matches"
+    one_fail 'node 4 never stopped or restarted'
+    torn_down
+    go iso-restart-started VARIANT=isolated FAKE_RESTART_IN_PLACE=started
+    want_rc 1
+    want_out "CHECK FAIL: node 4 never stopped or restarted during the isolated drill \(node-4 running at the end: ([0-9a-f]{12}) ; started at bring-up: \1; at bring-up started \S+, restart count 0, at the end started \S+, restart count 0\)" "a later start time, same id: FAIL"
+    if grep -qE 'at bring-up started (\S+), restart count 0, at the end started \1,' "${CDIR}/out.txt"; then bad "the start times in the FAIL row are equal"; else ok "the start times in the FAIL row differ"; fi
+    one_fail 'node 4 never stopped or restarted'
+    torn_down
+    # Node 2 restarts in place while nodes 3 and 4 are brought up after it: its baseline is
+    # read as soon as it serves, not after the last node, so the restart is not in it
+    go iso-restart-bringup VARIANT=isolated X_NODE=2 FAKE_RESTART_AT_UP=node-2
+    want_rc 1
+    want_out "CHECK FAIL: node 2 never stopped or restarted during the isolated drill \(node-2 running at the end: ([0-9a-f]{12}) ; started at bring-up: \1; at bring-up started \S+, restart count 0, at the end started \S+, restart count 1\)" "a restart during the rest of bring-up, same id: FAIL"
+    want_out "CHECK PASS: node 2's key is held by only the one container" "the id alone still matches"
+    one_fail 'node 2 never stopped or restarted'
+    torn_down
+    # the baseline read at bring-up fails: the run stops before the drill, and docker's own
+    # error is shown
+    go iso-restart-unreadable-bringup VARIANT=isolated FAKE_RUN_READ_FAIL=1
+    want_rc 2
+    want_out "cannot read node-4's start time and restart count at bring-up \(docker inspect gave ''\)" "the failed baseline read stops the run"
+    want_out "^Error response from daemon: fake read failure$" "docker's error for the failed baseline read"
+    no_out 'PHASE IC ' "the isolated restore"
+    torn_down
+    # the baseline read gives a start time the drill cannot parse (a Go time, as a CLI other
+    # than docker may print): the run stops, and the error shows what the read gave
+    go iso-restart-gotime-bringup VARIANT=isolated FAKE_RUN_GOTIME=1
+    want_rc 2
+    want_out "cannot read node-4's start time and restart count at bring-up \(docker inspect gave '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}\.[0-9]{9} \+0000 UTC 0'\)" "the unparsed read is in the error"
+    no_out 'PHASE IC ' "the isolated restore"
+    torn_down
+    # the read at the end fails: FAIL, and docker's own error is shown
+    go iso-restart-unreadable-end VARIANT=isolated FAKE_RUN_READ_FAIL=2
+    want_rc 1
+    want_out "CHECK FAIL: node 4 never stopped or restarted during the isolated drill \(.*, at the end unreadable \(nothing\)\)" "the failed read at the end: FAIL"
+    want_out "^Error response from daemon: fake read failure$" "docker's error for the failed read at the end"
+    one_fail 'node 4 never stopped or restarted'
+    torn_down
+    # the read at the end gives a start time the drill cannot parse: FAIL, and the row shows
+    # what the read gave, as the bring-up error does
+    go iso-restart-gotime-end VARIANT=isolated FAKE_RUN_GOTIME=2
+    want_rc 1
+    want_out "CHECK FAIL: node 4 never stopped or restarted during the isolated drill \(.*, at the end unreadable \([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}\.[0-9]{9} \+0000 UTC 0\)\)" "the unparsed read at the end is in the FAIL row"
+    one_fail 'node 4 never stopped or restarted'
+    torn_down
+fi
 
 # ── every read empty ────────────────────────────────────────────────────
 if sel empty-reads; then
@@ -718,8 +806,9 @@ if sel empty-reads; then
     # the same from node-iso's first answer on
     go empty-reads-isolated VARIANT=isolated FAKE_EMPTY_READS=1 REJOIN_TIMEOUT=8 STALL_LIMIT=4
     want_rc 1
-    no_pass_after '── 07-isolated-node' 'whether node 4 stopped or restarted'
-    for c in "isolated node reaches the expected head" "isolated node holds no copy" "the validators kept forging" "node 4's key is held by only"; do
+    no_pass_after '── 07-isolated-node'
+    for c in "isolated node reaches the expected head" "isolated node holds no copy" "the validators kept forging" "node 4's key is held by only" \
+        "node 4 never stopped or restarted"; do
         want_out "CHECK FAIL: ${c}" "${c}: FAIL"
     done
     no_out 'RESULT PASS' "RESULT PASS"

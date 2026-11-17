@@ -16,11 +16,12 @@
  * @module L2PSTransactionExecutor
  */
 
-import { Repository } from "typeorm"
+import { In, MoreThan, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 import { L2PSExecutedHash } from "@/model/entities/L2PSExecutedHashes"
+import { SETTLEABLE_QUEUE_STATUSES } from "./settleableStatuses"
 import type { Transaction, GCREdit, INativePayload } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
 import L2PSProofManager from "./L2PSProofManager"
@@ -658,6 +659,10 @@ export default class L2PSTransactionExecutor {
         // Each deleted row's hash is kept in the same statement: the replay
         // check reads this table, and a prune must not make an executed
         // transfer look new.
+        //
+        // A transfer whose queue row can still settle keeps its row whatever
+        // its age: admission counts its nonce and cost from this table, and
+        // recovery after a restart finds its batch through it.
         const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000
         // A retention longer than the table's existence matches nothing, and
         // a cutoff before the epoch or not a number is outside what the
@@ -665,8 +670,13 @@ export default class L2PSTransactionExecutor {
         if (!Number.isFinite(cutoffMs) || cutoffMs <= 0) return 0
         const [{ pruned }] = await ds.query(
             `WITH deleted AS (
-                DELETE FROM "l2ps_transactions"
-                 WHERE "created_at" < to_timestamp(CAST($1 AS double precision) / 1000)::timestamp
+                DELETE FROM "l2ps_transactions" t
+                 WHERE t."created_at" < to_timestamp(CAST($1 AS double precision) / 1000)::timestamp
+                   AND NOT EXISTS (
+                       SELECT 1 FROM "l2ps_mempool" m
+                        WHERE m."hash" = t."encrypted_hash"
+                          AND m."status" = ANY($2::text[])
+                   )
              RETURNING "hash", "l2ps_uid"
             ), kept AS (
                 INSERT INTO "l2ps_executed_hashes" ("hash", "l2ps_uid")
@@ -674,7 +684,7 @@ export default class L2PSTransactionExecutor {
                 ON CONFLICT ("hash") DO NOTHING
             )
             SELECT COUNT(*)::int AS "pruned" FROM deleted`,
-            [cutoffMs],
+            [cutoffMs, SETTLEABLE_QUEUE_STATUSES],
         )
 
         return Number(pruned) || 0
@@ -718,6 +728,43 @@ export default class L2PSTransactionExecutor {
             if (count < batchSize) return total
             lastId = rows.reduce((max, r) => Math.max(max, Number(r.id)), lastId)
         }
+    }
+
+    /**
+     * A sender's transfers this node admitted, in any subnet, that have not
+     * settled or failed yet, past its account nonce, lowest nonce first.
+     */
+    static async getUnsettledBySender(
+        from: string,
+        accountNonce: bigint,
+        limit: number,
+        offset = 0,
+    ): Promise<L2PSTransaction[]> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        return ds.getRepository(L2PSTransaction).find({
+            where: {
+                from_address: from,
+                status: In(["pending", "batched"]),
+                nonce: MoreThan(accountNonce.toString() as unknown as bigint),
+            },
+            order: { nonce: "ASC", id: "ASC" },
+            take: limit,
+            skip: offset,
+        })
+    }
+
+    /** The encrypted hashes among `hashes` whose history row reads failed. Throws on a failed read. */
+    static async getFailedByEncryptedHashes(hashes: string[]): Promise<Set<string>> {
+        if (hashes.length === 0) return new Set()
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const rows = await dsInstance.getDataSource().getRepository(L2PSTransaction).find({
+            where: { encrypted_hash: In(hashes), status: "failed" },
+            select: { encrypted_hash: true },
+        })
+        return new Set(rows.map(row => row.encrypted_hash))
     }
 
     /**

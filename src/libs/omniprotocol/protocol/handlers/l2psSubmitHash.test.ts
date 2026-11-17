@@ -18,6 +18,8 @@ mock.module("../../../network/server_rpc", () => ({
     emptyResponse: { result: 200, response: "", require_reply: false, extra: null },
 }))
 mockL2psGateDormant()
+// The real gate reads the node's shared state, which these stubs cannot load.
+mock.module("@/forks/l2psSettlementGate", () => ({ l2psSettlementActive: () => false }))
 mock.module("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,
     default: { getInstance: () => ({ getL2PS, loadL2PS: getL2PS }) },

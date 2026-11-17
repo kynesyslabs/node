@@ -1,0 +1,16 @@
+{
+  "description": "Notary A with its clock 2 days ahead: attested connection time is after the leaf cert notAfter. Must be refused.",
+  "root": "test-ca.der",
+  "verifier": "refused",
+  "refusal": {
+    "class": "verify",
+    "contains": "server identity error"
+  },
+  "nodePolicy": "refuse",
+  "expect": {
+    "server": "api.demos-spike.test",
+    "method": "GET",
+    "path": "/user",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

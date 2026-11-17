@@ -67,6 +67,9 @@ LOG_DIR="${RUN_DIR}/logs"
 # Compose project names allow [a-z0-9_-] only
 PROJECT="crace-$(echo "${RUN_ID}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')"
 mkdir -p "${LOG_DIR}" "${RUN_DIR}/inputs/empty-snapshot"
+# Private before any key is written: the inputs are readable by any uid (step 2),
+# so this dir is what keeps other host users out
+chmod 700 "${RUN_DIR}" || { echo "could not make ${RUN_DIR} mode 700" >&2; exit 2; }
 
 say() { echo "[race $(date -u +%H:%M:%S)] $*" | tee -a "${LOG_DIR}/run.log"; }
 
@@ -127,6 +130,16 @@ for img in "${IMAGE}" "${NETSHOOT_IMAGE}" postgres:16-alpine; do
     docker image inspect "${img}" >/dev/null 2>&1 || abort_pre "image ${img} is not present locally"
 done
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
+# The image's user (root in the default devnet image; this harness runs
+# devnet-style images only), read from the image as ../quorum-drills/run.sh
+# does: the node tmpfs is mounted owned by it (docker-compose.race.yml), since
+# Docker creates it root-owned and a non-root node could not write its state
+# there. A non-root devnet image, or a userns-remapped or rootless daemon, also
+# works; for a root image nothing changes
+IMAGE_UID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -u 2>/dev/null)
+IMAGE_GID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -g 2>/dev/null)
+[[ "${IMAGE_UID}" =~ ^[0-9]+$ && "${IMAGE_GID}" =~ ^[0-9]+$ ]] ||
+    abort_pre "could not read the user of ${IMAGE} (id -u '${IMAGE_UID}', id -g '${IMAGE_GID}')"
 CODE="image"
 [ -n "${SRC_TREE}" ] && CODE="src:${SRC_TREE}@$(git -C "${SRC_TREE}" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "${SRC_TREE}" diff --quiet HEAD -- src 2>/dev/null || echo '+dirty')"
 say "mode=${MODE} label=${LABEL} image=${IMAGE} (${IMAGE_ID:7:12}) code=${CODE}"
@@ -140,8 +153,6 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
         echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/node${i}.identity"
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
     done
-    chmod 600 "${RUN_DIR}"/inputs/node*.identity
-    chmod 700 "${RUN_DIR}"
     python3 - "${RUN_DIR}/inputs" "${REPO_ROOT}" "${GENESIS_TS}" <<'PY'
 import json, sys
 inputs, repo, genesis_ts = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -166,6 +177,20 @@ json.dump({pubs[0]: "http://node-1:53551"}, open(f"{inputs}/peerlist.json", "w")
 print("genesis shardSize", g["properties"]["shardSize"], "validators", len(pubs))
 PY
 } > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: generating inputs failed (see ${step}.log)"; exit 2; }
+# Once, after everything is written, so the modes do not depend on the umask:
+# 644 files in a 755 inputs/ under the 0700 run dir, as ../quorum-drills/ does.
+# The node runs as the image's user (root by default, or whatever uid the
+# devnet-style image sets), not the host user, and these are throwaway devnet keys
+python3 -I "${HERE}/../quorum-drills/drill_inputs.py" readable --dir "${RUN_DIR}/inputs" >> "${LOG_DIR}/${step}.log" 2>&1 ||
+    { say "ABORT: making the inputs readable failed (see ${step}.log)"; exit 2; }
+# Read them as that user before bring-up: a throwaway container, no network,
+# inputs/ read-only and /app/state mounted as the compose file does, copying the
+# identity as the node's entrypoint does
+probe_fail=$(docker run --rm --network none --memory 64m --entrypoint sh -v "${RUN_DIR}/inputs:/inputs:ro" \
+    --tmpfs "/app/state:uid=${IMAGE_UID},gid=${IMAGE_GID},mode=0700" "${IMAGE}" -c '
+    cat /inputs/genesis.json /inputs/peerlist.json > /dev/null && ls /inputs/empty-snapshot > /dev/null &&
+        cp /inputs/node1.identity /app/state/node.identity' 2>&1) ||
+    abort_pre "the user of ${IMAGE} (uid ${IMAGE_UID} gid ${IMAGE_GID}) cannot read the inputs: ${probe_fail:-docker run failed}; host uid $(id -u), inputs in ${RUN_DIR}/inputs"
 say "inputs ready"
 
 cat > "${ENVFILE}" <<EOF
@@ -174,6 +199,8 @@ RUN_DIR=${RUN_DIR}
 SRC_TREE=${SRC_TREE:-/nonexistent}
 CONSENSUS_TIME=${CONSENSUS_TIME}
 NODE_MEM=${NODE_MEM}
+IMAGE_UID=${IMAGE_UID}
+IMAGE_GID=${IMAGE_GID}
 EOF
 
 # ── 3. staggered bring-up ───────────────────────────────────────────────
