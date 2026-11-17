@@ -388,6 +388,21 @@ describe("genesis refusals under identityCarryover", () => {
         expect(err2.message).toContain("carries no validators.jsonl")
     })
 
+    it("genesis-hash reports what the import would refuse, only under identityCarryover at block 0", async () => {
+        const { carryoverImportProblems } = await import("../../scripts/genesis-hash")
+        const out = join(work, "out")
+        await buildCarryoverSnapshot({ inDir: source, validatorsFile: launchFile, outDir: out })
+        const atZero = { forks: { identityCarryover: { activationHeight: 0 } } }
+        expect(await carryoverImportProblems({ ...atZero, validators: LAUNCH }, out)).toEqual([])
+        const wrong = await carryoverImportProblems({ ...atZero, validators: [LAUNCH[0]] }, out)
+        expect(wrong.join("\n")).toContain(`validators.jsonl row ${LAUNCH[1].address} is not in the genesis validators`)
+        expect(wrong[0]).toStartWith("a node would refuse the identityCarryover import at boot")
+        const later = { forks: { identityCarryover: { activationHeight: 5 } }, validators: [LAUNCH[0]] }
+        expect(await carryoverImportProblems(later, out)).toEqual([])
+        expect(await carryoverImportProblems({ validators: [LAUNCH[0]] }, out)).toEqual([])
+        expect(process.env.DEMOS_SNAPSHOT_DIR).toBeUndefined()
+    })
+
     it("compares validator entries field by field", () => {
         const rows = launchValidatorRows(LAUNCH)
         expect(launchValidatorProblems(rows, LAUNCH)).toEqual([])

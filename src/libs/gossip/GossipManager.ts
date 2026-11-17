@@ -1013,6 +1013,14 @@ export class GossipManager {
     /** Publish a validated transaction envelope. Fire and forget. */
     async publishTx(validityData: ValidityData): Promise<boolean> {
         if (!(await this.mayPublish(TXS_TOPIC))) return false
+        // Readiness counts heights subscribers only, and the sidecar
+        // publishes to an empty topic without error: with no peer on the
+        // tx topic the tx would reach nobody, so it stays held for retry.
+        if ((this.lastStats?.perTopic[TXS_TOPIC]?.subscribers ?? 0) < 1) {
+            countPublishSkipped("no_tx_peers")
+            this.logPublishSkipped(TXS_TOPIC, "no peer subscribed to the tx topic")
+            return false
+        }
         this.send({
             type: "publish",
             topic: TXS_TOPIC,

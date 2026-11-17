@@ -34,6 +34,8 @@ jobs:
       # Stub-based (no Docker, no Postgres): the launchers never migrate a
       # database they did not just empty
       - run: bash scripts/launcher-wipe-guard.test.sh
+      # The PG_PORT the launcher hands the node, with and without -e
+      - run: bash scripts/launcher-external-db.test.sh
       - run: bun run test:consensus
 
   rehearsal-drill:
@@ -59,3 +61,16 @@ jobs:
       # in the log); write it to a scratch dir instead. A broken import still
       # fails the step.
       - run: bun build testing/forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts --target=bun --outdir "$RUNNER_TEMP/rehearsal-drill-bundle"
+
+  tlsn-verifier-wasm:
+    # The TLSN verifier wasm runs inside block apply, so the committed binary
+    # must be exactly what its pinned sources build. This rebuilds it in the
+    # pinned Docker image and fails on any byte difference, then runs the
+    # native twin of the same crate over the golden vectors as an oracle.
+    name: TLSN Verifier Reproducible Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: bash native/tlsn-verify/build.sh check
+      - run: bash native/tlsn-verify/build.sh parity

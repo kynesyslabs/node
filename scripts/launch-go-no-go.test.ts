@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test"
+import fs from "node:fs"
+import path from "node:path"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import { tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
 import {
     type GoNoGoInput,
     KNOWN_FORKS,
@@ -14,6 +17,8 @@ import {
     sameCommit,
     parseArgs,
     treasuryReasons,
+    KNOWN_TEST_TREASURIES,
+    KNOWN_TEST_NOTARY_KEYS,
 } from "./launch-go-no-go"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -527,11 +532,16 @@ describe("decideGoNoGo", () => {
 
 const TREASURY = "0x" + "ab".repeat(32)
 
-/** A mainnet fork at 0, gasFeeSeparation with the treasury it is refused without. */
+/**
+ * A mainnet fork at 0, gasFeeSeparation with the treasury and tlsnVerified
+ * with the notary keys each is refused without.
+ */
 const atZero = (name: string, extra: Record<string, unknown> = {}) =>
     name === "gasFeeSeparation"
         ? { activationHeight: 0, treasuryAddress: TREASURY, ...extra }
-        : { activationHeight: 0, ...extra }
+        : name === "tlsnVerified"
+          ? { activationHeight: 0, ...tlsnVerifiedPayload(), ...extra }
+          : { activationHeight: 0, ...extra }
 
 /** Every fork this build knows declared: the mainnet ones at 0, the rest off. */
 const mainnetForks = () =>
@@ -670,16 +680,115 @@ describe("checkLaunch", () => {
             }
         })
 
+        it("is NO-GO on the mainnet chain id with a test genesis treasury, even when it was the one agreed", () => {
+            for (const test of KNOWN_TEST_TREASURIES) {
+                const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: test } }
+                const d = checkLaunch({
+                    ...base,
+                    expectedTreasury: test.toUpperCase().replace("0X", "0x"),
+                    genesis: genesisFile(rows, forks),
+                    blockZero: blockZero(rows),
+                })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain("treasury of a test genesis")
+            }
+        })
+
+        it("lets a test genesis treasury through on the testnet and devnet chain ids", () => {
+            const [test] = KNOWN_TEST_TREASURIES
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0, treasuryAddress: test } }
+                const g = { ...genesisFile(rows, forks), properties: { id: chainId, shardSize: 10 } }
+                expect(treasuryReasons(g, test)).toEqual([])
+            }
+        })
+
+        it("knows every treasury the repository's genesis files name", () => {
+            const root = path.resolve(import.meta.dir, "..")
+            const found = new Set<string>()
+            for (const dir of ["testing", "docs", "data"]) {
+                const glob = new Bun.Glob("**/*.json")
+                if (!fs.existsSync(path.join(root, dir))) continue
+                for (const file of glob.scanSync({ cwd: path.join(root, dir) })) {
+                    const text = fs.readFileSync(path.join(root, dir, file), "utf8")
+                    for (const m of text.matchAll(/"treasuryAddress"\s*:\s*"(0x[0-9a-fA-F]{64})"/g)) {
+                        found.add(m[1].toLowerCase())
+                    }
+                }
+            }
+            expect(found.size).toBeGreaterThan(0)
+            for (const address of found) expect(KNOWN_TEST_TREASURIES).toContain(address)
+        })
+
         it("is NO-GO when the genesis has no treasury to compare", () => {
             const forks = { ...mainnetForks(), gasFeeSeparation: { activationHeight: 0 } }
             expect(treasuryReasons(genesisFile(rows, forks), TREASURY).join("\n")).toContain("has no treasuryAddress")
         })
     })
 
-    it("launches with L2PS and TLSNotary off", () => {
-        expect(MAINNET_FORKS).toContain("l2psGate")
-        expect(MAINNET_FORKS).toContain("tlsnDisabled")
+    it("launches with L2PS settling, TLSNotary verified and both kill switches unscheduled", () => {
+        expect(MAINNET_FORKS).toContain("l2psSettlement")
+        expect(MAINNET_FORKS).not.toContain("l2psGate")
+        expect(LAUNCH_DORMANT_FORKS).toContain("l2psGate")
+        expect(MAINNET_FORKS).toContain("tlsnVerified")
+        expect(MAINNET_FORKS).not.toContain("tlsnDisabled")
+        expect(LAUNCH_DORMANT_FORKS).toContain("tlsnDisabled")
         expect(MAINNET_FORKS).toHaveLength(29)
+    })
+
+    describe("the TLSNotary notary keys", () => {
+        const withTlsn = (entry: Record<string, unknown>) =>
+            genesisFile(rows, { ...mainnetForks(), tlsnVerified: { activationHeight: 0, ...entry } })
+        const check = (entry: Record<string, unknown>) =>
+            checkLaunch({ ...base, genesis: withTlsn(entry), blockZero: blockZero(rows) })
+
+        it("is GO with ceremony keys and a pinned verifier", () => {
+            const d = check(tlsnVerifiedPayload())
+            expect(d.reasons).toEqual([])
+            expect(d.go).toBe(true)
+        })
+
+        it("is NO-GO on the template's placeholder keys", () => {
+            const keys = (tlsnVerifiedPayload().notaryKeys as Array<Record<string, string>>).map(k => ({
+                ...k,
+                hex: "FILL: notary public key from the notary key ceremony",
+            }))
+            const d = check(tlsnVerifiedPayload({ notaryKeys: keys }))
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("placeholder or unset notary keys")
+        })
+
+        it("is NO-GO without keys, or without the payload at all", () => {
+            for (const entry of [tlsnVerifiedPayload({ notaryKeys: [] }), {}]) {
+                const d = check(entry)
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain("placeholder or unset notary keys")
+            }
+        })
+
+        it("is NO-GO on a test key from this repository", () => {
+            for (const hex of KNOWN_TEST_NOTARY_KEYS) {
+                const d = check(tlsnVerifiedPayload({ notaryKeys: [{ id: "n1", alg: "k256", hex }] }))
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain(`lists the test notary key ${hex}`)
+            }
+        })
+
+        it("is NO-GO on a payload the node would refuse", () => {
+            const d = check(tlsnVerifiedPayload({ verifierWasmSha256: "FILL: sha256" }))
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("payload the node refuses")
+            expect(d.reasons.join("\n")).toContain("verifierWasmSha256")
+        })
+
+        it("lists the devnet genesis keys as test keys", () => {
+            const devnet = JSON.parse(
+                fs.readFileSync(path.join(import.meta.dir, "../testing/devnet/genesis.devnet.json"), "utf8"),
+            )
+            for (const key of devnet.forks.tlsnVerified.notaryKeys) {
+                expect(KNOWN_TEST_NOTARY_KEYS).toContain(key.hex)
+            }
+        })
     })
 
     it("launches with the Storage Program fee kept in the supply", () => {

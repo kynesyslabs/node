@@ -51,8 +51,6 @@ async function handleGreenlight(
     response: RPCResponse,
 ): Promise<RPCResponse | null> {
     try {
-        // TODO: Check if the sender is the secretary (without verifying the signature
-        // as we have already done that) in validateHeaders
         const [blockRef, timestamp, validatorPhase, peerlist] = params as [
             number, // blockRef
             number, // timestamp

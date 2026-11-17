@@ -1,0 +1,16 @@
+{
+  "description": "valid-local with one byte of the revealed X-Demos-Bind sender changed (1 -> 9)",
+  "root": "test-ca.der",
+  "verifier": "refused",
+  "refusal": {
+    "class": "verify",
+    "contains": "transcript error"
+  },
+  "nodePolicy": "refuse",
+  "expect": {
+    "server": "api.demos-spike.test",
+    "method": "GET",
+    "path": "/user",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

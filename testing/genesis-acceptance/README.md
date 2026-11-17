@@ -29,7 +29,10 @@ could not be carried out.
    (`KNOWN_FORKS`; a node on a mainnet chain id refuses an undeclared one), the
    carry-over snapshot bound by `snapshot.manifestSha256`) and its variants.
    Every node boots on that snapshot through `DEMOS_SNAPSHOT_DIR`, with
-   `PROD=true` (a mainnet chain id refuses development mode).
+   `PROD=true` and `DEMOS_REQUIRE_VALIDATORS=true`: on a mainnet chain id a
+   node refuses development mode, and refuses to start without strict
+   validator mode (a node that cannot read the validator set would otherwise
+   use every online peer as the committee).
 3. Computes the pin with `bun scripts/genesis-hash.ts --json` on the host.
 4. Starts a throwaway Postgres (the image pinned in `docker-compose.yml`) and
    one node at a time on a private bridge network with no published ports. A
@@ -43,10 +46,10 @@ could not be carried out.
 | # | Scenario | Expected |
 | --- | --- | --- |
 | s01 | fresh-correct | boots; `getGenesisDataHash` = pin; the mainnet forks (`MAINNET_FORKS`) active at 0 |
-| s02 | fresh-genesis-1byte (timestamp + 1) | exit 1, no block 0 |
+| s02 | fresh-genesis-1byte (timestamp + 1) | exit 1, no block 0, log names the file hash against `EXPECTED_GENESIS_HASH` |
 | s03 | fresh-no-pin | exit 1, no block 0 |
 | s04 | fresh-bad-pin-format (63 hex) | exit 1, no block 0 |
-| s05 | fresh-snapshot-changed (manifest + newline, `DEMOS_SNAPSHOT_DIR`) | exit 1, no block 0 |
+| s05 | fresh-snapshot-changed (manifest + newline, `DEMOS_SNAPSHOT_DIR`) | exit 1, no block 0, log names the manifest hash against the genesis |
 | s06 | restart-same | boots; same block 0 |
 | s07 | restart-pin-changed | exit 1, database unchanged |
 | s08 | restart-fork-moved-past (`commitLock` at 1) | exit 1, database unchanged, log names `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` |

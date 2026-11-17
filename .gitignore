@@ -6,6 +6,8 @@
 node_modules/
 .bun/
 dist/
+# The TLSN verifier wasm is a pinned build artifact; CI rebuilds and compares it.
+!native/tlsn-verify/dist/
 output/
 *.db
 *.sqlite3
@@ -182,6 +184,8 @@ bridges_docs/
 aptos_examples_ts/
 target/
 bin/
+# The native twin of the TLSN verifier (build.sh parity) lives in src/bin.
+!native/tlsn-verify/src/bin/
 omniprotocol_fixtures_scripts/
 prop_agent/
 temp/

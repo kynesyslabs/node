@@ -59,6 +59,11 @@ export interface CoreConfig {
     /** Max seconds a block's timestamp may lead the verifier's clock. */
     blockTimestampTolerance: number
     logLevel: string
+    /**
+     * Directory the per-node `logs_<port>_<identity>/` folder is created in.
+     * Empty means the working directory. The image sets it to its logs volume.
+     */
+    logsDir: string
     whitelistedIPs: string[]
     whitelistedKeys: string[]
     /**
@@ -162,6 +167,8 @@ export interface OmniConfig {
 export interface L2PSConfig {
     zkEnabled: boolean
     zkUseMainThread: boolean
+    /** Settlement prover subprocesses; each takes a core and about 1 GB while it proves. */
+    settlementProvers: number
     hashIntervalMs: number
     aggregationIntervalMs: number
     minBatchSize: number

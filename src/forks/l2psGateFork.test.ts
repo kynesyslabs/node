@@ -1,5 +1,6 @@
 /**
- * Mainnet launches with L2PS off. Under `l2psGate` the four L2PS transaction
+ * The L2PS kill switch: mainnet launches with L2PS settling and the gate
+ * unscheduled, to be scheduled only if L2PS has to stop. Under `l2psGate` the four L2PS transaction
  * types are refused at RPC intake, pool admission and apply, a transaction
  * applied on its own (the simulation, an L2PS proof) is refused before its
  * edits, and consensus applies no pending L2PS proof: a proof debits the L2
@@ -37,7 +38,7 @@ restoreForkConfigAfterEach()
 /** The mainnet forks, with l2psGate at `height`. */
 const gate = (height: number | null) => mainnetForks({ l2psGate: height })
 
-describeForkConfig("l2psGate")
+describeForkConfig("l2psGate", null)
 
 describe("l2psGate types", () => {
     it("covers the four L2PS transaction types and nothing else", () => {
