@@ -141,6 +141,7 @@ SUITE_FILES=(
     testing/loadgen/src/features/peersync/snapshot_reply_log.test.ts
     testing/loadgen/src/features/tlsnotary/shared.test.ts
     testing/loadgen/src/framework/common.test.ts
+    testing/loadgen/src/framework/rpc_json_log.test.ts
     testing/loadgen/src/framework/silent_catch.test.ts
     testing/loadgen/src/rpc_ready_log.test.ts
     testing/loadgen/src/token_holders_export.test.ts

@@ -1,8 +1,8 @@
 /**
  * A loadgen catch block that neither logs nor rethrows hides the failure it
  * caught (#708). Every `catch {` without a binding, and every `.catch(...)` arrow
- * that does not use its error (`() => {}`, `() => null`, `() => ""`, `_ => 0`, ...)
- * and is not on `.json()`, must log through the framework helpers or throw.
+ * that does not use its error (`() => {}`, `() => null`, `() => ""`, `_ => 0`, ...),
+ * including on `.json()`, must log through the framework helpers or throw.
  * The values those log calls carry go through `textOrType`, not a bare `String()`.
  */
 
@@ -69,8 +69,8 @@ function silentCatches(source: string): number[] {
     }
   }
   // A `.catch` arrow that neither logs, throws nor uses its error drops the
-  // rejection, whatever it returns. Allowed only on `.json()`, where the caller
-  // checks the null for a non-JSON body.
+  // rejection, whatever it returns. That includes `.json()`: a null for a
+  // non-JSON body hides the parse error unless it is logged.
   const dotCatch = /\.catch\(/g
   while ((match = dotCatch.exec(source))) {
     const handler = stripComments(enclosed(source, match.index + match[0].length, "(", ")"))
@@ -79,7 +79,6 @@ function silentCatches(source: string): number[] {
     const param = arrow[1] || arrow[2]
     const body = arrow[3]
     if (LOGS_OR_THROWS.test(body) || (param && new RegExp(`\\b${param}\\b`).test(body))) continue
-    if (/\.json\(\)\s*$/.test(source.slice(Math.max(0, match.index - 40), match.index))) continue
     lines.push(source.slice(0, match.index).split("\n").length)
   }
   return lines
@@ -142,18 +141,19 @@ describe("loadgen catch blocks", () => {
       "const row = await read().catch(() => null)",
       "await close().catch(() => {})",
       "await close().catch(() => {\n  // ignore\n})",
+      "const json = await res.json().catch(() => null)",
     ]) {
       expect({ snippet, lines: silentCatches(snippet) }).toEqual({ snippet, lines: [1] })
     }
   })
 
-  it("accept a .catch that logs, throws or keeps its error, and .json() fallbacks", () => {
+  it("accept a .catch that logs, throws or keeps its error", () => {
     for (const snippet of [
       "const text = await read().catch(error => {\n  logNonCriticalError(\"read\", error, { file })\n  return \"\"\n})",
       "await close().catch(error => logNonCriticalError(\"close\", error, { target }))",
       "const res = await call().catch((error: unknown) => ({ result: 599, extra: String(error) }))",
       "await confirm().catch((err: any) => {\n  counters.error++\n  throw err\n})",
-      "const json = await res.json().catch(() => null)",
+      "const json = await res.json().catch(error => {\n  logNonCriticalErrorOnce(`rpc.rpcPost:${url}`, \"rpc.rpcPost\", error, { rpcUrl: url })\n  return null\n})",
     ]) {
       expect({ snippet, lines: silentCatches(snippet) }).toEqual({ snippet, lines: [] })
     }

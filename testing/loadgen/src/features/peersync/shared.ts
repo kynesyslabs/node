@@ -59,7 +59,10 @@ export async function getNodeIdentity(rpcUrl: string): Promise<string | null> {
   try {
     const res = await fetch(new URL("info", normalizeRpcUrl(rpcUrl)))
     if (!res.ok) return null
-    const json = await res.json().catch(() => null)
+    const json = await res.json().catch(error => {
+      logNonCriticalErrorOnce(`peersync.getNodeIdentity:${rpcUrl}`, "peersync.getNodeIdentity", error, { rpcUrl, status: res.status })
+      return null
+    })
     return typeof json?.identity === "string" && json.identity.length > 0 ? json.identity : null
   } catch (error) {
     logNonCriticalError("peersync.getNodeIdentity", error, { rpcUrl })

@@ -110,7 +110,10 @@ async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
     })
-    const json = await res.json().catch(() => null)
+    const json = await res.json().catch(error => {
+      logNonCriticalErrorOnce(`token_pause_under_load.rpcPost:${url}`, "token_pause_under_load.rpcPost", error, { rpcUrl: url, status: res.status })
+      return null
+    })
     return { ok: res.ok, status: res.status, json }
   } catch (error: any) {
     const reason =
