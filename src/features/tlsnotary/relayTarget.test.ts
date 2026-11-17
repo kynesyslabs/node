@@ -6,10 +6,11 @@
  */
 
 import { afterEach, describe, expect, it, jest, mock } from "bun:test"
-import { EventEmitter } from "node:events"
 
 delete process.env.TLSNOTARY_ALLOWED_PORTS
 delete process.env.TLSNOTARY_ALLOW_PRIVATE_TARGETS
+process.env.TLSNOTARY_PROXY_PORT_MIN = "56600"
+process.env.TLSNOTARY_PROXY_PORT_MAX = "56663"
 
 const quietLog = {
     debug: jest.fn(),
@@ -23,25 +24,6 @@ mock.module("@/utilities/logger", () => ({ __esModule: true, default: quietLog }
 mock.module("src/utilities/logger", () => ({ __esModule: true, default: quietLog }))
 const sharedState: Record<string, unknown> = {}
 mock.module("@/utilities/sharedState", () => ({ getSharedState: sharedState }))
-
-const spawned: string[][] = []
-const realChildProcess = { ...(await import("node:child_process")) }
-mock.module("child_process", () => ({
-    ...realChildProcess,
-    exec: (_cmd: string, cb: (e: Error | null, r: unknown) => void) =>
-        cb(null, { stdout: "wstcp v0.2.1:\n    wstcp\n", stderr: "" }),
-    spawn: (_bin: string, args: string[]) => {
-        spawned.push(args)
-        const child = new EventEmitter() as any
-        child.stderr = new EventEmitter()
-        child.kill = () => true
-        setTimeout(
-            () => child.stderr.emit("data", Buffer.from("INFO Starts a WebSocket proxy server")),
-            1,
-        )
-        return child
-    },
-}))
 
 const realDns = (await import("node:dns")).default
 const DNS: Record<string, string> = {
@@ -64,16 +46,22 @@ mock.module("node:dns", () => ({
 }))
 
 const { requestProxy, killAllProxies } = await import("./proxyManager")
+const { liveSessions } = await import("./proxyRelay")
 
 afterEach(() => {
     killAllProxies()
-    spawned.length = 0
 })
 
+const limits = { maxLifetimeMs: 60_000, idleMs: 60_000, maxSentBytes: 1024, maxRecvBytes: 1024 }
+
+function ask(targetUrl: string) {
+    return requestProxy({ targetUrl, tokenId: "t", owner: "o", clientKey: "k", limits }) as Promise<any>
+}
+
 async function refused(url: string) {
-    const result: any = await requestProxy(url)
+    const result = await ask(url)
     expect(result.error).toBe("TARGET_NOT_ALLOWED")
-    expect(spawned).toEqual([])
+    expect(liveSessions()).toEqual([])
 }
 
 describe("TLSNotary relay targets", () => {
@@ -94,9 +82,11 @@ describe("TLSNotary relay targets", () => {
     })
 
     it("relays to a public host on 443 through the address it checked", async () => {
-        const result: any = await requestProxy("https://public.example/x")
+        const result = await ask("https://public.example/x")
         expect(result.error).toBeUndefined()
-        expect(spawned.length).toBe(1)
-        expect(spawned[0].at(-1)).toBe("93.184.216.34:443")
+        const sessions = liveSessions()
+        expect(sessions.length).toBe(1)
+        expect(sessions[0].dialHost).toBe("93.184.216.34")
+        expect(sessions[0].targetPort).toBe(443)
     })
 })

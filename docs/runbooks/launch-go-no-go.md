@@ -330,7 +330,7 @@ check: without it a partial set passes. Exit 0 ok, 1 not ok, 2 bad input.
 From T-0 on, restart or upgrade launch validators one at a time, and wait
 until each is back in the committee (signing blocks) before the next. A
 just-restarted validator that logs `Timeout waiting for green light` for the
-same block twice is restarted once more. From `v1.0.0-rc.12` the validator
+same block twice is restarted once more. From `v1.0.0-rc.13` the validator
 leaves a round the secretary abandoned and joins the newer one on its own,
 so this is a fallback there. The rule, the signing check and the recovery
 tiers are in [chain-halt-recovery.md](chain-halt-recovery.md).

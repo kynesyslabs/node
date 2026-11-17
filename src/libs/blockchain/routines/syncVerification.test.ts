@@ -222,6 +222,30 @@ describe("verifyNativeTablesHashes", () => {
         expect(rejection.message).not.toContain("native_tlsnotary")
     })
 
+    it("compares the TLSNotary entry from tlsnVerified on, whose table hash carries no clock", async () => {
+        getSharedState.forkConfig.tlsnVerified.activationHeight = HEIGHT
+        hashGCRTables.mockResolvedValue({ native_subnets_txs: "a", native_tlsnotary: "t" })
+
+        await verifyNativeTablesHashes(makeBlock([], { native_subnets_txs: "a", native_tlsnotary: "t" }))
+
+        const differs = await verifyNativeTablesHashes(
+            makeBlock([], { native_subnets_txs: "a", native_tlsnotary: "u" }),
+        ).catch(e => e)
+        expect(differs).toBeInstanceOf(SyncBlockRejectedError)
+        expect(differs.message).toContain("native_tlsnotary")
+
+        await expect(
+            verifyNativeTablesHashes(makeBlock([], { native_subnets_txs: "a" })),
+        ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+    })
+
+    it("still leaves the TLSNotary entry out of a block before tlsnVerified activates", async () => {
+        getSharedState.forkConfig.tlsnVerified.activationHeight = HEIGHT + 1
+        hashGCRTables.mockResolvedValue({ native_subnets_txs: "a", native_tlsnotary: "t" })
+
+        await verifyNativeTablesHashes(makeBlock([], { native_subnets_txs: "a", native_tlsnotary: "u" }))
+    })
+
     it("rejects a block that carries no table hashes", async () => {
         await expect(verifyNativeTablesHashes(makeBlock([], null))).rejects.toBeInstanceOf(
             SyncBlockRejectedError,

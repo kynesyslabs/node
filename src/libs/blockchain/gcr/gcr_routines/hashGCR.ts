@@ -74,14 +74,57 @@ export async function hashSubnetsTxsTable(): Promise<string> {
     return Hashing.sha256(tableString)
 }
 
-// REVIEW: TLSNotary proofs table hash for integrity verification
 /**
- * Generates a SHA-256 hash for the GCRTLSNotary table.
- * Orders by tokenId for deterministic hashing.
- *
- * @returns Promise<string> - SHA-256 hash of the TLSNotary proofs table
+ * The digest of the TLSN table rows. Before `tlsnVerified` it covers the
+ * `createdAt` each node's database stamps, so it differs between nodes and
+ * Sync leaves it out; that branch stays as it was, so old blocks keep their
+ * hash. Under the fork it covers only what the chain wrote, the token and
+ * proof columns, and no wall-clock field, so it is the same on every node.
  */
-export async function hashTLSNotaryTable(): Promise<string> {
+export function tlsnTableDigest(rows: GCRTLSNotary[], verified: boolean): string {
+    const records = [...rows].sort(byKeyBytes(r => r.tokenId))
+    if (!verified) {
+        return Hashing.sha256(
+            JSON.stringify(
+                records.map(r => ({
+                    tokenId: r.tokenId,
+                    owner: r.owner,
+                    domain: r.domain,
+                    proof: r.proof,
+                    storageType: r.storageType,
+                    txhash: r.txhash,
+                    proofTimestamp: String(r.proofTimestamp),
+                    createdAt: r.createdAt ? r.createdAt.toISOString() : null,
+                })),
+            ),
+        )
+    }
+    const int = (v: number | string | null | undefined) =>
+        v === null || v === undefined ? null : Number(v)
+    return Hashing.sha256(
+        JSON.stringify(
+            records.map(r => ({
+                tokenId: r.tokenId,
+                owner: r.owner,
+                domain: r.domain,
+                status: r.status ?? null,
+                requestHeight: int(r.requestHeight),
+                expiresAtHeight: int(r.expiresAtHeight),
+                proof: r.proof ?? null,
+                storageType: r.storageType ?? null,
+                txhash: r.txhash,
+                proofTimestamp: String(r.proofTimestamp),
+                attestationId: r.attestationId ?? null,
+                storedAtHeight: int(r.storedAtHeight),
+            })),
+        ),
+    )
+}
+
+/** SHA-256 of the TLSN table as it stands before the block at `blockHeight` applies. */
+export async function hashTLSNotaryTable(
+    blockHeight: number = getSharedState.lastBlockNumber ?? 0,
+): Promise<string> {
     const db = await Datasource.getInstance()
     const repository = db.getDataSource().getRepository(GCRTLSNotary)
 
@@ -90,21 +133,7 @@ export async function hashTLSNotaryTable(): Promise<string> {
             tokenId: "ASC",
         },
     })
-    records.sort(byKeyBytes(r => r.tokenId))
-
-    // Normalize to plain objects with fixed field order for deterministic hashing
-    const normalized = records.map(r => ({
-        tokenId: r.tokenId,
-        owner: r.owner,
-        domain: r.domain,
-        proof: r.proof,
-        storageType: r.storageType,
-        txhash: r.txhash,
-        proofTimestamp: String(r.proofTimestamp),
-        createdAt: r.createdAt ? r.createdAt.toISOString() : null,
-    }))
-
-    return Hashing.sha256(JSON.stringify(normalized))
+    return tlsnTableDigest(records, isForkActive("tlsnVerified", blockHeight))
 }
 
 /**
@@ -126,7 +155,7 @@ export default async function hashGCRTables(
     // REVIEW: The below was GCRTracker without "", which was causing an error as is not an entity
     const subnetsTxsHash = await hashSubnetsTxsTable()
     // REVIEW: TLSNotary proofs included in GCR integrity hash
-    const tlsnotaryHash = await hashTLSNotaryTable()
+    const tlsnotaryHash = await hashTLSNotaryTable(blockHeight)
     const hashes = {
         native_subnets_txs: subnetsTxsHash,
         native_tlsnotary: tlsnotaryHash,
