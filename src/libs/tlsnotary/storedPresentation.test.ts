@@ -238,6 +238,12 @@ describe("verifyStoredPresentation", () => {
             expect(reasonOf(verifyStoredPresentation(input()))).toContain("does not end the sent transcript")
         })
 
+        it("refuses a second response after the one the request was answered with", () => {
+            const two = RESPONSE + "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+            nextOutput = over(partly(REQUEST_HEAD, "Bearer s3cret"), partly(two, "s=1"))
+            expect(reasonOf(verifyStoredPresentation(input()))).toContain("does not end the transcript")
+        })
+
         it("refuses a hidden header name next to a revealed value", () => {
             nextOutput = over(partly(REQUEST_HEAD, "authorization"))
             expect(verifyStoredPresentation(input()).ok).toBe(false)

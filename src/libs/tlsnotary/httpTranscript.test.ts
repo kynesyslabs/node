@@ -105,6 +105,7 @@ describe("parseAuthedRequest", () => {
         expect(r(`${POST}content-length: [2]\r\n\r\nab`)).toContain("not revealed")
         expect(r(`${POST}content-length: 2\r\ncontent-length: 2\r\n\r\nab`)).toContain("repeated")
         expect(r(`${POST}content-length: -2\r\n\r\n`)).toContain("malformed")
+        expect(r(`${POST}content-length: 2\r\n[transfer-encoding: chunked]\r\n\r\nab`)).toContain("hides a whole header line")
     })
 
     it("refuses a hidden end of headers, request line or other HTTP versions", () => {
@@ -237,6 +238,7 @@ describe("parseAuthedResponseHead", () => {
     it("reads the status and every header block, whatever the body reveals", () => {
         const r = parseAuthedResponseHead(
             transcript("HTTP/1.1 103 Early Hints\r\nlink: </a>\r\n\r\nHTTP/1.1 200 OK\r\nset-cookie: [s=1]\r\ncontent-length: 9\r\n\r\n{\"a\":[123]}"),
+            "GET",
         )
         expect(r.ok).toBe(true)
         if (!r.ok) return
@@ -251,7 +253,31 @@ describe("parseAuthedResponseHead", () => {
     })
 
     it("refuses a head whose status line or end is hidden", () => {
-        expect(reason(parseAuthedResponseHead(transcript("HTTP/1.1 [200] OK\r\n\r\n")))).toContain("status line")
-        expect(reason(parseAuthedResponseHead(transcript("HTTP/1.1 200 OK\r\nx: y[\r\n\r\n]")))).toContain("end of headers")
+        expect(reason(parseAuthedResponseHead(transcript("HTTP/1.1 [200] OK\r\n\r\n"), "GET"))).toContain("status line")
+        expect(reason(parseAuthedResponseHead(transcript("HTTP/1.1 200 OK\r\nx: y[\r\n\r\n]"), "GET"))).toContain("end of headers")
+    })
+
+    it("accepts one response framed by revealed headers, with its body hidden", () => {
+        const head = (marked: string, method = "GET") => reason(parseAuthedResponseHead(transcript(marked), method))
+        expect(head("HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\n[abc]")).toBe("accepted")
+        expect(head("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n3\r\n[abc]\r\n0\r\n\r\n")).toBe("accepted")
+        expect(head("HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n[abc]")).toBe("accepted")
+        expect(head("HTTP/1.1 204 No Content\r\n\r\n")).toBe("accepted")
+        expect(head("HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\n", "HEAD")).toBe("accepted")
+    })
+
+    it("refuses a second response after the first, or a body it cannot frame", () => {
+        const head = (marked: string, method = "GET") => reason(parseAuthedResponseHead(transcript(marked), method))
+        const two = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nokHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+        expect(head(two)).toContain("does not end the transcript")
+        expect(head("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\nHTTP/1.1 200 OK\r\n\r\n")).toContain(
+            "does not end the transcript",
+        )
+        expect(head("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n[2\r\nok\r\n]0\r\n\r\n")).toContain("chunk size")
+        expect(head("HTTP/1.1 200 OK\r\nset-cookie: [x\r\ncontent-length: 2]\r\n\r\nokHTTP/1.1 200 OK\r\n\r\n")).toContain(
+            "Connection: close",
+        )
+        expect(head("HTTP/1.1 200 OK\r\ncontent-length: [2]\r\n\r\nok")).toContain("not revealed")
+        expect(head("HTTP/1.1 204 No Content\r\n\r\nHTTP/1.1 200 OK\r\n\r\n")).toContain("without a body")
     })
 })

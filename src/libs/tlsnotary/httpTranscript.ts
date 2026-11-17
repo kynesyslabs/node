@@ -197,6 +197,11 @@ export function parseAuthedRequest(
         if (bodyStart + framing.value !== bytes.length) {
             return fail("request body does not end the sent transcript at its Content-Length")
         }
+        // A wholly hidden line could be a Transfer-Encoding the server frames
+        // the body by instead, turning its tail into a second request.
+        if (framing.value > 0 && headers.value.length !== rest.length) {
+            return fail("a request with a body hides a whole header line")
+        }
     }
     return { ok: true, value: { method, target, version, headers: headers.value } }
 }
@@ -228,6 +233,7 @@ function decodeChunked(
     bytes: Uint8Array,
     mask: Uint8Array,
     from: number,
+    dataMayBeHidden = false,
 ): Parsed<Uint8Array> {
     const parts: Uint8Array[] = []
     let total = 0
@@ -256,7 +262,9 @@ function decodeChunked(
             break
         }
         if (at + size + 2 > bytes.length) return fail("chunk runs past the transcript")
-        if (!allAuthed(mask, at, at + size + 2)) return fail("chunk is not fully revealed")
+        if (!allAuthed(mask, dataMayBeHidden ? at + size : at, at + size + 2)) {
+            return fail("chunk is not fully revealed")
+        }
         if (bytes[at + size] !== CR || bytes[at + size + 1] !== LF) return fail("chunk is not CRLF-terminated")
         parts.push(bytes.subarray(at, at + size))
         total += size
@@ -313,16 +321,62 @@ function responseHeadsOf(
 
 /**
  * The status and header blocks of the response, under the same rules as
- * parseAuthedResponse, with no rule on the body: a stored presentation may
- * reveal only part of it.
+ * parseAuthedResponse, with the body free to stay hidden: a stored
+ * presentation may reveal only part of it. The final response must still
+ * be the only one and end the transcript, by revealed framing, so a
+ * response the server sent to a request hidden inside the sent transcript
+ * can never be read as part of this one. `requestMethod` is the method of
+ * the request it answers (a HEAD response has no body).
  */
 export function parseAuthedResponseHead(
     recv: AuthedBytes,
+    requestMethod: string,
 ): Parsed<{ status: number; interim: HeaderLine[][]; headers: HeaderLine[] }> {
-    const heads = responseHeadsOf(recv.bytes, maskOf(recv))
+    const { bytes } = recv
+    const mask = maskOf(recv)
+    const heads = responseHeadsOf(bytes, mask)
     if (heads.ok === false) return fail(heads.reason)
     const { interim, final } = heads.value
+    const end = responseEnd(bytes, mask, final, requestMethod)
+    if (end.ok === false) return fail(end.reason)
     return { ok: true, value: { status: final.status, interim, headers: final.headers } }
+}
+
+function responseEnd(
+    bytes: Uint8Array,
+    mask: Uint8Array,
+    head: ResponseHead,
+    requestMethod: string,
+): Parsed<true> {
+    const { status, headers, next } = head
+    const te = headers.filter(h => h.name === "transfer-encoding")
+    const cl = headers.filter(h => h.name === "content-length")
+    if (te.length > 1 || cl.length > 1) return fail("framing header repeated")
+    if (te.length === 1 && cl.length === 1) return fail("both Content-Length and Transfer-Encoding")
+    if (requestMethod === "HEAD" || status === 204 || status === 304) {
+        return next === bytes.length ? { ok: true, value: true } : fail("bytes follow a response without a body")
+    }
+    if (te.length === 1) {
+        if (te[0].value === null || te[0].value.toLowerCase() !== "chunked") {
+            return fail("unsupported Transfer-Encoding")
+        }
+        const walked = decodeChunked(bytes, mask, next, true)
+        return walked.ok === false ? fail(walked.reason) : { ok: true, value: true }
+    }
+    if (cl.length === 1) {
+        if (cl[0].value === null || !/^(0|[1-9][0-9]{0,8})$/.test(cl[0].value)) {
+            return fail("Content-Length is not revealed or not a length")
+        }
+        if (next + Number(cl[0].value) !== bytes.length) return fail("Content-Length does not end the transcript")
+        return { ok: true, value: true }
+    }
+    // Read to the close: a hidden span could hold the real framing header,
+    // so the server must say in the open that it closed after this response.
+    const connection = headers.filter(h => h.name === "connection")
+    if (connection.length !== 1 || connection[0].value?.toLowerCase() !== "close") {
+        return fail("response is not framed by a revealed Content-Length, chunked coding or Connection: close")
+    }
+    return { ok: true, value: true }
 }
 
 /**

@@ -223,7 +223,7 @@ export function judgeStoreTranscript(
     const leak = revealedSecret(request.value.headers, SECRET_REQUEST_HEADERS)
     if (leak) return { ok: false, reason: `presentation reveals the ${leak} header value` }
 
-    const response = parseAuthedResponseHead({ bytes: p.recv, authed: p.recvAuthed })
+    const response = parseAuthedResponseHead({ bytes: p.recv, authed: p.recvAuthed }, request.value.method)
     if (response.ok === false) return { ok: false, reason: `response: ${response.reason}` }
     for (const block of [...response.value.interim, response.value.headers]) {
         const cookie = revealedSecret(block, SECRET_RESPONSE_HEADERS)
