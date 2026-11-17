@@ -546,7 +546,7 @@ describe("truncatedError", () => {
         "a".repeat(maxChars - 2) + "😀" + "tail",
         "a".repeat(maxChars - 1) + "\ud83d",
         "\u0085".repeat(500),
-        "[Confirm] rejected:\n\r\t\u001b\u007f\u0085‮ 😀 ".repeat(60),
+        "[Confirm] rejected:\n\r\t\u001b\u007f\u0085\u202e\u2028😀 ".repeat(60),
         "a".repeat(maxChars) + "\n\u001b",
         "a".repeat(maxChars - 3) + "\u001b".repeat(3),
         "\n" + "a".repeat(maxChars - 1),
