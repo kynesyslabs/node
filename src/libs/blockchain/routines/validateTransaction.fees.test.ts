@@ -334,6 +334,53 @@ describe("native send confirmation fee quote", () => {
         }
     }
 
+    // Confirmation references block 100. A block can commit while it runs
+    // (lastBlockNumber 101), and the chain tip is written before
+    // lastBlockNumber follows it (lastBlockNumber 99), so the fee forks can be
+    // active at one height and not the other.
+    const forkHeights: Array<[number, number, bigint]> = [[101, 101, 2n], [99, 100, 1n]]
+    for (const [lastBlockNumber, activation, fee] of forkHeights) {
+        it(`quotes the debits the balance check reads (reference 100, last block ${lastBlockNumber}, fee forks at ${activation})`, async () => {
+            chainIs(true, null)
+            getSharedState.lastBlockNumber = lastBlockNumber
+            getSharedState.forkConfig.gasFeeSeparation.activationHeight = activation
+            getSharedState.forkConfig.feeBinding.activationHeight = activation
+            caches.accounts.get(SENDER)!.balance = 100n * OS
+            const amount = 90n * OS
+            const tx = await pay(amount)
+
+            const confirmed = await confirm(tx)
+            expect(confirmed.valid).toBe(true)
+            expect(confirmed.reference_block).toBe(100)
+            expect((tx.attrs as { reference_block: number }).reference_block).toBe(100)
+            const debits = withDerivedFeeEdits(tx).content.gcr_edits
+                .filter(edit => edit.type === "balance" && edit.operation === "remove")
+                .reduce((sum, edit) => sum + BigInt(edit.amount), 0n)
+            expect(quote(tx)).toBe(debits - amount)
+            expect(quote(tx)).toBe(fee * OS)
+        })
+    }
+
+    it("sends balance minus the quote when a block activating the fee forks commits during confirmation", async () => {
+        chainIs(true, null)
+        getSharedState.lastBlockNumber = 101
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 101
+        getSharedState.forkConfig.feeBinding.activationHeight = 101
+        caches.accounts.get(SENDER)!.balance = 100n * OS
+
+        const max = await pay(98n * OS)
+        expect((await confirm(max)).valid).toBe(true)
+        expect(quote(max)).toBe(2n * OS)
+        const over = await pay(98n * OS + 1n)
+        const refusal = await confirm(over)
+        expect(refusal.valid).toBe(false)
+        expect(refusal.message).toContain(`quoted total fee ${2n * OS}`)
+
+        const applied = await HandleGCR.applyTransactions([max], false)
+        expect(applied.successfulTxs).toEqual([max.hash])
+        expect(balance(SENDER)).toBe(0n)
+    })
+
     it("refuses legacy signed-fee send max before it can charge the sender", async () => {
         chainIs(true, null)
         getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0

@@ -118,13 +118,16 @@ async function quoteNativeSendFee(
     // rewriting signed content.
     if (!isNativeSend(tx)) return null
 
+    // Fork state at the height legacyGasRetired and the derived fee edits
+    // read, not at referenceBlock: a block can commit during confirmation.
+    const height = getSharedState.lastBlockNumber ?? 0
     const gas = legacyGasRetired(tx) ? null : await derivedGasEdit(
         "native",
         tx.content.from,
-        isForkActive("osDenomination", referenceBlock),
+        isForkActive("osDenomination", height),
     )
     let total = BigInt(gas?.type === "balance" ? gas.amount : 0)
-    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+    if (isForkActive("gasFeeSeparation", height)) {
         const fee = tx.content.transaction_fee
         total += BigInt(fee.network_fee ?? 0) +
             BigInt(fee.rpc_fee ?? 0) + BigInt(fee.additional_fee ?? 0)
@@ -137,7 +140,7 @@ async function quoteNativeSendFee(
     // Check the signed amount edit here before submission.
     const sendAmount = canonicalizeAmountToOs(
         tx.content.amount,
-        isForkActive("osDenomination", referenceBlock),
+        isForkActive("osDenomination", height),
     )
     return nativeSendBalanceError(tx, sendAmount, total)
 }
