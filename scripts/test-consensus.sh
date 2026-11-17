@@ -84,6 +84,7 @@ SUITE_FILES=(
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
     src/libs/network/broadcastReferenceWindow.test.ts
+    src/libs/network/demosWorkScript.execute.test.ts
     src/libs/network/endpointValidation.admissionReason.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
@@ -100,6 +101,7 @@ SUITE_FILES=(
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.head.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.status.test.ts
+    src/libs/network/routines/transactions/demosWork/scriptLimits.test.ts
     src/libs/network/rpcEditBinding.test.ts
     src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts

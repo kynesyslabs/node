@@ -11,6 +11,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
+import { demoScriptRefusal } from "./routines/transactions/demosWork/scriptLimits"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR from "../blockchain/gcr/handleGCR"
@@ -385,6 +386,13 @@ export async function handleExecuteTransaction(
                     "Remove them from the script's web2 steps.",
                 )
             ) {
+                break
+            }
+            const message = demoScriptRefusal(demosWorkScript)
+            if (message) {
+                result.success = false
+                result.response = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
+                result.extra = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
                 break
             }
             try {
