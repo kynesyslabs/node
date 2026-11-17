@@ -199,10 +199,13 @@ exposed by the node, so it comes from the T-24h posts). Then:
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
   third of the first committee's votes; the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `tlsnDisabled`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10` and `l2psSettlement` at
-  `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking` and the L2PS kill switch `l2psGate` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
+  `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
-  (`--expected-treasury`),
+  (`--expected-treasury`), gives `tlsnVerified` the notary keys from the
+  notary key ceremony (NO-GO on the template's placeholder keys, on no keys,
+  on a payload the node would refuse and on a devnet, spike or test-vector
+  key, `KNOWN_TEST_NOTARY_KEYS`),
   uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`
   (mainnet is `8587492`), and sets
   `shardSize` 10; and no launch validator is one of

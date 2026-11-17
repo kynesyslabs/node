@@ -1,5 +1,6 @@
 /**
- * Mainnet launches with TLSNotary off. Under `tlsnDisabled` a native
+ * `tlsnDisabled` is the TLSNotary kill switch, unscheduled at mainnet launch
+ * (TLSNotary runs under `tlsnVerified`). Once scheduled, a native
  * `tlsn_request` or `tlsn_store` is refused at RPC intake, pool admission and
  * apply before any of its edits run: it pays no fee, burns nothing and no
  * attestation token is issued.
@@ -43,7 +44,7 @@ restoreForkConfigAfterEach()
 /** The mainnet forks, with tlsnDisabled at `height`. */
 const disabled = (height: number | null) => mainnetForks({ tlsnDisabled: height })
 
-describeForkConfig("tlsnDisabled")
+describeForkConfig("tlsnDisabled", null)
 
 describe("tlsnDisabled operations", () => {
     it("matches a native tlsn_request or tlsn_store and a tlsnotary edit, nothing else", async () => {
