@@ -7,9 +7,9 @@
  * the same table and the same table hash, and a reverted block undoes them.
  *
  * Transactions are built and signed by the SDK builders the TLSNotary service
- * uses. The wasm verifier is replaced by a stand-in whose "presentation" is a
- * JSON description of the facts it should report; the real verifier and its
- * vectors are covered in src/libs/tlsnotary.
+ * uses. The presentation gate's verifier is replaced by a stand-in whose
+ * "presentation" is a JSON description of the facts it should report; the
+ * real verifier and its vectors are covered in src/libs/tlsnotary.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
@@ -43,8 +43,11 @@ interface FakeFacts {
     bind?: string
     key?: number
     revealAuthorization?: boolean
+    revealCookie?: boolean
     invalid?: boolean
 }
+
+const RESPONSE = "HTTP/1.1 200 OK\r\nset-cookie: s=1\r\ncontent-length: 2\r\n\r\n{}"
 
 function fakeVerify(bytes: Uint8Array) {
     verifierCalls++
@@ -57,7 +60,7 @@ function fakeVerify(bytes: Uint8Array) {
     if (facts.invalid) return { ok: false as const }
     const head =
         "GET /resource HTTP/1.1\r\n" +
-        `Host: ${facts.server ?? "x"}\r\n` +
+        `Host: ${facts.server === undefined ? "api.github.com" : (facts.server ?? "x")}\r\n` +
         (facts.bind ? `X-Demos-Bind: ${facts.bind}\r\n` : "") +
         "Authorization: Bearer secret-token\r\n" +
         "\r\n"
@@ -74,6 +77,15 @@ function fakeVerify(bytes: Uint8Array) {
           ]
     const shown = Buffer.from(sent)
     if (!facts.revealAuthorization) shown.fill(0, valueStart, valueEnd)
+    const recv = Buffer.from(RESPONSE, "latin1")
+    const cookie = RESPONSE.indexOf("s=1")
+    const recvAuthed: [number, number][] = facts.revealCookie
+        ? [[0, recv.length]]
+        : [
+              [0, cookie],
+              [cookie + 3, recv.length],
+          ]
+    if (!facts.revealCookie) recv.fill(0, cookie, cookie + 3)
     return {
         ok: true as const,
         raw: "",
@@ -87,25 +99,16 @@ function fakeVerify(bytes: Uint8Array) {
                 facts.server === undefined ? "api.github.com" : facts.server,
             time: facts.time,
             tlsVersion: "1.2",
-            transcriptLength: { sent: sent.length, received: 0 },
+            transcriptLength: { sent: sent.length, received: recv.length },
             sent: shown.toString("hex"),
             sentAuthed,
-            recv: null,
-            recvAuthed: null,
+            recv: recv.toString("hex"),
+            recvAuthed,
             extensions: 0,
         },
     }
 }
 
-class FakeVerifierError extends Error {}
-mock.module("@/libs/tlsnotary/wasmVerifier", () => ({
-    __esModule: true,
-    TLSN_MAX_PRESENTATION_BYTES: 1 << 20,
-    TLSN_VERIFY_WASM_SHA256: FAKE_WASM_SHA256,
-    TlsnVerifierUnavailableError: FakeVerifierError,
-    TlsnVerifierLoadError: FakeVerifierError,
-    verifyPresentation: fakeVerify,
-}))
 
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { TLSNotaryService } from "@kynesyslabs/demosdk/tlsnotary/service"
@@ -130,6 +133,9 @@ import {
 import type { GCREntityCaches } from "./handleGCR"
 import { tlsnTableDigest } from "./gcr_routines/hashGCR"
 import { tlsnAdmissionCopy } from "./tlsnTransitions"
+import { setPresentationVerifierForTests } from "@/libs/tlsnotary/presentationGate"
+import { TlsnVerifierUnavailableAtApplyError } from "@/libs/tlsnotary/verifiedIdentity"
+import { StateReadError } from "./stateReadError"
 
 const { default: HandleGCR } = await import("./handleGCR")
 
@@ -194,7 +200,8 @@ const facts = (
     requestHash: string,
     extra: Partial<FakeFacts> = {},
 ): FakeFacts => ({
-    id: "att-" + requestHash.slice(0, 8),
+    // Hex, as the verifier reports attestation ids.
+    id: "a7" + requestHash.slice(0, 14),
     time: BLOCK_TIME - 30,
     bind: bind(requestHash),
     ...extra,
@@ -286,11 +293,16 @@ beforeEach(() => {
     forksWithTlsn()
     verifierCalls = 0
     getSharedState.tlsnTokenStore = null
+    setPresentationVerifierForTests({
+        wasmSha256: FAKE_WASM_SHA256,
+        verify: bytes => fakeVerify(bytes) as never,
+    })
 })
 
 afterEach(() => {
     getSharedState.forkConfig = savedForks
     Object.assign(HandleGCR, original)
+    setPresentationVerifierForTests(null)
     const timer = getSharedState.tlsnTokenStore?.cleanupTimer
     if (timer) clearInterval(timer)
 })
@@ -482,11 +494,11 @@ describe("tlsn_store under tlsnVerified", () => {
 
         const replay = await store(
             req.hash,
-            facts(req.hash, { id: "another-attestation" }),
+            facts(req.hash, { id: "a8" + "00".repeat(7) }),
             { nonce: 10 },
         )
         expect(await admissionRefusal(a, 103, replay)).toContain(
-            "ALREADY_STORED",
+            "ALREADY_USED",
         )
         const out = await a.apply(103, [replay])
 
@@ -555,7 +567,7 @@ describe("tlsn_store under tlsnVerified", () => {
         expect(verifierCalls).toBe(0)
         const admitted = tlsnAdmissionCopy(st)
         expect(admitted.ok).toBe(false)
-        if (admitted.ok === false) expect(admitted.reason).toContain("cap")
+        if (admitted.ok === false) expect(admitted.reason).toContain("larger than the 4096 bytes")
     })
 
     it("refuses a store on another sender's request", async () => {
@@ -614,6 +626,14 @@ describe("tlsn_store under tlsnVerified", () => {
             [
                 "it reveals the Authorization header",
                 () => ({ revealAuthorization: true }),
+            ],
+            [
+                "it reveals a Set-Cookie value",
+                () => ({ revealCookie: true }),
+            ],
+            [
+                "its attestation id is not hex",
+                () => ({ id: "att-1" }),
             ],
             ["it has no bind header", () => ({ bind: undefined })],
             [
@@ -685,6 +705,55 @@ describe("tlsn_store under tlsnVerified", () => {
     }
 })
 
+describe("one request backs one attestation, and a node without a verdict", () => {
+    it("refuses a store on a token an identity link used", async () => {
+        const { a, req } = await twoValidators()
+        const row = a.row(req.hash)!
+        a.caches.tlsNotaries.set(req.hash, { ...row, status: "linked", attestationId: "a9" } as GCRTLSNotary)
+        const before = a.digest()
+        const st = await store(req.hash, facts(req.hash))
+
+        expect(await admissionRefusal(a, 102, st)).toContain("ALREADY_USED")
+        const out = await a.apply(102, [st])
+
+        expect(out.failedTxs).toEqual([st.hash])
+        expect(a.digest()).toBe(before)
+    })
+
+    it("applies token edits in the TLSN identity links' group, in block order", async () => {
+        const req = tlsnAdmissionCopy(await request())
+        expect(req.ok).toBe(true)
+        const linkTx = (sender: string, hash: string): any => ({
+            hash,
+            content: {
+                from_ed25519_address: sender,
+                gcr_edits: [{ type: "identity", context: "tlsn", operation: "add", account: sender }],
+            },
+        })
+        const reqTx = (req as { tx: Transaction }).tx
+        const groups = HandleGCR.partitionIndependentTxs([
+            linkTx("0x" + "a1".repeat(32), "h1"),
+            reqTx,
+            linkTx("0x" + "c3".repeat(32), "h3"),
+        ])
+        expect(groups.map(g => g.map(t => t.hash))).toContainEqual(["h1", reqTx.hash, "h3"])
+    })
+
+    it("stops the block, not the store, when this node's verifier is not the one the chain pins", async () => {
+        const { a, req } = await twoValidators()
+        const st = await store(req.hash, facts(req.hash))
+        setPresentationVerifierForTests({ wasmSha256: "01".repeat(32), verify: bytes => fakeVerify(bytes) as never })
+
+        const applied = a.apply(102, [st])
+
+        await expect(applied).rejects.toBeInstanceOf(TlsnVerifierUnavailableAtApplyError)
+        await expect(a.apply(102, [st])).rejects.toBeInstanceOf(StateReadError)
+        expect(tlsnRequestOf(a.row(req.hash))!.status).toBe("pending")
+        // Admission refuses it on this node only, with a reason to retry.
+        expect(await admissionRefusal(a, 102, st)).toContain("cannot run on this node")
+    })
+})
+
 describe("before tlsnVerified", () => {
     it("writes no token row: the request keeps its pre-fork behaviour", async () => {
         baseForks()
@@ -692,7 +761,6 @@ describe("before tlsnVerified", () => {
         const req = await request()
 
         const out = await v.apply(101, [req])
-        console.error("OUT", JSON.stringify(out))
 
         expect(out.successfulTxs).toEqual([req.hash])
         expect(v.rows()).toHaveLength(0)

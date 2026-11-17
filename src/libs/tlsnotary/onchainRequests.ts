@@ -19,7 +19,9 @@ import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
  *
  * A token is the `gcr_tlsnotary` row a `tlsn_request` wrote at apply: its id
  * is the request tx hash, its owner the sender, its domain the host of the
- * requested URL. It can be used up to and including `expiresAtHeight`.
+ * requested URL. It can be used up to and including `expiresAtHeight`, and
+ * only once: a store (`stored`) or an identity link (`linked`) uses it up,
+ * so one request backs exactly one attestation.
  */
 
 /** Blocks a request stays usable after the block it landed in: inclusion, attest, then store at about 7 s blocks. */
@@ -32,7 +34,7 @@ export interface OnChainTlsnRequest {
     tokenId: string
     owner: string
     domain: string
-    status: "pending" | "stored"
+    status: "pending" | "stored" | "linked"
     requestHeight: number
     expiresAtHeight: number
 }
@@ -42,7 +44,7 @@ export type TlsnRequestRefusal =
     | "OWNER_MISMATCH"
     | "DOMAIN_MISMATCH"
     | "EXPIRED"
-    | "ALREADY_STORED"
+    | "ALREADY_USED"
 
 export interface TlsnRequestExpectation {
     /** The account that must own the request. */
@@ -51,16 +53,17 @@ export interface TlsnRequestExpectation {
     height: number
     /** Host the request must have been made for, when the caller has one. */
     domain?: string
-    /** Refuse a request whose proof is already stored. */
+    /** Refuse a request a store or an identity link already used. */
     pendingOnly?: boolean
 }
 
-const sameAccount = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+const bareAccount = (a: string) => a.toLowerCase().replace(/^0x/, "")
+const sameAccount = (a: string, b: string) => bareAccount(a) === bareAccount(b)
 
 /** The token a row holds, or null for a row that is not a `tlsnVerified` token (a pre-fork proof). */
 export function tlsnRequestOf(row: GCRTLSNotary | null | undefined): OnChainTlsnRequest | null {
     if (!row) return null
-    if (row.status !== "pending" && row.status !== "stored") return null
+    if (row.status !== "pending" && row.status !== "stored" && row.status !== "linked") return null
     if (row.requestHeight === null || row.expiresAtHeight === null) return null
     return {
         tokenId: row.tokenId,
@@ -86,7 +89,7 @@ export function tlsnRequestRefusal(
         return "DOMAIN_MISMATCH"
     }
     if (expect.height > request.expiresAtHeight) return "EXPIRED"
-    if (expect.pendingOnly && request.status !== "pending") return "ALREADY_STORED"
+    if (expect.pendingOnly && request.status !== "pending") return "ALREADY_USED"
     return null
 }
 

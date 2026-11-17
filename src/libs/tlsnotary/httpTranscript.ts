@@ -263,6 +263,39 @@ function responseHeadAt(bytes: Uint8Array, mask: Uint8Array, at: number): Parsed
     return { ok: true, value: { status: Number(status[1]), headers: headers.value, next: end + 4 } }
 }
 
+function responseHeadsOf(
+    bytes: Uint8Array,
+    mask: Uint8Array,
+): Parsed<{ interim: HeaderLine[][]; final: ResponseHead }> {
+    const interim: HeaderLine[][] = []
+    let at = 0
+    for (;;) {
+        const head = responseHeadAt(bytes, mask, at)
+        if (head.ok === false) return fail(head.reason)
+        if (head.value.status >= 200) return { ok: true, value: { interim, final: head.value } }
+        // After a 101 the connection speaks another protocol: no final
+        // HTTP response follows.
+        if (head.value.status === 101) return fail("response switches protocols")
+        if (interim.length === MAX_INTERIM_RESPONSES) return fail("too many interim responses")
+        interim.push(head.value.headers)
+        at = head.value.next
+    }
+}
+
+/**
+ * The status and header blocks of the response, under the same rules as
+ * parseAuthedResponse, with no rule on the body: a stored presentation may
+ * reveal only part of it.
+ */
+export function parseAuthedResponseHead(
+    recv: AuthedBytes,
+): Parsed<{ status: number; interim: HeaderLine[][]; headers: HeaderLine[] }> {
+    const heads = responseHeadsOf(recv.bytes, maskOf(recv))
+    if (heads.ok === false) return fail(heads.reason)
+    const { interim, final } = heads.value
+    return { ok: true, value: { status: final.status, interim, headers: final.headers } }
+}
+
 /**
  * The response the received transcript holds: any interim 1xx responses
  * (103 Early Hints), then the final one. Each interim block is read as a
@@ -275,23 +308,9 @@ function responseHeadAt(bytes: Uint8Array, mask: Uint8Array, at: number): Parsed
 export function parseAuthedResponse(recv: AuthedBytes): Parsed<ParsedResponse> {
     const { bytes } = recv
     const mask = maskOf(recv)
-    const interim: HeaderLine[][] = []
-    let at = 0
-    let final: ResponseHead
-    for (;;) {
-        const head = responseHeadAt(bytes, mask, at)
-        if (head.ok === false) return fail(head.reason)
-        if (head.value.status >= 200) {
-            final = head.value
-            break
-        }
-        // After a 101 the connection speaks another protocol: no final
-        // HTTP response follows.
-        if (head.value.status === 101) return fail("response switches protocols")
-        if (interim.length === MAX_INTERIM_RESPONSES) return fail("too many interim responses")
-        interim.push(head.value.headers)
-        at = head.value.next
-    }
+    const heads = responseHeadsOf(bytes, mask)
+    if (heads.ok === false) return fail(heads.reason)
+    const { interim, final } = heads.value
     const { status, headers, next: bodyStart } = final
 
     const te = headers.filter(h => h.name === "transfer-encoding")

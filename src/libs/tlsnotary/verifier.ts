@@ -12,6 +12,7 @@ import Hashing from "@/libs/crypto/hashing"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyTlsnIdentity } from "./verifiedIdentity"
+import type { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 
 /**
  * TLSNotary presentation format (from tlsn-js attestation)
@@ -728,6 +729,8 @@ export interface TLSNProofOptions {
     sender?: string
     /** Accounts the caller holds in memory (the block being applied). */
     accounts?: Iterable<{ pubkey: string; identities?: { web2?: Record<string, unknown> } | null }>
+    /** Token rows the caller holds in memory (the block being applied), by token id. */
+    tokens?: ReadonlyMap<string, GCRTLSNotary | null>
 }
 
 export async function verifyTLSNProof(
@@ -739,6 +742,7 @@ export async function verifyTLSNProof(
     extractedUsername?: string
     extractedUserId?: string
     attestationId?: string
+    token?: GCRTLSNotary
     retryable?: boolean
 }> {
     const { context, proof, recvHash, revealedRecv, username, userId } = payload
@@ -752,6 +756,7 @@ export async function verifyTLSNProof(
             userId: String(userId),
             sender: options.sender ?? "",
             accounts: options.accounts,
+            tokens: options.tokens,
         })
     }
 

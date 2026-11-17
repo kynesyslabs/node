@@ -217,6 +217,12 @@ export interface GCRResult {
     /** A database write that belongs in the transaction the edits commit in. */
     deferredWrite?: DeferredWrite
     response?: any
+    /**
+     * A cached row the edit replaced beyond the ones its fields name (the
+     * request token a TLSN link uses), as it was before, so a failed
+     * transaction puts it back.
+     */
+    replacedRow?: RowSnapshot
 }
 
 /** A write issued through the entity manager of the committing transaction. */
@@ -390,8 +396,9 @@ function snapshotRows(entities: GCREntityCaches, edits: GCREdit[]): RowSnapshot[
     return snapshots
 }
 
+/** Puts rows back, the earliest copy of a row last, so it is the one kept. */
 function restoreRows(snapshots: RowSnapshot[]) {
-    for (const { cache, key, present, row } of snapshots) {
+    for (const { cache, key, present, row } of [...snapshots].reverse()) {
         if (present) cache.set(key, row)
         else cache.delete(key)
     }
@@ -1834,6 +1841,7 @@ export default class HandleGCR {
                     message: `Error applying GCREdit: ${error}`,
                 }
             }
+            if (result.replacedRow) rowSnapshots.push(result.replacedRow)
 
             if (!result.success) {
                 // INFO: If on a serious run, rollback hard edits
@@ -2019,6 +2027,10 @@ export default class HandleGCR {
                         if (typeof attestationId === "string" && attestationId) {
                             keys.push("tlsatt:" + attestationId)
                         }
+                        // A TLSN identity link uses a request token too, one
+                        // its edit does not name: tokens and links apply in
+                        // block order, in the links' group.
+                        if (isNodeDerivedTlsnEdit(edit)) keys.push("web2-links")
                         // Conservative: tlsnotary edits carry an account
                         // field; key it even though today's routine only
                         // touches entities.tlsNotaries.
@@ -3273,7 +3285,11 @@ export default class HandleGCR {
         const where = unstorableAfter(edit, entities, stored)
         return where === null
             ? result
-            : { success: false, message: `${where} holds a value Postgres cannot store` }
+            : {
+                  success: false,
+                  message: `${where} holds a value Postgres cannot store`,
+                  replacedRow: result.replacedRow,
+              }
     }
 
     static async applyGCREdit(
@@ -3341,7 +3357,7 @@ export default class HandleGCR {
             case "nonce":
                 result = await GCRNonceRoutines.apply(editOperation, account)
                 break
-            case "identity":
+            case "identity": {
                 result = await GCRIdentityRoutines.apply(
                     editOperation,
                     account,
@@ -3349,7 +3365,22 @@ export default class HandleGCR {
                     entities,
                     place,
                 )
+                // Under tlsnVerified a TLSN link uses its request token (and
+                // its undo frees it): the row is the block's like any other.
+                const token = result.success ? result.tlsNotary : undefined
+                if (token) {
+                    const cache = entities.tlsNotaries
+                    const before = cache.get(token.tokenId)
+                    result.replacedRow = {
+                        cache,
+                        key: token.tokenId,
+                        present: cache.has(token.tokenId),
+                        row: before ? structuredClone(before) : before,
+                    }
+                    cache.set(token.tokenId, token)
+                }
                 break
+            }
             case "assign":
             case "subnetsTx":
                 // TODO implementations

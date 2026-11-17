@@ -20,6 +20,41 @@ import { TLSN_CONTEXTS } from "@/libs/identity/web2Contexts"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import type { GCREntityCaches } from "../../handleGCR"
+import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
+import { findTlsnLinkedToken } from "@/libs/tlsnotary/tlsnChainReads"
+
+/** `row` as a TLSN link of transaction `txhash` leaves it: used by `attestationId`. */
+function linkedToken(row: GCRTLSNotary, txhash: string | undefined, attestationId: string): GCRTLSNotary {
+    const used = Object.assign(new GCRTLSNotary(), row)
+    used.status = "linked"
+    used.attestationId = attestationId
+    used.storedAtHeight = (getSharedState.lastBlockNumber ?? 0) + 1
+    // A dry run has no hash; nothing it leaves is stored.
+    if (txhash) used.txhash = txhash
+    return used
+}
+
+/** Takes back the points a TLSN link earned. */
+async function deductTLSNPoints(context: string, identity: Web2GCRData["data"], account: string): Promise<void> {
+    // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
+    if (context === "github" && identity.userId) {
+        await IncentiveManager.githubUnlinked(account, identity.userId)
+    } else if (context === "discord") {
+        await IncentiveManager.discordUnlinked(account)
+    } else if (context === "telegram") {
+        await IncentiveManager.telegramUnlinked(account)
+    }
+}
+
+/** A used token as its request left it, for the undo of its link. */
+function freedToken(row: GCRTLSNotary): GCRTLSNotary {
+    const free = Object.assign(new GCRTLSNotary(), row)
+    free.status = "pending"
+    free.attestationId = null
+    free.storedAtHeight = null
+    free.txhash = row.tokenId
+    return free
+}
 
 /**
  * Add an identity via TLSNotary proof verification.
@@ -153,6 +188,7 @@ export async function applyTLSNIdentityAdd(
         {
             sender: editOperation.account,
             accounts: [accountGCR, ...(entities?.accounts.values() ?? [])],
+            tokens: entities?.tlsNotaries,
         },
     )
 
@@ -243,11 +279,18 @@ export async function applyTLSNIdentityAdd(
         }
     }
 
+    // Under tlsnVerified the link uses its request token up.
+    const token =
+        verification.token && verification.attestationId
+            ? linkedToken(verification.token, editOperation.txhash, verification.attestationId)
+            : undefined
+
     return {
         success: true,
         message: "TLSN identity added successfully",
         entity: accountGCR,
         sideEffect: awardPoints,
+        ...(token ? { tlsNotary: token } : {}),
     }
 }
 
@@ -335,24 +378,51 @@ export async function applyTLSNIdentityRemove(
         )
     }
 
-    const deductPoints = async () => {
-        // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
-        if (context === "github" && identity.userId) {
-            await IncentiveManager.githubUnlinked(
-                editOperation.account,
-                identity.userId,
-            )
-        } else if (context === "discord") {
-            await IncentiveManager.discordUnlinked(editOperation.account)
-        } else if (context === "telegram") {
-            await IncentiveManager.telegramUnlinked(editOperation.account)
-        }
-    }
+    const deductPoints = () => deductTLSNPoints(context, identity, editOperation.account)
 
     return {
         success: true,
         message: "TLSN identity removed successfully",
         entity: accountGCR,
         sideEffect: deductPoints,
+    }
+}
+
+/**
+ * The undo of a TLSN link under `tlsnVerified`: drops the link the add
+ * wrote, named by the add's own payload, and frees the request token it
+ * used. The remove routine cannot do it: a remove edit names the link at its
+ * top level, an add nests it under `data.data`.
+ */
+export async function rollbackTLSNIdentityAdd(
+    editOperation: any,
+    accountGCR: GCRMain,
+    entities?: GCREntityCaches,
+): Promise<GCRResult> {
+    const { context } = editOperation.data ?? {}
+    const { username, userId } = editOperation.data?.data ?? {}
+    if (!TLSN_CONTEXTS.has(context) || userId === undefined || userId === null) {
+        return { success: false, message: "Invalid payload: missing context or userId" }
+    }
+    const links: Array<Web2GCRData["data"] & { proofType?: string }> =
+        accountGCR.identities?.web2?.[context] ?? []
+    const at = links.findIndex(
+        id => id.proofType === "tlsn" && id.userId === String(userId) && id.username === username,
+    )
+    if (at < 0) return { success: false, message: "TLSN identity not found" }
+    const [removed] = links.splice(at, 1)
+    accountGCR.identities.web2[context] = links
+
+    const used =
+        typeof editOperation.txhash === "string"
+            ? await findTlsnLinkedToken(editOperation.txhash, entities?.tlsNotaries)
+            : null
+
+    return {
+        success: true,
+        message: "TLSN identity add rolled back",
+        entity: accountGCR,
+        sideEffect: () => deductTLSNPoints(context, removed, editOperation.account),
+        ...(used ? { tlsNotary: freedToken(used) } : {}),
     }
 }

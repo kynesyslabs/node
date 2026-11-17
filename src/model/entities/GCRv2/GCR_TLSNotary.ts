@@ -1,15 +1,16 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from "typeorm"
 
-/** A `tlsn_request` token row under `tlsnVerified`, before and after its store. */
-export type TlsnTokenStatus = "pending" | "stored"
+/** A `tlsn_request` token row under `tlsnVerified`: unused, used by a store, or used by an identity link. */
+export type TlsnTokenStatus = "pending" | "stored" | "linked"
 
 /**
  * One row per TLSNotary attestation token.
  *
  * Before `tlsnVerified`, rows were written only by a shipped `tlsnotary`
  * store edit and carry no status. Under the fork a `tlsn_request` writes a
- * `pending` row keyed by its own tx hash, and the `tlsn_store` that names it
- * fills in the proof and sets it `stored`. Every column the chain writes
+ * `pending` row keyed by its own tx hash; the `tlsn_store` that names it
+ * fills in the proof and sets it `stored`, or a TLSN identity link whose
+ * bind names it sets it `linked` with the link's attestation id. Every column the chain writes
  * under the fork is derived from the block (heights, tx hashes, the verified
  * presentation), so the row is the same on every node.
  */

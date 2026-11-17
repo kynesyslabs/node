@@ -14,6 +14,8 @@ import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { isForkActive } from "@/forks/forkGates"
 import { TLSN_REQUEST_TTL_BLOCKS, TLSN_TOKEN_ID } from "@/libs/tlsnotary/onchainRequests"
 import { verifyStoredPresentation } from "@/libs/tlsnotary/storedPresentation"
+import { TlsnVerifierUnavailableAtApplyError } from "@/libs/tlsnotary/verifiedIdentity"
+import { TlsnVerifierUnavailableError } from "@/libs/tlsnotary/wasmVerifier"
 import { getSharedState } from "@/utilities/sharedState"
 import { applyTime } from "./applyTime"
 import { normalizePubkey } from "./normalizePubkey"
@@ -144,9 +146,10 @@ export interface TlsnTransitionContext {
  * edits, as a refused settlement is. Those that need the token row run when
  * the edit applies. Empty unless `tlsnVerified` is active at the tip.
  *
- * Throws when a presentation cannot be judged on this node (the verifier is
- * missing or cannot run): the block must not apply here rather than fail
- * the transaction on this node alone.
+ * Throws TlsnVerifierUnavailableAtApplyError, a StateReadError, when a
+ * presentation cannot be judged on this node (the verifier is missing, is
+ * not the one the chain pins, or cannot run): the block must not apply here
+ * rather than fail the transaction on this node alone.
  */
 export function prepareTlsnTransitions(
     txs: Transaction[],
@@ -155,6 +158,8 @@ export function prepareTlsnTransitions(
     const prepared = new Map<string, GCREditTlsnDerived>()
     if (!tlsnVerifiedAtTip()) return prepared
     const tip = getSharedState.lastBlockNumber ?? 0
+    // The block's time at apply; at admission the wall clock stands in for
+    // the time of the block the transaction will land in.
     const blockTimeSec = Math.floor(applyTime().getTime() / 1000)
 
     for (const tx of txs) {
@@ -205,13 +210,23 @@ export function prepareTlsnTransitions(
             ctx.refuse(tx, "tlsn_store carries no proof")
             continue
         }
-        const verdict = verifyStoredPresentation({
-            proof,
-            sender: account,
-            requestTxHash: tokenId,
-            tip,
-            blockTimeSec,
-        })
+        let verdict: ReturnType<typeof verifyStoredPresentation>
+        try {
+            verdict = verifyStoredPresentation({
+                proof,
+                sender: account,
+                requestTxHash: tokenId,
+                tip,
+                blockTimeSec,
+            })
+        } catch (error) {
+            // A StateReadError: consensus sits the round out instead of
+            // failing the store on this node alone.
+            if (error instanceof TlsnVerifierUnavailableError) {
+                throw new TlsnVerifierUnavailableAtApplyError(error.message)
+            }
+            throw error
+        }
         if (verdict.ok === false) {
             ctx.refuse(tx, `tlsn_store presentation refused: ${verdict.reason}`)
             continue

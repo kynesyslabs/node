@@ -29,8 +29,11 @@ import {
     applyEthosIdentityRemove,
     applyTLSNIdentityAdd,
     applyTLSNIdentityRemove,
+    rollbackTLSNIdentityAdd,
 } from "./routines"
 import type { EditPlace } from "./routines/removedIdentities"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
 
 export default class GCRIdentityRoutines {
     static async apply(
@@ -80,6 +83,13 @@ export default class GCRIdentityRoutines {
                         accountGCR,
                         place,
                     )
+                case "tlsnadd":
+                    // Before the fork the add is undone by the remove
+                    // routine, as it always was.
+                    if (isForkActive("tlsnVerified", getSharedState.lastBlockNumber ?? 0)) {
+                        return rollbackTLSNIdentityAdd(identityEdit, accountGCR, entities)
+                    }
+                    break
             }
         }
 

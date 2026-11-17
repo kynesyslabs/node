@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { parseAuthedRequest, parseAuthedResponse, singleHeader, type AuthedBytes } from "./httpTranscript"
+import {
+    parseAuthedRequest,
+    parseAuthedResponse,
+    parseAuthedResponseHead,
+    singleHeader,
+    type AuthedBytes,
+} from "./httpTranscript"
 
 /**
  * A transcript where `[` and `]` mark hidden spans: the brackets are dropped
@@ -197,5 +203,28 @@ describe("parseAuthedResponse", () => {
         expect(body(parseAuthedResponse(transcript("HTTP/1.1 [200] OK\r\n\r\n{}")))).toContain("not fully revealed")
         expect(body(parseAuthedResponse(transcript("HTTP/1.0 200 OK\r\n\r\n{}")))).toContain("malformed status")
         expect(body(parseAuthedResponse(transcript(`${OK}x: y`)))).toContain("no authenticated end")
+    })
+})
+
+describe("parseAuthedResponseHead", () => {
+    it("reads the status and every header block, whatever the body reveals", () => {
+        const r = parseAuthedResponseHead(
+            transcript("HTTP/1.1 103 Early Hints\r\nlink: </a>\r\n\r\nHTTP/1.1 200 OK\r\nset-cookie: [s=1]\r\ncontent-length: 9\r\n\r\n{\"a\":[123]}"),
+        )
+        expect(r.ok).toBe(true)
+        if (!r.ok) return
+        expect(r.value.status).toBe(200)
+        expect(r.value.interim.map(b => b.map(h => h.name))).toEqual([["link"]])
+        expect(r.value.headers.map(h => [h.name, h.valueRevealed])).toEqual([
+            ["set-cookie", false],
+            ["content-length", true],
+        ])
+        // The same transcript is no response to read a body from.
+        expect(parseAuthedResponse(transcript("HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\n[abc]")).ok).toBe(false)
+    })
+
+    it("refuses a head whose status line or end is hidden", () => {
+        expect(reason(parseAuthedResponseHead(transcript("HTTP/1.1 [200] OK\r\n\r\n")))).toContain("status line")
+        expect(reason(parseAuthedResponseHead(transcript("HTTP/1.1 200 OK\r\nx: y[\r\n\r\n]")))).toContain("end of headers")
     })
 })

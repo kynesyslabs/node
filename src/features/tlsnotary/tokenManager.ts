@@ -217,7 +217,8 @@ const CHAIN_REFUSAL_ERRORS: Record<TlsnRequestRefusal, string> = {
     OWNER_MISMATCH: "TOKEN_OWNER_MISMATCH",
     DOMAIN_MISMATCH: "TOKEN_DOMAIN_MISMATCH",
     EXPIRED: "TOKEN_EXPIRED",
-    ALREADY_STORED: "TOKEN_ALREADY_STORED",
+    // The pre-fork error name: a used token was a stored one.
+    ALREADY_USED: "TOKEN_ALREADY_STORED",
 }
 
 /**
@@ -409,6 +410,8 @@ export async function lookupToken(idOrTxHash: string): Promise<TokenView | null>
     const local = getToken(request.tokenId)
     let status = local?.status ?? TokenStatus.PENDING
     if (request.status === "stored") status = TokenStatus.STORED
+    // Used up by an identity link: attested, nothing stored.
+    else if (request.status === "linked") status = TokenStatus.COMPLETED
     else if (tip + 1 > request.expiresAtHeight) status = TokenStatus.EXPIRED
     return {
         id: request.tokenId,

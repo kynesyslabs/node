@@ -2,7 +2,9 @@
  * A TLSN identity link under the `tlsnVerified` fork, judged the same way at
  * admission and at block apply: the presentation (presentationGate), its
  * transcript (identityPolicy), the tlsn_request the bind header names, and
- * the links already on chain.
+ * the links already on chain. The request is the on-chain token its
+ * `tlsn_request` wrote, and a link uses it up as a store does, so one
+ * request backs exactly one attestation.
  *
  * Inside block apply every check reads the block's own time and the chain
  * as of the tip, so all nodes reach the same verdict. A node that cannot
@@ -20,6 +22,8 @@ import { judgePresentation } from "./presentationGate"
 import { bindSenderForm, judgeIdentityTranscript, tlsnIdentityEndpoint } from "./identityPolicy"
 import { TlsnVerifierUnavailableError } from "./wasmVerifier"
 import { findTlsnLinkHits, findTlsnRequest, tipBlockTimestampSec } from "./tlsnChainReads"
+import { tlsnRequestOf, tlsnRequestRefusal, type TlsnRequestRefusal } from "./onchainRequests"
+import type { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 
 /** The verifier could not run while a block applied: no verdict, no block. */
 export class TlsnVerifierUnavailableAtApplyError extends StateReadError {
@@ -45,6 +49,8 @@ export interface VerifiedIdentityInput {
     sender: string
     /** Accounts this block (or this admission) already holds in memory. */
     accounts?: Iterable<LinkHolder>
+    /** Token rows this block (or this admission) already holds in memory, by token id. */
+    tokens?: ReadonlyMap<string, GCRTLSNotary | null>
 }
 
 export interface VerifiedIdentityResult {
@@ -54,26 +60,27 @@ export interface VerifiedIdentityResult {
     extractedUserId?: string
     attestationId?: string
     serverName?: string
+    /** The token row the link uses, as found: the caller marks it used. */
+    token?: GCRTLSNotary
     /** Set on a refusal that says nothing about the transaction. */
     retryable?: boolean
 }
 
 const refuse = (message: string): VerifiedIdentityResult => ({ success: false, message })
 
+const REQUEST_REFUSALS: Record<TlsnRequestRefusal, string> = {
+    NOT_FOUND: "names no tlsn_request on chain",
+    OWNER_MISMATCH: "names a tlsn_request of another account",
+    DOMAIN_MISMATCH: "names a tlsn_request for another server",
+    EXPIRED: "names an expired tlsn_request",
+    ALREADY_USED: "names a tlsn_request already used",
+}
+
 function linksOf(holder: LinkHolder, context: string): Record<string, unknown>[] {
     const web2 = holder.identities?.web2
     if (!web2 || typeof web2 !== "object" || !Object.hasOwn(web2, context)) return []
     const bucket = web2[context]
     return Array.isArray(bucket) ? (bucket as Record<string, unknown>[]) : []
-}
-
-function hostOf(url: string | null): string | null {
-    if (url === null) return null
-    try {
-        return new URL(url).hostname.toLowerCase()
-    } catch {
-        return null
-    }
 }
 
 async function judge(input: VerifiedIdentityInput, applying: boolean): Promise<VerifiedIdentityResult> {
@@ -108,24 +115,19 @@ async function judge(input: VerifiedIdentityInput, applying: boolean): Promise<V
         return refuse(`UserId mismatch: claimed '${String(input.userId)}', proof contains '${facts.userId}'`)
     }
 
-    // The request must be this sender's, for this server and already on
-    // chain, so a presentation made under one request or for one account
-    // cannot serve another.
-    const request = await findTlsnRequest(facts.bind.requestTxHash)
-    if (!request) return refuse("X-Demos-Bind names no tlsn_request on chain")
-    if (
-        request.status !== "confirmed" ||
-        request.type !== "native" ||
-        request.nativeOperation !== "tlsn_request"
-    ) {
-        return refuse("X-Demos-Bind names a transaction that is not a confirmed tlsn_request")
-    }
-    if (bindSenderForm(request.sender) !== bindSenderForm(sender)) {
-        return refuse("X-Demos-Bind names a tlsn_request of another account")
-    }
-    if (hostOf(request.targetUrl) !== facts.serverName.toLowerCase()) {
-        return refuse("X-Demos-Bind names a tlsn_request for another server")
-    }
+    // The request must be this sender's, for this server, on chain and
+    // unused, so a presentation made under one request or for one account
+    // cannot serve another, and one request backs one attestation.
+    const token = await findTlsnRequest(facts.bind.requestTxHash, input.tokens)
+    const request = tlsnRequestOf(token)
+    const refusal = tlsnRequestRefusal(request, {
+        sender: bindSenderForm(sender),
+        // The height of the block the link lands in.
+        height: height + 1,
+        domain: facts.serverName,
+        pendingOnly: true,
+    })
+    if (refusal) return refuse(`X-Demos-Bind ${REQUEST_REFUSALS[refusal]}`)
 
     // Links held in memory are this block's current state; the database is
     // read only for the accounts not among them.
@@ -161,6 +163,7 @@ async function judge(input: VerifiedIdentityInput, applying: boolean): Promise<V
         extractedUserId: facts.userId,
         attestationId: facts.attestationId,
         serverName: facts.serverName,
+        token: token!,
     }
 }
 

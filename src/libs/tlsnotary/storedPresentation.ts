@@ -9,21 +9,16 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { isTrustedNotaryKey, tlsnVerifiedParams } from "@/forks/tlsnVerifiedGate"
-import {
-    TLSN_MAX_PRESENTATION_BYTES,
-    TLSN_VERIFY_WASM_SHA256,
-    TlsnVerifierUnavailableError,
-    type TlsnVerifiedPresentation,
-    verifyPresentation,
-} from "./wasmVerifier"
+import { tlsnVerifiedParams } from "@/forks/tlsnVerifiedGate"
+import { judgeStoreTranscript } from "./identityPolicy"
+import { judgePresentation } from "./presentationGate"
 
 /**
  * The checks a `tlsn_store` presentation must pass under `tlsnVerified`
- * before its proof row can be written. Every input is either signed by the
- * sender or fixed by the block, so the verdict is the same on every node.
- * The token checks (owner, expiry, domain, single use) need the chain's rows
- * and are made where the row is written.
+ * before its proof row can be written: the presentation gate every TLSN
+ * verdict goes through, then the store's transcript rules. The token checks
+ * (owner, expiry, domain, single use) need the chain's rows and are made
+ * where the row is written.
  */
 
 /** Room for the JSON envelope around the hex presentation (`version`, `meta`). */
@@ -34,7 +29,7 @@ export interface StoredPresentationInput {
     proof: string
     /** Sender of the store, as the bind header must name it. */
     sender: string
-    /** The `tlsn_request` tx hash the store names, as the bind header must name it. */
+    /** The `tlsn_request` tx hash the store names: 64 lowercase hex, no 0x. */
     requestTxHash: string
     /** Tip the fork payload (keys, caps) is read at. */
     tip: number
@@ -60,181 +55,11 @@ const refuse = (reason: string): StoredPresentationVerdict => ({ ok: false, reas
 
 const HEX = /^(?:[0-9a-fA-F]{2})*$/
 
-/** The bind header value prefix of a store: `demos-tlsn:v1:store:<sender>:<request hash>`. */
-export const STORE_BIND_CONTEXT = "store"
-const BIND_HEADER = "x-demos-bind"
-// Revealing one of these would publish the prover's credentials with the proof.
-const SECRET_HEADERS: ReadonlySet<string> = new Set(["authorization", "cookie", "proxy-authorization"])
-
-export interface BindHeader {
-    context: string
-    sender: string
-    requestTxHash: string
-}
-
-const bare = (hex: string) => hex.toLowerCase().replace(/^0x/, "")
-
-function authed(ranges: [number, number][], start: number, end: number): boolean {
-    // Ranges are disjoint and sorted by the verifier, but a cover may span
-    // several adjacent ones, so walk them rather than look for one container.
-    let at = start
-    for (const [from, to] of [...ranges].sort((a, b) => a[0] - b[0])) {
-        if (from > at) break
-        if (to > at) at = to
-        if (at >= end) return true
-    }
-    return at >= end
-}
-
-function anyAuthed(ranges: [number, number][], start: number, end: number): boolean {
-    return ranges.some(([from, to]) => from < end && to > start)
-}
-
-interface HeaderLine {
-    /** Lowercase name; empty when the line has no colon. */
-    name: string
-    value: string
-    start: number
-    /** Offset of the colon, or -1. */
-    colon: number
-    valueStart: number
-    /** Offset of the line's CRLF, or of the head's end when it has none. */
-    end: number
-}
-
-/** Header lines of the request head in `sent`, with their byte offsets. */
-function headerLines(sent: Buffer): HeaderLine[] {
-    const headEnd = sent.indexOf("\r\n\r\n")
-    const head = headEnd === -1 ? sent.length : headEnd
-    const lines: HeaderLine[] = []
-    // The first line is the request line, not a header.
-    let start = sent.indexOf("\r\n")
-    if (start === -1 || start >= head) return lines
-    start += 2
-    while (start < head) {
-        let end = sent.indexOf("\r\n", start)
-        if (end === -1 || end > head) end = head
-        let colon = sent.indexOf(":", start)
-        if (colon >= end) colon = -1
-        let valueStart = colon === -1 ? end : colon + 1
-        while (valueStart < end && (sent[valueStart] === 0x20 || sent[valueStart] === 0x09)) valueStart++
-        lines.push({
-            name: colon === -1 ? "" : sent.subarray(start, colon).toString("latin1").trim().toLowerCase(),
-            value: sent.subarray(valueStart, end).toString("latin1").trim(),
-            start,
-            colon,
-            valueStart,
-            end,
-        })
-        start = end + 2
-    }
-    return lines
-}
-
-/**
- * The bind header of a verified presentation, or why there is none usable.
- * Bytes outside the authenticated ranges are zero in the verifier output, so
- * a redacted header cannot read as one; a header is used only when its whole
- * line is authenticated, and there must be exactly one.
- */
-export function readBindHeader(
-    verified: Pick<TlsnVerifiedPresentation, "sent" | "sentAuthed">,
-): { ok: true; bind: BindHeader } | { ok: false; reason: string } {
-    if (verified.sent === null || verified.sentAuthed === null) {
-        return { ok: false, reason: "the sent transcript is not revealed" }
-    }
-    const sent = Buffer.from(verified.sent, "hex")
-    const binds = headerLines(sent).filter(line => line.name === BIND_HEADER)
-    if (binds.length !== 1) {
-        return { ok: false, reason: `expected one ${BIND_HEADER} header, found ${binds.length}` }
-    }
-    const [line] = binds
-    if (!authed(verified.sentAuthed, line.start, line.end)) {
-        return { ok: false, reason: `the ${BIND_HEADER} header is not fully authenticated` }
-    }
-    const parts = line.value.split(":")
-    if (parts.length !== 5 || parts[0] !== "demos-tlsn" || parts[1] !== "v1") {
-        return { ok: false, reason: `malformed ${BIND_HEADER} header` }
-    }
-    return { ok: true, bind: { context: parts[2], sender: parts[3], requestTxHash: parts[4] } }
-}
-
-// What a request line may reveal after a hidden target: its version.
-const REQUEST_LINE_TAIL = / HTTP\/\d(?:\.\d)?$/
-
-/**
- * Why the request line could hide a header, or null. It is revealed whole,
- * or hides only the target, with its version and CRLF revealed: otherwise
- * a hidden CRLF would fold the next header into it, where no header check
- * reads it.
- */
-function requestLineRefusal(sent: Buffer, ranges: [number, number][]): string | null {
-    const end = sent.indexOf("\r\n")
-    if (end === -1) return anyAuthed(ranges, 0, sent.length) ? "a request line without a revealed end" : null
-    if (authed(ranges, 0, end + 2)) return null
-    const line = sent.subarray(0, end).toString("latin1")
-    const tail = REQUEST_LINE_TAIL.exec(line)
-    if (tail && authed(ranges, tail.index, end + 2)) return null
-    return "a partly revealed request line"
-}
-
-/**
- * Why revealed bytes after the request head could carry another request, or
- * null. They must be the one body the head declares, by a revealed
- * Content-Length equal to their length.
- */
-function trailingRefusal(sent: Buffer, ranges: [number, number][], lines: HeaderLine[]): string | null {
-    const headEnd = sent.indexOf("\r\n\r\n")
-    if (headEnd === -1) return null
-    const bodyStart = headEnd + 4
-    if (bodyStart >= sent.length || !anyAuthed(ranges, bodyStart, sent.length)) return null
-    const declared = lines.find(
-        line => line.name === "content-length" && authed(ranges, line.start, Math.min(line.end + 2, sent.length)),
-    )
-    if (declared && declared.value === String(sent.length - bodyStart)) return null
-    return "revealed bytes after the request head that are not its declared body"
-}
-
-/**
- * Why the presentation may reveal a credential, or null. A secret header
- * (Authorization, Cookie, Proxy-Authorization) must keep its value hidden.
- * A header line is either revealed whole, with its CRLF, or reveals at most
- * its name and colon. Hidden bytes read as zeros, so a line that reveals part
- * of its value could hide the name of a secret header, or a CRLF that joins
- * a secret header to the line before it; the request line and anything after
- * the head are held to the same end.
- */
-export function revealedSecretHeader(
-    verified: Pick<TlsnVerifiedPresentation, "sent" | "sentAuthed">,
-): string | null {
-    if (verified.sent === null || verified.sentAuthed === null) return null
-    const sent = Buffer.from(verified.sent, "hex")
-    const ranges = verified.sentAuthed
-    const requestLine = requestLineRefusal(sent, ranges)
-    if (requestLine) return requestLine
-    const lines = headerLines(sent)
-    for (const line of lines) {
-        const lineEnd = Math.min(line.end + 2, sent.length)
-        if (!anyAuthed(ranges, line.start, line.end)) continue
-        if (authed(ranges, line.start, lineEnd)) {
-            if (SECRET_HEADERS.has(line.name) && line.end > line.valueStart) return line.name
-            continue
-        }
-        const nameShown = line.colon !== -1 && authed(ranges, line.start, line.colon + 1)
-        const valueShown = anyAuthed(ranges, line.colon === -1 ? line.start : line.valueStart, line.end)
-        if (!nameShown || valueShown) {
-            const shown = line.name.replace(/[^\x21-\x7e]/g, "")
-            return `partly revealed ${shown || "unnamed"}`
-        }
-    }
-    return trailingRefusal(sent, ranges, lines)
-}
-
 /** The presentation bytes and canonical proof of a store's `proof` arg, or why it is refused. */
 function decodeProof(
     proof: string,
     maxBytes: number,
-): { ok: true; bytes: Uint8Array; canonical: string } | { ok: false; reason: string } {
+): { ok: true; data: string; canonical: string } | { ok: false; reason: string } {
     // Checked before parsing, so a huge arg costs no parse.
     if (proof.length > maxBytes * 2 + STORED_PROOF_ENVELOPE_CHARS) {
         return { ok: false, reason: `proof is larger than the ${maxBytes}-byte presentation cap` }
@@ -255,82 +80,37 @@ function decodeProof(
     if (typeof data !== "string" || data.length === 0 || !HEX.test(data)) {
         return { ok: false, reason: "proof data is not hex" }
     }
-    const length = data.length / 2
-    if (length > maxBytes || length > TLSN_MAX_PRESENTATION_BYTES) {
-        return { ok: false, reason: `presentation of ${length} bytes is over the ${maxBytes}-byte cap` }
-    }
+    // The byte cap itself is the gate's, judged on this same hex.
     const hex = data.toLowerCase()
-    return {
-        ok: true,
-        bytes: new Uint8Array(Buffer.from(hex, "hex")),
-        canonical: JSON.stringify({ version, data: hex }),
-    }
+    return { ok: true, data: hex, canonical: JSON.stringify({ version, data: hex }) }
 }
 
 /**
- * Verifies the presentation of a `tlsn_store` under `tlsnVerified`: size
- * caps, the pinned wasm verifier, a notary key the fork lists at `tip`, a
- * named server, an attested time within the freshness window of the block,
- * no revealed credentials, and a bind header that names this sender and the
- * request the store claims.
+ * Verifies the presentation of a `tlsn_store` under `tlsnVerified`.
  *
- * A refusal is a verdict. A throw is none: the verifier could not load or
- * run on this node (TlsnVerifierLoadError, TlsnVerifierUnavailableError), or
- * the fork is not active at `tip`, and the caller must not judge the
- * transaction on it.
+ * A refusal is a verdict. A throw is none: the verifier cannot give the
+ * chain's verdict on this node (TlsnVerifierUnavailableError), or the fork
+ * is not active at `tip`, and the caller must not judge the transaction on it.
  */
 export function verifyStoredPresentation(input: StoredPresentationInput): StoredPresentationVerdict {
     const params = tlsnVerifiedParams(input.tip)
     if (!params) throw new Error(`[TLSNotary] tlsnVerified is not active at ${input.tip}`)
-    if (params.verifierWasmSha256 !== TLSN_VERIFY_WASM_SHA256) {
-        // Another verifier build would give the network's verdict, not this one.
-        throw new TlsnVerifierUnavailableError(
-            `this node carries verifier ${TLSN_VERIFY_WASM_SHA256}, the chain verifies with ${params.verifierWasmSha256}`,
-        )
-    }
 
     const decoded = decodeProof(input.proof, params.maxPresentationBytes)
     if (decoded.ok === false) return refuse(decoded.reason)
 
-    const result = verifyPresentation(decoded.bytes)
-    if (result.ok === false) return refuse("the presentation does not verify")
-    const out = result.out
+    const verdict = judgePresentation(decoded.data, { height: input.tip, blockTimeSec: input.blockTimeSec })
+    if (verdict.ok === false) return refuse(verdict.reason)
+    const p = verdict.presentation
 
-    if (!out.attestationVersionIsCurrent) return refuse("the attestation version is not the pinned one")
-    if (!isTrustedNotaryKey(input.tip, out.verifyingKey.alg, out.verifyingKey.hex)) {
-        return refuse("the presentation is signed by a notary key the chain does not list")
-    }
-    if (out.serverName === null || out.serverName.length === 0) {
-        return refuse("the presentation does not name its server")
-    }
-    if (!Number.isSafeInteger(out.time)) return refuse("the attested time is not a number")
-    if (out.time < input.blockTimeSec - params.freshnessWindowSec) {
-        return refuse("the attested connection is older than the freshness window")
-    }
-    if (out.time > input.blockTimeSec + params.futureSkewSec) {
-        return refuse("the attested connection is later than the block time")
-    }
-
-    const secret = revealedSecretHeader(out)
-    if (secret) return refuse(`the presentation reveals the ${secret} header`)
-
-    const bind = readBindHeader(out)
-    if (bind.ok === false) return refuse(bind.reason)
-    if (bind.bind.context !== STORE_BIND_CONTEXT) {
-        return refuse(`the presentation is bound to "${bind.bind.context}", not to a store`)
-    }
-    if (bare(bind.bind.sender) !== bare(input.sender)) {
-        return refuse("the presentation is bound to another sender")
-    }
-    if (bare(bind.bind.requestTxHash) !== bare(input.requestTxHash)) {
-        return refuse("the presentation is bound to another request")
-    }
+    const transcript = judgeStoreTranscript(p, input.sender, input.requestTxHash)
+    if (transcript.ok === false) return refuse(transcript.reason)
 
     return {
         ok: true,
-        attestationId: out.attestationId,
-        serverName: out.serverName.toLowerCase(),
-        attestedTimeSec: out.time,
+        attestationId: p.attestationId,
+        serverName: p.serverName.toLowerCase(),
+        attestedTimeSec: p.time,
         canonicalProof: decoded.canonical,
     }
 }
