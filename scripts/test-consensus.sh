@@ -92,6 +92,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/outboundEntryGate.test.ts
+    src/features/multichain/XMDispatcher.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/network/rateLimiter.loopback.test.ts
     src/libs/network/rpcGossipSize.test.ts

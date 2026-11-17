@@ -72,11 +72,12 @@ class XMParser {
     }> {
         const results = {}
         let name: string, operation: IOperation
+        const names = Object.keys(fullscript.operations)
         // Iterating over the operations
         // TODO Enforce order
-        for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
+        for (let id = 0; id < names.length; id++) {
             try {
-                name = Object.keys(fullscript.operations)[id]
+                name = names[id]
                 log.debug("[" + name + "] ")
                 operation = fullscript.operations[name]
                 log.debug("[XMParser]: full script operation")
