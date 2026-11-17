@@ -1409,14 +1409,6 @@ async function fetchChildBlock(
     return peerHeight(peer) > parent.number ? null : undefined
 }
 
-/**
- * Download and process a batch of blocks from a peer
- *
- * @param peer - The peer to download blocks from
- * @param startBlock - The first block number to download
- * @param endBlock - The last block number to download (inclusive)
- * @returns True if all blocks were downloaded and processed successfully
- */
 function batchDownloadIsStopping(): boolean {
     return !getSharedState.runMainLoop || getSharedState.isShuttingDown
 }
@@ -1525,6 +1517,14 @@ async function processBatchBlock(
     return true
 }
 
+/**
+ * Download and process a batch of blocks from a peer
+ *
+ * @param peer - The peer to download blocks from
+ * @param startBlock - The first block number to download
+ * @param endBlock - The last block number to download (inclusive)
+ * @returns True if all blocks were downloaded and processed successfully
+ */
 async function batchDownloadBlocks(
     peer: Peer,
     startBlock: number,
