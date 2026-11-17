@@ -74,19 +74,26 @@ checked with `git verify-tag` (INSTALL.md, "Run a released image").
    validator and nothing else exposed.
 2. **Key file.** A key holder decrypts the key on their own machine and
    streams it to the host; the plain key is never written on the holder's
-   machine:
+   machine. The host keeps the staged copy only if it holds the key the
+   ceremony published, so a failed or wrong decryption leaves the current
+   key file in place:
 
    ```bash
+   set -o pipefail
    sops decrypt --input-type json --output-type binary demos-notary-1.key.sops.json |
-     ssh root@<notary-host> 'install -d -m 0700 /etc/tlsn-notary && umask 077 &&
-       cat > /etc/tlsn-notary/notary.key.new &&
-       chown 10001:10001 /etc/tlsn-notary/notary.key.new &&
-       chmod 0400 /etc/tlsn-notary/notary.key.new &&
-       mv /etc/tlsn-notary/notary.key.new /etc/tlsn-notary/notary.key'
+     ssh root@<notary-host> 'set -e; install -d -m 0700 /etc/tlsn-notary; umask 077
+       f=/etc/tlsn-notary/notary.key.new; trap "rm -f $f" EXIT
+       cat > "$f"
+       . <checkout>/tlsnotary/notary-service/lib.sh
+       [ "$(k256_pkcs8_pubkey "$f")" = "<hex from demos-notary-1.notary-key.json>" ] ||
+         { echo "staged key is not the expected key; current key kept" >&2; exit 1; }
+       chown 10001:10001 "$f"; chmod 0400 "$f"
+       mv "$f" /etc/tlsn-notary/notary.key'
    ```
 
-   10001 is the container user (`NOTARY_UID`). The guard refuses a key file
-   that others can read or its group can write.
+   The command must exit 0; a non-zero exit from either side means nothing
+   was installed. 10001 is the container user (`NOTARY_UID`). The guard
+   refuses a key file that others can read or its group can write.
 3. **Settings.** Copy `notary.env.example` to `/etc/tlsn-notary/notary.env`
    (root, 0600) and set `NOTARY_EXPECTED_PUBKEY` to the key's `hex` from the
    ceremony's `<id>.notary-key.json` (it must be in the genesis `notaryKeys`).
@@ -114,7 +121,7 @@ checked with `git verify-tag` (INSTALL.md, "Run a released image").
    [tlsn-reverse-proxy.md](tlsn-reverse-proxy.md)).
    Rate-limit `/session` per client address: each session holds about 1 GiB
    of the notary's memory for up to 5 minutes.
-6. **Check.** `notary-check.sh` (section 5) exits 0.
+6. **Check.** `notary-check.sh`, run as section 5 shows, exits 0.
 7. **Failover drill.** With both hosts up, stop the active instance
    (`systemctl stop tlsn-notary`), check that the public URL serves the
    other one (`<notary-url>/info` shows the same key, a test link
@@ -215,8 +222,15 @@ with the published one.
 
 ## 5. Monitoring
 
-`notary-check.sh` reads the same env file. One line per check, exit code of
-the first failure:
+`notary-check.sh` takes its settings from the environment, the same
+variables as `/etc/tlsn-notary/notary.env`; it does not open the file
+itself. Run it by hand with the file loaded:
+
+```bash
+(set -a; . /etc/tlsn-notary/notary.env; set +a; <checkout>/tlsnotary/notary-service/notary-check.sh)
+```
+
+One line per check, exit code of the first failure:
 
 | Code | Meaning |
 |---|---|
@@ -257,14 +271,16 @@ Planned rotation to the standby (no release needed, the standby is already
 pinned):
 
 1. Holders stream `demos-notary-standby` to both hosts as a second file,
-   `/etc/tlsn-notary/notary-standby.key` (section 2, step 2, with that
-   name: owner 10001, mode 0400). The running key file stays untouched, so
+   `/etc/tlsn-notary/notary-standby.key` (section 2, step 2, with the
+   standby's encrypted file and `hex`, and that name as the last `mv`
+   target: owner 10001, mode 0400). The running key file stays untouched, so
    a host can go back to it at any point.
 2. Per host, one at a time, starting with the passive one: in
    `/etc/tlsn-notary/notary.env` change `NOTARY_KEY_FILE` to the standby
    file and `NOTARY_EXPECTED_PUBKEY` to the standby key together (the guard
    refuses with exit 6 if only one changes), `systemctl restart
-   tlsn-notary`, run `notary-check.sh`. Then switch the active one.
+   tlsn-notary`, run `notary-check.sh` (section 5). Then switch the active
+   one.
 3. When both hosts serve the standby key, destroy the old key's plain
    copies on the hosts (`shred -u /etc/tlsn-notary/notary.key`).
 4. Hold a new ceremony for the next standby and ship it as an added key
@@ -316,7 +332,7 @@ users' links fail with a time refusal while the notary is up.
    (`chronyc sources -v`); check the host firewall lets NTP out (udp 123).
 3. Wait until `timedatectl show -p NTPSynchronized --value` prints `yes`
    and `chronyc tracking` (if used) shows an offset well under a second.
-4. `systemctl start tlsn-notary`, then `notary-check.sh`.
+4. `systemctl start tlsn-notary`, then `notary-check.sh` (section 5).
 
 Never step the clock back while the notary runs.
 

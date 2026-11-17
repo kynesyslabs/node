@@ -14,15 +14,17 @@ export const GUARD = path.join(SERVICE_DIR, "notary-guard.sh")
 export const CHECK = path.join(SERVICE_DIR, "notary-check.sh")
 export const CEREMONY = path.join(SERVICE_DIR, "notary-key-ceremony.sh")
 
-export const hasTool = (tool: string) =>
-    spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).status === 0
+export const hasTool = (tool: string) => Bun.which(tool) !== null
 
 export function makeTmp(prefix: string): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`))
 }
 
+const OPENSSL = Bun.which("openssl")
+
 function openssl(args: string[], input?: Buffer | string): Buffer {
-    const r = spawnSync("openssl", args, { input })
+    if (!OPENSSL) throw new Error("openssl is required to make test keys")
+    const r = spawnSync(OPENSSL, args, { input })
     if (r.status !== 0) throw new Error(`openssl ${args.join(" ")}: ${r.stderr.toString()}`)
     return r.stdout
 }
@@ -38,7 +40,7 @@ export function makeKey(dir: string, name: string, curve = "secp256k1"): { file:
 /** The compressed public key openssl derives from a private key file. */
 export function compressedPubOf(file: string): string {
     const der = openssl(["pkey", "-in", file, "-pubout", "-outform", "DER", "-ec_conv_form", "compressed"])
-    return der.subarray(der.length - 33).toString("hex")
+    return der.subarray(-33).toString("hex")
 }
 
 /** SubjectPublicKeyInfo PEM of a key file, compressed or not. */
@@ -56,9 +58,10 @@ export function rewriteKey(src: string, dest: string, args: string[]): string {
 /** A key's 32-byte private scalar, hex, to prove it never reaches output. */
 export function scalarOf(file: string): string {
     const text = openssl(["pkey", "-in", file, "-noout", "-text"]).toString()
-    const m = /priv:\s*([\s\S]*?)\npub:/.exec(text)
-    if (!m) throw new Error("no priv section")
-    return m[1].replace(/[\s:]/g, "").replace(/^00(?=[0-9a-f]{64}$)/, "")
+    const start = text.indexOf("priv:")
+    const end = text.indexOf("\npub:", start)
+    if (start < 0 || end < 0) throw new Error("no priv section")
+    return text.slice(start + "priv:".length, end).replace(/[\s:]/g, "").replace(/^00(?=[0-9a-f]{64}$)/, "")
 }
 
 /** Writes an executable stub that prints `stdout` for the matching first-arg pattern. */

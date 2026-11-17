@@ -78,7 +78,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends age
-          curl -fsSL -o "$RUNNER_TEMP/sops" https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+          curl --proto =https --tlsv1.2 -fsSL -o "$RUNNER_TEMP/sops" https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
           echo "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b  $RUNNER_TEMP/sops" | sha256sum -c -
           sudo install -m 0755 "$RUNNER_TEMP/sops" /usr/local/bin/sops
       - run: bun install --frozen-lockfile --ignore-scripts

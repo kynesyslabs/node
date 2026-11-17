@@ -17,12 +17,14 @@ notary_log() {
 # One line, no newline inside: grep -x alone matches line by line, so a
 # value with an embedded newline could pass it.
 single_line() {
-    [ "$(printf '%s' "$1" | wc -l | tr -d ' ')" = 0 ]
+    _s=$1
+    [ "$(printf '%s' "${_s}" | wc -l | tr -d ' ')" = 0 ]
 }
 
 # A k256 notary key as the verifier reports it and the fork payload lists it.
 is_compressed_pubkey() {
-    single_line "$1" && printf '%s' "$1" | grep -Eqx '0[23][0-9a-f]{64}'
+    _k=$1
+    single_line "${_k}" && printf '%s' "${_k}" | grep -Eqx '0[23][0-9a-f]{64}'
 }
 
 # The DER of the PEM block labelled $2 in file $1, as lowercase hex, on
@@ -60,9 +62,10 @@ compress_point() {
 # the scalar (elliptic-curve's SEC1 import checks the pair), so the key
 # checked here is the key the notary signs with.
 k256_pkcs8_pubkey() {
+    _keyfile=$1
     # Only the public point is ever captured; a failed or partial base64
     # decode cannot match the whole-DER pattern.
-    _point=$(pem_der_hex "$1" "PRIVATE KEY" |
+    _point=$(pem_der_hex "${_keyfile}" "PRIVATE KEY" |
         sed -n 's/^308184020100301006072a8648ce3d020106052b8104000a046d306b0201010420[0-9a-f]\{64\}a14403420004\([0-9a-f]\{128\}\)$/04\1/p')
     [ -n "${_point}" ] || return 1
     compress_point "${_point}"
@@ -83,7 +86,8 @@ k256_spki_pubkey() {
 
 # Raw bytes of a hex string on stdout, without xxd.
 hex_to_bin() {
-    _esc=$(printf '%s' "$1" | awk '{
+    _hex=$1
+    _esc=$(printf '%s' "${_hex}" | awk '{
         h = "0123456789abcdef"; s = ""
         for (i = 1; i < length($0); i += 2) {
             v = (index(h, substr($0, i, 1)) - 1) * 16 + index(h, substr($0, i + 1, 1)) - 1
@@ -98,12 +102,15 @@ hex_to_bin() {
 # SHA256:<hex> over the 33 key bytes. Holders publish it outside GitHub, as
 # with the release keys, and the health check prints it for the served key.
 key_fingerprint() {
-    printf 'SHA256:%s' "$(hex_to_bin "$1" | sha256sum | cut -c1-64)"
+    _fpkey=$1
+    printf 'SHA256:%s' "$(hex_to_bin "${_fpkey}" | sha256sum | cut -c1-64)"
 }
 
 # |$1| < $2, both decimal seconds.
 abs_below() {
-    awk -v o="$1" -v m="$2" 'BEGIN { if (o < 0) o = -o; exit !(o + 0 < m + 0) }'
+    _val=$1
+    _lim=$2
+    awk -v o="${_val}" -v m="${_lim}" 'BEGIN { if (o < 0) o = -o; exit !(o + 0 < m + 0) }'
 }
 
 # Sets CLOCK_SYNCED (yes, no or unknown), CLOCK_OFFSET (signed seconds, empty
@@ -119,6 +126,7 @@ clock_status() {
         case $("${_tdc}" show -p NTPSynchronized --value 2>/dev/null) in
             yes) CLOCK_SYNCED=yes; CLOCK_SOURCE=timedatectl ;;
             no) CLOCK_SYNCED=no; CLOCK_SOURCE=timedatectl ;;
+            *) ;;
         esac
         # Only systemd-timesyncd answers timesync-status; units vary (us, ms, s).
         CLOCK_OFFSET=$("${_tdc}" timesync-status 2>/dev/null | awk '
@@ -154,11 +162,13 @@ clock_status() {
 # largest offset allowed, in seconds. Reads what clock_status set, which the
 # caller runs first in its own shell so it can report the source and offset.
 clock_problem() {
+    _max=$1
     case ${CLOCK_SYNCED} in
         no) printf 'the host clock is not NTP-synchronised (%s)' "${CLOCK_SOURCE}"; return ;;
         unknown) printf 'cannot tell whether the host clock is NTP-synchronised: neither timedatectl nor chronyc answered'; return ;;
+        *) ;;
     esac
-    if [ -n "${CLOCK_OFFSET}" ] && ! abs_below "${CLOCK_OFFSET}" "$1"; then
-        printf 'the host clock is %s s off NTP time (%s), the limit is %s s' "${CLOCK_OFFSET}" "${CLOCK_SOURCE}" "$1"
+    if [ -n "${CLOCK_OFFSET}" ] && ! abs_below "${CLOCK_OFFSET}" "${_max}"; then
+        printf 'the host clock is %s s off NTP time (%s), the limit is %s s' "${CLOCK_OFFSET}" "${CLOCK_SOURCE}" "${_max}"
     fi
 }

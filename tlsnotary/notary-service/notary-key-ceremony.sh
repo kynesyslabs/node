@@ -94,11 +94,27 @@ fi
 ENC="${OUT}/${ID}.key.sops.json"
 ENTRY="${OUT}/${ID}.notary-key.json"
 mkdir -p "${OUT}" || exit 6
-for f in "${ENC}" "${ENTRY}"; do
-    [ ! -e "${f}" ] || { notary_log "${f} already exists; a key id is made once"; exit 5; }
-done
 
 umask 077
+# Both output names are claimed with noclobber before a key exists, so a
+# second ceremony for the same id refuses instead of overwriting, and a
+# failed run removes only the files it claimed itself.
+OWN_ENC=0
+OWN_ENTRY=0
+DONE=0
+release_outputs() {
+    [ "${DONE}" = 1 ] && return 0
+    [ "${OWN_ENC}" = 1 ] && rm -f "${ENC}"
+    [ "${OWN_ENTRY}" = 1 ] && rm -f "${ENTRY}"
+    return 0
+}
+if ( set -C; : > "${ENC}" ) 2>/dev/null; then OWN_ENC=1; else
+    notary_log "${ENC} already exists; a key id is made once"; exit 5
+fi
+if ( set -C; : > "${ENTRY}" ) 2>/dev/null; then OWN_ENTRY=1; else
+    notary_log "${ENTRY} already exists; a key id is made once"; release_outputs; exit 5
+fi
+
 base=${TMPDIR:-/tmp}
 [ -d /dev/shm ] && [ -w /dev/shm ] && base=/dev/shm
 case $(stat -f -c '%T' "${base}" 2>/dev/null) in
@@ -106,11 +122,12 @@ case $(stat -f -c '%T' "${base}" 2>/dev/null) in
     *)
         if [ "${ALLOW_DISK_TEMP}" != 1 ]; then
             notary_log "${base} is not tmpfs and /dev/shm is not writable; the key would touch a disk. Point TMPDIR at a tmpfs or pass --allow-disk-temp"
+            release_outputs
             exit 6
         fi
         ;;
 esac
-WORK=$(mktemp -d "${base}/notary-ceremony.XXXXXXXX") || exit 6
+WORK=$(mktemp -d "${base}/notary-ceremony.XXXXXXXX") || { release_outputs; exit 6; }
 
 wipe() {
     if [ -n "${WORK:-}" ] && [ -d "${WORK}" ]; then
@@ -125,13 +142,13 @@ wipe() {
         done
         rm -rf "${WORK}"
     fi
+    release_outputs
 }
 trap wipe EXIT
 trap 'exit 6' INT TERM HUP
 
 failed() {
     notary_log "$*"
-    rm -f "${ENC}" "${ENC}.tmp" "${ENTRY}"
     exit 6
 }
 
@@ -156,17 +173,18 @@ printf 'creation_rules:\n  - age: "%s"\n' "${AGE_LIST}" > "${WORK}/sops.yaml"
 env -u SOPS_AGE_RECIPIENTS -u SOPS_PGP_FP -u SOPS_KMS_ARN -u SOPS_GCP_KMS_IDS \
     -u SOPS_AZURE_KEYVAULT_URLS -u SOPS_HC_VAULT_URIS \
     sops --config "${WORK}/sops.yaml" --encrypt --input-type binary --output-type json \
-    "${KEY}" > "${ENC}.tmp" 2>"${WORK}/sops.err" || failed "sops could not encrypt: $(head -c 300 "${WORK}/sops.err")"
-grep -q 'PRIVATE KEY' "${ENC}.tmp" && failed "the encrypted file holds the key in plain text"
+    "${KEY}" > "${WORK}/enc.json" 2>"${WORK}/sops.err" || failed "sops could not encrypt: $(head -c 300 "${WORK}/sops.err")"
+grep -q 'PRIVATE KEY' "${WORK}/enc.json" && failed "the encrypted file holds the key in plain text"
 for r in ${seen}; do
-    grep -q "\"${r}\"" "${ENC}.tmp" || failed "the encrypted file does not name recipient ${r}"
+    grep -q "\"${r}\"" "${WORK}/enc.json" || failed "the encrypted file does not name recipient ${r}"
 done
-named=$(grep -o '"recipient"' "${ENC}.tmp" | wc -l | tr -d ' ')
+named=$(grep -o '"recipient"' "${WORK}/enc.json" | wc -l | tr -d ' ')
 [ "${named}" = "${count}" ] || failed "the encrypted file names ${named} recipients, not the ${count} holders given"
-mv "${ENC}.tmp" "${ENC}" || failed "cannot write ${ENC}"
+cat "${WORK}/enc.json" > "${ENC}" || failed "cannot write ${ENC}"
 
 printf '{"id":"%s","alg":"k256","hex":"%s"}\n' "${ID}" "${PUB}" > "${ENTRY}" || failed "cannot write ${ENTRY}"
-chmod 0644 "${ENTRY}" "${ENC}"
+chmod 0644 "${ENTRY}" "${ENC}" || failed "cannot set the mode of the outputs"
+DONE=1
 
 FP=$(key_fingerprint "${PUB}")
 printf 'notaryKeys entry: %s\n' "$(cat "${ENTRY}")"

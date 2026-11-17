@@ -79,11 +79,13 @@ check_key_file() {
     fi
     # The preflight runs as root, for whom any file is readable; the
     # container reads the key as NOTARY_UID:NOTARY_GID.
-    if [ -n "${2:-}" ]; then
+    _uid=${2:-}
+    _gid=${3:-}
+    if [ -n "${_uid}" ]; then
         _owner=$(stat -c '%u' "${_key}")
         _group=$(stat -c '%g' "${_key}")
-        if [ "${_owner}" != "$2" ] && { [ "${_group}" != "${3:-}" ] || [ $((0${_mode} & 040)) -eq 0 ]; }; then
-            refuse 3 "key file ${_key} is owned by ${_owner}:${_group} with mode ${_mode}; the notary runs as $2:${3:-} and could not read it (chown $2:${3:-$2} ${_key})"
+        if [ "${_owner}" != "${_uid}" ] && { [ "${_group}" != "${_gid}" ] || [ $((0${_mode} & 040)) -eq 0 ]; }; then
+            refuse 3 "key file ${_key} is owned by ${_owner}:${_group} with mode ${_mode}; the notary runs as ${_uid}:${_gid} and could not read it (chown ${_uid}:${_gid:-${_uid}} ${_key})"
         fi
     fi
     _pub=$(k256_pkcs8_pubkey "${_key}") ||
@@ -113,6 +115,7 @@ case ${mode} in
         case ${NOTARY_BIND:-127.0.0.1} in
             0.0.0.0 | '::' | '[::]' | '*')
                 refuse 2 "NOTARY_BIND=${NOTARY_BIND} publishes the notary on every interface; bind it to loopback or a private address behind the TLS reverse proxy" ;;
+            *) ;;
         esac
         check_key_file "${NOTARY_KEY_FILE:-}" "${NOTARY_UID:-10001}" "${NOTARY_GID:-10001}"
         mkdir -p "$(dirname -- "${STAMP}")" || refuse 2 "cannot create $(dirname -- "${STAMP}")"
@@ -142,6 +145,7 @@ case ${mode} in
             read -r stamp_time stamp_key < "${STAMP}" || refuse 7 "cannot read the preflight stamp ${STAMP}"
             case ${stamp_time} in
                 '' | *[!0-9]*) refuse 7 "malformed preflight stamp ${STAMP}" ;;
+                *) ;;
             esac
             age=$(($(date -u +%s) - stamp_time))
             max_age=${NOTARY_STAMP_MAX_AGE_SEC:-300}

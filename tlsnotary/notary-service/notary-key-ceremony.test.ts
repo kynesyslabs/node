@@ -205,6 +205,15 @@ describe("notary-key-ceremony.sh", () => {
         expect(fs.readFileSync(path.join(out, "k1.notary-key.json"), "utf8")).toBe(first)
     })
 
+    it("refuses when another run holds one output name, and leaves that run's file alone", () => {
+        const args = ["--id", "k2", "--recipient", FAKE_RECIPIENTS[0], "--recipient", FAKE_RECIPIENTS[1], "--out-dir", out, "--allow-online"]
+        fs.mkdirSync(out, { recursive: true })
+        fs.writeFileSync(path.join(out, "k2.notary-key.json"), "other run")
+        expect(ceremony(args, stubSops()).status).toBe(5)
+        expect(fs.readFileSync(path.join(out, "k2.notary-key.json"), "utf8")).toBe("other run")
+        expect(fs.existsSync(path.join(out, "k2.key.sops.json"))).toBe(false)
+    })
+
     const online = fs.existsSync("/proc/net/route") &&
         fs.readFileSync("/proc/net/route", "utf8").split("\n").slice(1).some(l => l.split(/\s+/)[1] === "00000000")
 
