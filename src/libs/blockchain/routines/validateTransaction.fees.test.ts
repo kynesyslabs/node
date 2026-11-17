@@ -361,6 +361,57 @@ describe("native send confirmation fee quote", () => {
         })
     }
 
+    // The fee forks are active at lastBlockNumber 101 but not at reference
+    // block 100, so the ingress fee check has not read transaction_fee.
+    const forksAfterReference = (): void => {
+        chainIs(true, null)
+        getSharedState.lastBlockNumber = 101
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 101
+        getSharedState.forkConfig.feeBinding.activationHeight = 101
+        caches.accounts.get(SENDER)!.balance = 100n * OS
+    }
+    const unreadableFees: Array<[string, (content: any) => void, string]> = [
+        ["no transaction_fee", content => { delete content.transaction_fee }, "transaction_fee is missing or not an object"],
+        ["rpc_fee 1.5", content => { content.transaction_fee.rpc_fee = "1.5" }, "transaction_fee.rpc_fee is not a non-negative integer"],
+        ["network_fee -1", content => { content.transaction_fee.network_fee = -1 }, "transaction_fee.network_fee is not a non-negative integer"],
+    ]
+    for (const [label, change, reason] of unreadableFees) {
+        it(`refuses a fee it cannot read when the fee forks follow the reference block (${label})`, async () => {
+            forksAfterReference()
+            const tx = await pay(1n * OS)
+            change(tx.content)
+
+            const refusal = await confirm(tx)
+            expect(refusal.valid).toBe(false)
+            expect(refusal.message).toBe(`[Tx Validation] [FEE ERROR] ${reason}\n`)
+            expect((tx.attrs as { total_fee?: string } | undefined)?.total_fee).toBeUndefined()
+        })
+    }
+
+    it("quotes digit-string fee components at the shipped total when the fee forks follow the reference block", async () => {
+        forksAfterReference()
+        const amount = 90n * OS
+        const shipped = await pay(amount)
+        const digits = onTheWire(shipped)
+        const fee = digits.content.transaction_fee as unknown as Record<string, unknown>
+        for (const key of ["network_fee", "rpc_fee", "additional_fee"]) {
+            fee[key] = String(BigInt((fee[key] ?? 0) as number | string))
+            expect(fee[key]).toMatch(/^[0-9]+$/)
+        }
+        const signedSum = ["network_fee", "rpc_fee", "additional_fee"]
+            .reduce((sum, key) => sum + BigInt(fee[key] as string), 0n)
+
+        expect((await confirm(shipped)).valid).toBe(true)
+        expect((await confirm(digits)).valid).toBe(true)
+        expect(quote(digits)).toBe(quote(shipped))
+        expect(quote(digits)).toBe(signedSum)
+        expect(quote(digits)).toBe(2n * OS)
+        const debits = withDerivedFeeEdits(digits).content.gcr_edits
+            .filter(edit => edit.type === "balance" && edit.operation === "remove")
+            .reduce((sum, edit) => sum + BigInt(edit.amount), 0n)
+        expect(quote(digits)).toBe(debits - amount)
+    })
+
     it("sends balance minus the quote when a block activating the fee forks commits during confirmation", async () => {
         chainIs(true, null)
         getSharedState.lastBlockNumber = 101

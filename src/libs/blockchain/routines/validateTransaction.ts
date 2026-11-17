@@ -128,9 +128,23 @@ async function quoteNativeSendFee(
     )
     let total = BigInt(gas?.type === "balance" ? gas.amount : 0)
     if (isForkActive("gasFeeSeparation", height)) {
-        const fee = tx.content.transaction_fee
-        total += BigInt(fee.network_fee ?? 0) +
-            BigInt(fee.rpc_fee ?? 0) + BigInt(fee.additional_fee ?? 0)
+        // The ingress fee check is skipped when the fork is not yet active
+        // at referenceBlock, so the signed fee may not have been read.
+        const fee: unknown = tx.content.transaction_fee
+        if (!fee || typeof fee !== "object") {
+            return "[Tx Validation] [FEE ERROR] transaction_fee is missing or not an object\n"
+        }
+        for (const key of ["network_fee", "rpc_fee", "additional_fee"]) {
+            // OS amounts travel as digit strings.
+            const value = (fee as Record<string, unknown>)[key] ?? 0
+            const readable = typeof value === "number"
+                ? Number.isSafeInteger(value) && value >= 0
+                : typeof value === "string" && /^[0-9]+$/.test(value)
+            if (!readable) {
+                return `[Tx Validation] [FEE ERROR] transaction_fee.${key} is not a non-negative integer\n`
+            }
+            total += BigInt(value as number | string)
+        }
     }
     tx.attrs = {
         reference_block: referenceBlock,
