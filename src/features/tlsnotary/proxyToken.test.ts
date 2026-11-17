@@ -24,7 +24,14 @@ mock.module("@/model/datasource", () => ({
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { TLSN_REQUEST_TTL_BLOCKS } from "@/libs/tlsnotary/onchainRequests"
-import { TOKEN_CONFIG, TokenStatus, consumeRetry, lookupToken, validateProxyToken } from "./tokenManager"
+import {
+    TOKEN_CONFIG,
+    TokenStatus,
+    cleanupExpiredTokens,
+    consumeRetry,
+    lookupToken,
+    validateProxyToken,
+} from "./tokenManager"
 
 const OWNER = "0x" + "11".repeat(32)
 const HASH = "ab".repeat(32)
@@ -91,6 +98,19 @@ describe("validateProxyToken under tlsnVerified", () => {
         getSharedState.lastBlockNumber = 101
         rows.set(HASH, token({ status: "stored" }))
         expect((await validateProxyToken(HASH, OWNER, URL_)).valid).toBe(false)
+    })
+
+    it("keeps spent retries past the wall-clock expiry until the chain request expires", async () => {
+        const first = await validateProxyToken(HASH, OWNER, URL_)
+        for (let i = 0; i < TOKEN_CONFIG.MAX_RETRIES; i++) consumeRetry(HASH, `proxy-${i}`)
+        first.token!.expiresAt = Date.now() - 1
+
+        expect(cleanupExpiredTokens()).toBe(0)
+        expect((await validateProxyToken(HASH, OWNER, URL_)).error).toBe("TOKEN_NO_RETRIES_LEFT")
+
+        getSharedState.lastBlockNumber = 101 + TLSN_REQUEST_TTL_BLOCKS
+        expect(cleanupExpiredTokens()).toBe(1)
+        expect(getSharedState.tlsnTokenStore?.tokens.has(HASH)).toBe(false)
     })
 
     it("creates nothing for a request that is not on chain", async () => {

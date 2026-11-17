@@ -162,14 +162,21 @@ function headersOf(
  * The single request the sent transcript holds: an authenticated request
  * line, its headers, and nothing after the blank line (an identity request
  * is a GET without a body, and a second request would be answered by a
- * second response the rules do not read).
+ * second response the rules do not read). With `allowBody` the request may
+ * carry one body framed by a revealed Content-Length that ends the
+ * transcript: the body itself may stay hidden, since the server reads
+ * exactly that many bytes and a second request could only follow it.
  */
-export function parseAuthedRequest(sent: AuthedBytes): Parsed<ParsedRequest> {
+export function parseAuthedRequest(
+    sent: AuthedBytes,
+    options: { allowBody?: boolean } = {},
+): Parsed<ParsedRequest> {
     const { bytes } = sent
     const mask = maskOf(sent)
     const end = headEnd(bytes, mask)
     if (end < 0) return fail("request has no authenticated end of headers")
-    if (end + 4 !== bytes.length) {
+    const bodyStart = end + 4
+    if (!options.allowBody && bodyStart !== bytes.length) {
         return fail("sent transcript holds more than one bodiless request")
     }
     const [first, ...rest] = linesOf(bytes, mask, 0, end)
@@ -184,7 +191,29 @@ export function parseAuthedRequest(sent: AuthedBytes): Parsed<ParsedRequest> {
     if (version !== "HTTP/1.1") return fail(`request is ${version}, not HTTP/1.1`)
     const headers = rest.length === 0 ? { ok: true as const, value: [] } : headersOf(bytes, mask, rest[0][0], end)
     if (headers.ok === false) return fail(headers.reason)
+    if (options.allowBody) {
+        const framing = requestBodyLength(headers.value)
+        if (framing.ok === false) return fail(framing.reason)
+        if (bodyStart + framing.value !== bytes.length) {
+            return fail("request body does not end the sent transcript at its Content-Length")
+        }
+    }
     return { ok: true, value: { method, target, version, headers: headers.value } }
+}
+
+// Only Content-Length framing: a hidden chunked body could hide where it
+// ends, and with it the start of a second request.
+function requestBodyLength(headers: HeaderLine[]): Parsed<number> {
+    if (headers.some(h => h.name === "transfer-encoding")) {
+        return fail("request body is not framed by Content-Length")
+    }
+    const lengths = headers.filter(h => h.name === "content-length")
+    if (lengths.length === 0) return { ok: true, value: 0 }
+    if (lengths.length > 1) return fail("content-length header repeated")
+    const value = lengths[0].value
+    if (value === null) return fail("request content-length is not revealed")
+    if (!/^[0-9]{1,9}$/.test(value)) return fail("malformed request content-length")
+    return { ok: true, value: Number(value) }
 }
 
 /** The one header named `name`, or a refusal when it is missing or repeated. */

@@ -80,6 +80,33 @@ describe("parseAuthedRequest", () => {
         expect(reason(parseAuthedRequest(transcript(`${GET}\r\nbody`)))).toContain("more than one")
     })
 
+    it("with allowBody, accepts one Content-Length body, hidden or revealed, that ends the transcript", () => {
+        const POST = "POST /v1/data HTTP/1.1\r\nhost: api.example\r\n"
+        const opts = { allowBody: true }
+        expect(reason(parseAuthedRequest(transcript(`${POST}content-length: 7\r\n\r\n[{"a":1}]`), opts))).toBe(
+            "accepted",
+        )
+        expect(reason(parseAuthedRequest(transcript(`${POST}content-length: 7\r\n\r\n{"a":1}`), opts))).toBe(
+            "accepted",
+        )
+        expect(reason(parseAuthedRequest(transcript(`${GET}\r\n`), opts))).toBe("accepted")
+    })
+
+    it("with allowBody, refuses a second request, unframed, chunked or hidden-length bodies", () => {
+        const POST = "POST /v1/data HTTP/1.1\r\nhost: api.example\r\n"
+        const opts = { allowBody: true }
+        const r = (marked: string) => reason(parseAuthedRequest(transcript(marked), opts))
+        expect(r(`${POST}content-length: 2\r\n\r\nab${GET}\r\n`)).toContain("does not end")
+        expect(r(`${POST}content-length: 9\r\n\r\nab`)).toContain("does not end")
+        expect(r(`${GET}\r\n${GET}\r\n`)).toContain("does not end")
+        expect(r(`${POST}transfer-encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n`)).toContain(
+            "not framed by Content-Length",
+        )
+        expect(r(`${POST}content-length: [2]\r\n\r\nab`)).toContain("not revealed")
+        expect(r(`${POST}content-length: 2\r\ncontent-length: 2\r\n\r\nab`)).toContain("repeated")
+        expect(r(`${POST}content-length: -2\r\n\r\n`)).toContain("malformed")
+    })
+
     it("refuses a hidden end of headers, request line or other HTTP versions", () => {
         expect(reason(parseAuthedRequest(transcript(`${GET}[\r\n\r\n]`)))).toContain("no authenticated end")
         expect(reason(parseAuthedRequest(transcript("GET /[user] HTTP/1.1\r\n\r\n")))).toContain("not fully revealed")

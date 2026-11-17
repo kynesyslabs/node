@@ -52,6 +52,9 @@ export interface AttestationToken {
     retriesLeft: number
     txHash: string // original payment tx hash
     proxyId?: string // linked proxy ID once spawned
+    // Set for tokens backed by an on-chain tlsn_request: the retry count must
+    // outlive the wall-clock expiry for as long as the chain request is live.
+    expiresAtHeight?: number
 }
 
 /**
@@ -269,6 +272,7 @@ export async function validateProxyToken(
             expiresAt: now + TOKEN_CONFIG.EXPIRY_MS,
             retriesLeft: TOKEN_CONFIG.MAX_RETRIES,
             txHash: id,
+            expiresAtHeight: chain.request.expiresAtHeight,
         }
         store.tokens.set(id, token)
     }
@@ -430,10 +434,15 @@ export async function lookupToken(idOrTxHash: string): Promise<TokenView | null>
 export function cleanupExpiredTokens(): number {
     const store = getTokenStore()
     const now = Date.now()
+    const nextHeight = (getSharedState.lastBlockNumber ?? 0) + 1
     let cleaned = 0
 
     for (const [id, token] of store.tokens) {
-        if (now > token.expiresAt && token.status !== TokenStatus.STORED) {
+        const expired =
+            token.expiresAtHeight !== undefined
+                ? nextHeight > token.expiresAtHeight
+                : now > token.expiresAt
+        if (expired && token.status !== TokenStatus.STORED) {
             store.tokens.delete(id)
             cleaned++
         }

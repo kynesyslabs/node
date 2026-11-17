@@ -230,6 +230,14 @@ describe("verifyStoredPresentation", () => {
             expect(verifyStoredPresentation(input()).ok).toBe(false)
         })
 
+        it("accepts a POST whose Content-Length body is hidden, and refuses a request smuggled after it", () => {
+            const post = REQUEST_HEAD.replace("GET /x", "POST /x").replace(BIND, `${BIND}content-length: 9\r\n`)
+            nextOutput = over(partly(post + "{\"pin\":1}", "Bearer s3cret", "{\"pin\":1}"))
+            expect(verifyStoredPresentation(input()).ok).toBe(true)
+            nextOutput = over(partly(post + "{\"pin\":1}GET / HTTP/1.1\r\n\r\n", "Bearer s3cret", "{\"pin\":1}"))
+            expect(reasonOf(verifyStoredPresentation(input()))).toContain("does not end the sent transcript")
+        })
+
         it("refuses a hidden header name next to a revealed value", () => {
             nextOutput = over(partly(REQUEST_HEAD, "authorization"))
             expect(verifyStoredPresentation(input()).ok).toBe(false)

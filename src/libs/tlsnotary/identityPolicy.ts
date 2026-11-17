@@ -208,8 +208,9 @@ export type StoreTranscriptVerdict = { ok: true; bind: BindClaim } | { ok: false
 /**
  * Judges the transcript of an accepted presentation a `tlsn_store` puts on
  * chain for `sender` under the request `requestTxHash`. A store proves any
- * response, so only the request and the response heads are read: the body
- * may be revealed in part. Credentials are refused in both directions,
+ * response, so only the request and the response heads are read: the
+ * response body may be revealed in part, and the request may carry one
+ * Content-Length body (a POST to an API), revealed or not. Credentials are refused in both directions,
  * since a stored proof is public for good.
  */
 export function judgeStoreTranscript(
@@ -217,7 +218,7 @@ export function judgeStoreTranscript(
     sender: string,
     requestTxHash: string,
 ): StoreTranscriptVerdict {
-    const request = parseAuthedRequest({ bytes: p.sent, authed: p.sentAuthed })
+    const request = parseAuthedRequest({ bytes: p.sent, authed: p.sentAuthed }, { allowBody: true })
     if (request.ok === false) return { ok: false, reason: `request: ${request.reason}` }
     const leak = revealedSecret(request.value.headers, SECRET_REQUEST_HEADERS)
     if (leak) return { ok: false, reason: `presentation reveals the ${leak} header value` }
