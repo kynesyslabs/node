@@ -131,3 +131,14 @@ export async function tipBlockTimestampSec(): Promise<number> {
     }
     return Math.floor(ts)
 }
+
+/**
+ * Timestamp, in seconds, of the block at this height, or null when this node
+ * holds no such block.
+ */
+export async function blockTimestampSec(blockNumber: number): Promise<number | null> {
+    const { getBlockByNumber } = await import("@/libs/blockchain/chainBlocks")
+    const block = await readState("block by number", () => getBlockByNumber(blockNumber))
+    const ts = Number(block?.content?.timestamp)
+    return Number.isFinite(ts) ? Math.floor(ts) : null
+}

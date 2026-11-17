@@ -190,7 +190,7 @@ TLSNOTARY_ENABLED=false
 
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
 - **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. On mainnet the notary is a Demos-operated service whose keys the genesis pins (`tlsnVerified`), and every node verifies presentations itself, so a mainnet validator runs no notary and keeps `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false` as above. On a devnet or test network, `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses, paired with `TLSNOTARY_ENABLED=true`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
-- **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised proxy port (`TLSNOTARY_PROXY_PORT`) on every interface and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
+- **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised static proxy port (`TLSNOTARY_PROXY_PORT`, on which nothing listens) and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). The node opens a proxy session only for a signed `requestTLSNproxy` from the sender of a confirmed `tlsn_request`, and only with `TLSNOTARY_ENABLED=true`; each session admits one websocket carrying its secret session id, and ends at 5 minutes or at its byte caps. A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
 - **`SUDO_PUBKEY`** (optional) is the ed25519 public key (`0x` + 64 hex) this node answers its admin RPC to (`rate-limit/unblock`, `getCampaignData`, `awardPoints`). Empty, nobody may call them. It only authorises calls on this node: whether an award transaction is valid is decided by the genesis `properties.sudoPubkey`, the same on every node.
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
 - **Another install on this host** also sets `INSTANCE_SUFFIX` and `COMPOSE_PROJECT_NAME` and moves every port: see [More than one install on a host](#more-than-one-install-on-a-host).
@@ -481,7 +481,6 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 9095 | `GOSSIP_PORT` | TCP | Gossip; peers dial `EXPOSED_URL`'s host on this port |
 | 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Published on every interface |
 | 7047 | `TLSNOTARY_PORT` | TCP | TLSNotary notary, published on every interface whenever the `tlsnotary` profile is on |
-| 55688 | `TLSNOTARY_PROXY_PORT` | TCP | TLSNotary WebSocket proxy port the node advertises. The node service always publishes it, so it must be free even with TLSNotary off; it answers only with TLSNotary on |
 | 123 | | UDP, outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
 These are published on loopback (or the interface the `*_BIND` variable names), or not at all, and should NOT be exposed publicly:
@@ -495,6 +494,7 @@ These are published on loopback (or the interface the `*_BIND` variable names), 
 | 9091 | `PROMETHEUS_PORT` | Prometheus (`monitoring` profile), on `MONITORING_BIND` (loopback) |
 | 3000 | `GRAFANA_PORT` | Grafana (`monitoring` profile), on `MONITORING_BIND` (loopback); only public if you want a public dashboard |
 | 9100 | `NODE_EXPORTER_PORT` | node-exporter (`full` profile), on `MONITORING_BIND` (loopback) |
+| 55688 | `TLSNOTARY_PROXY_PORT` | Static TLSNotary proxy port `tlsnotary.getInfo` still advertises for older clients. Nothing listens on it; the node service publishes it on loopback, so it must be free |
 | 55000-55063 | `TLSNOTARY_PROXY_PORT_MIN`, `TLSNOTARY_PROXY_PORT_MAX` | TLSNotary per-session proxies, on loopback only, for a reverse proxy on this host (`/tlsn/<port>/`). The node service always publishes this window, so it must be free even with TLSNotary off; bare metal (no Docker) uses 55000-57000 unless the same variables say otherwise |
 | 7474, 7687 | `NEO4J_HTTP_PORT`, `NEO4J_BOLT_PORT` | Neo4j (`neo4j` profile), published on every interface: keep the profile off on a validator |
 | 80, 443 | | Caddy (`proxy` profile): fixed ports, so only one install per host can run that profile |
@@ -507,7 +507,6 @@ sudo ufw allow 53550/tcp comment "Demos RPC"
 sudo ufw allow 53551/tcp comment "Demos OmniProtocol"
 sudo ufw allow 9095/tcp  comment "Demos gossip"
 sudo ufw allow 7047/tcp  comment "Demos TLSNotary"
-sudo ufw allow 55688/tcp comment "Demos TLSNotary proxy"
 sudo ufw enable
 ```
 
@@ -903,16 +902,9 @@ git branch
 ### 5. Install Dependencies
 
 ```bash
-# Install all dependencies (requires Rust/Cargo for wstcp)
+# Install all dependencies
 ./scripts/install-deps.sh
 ```
-
-> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying. If you don't have Rust installed, run:
->
-> ```bash
-> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-> source ~/.cargo/env
-> ```
 
 ### 6. First Run — Generate Keys
 
@@ -1176,7 +1168,6 @@ The variable replaces the pinned digest (it does not turn the check off), so a n
 | 53551       | OmniProtocol | P2P communication (TCP)                 |
 | 9095        | Gossip       | Gossip sidecar (TCP)                    |
 | 7047        | TLSNotary    | TLSNotary server                        |
-| 55688       | WS Proxy     | TLSNotary WebSocket proxy the node advertises (TCP) |
 | 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it |
 | 55000-55063 | WS Proxy     | Per-session TLSNotary proxies (TCP), on loopback for a reverse proxy on this host; bare metal uses 55000-57000. Not opened in the firewall ([Network Exposure](#network-exposure)) |
 | 123 (out)   | NTP          | Outbound UDP; host time sync and the node's clock offset check |

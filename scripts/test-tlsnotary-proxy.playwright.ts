@@ -5,7 +5,7 @@
  *   - Full Prover → setup → sendRequest → notarize → Presentation flow
  *     runs through Caddy when EXPOSED_URL is path-mode or proxied.
  *   - WASM + Web Worker boot end-to-end inside a real browser context.
- *   - SDK's auto-init flow handles the proxied wstcp URL.
+ *   - SDK's auto-init flow handles the proxied session URL.
  *
  * Prereq:
  *   1. Playwright chromium binary installed:

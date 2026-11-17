@@ -287,6 +287,7 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
             muid: actualMuid,
         },
         context.isAuthenticated ? context.peerIdentity ?? "" : "",
+        context.remoteAddress,
     )
 
     return encodeNodeCallResponse({

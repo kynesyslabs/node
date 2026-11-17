@@ -132,7 +132,7 @@ async function main(): Promise<number> {
         if (body.result !== 200) {
             const err = body.response as { error?: string; message?: string }
             const msg = err.message || err.error || "(no message)"
-            // 400 with "Missing tokenId or owner parameter" proves the
+            // 400 with "Missing tokenId parameter" proves the
             // node received + parsed our call. Without a real DAHR
             // token we can't get a real proxy URL — but reaching the
             // handler is the only thing this driver verifies. Treat

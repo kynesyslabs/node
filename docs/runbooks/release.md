@@ -496,7 +496,7 @@ this restart is a fallback there.
 ## Known limits
 
 - Debian packages installed with `apt-get` (curl, ca-certificates, xz)
-  and the `wstcp` crate's dependencies are resolved at build time. The two CI builds run minutes
+  are resolved at build time. The two CI builds run minutes
   apart and resolve the same versions; a rebuild weeks later may not.
   Pinning them to a snapshot is the next step if a later rebuild has to
   match byte for byte.

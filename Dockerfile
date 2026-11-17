@@ -195,28 +195,12 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # Stage 2: runtime
 # Minimal image with only what the node needs at run time. Runs as non-root.
 # =============================================================================
-# ── wstcp (TLSNotary websocket↔TCP proxy) ─────────────────────────────
-# The TLSNotary flow spawns `wstcp` on demand to relay the browser's
-# WebSocket to the target TLS server (see proxyManager.ts). The runtime
-# image ships no Rust toolchain, so the on-demand `cargo install wstcp`
-# fallback in ensureWstcp() cannot run — bake the binary in instead.
-# Without it the proxy never binds its port and every verification fails
-# with an nginx 502 / CloseEvent 1006 on the prover.
-FROM rust:1.99.1-slim@sha256:e6cd1d294a300601eaaa4a294b337e5f0826f427fb2d481e9f76e69e7981e244 AS wstcp
-# Pin the version so an upstream wstcp release can't silently change
-# behaviour or break the build; scripts/install-deps.sh and ensureWstcp()
-# install the same version. `--locked` is intentionally omitted: the
-# crate's bundled Cargo.lock pins time 0.3.25, which does not compile on
-# Rust 1.80 or later, so we let cargo resolve compatible deps for this
-# exact wstcp version.
-RUN cargo install wstcp --version 0.2.1 --root /wstcp
-
 # ── provenance check ─────────────────────────────────────────────────
 # A node started with PROD=true refuses to boot without a commit, so the
 # image must carry the real one. The check lives in its own small stage
 # that the runtime stage mounts: BuildKit starts it alongside the builder
-# and wstcp stages, so a missing commit fails the build in seconds rather
-# than after the dependency install and the Rust compile.
+# stage, so a missing commit fails the build in seconds rather than after
+# the dependency install.
 # Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
 # git history.
 FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS provenance
@@ -268,11 +252,6 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
     && mkdir -p /app/data /app/logs /app/state \
     && chown demos:demos /app /app/data /app/logs /app/state \
     && chmod 0755 /app /app/data /app/logs /app/state
-
-# TLSNotary proxy binary, baked in so the on-demand proxy can spawn
-# without a Rust toolchain. Lands at $HOME/.cargo/bin/wstcp (HOME=/app) —
-# the exact path proxyManager.ts::ensureWstcp() probes via `test -x`.
-COPY --from=wstcp --chown=demos:demos /wstcp/bin/wstcp /app/.cargo/bin/wstcp
 
 # Build-time provenance. These ARGs are populated by the build driver
 # (./run --docker exports `git rev-parse HEAD` + `git rev-parse
