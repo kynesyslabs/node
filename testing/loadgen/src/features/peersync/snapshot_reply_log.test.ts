@@ -73,7 +73,7 @@ describe("peersync getNodeSnapshot with failed RPC replies", () => {
         line.includes(`Non-critical error in peersync.getNodeSnapshot.${call}: reply without result 200:`))
       expect(lines).toHaveLength(1)
       // The 503 body has neither result nor response; only those two bounded fields are logged.
-      expect(lines[0]).toContain(`reply without result 200: {"result":"undefined","response":"undefined"}`)
+      expect(lines[0]).toContain("reply without result 200: {\"result\":\"undefined\",\"response\":\"undefined\"}")
       expect(lines[0]).toContain(`{"rpcUrl":"${rpcUrl}"}`)
     }
 
@@ -95,7 +95,7 @@ describe("peersync getNodeSnapshot with failed RPC replies", () => {
     for (const call of READS) {
       const lines = snapshotLines(rpcUrl).filter(line => line.includes(`peersync.getNodeSnapshot.${call}: `))
       expect(lines).toHaveLength(1)
-      expect(lines[0]).toContain(`"result":599`)
+      expect(lines[0]).toContain("\"result\":599")
       expect(lines[0]).toContain("rpcPost failed: connect ECONNREFUSED 10.0.0.2:53550")
     }
   })
@@ -146,8 +146,8 @@ describe("peersync getNodeSnapshot with failed RPC replies", () => {
     for (const call of READS) {
       const lines = snapshotLines(rpcUrl).filter(line => line.includes(`peersync.getNodeSnapshot.${call}: `))
       expect(lines).toHaveLength(1)
-      expect(lines[0]).toContain(`reply without result 200: {"result":500,"responseLength":204,"response":"\\u001b`)
-      expect(lines[0]).toContain(`"responseLength":204`)
+      expect(lines[0]).toContain("reply without result 200: {\"result\":500,\"responseLength\":204,\"response\":\"\\u001b")
+      expect(lines[0]).toContain("\"responseLength\":204")
       // The message was cut: its marker is in the line and the end of the preview is not.
       expect(lines[0]).toMatch(/…\(\d+ chars\) \{"rpcUrl":/)
       expect(lines[0]).not.toContain(String.raw`\u001b"}`)

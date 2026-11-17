@@ -37,9 +37,10 @@ describe("tlsnotary fetchTlsNotaryJson", () => {
     expect(res.text).toBe(body)
     expect(errors).toHaveLength(1)
     expect(errors[0].split(/\r|\n/)).toHaveLength(1)
+    // eslint-disable-next-line no-control-regex
     expect(errors[0]).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u{202a}-\u{202e}\u{2066}-\u{2069}]/u)
     expect(errors[0]).toContain("Non-critical error in tlsnotary.requestJson: JSON Parse error: Unrecognized token '\\u001b'")
-    expect(errors[0]).toContain(`"rpcUrl":"http://node-a.invalid:53551","route":"/tlsnotary/health","status":200`)
+    expect(errors[0]).toContain("\"rpcUrl\":\"http://node-a.invalid:53551\",\"route\":\"/tlsnotary/health\",\"status\":200")
   })
 
   it("logs the first non-JSON body of each target and route once", async () => {

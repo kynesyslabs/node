@@ -44,7 +44,7 @@ describe("complex-policy amount parsing, object amounts", () => {
       expect(errors).toHaveLength(1)
       expect(errors[0]).toContain(`[loadgen] Non-critical error in ${context}`)
       expect(errors[0]).toContain(String.raw`{"value":"{\"amount\":\"5\",\"decimals\":18}"}`)
-      expect(errors[0]).not.toContain('"value":"[object Object]"')
+      expect(errors[0]).not.toContain("\"value\":\"[object Object]\"")
     })
   }
 })

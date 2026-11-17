@@ -45,12 +45,12 @@ describe("complex-policy amount parsing", () => {
     })
 
     it(`${context} returns 0n for an amount String() cannot convert`, () => {
-      const value = JSON.parse('{"toString":null}')
+      const value = JSON.parse("{\"toString\":null}")
       expect(() => String(value)).toThrow(TypeError)
       expect(parse(value)).toBe(0n)
       expect(errors).toHaveLength(1)
       expect(errors[0]).toContain(`[loadgen] Non-critical error in ${context}`)
-      expect(errors[0]).toContain('{"value":"object"}')
+      expect(errors[0]).toContain("{\"value\":\"object\"}")
     })
   }
 })

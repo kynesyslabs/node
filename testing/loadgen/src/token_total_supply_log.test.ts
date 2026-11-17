@@ -14,6 +14,7 @@ const { waitForTotalSupplyDelta } = await import("./token_mint_smoke")
 const { waitForTotalSupplyDecrease } = await import("./token_burn_smoke")
 
 // C0 and C1 controls, DEL and the bidi embedding, override and isolate controls.
+// eslint-disable-next-line no-control-regex
 const RAW_CONTROL = /[\u0000-\u001f\u007f-\u009f\u{202a}-\u{202e}\u{2066}-\u{2069}]/u
 
 // 1,000,001 characters: a forged log line and controls up front, then digits, then
@@ -60,8 +61,8 @@ describe.each(cases)("$name waitForTotalSupply", ({ name, wait, goodTotal }) => 
     expect(Buffer.byteLength(record, "utf8")).toBeLessThan(2_000)
     expect(record).not.toMatch(RAW_CONTROL)
     expect(record).toStartWith(`[loadgen] Non-critical error in ${name}.waitForTotalSupply: `)
-    expect(record).toContain(`"rpcUrl":"http://node-1:53550","tokenAddress":"0xtoken"`)
-    expect(record).toContain(`"totalSupply":"\\u001b[2K\\n[loadgen] Non-critical error in token_mint_smoke: none\\r\\u202e\\u0085\\u007f999`)
+    expect(record).toContain("\"rpcUrl\":\"http://node-1:53550\",\"tokenAddress\":\"0xtoken\"")
+    expect(record).toContain("\"totalSupply\":\"\\u001b[2K\\n[loadgen] Non-critical error in token_mint_smoke: none\\r\\u202e\\u0085\\u007f999")
     expect(record).toContain("…(1000001 chars)")
   })
 })

@@ -111,10 +111,10 @@ describe("loadgen log calls", () => {
   })
 
   it("flag String() in a log call and accept textOrType", () => {
-    expect(rawStringInLogCalls(`logNonCriticalErrorOnce("k", "ctx", error, { value: String(value).slice(0, 80) })`)).toEqual([1])
-    expect(rawStringInLogCalls(`logNonCriticalError("ctx",\n  error,\n  { value: String(value) },\n)`)).toEqual([1])
-    expect(rawStringInLogCalls(`logNonCriticalErrorOnce("k", "ctx", error, { value: textOrType(value).slice(0, 80) })`)).toEqual([])
-    expect(rawStringInLogCalls(`logNonCriticalError("ctx", error, { id: id.toString(), raw: String.raw\`\\n\` })`)).toEqual([])
+    expect(rawStringInLogCalls("logNonCriticalErrorOnce(\"k\", \"ctx\", error, { value: String(value).slice(0, 80) })")).toEqual([1])
+    expect(rawStringInLogCalls("logNonCriticalError(\"ctx\",\n  error,\n  { value: String(value) },\n)")).toEqual([1])
+    expect(rawStringInLogCalls("logNonCriticalErrorOnce(\"k\", \"ctx\", error, { value: textOrType(value).slice(0, 80) })")).toEqual([])
+    expect(rawStringInLogCalls("logNonCriticalError(\"ctx\", error, { id: id.toString(), raw: String.raw`\\n` })")).toEqual([])
   })
 })
 
@@ -133,15 +133,15 @@ describe("loadgen catch blocks", () => {
 
   it("flag a .catch that drops its error for a constant", () => {
     for (const snippet of [
-      `const text = await read().catch(() => "")`,
-      `const count = await read().catch(() => 0)`,
-      `const ok = await read().catch((_error) => false)`,
-      `const value = await read().catch(error => undefined)`,
-      `const info = await read().catch(() => ({}))`,
-      `const list = await read().catch(() => [])`,
-      `const row = await read().catch(() => null)`,
-      `await close().catch(() => {})`,
-      `await close().catch(() => {\n  // ignore\n})`,
+      "const text = await read().catch(() => \"\")",
+      "const count = await read().catch(() => 0)",
+      "const ok = await read().catch((_error) => false)",
+      "const value = await read().catch(error => undefined)",
+      "const info = await read().catch(() => ({}))",
+      "const list = await read().catch(() => [])",
+      "const row = await read().catch(() => null)",
+      "await close().catch(() => {})",
+      "await close().catch(() => {\n  // ignore\n})",
     ]) {
       expect({ snippet, lines: silentCatches(snippet) }).toEqual({ snippet, lines: [1] })
     }
@@ -149,11 +149,11 @@ describe("loadgen catch blocks", () => {
 
   it("accept a .catch that logs, throws or keeps its error, and .json() fallbacks", () => {
     for (const snippet of [
-      `const text = await read().catch(error => {\n  logNonCriticalError("read", error, { file })\n  return ""\n})`,
-      `await close().catch(error => logNonCriticalError("close", error, { target }))`,
-      `const res = await call().catch((error: unknown) => ({ result: 599, extra: String(error) }))`,
-      `await confirm().catch((err: any) => {\n  counters.error++\n  throw err\n})`,
-      `const json = await res.json().catch(() => null)`,
+      "const text = await read().catch(error => {\n  logNonCriticalError(\"read\", error, { file })\n  return \"\"\n})",
+      "await close().catch(error => logNonCriticalError(\"close\", error, { target }))",
+      "const res = await call().catch((error: unknown) => ({ result: 599, extra: String(error) }))",
+      "await confirm().catch((err: any) => {\n  counters.error++\n  throw err\n})",
+      "const json = await res.json().catch(() => null)",
     ]) {
       expect({ snippet, lines: silentCatches(snippet) }).toEqual({ snippet, lines: [] })
     }

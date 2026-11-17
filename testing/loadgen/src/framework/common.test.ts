@@ -25,6 +25,7 @@ import {
 // C0 and C1 controls, DEL, the line and paragraph separators, and the bidi marks,
 // embedding, override and isolate controls.
 const RAW_CONTROL =
+  // eslint-disable-next-line no-control-regex
   /[\u0000-\u001f\u007f-\u009f\u{061c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]/u
 // Characters that end a line for JavaScript and for many log viewers.
 const LINE_BREAK = /\r\n|[\n\r\u{0085}\u{2028}\u{2029}]/u
@@ -64,7 +65,7 @@ describe("logNonCriticalError", () => {
       expect(lines).toHaveLength(1)
       expect(lines[0]).not.toMatch(RAW_CONTROL)
       expect(lines[0]).toBe(
-        `[loadgen] Non-critical error in test.sink: JSON Parse error: Unrecognized token '\\u001b' {"value":"1\\u007f\\u009b\\u202e2\\n"}`,
+        "[loadgen] Non-critical error in test.sink: JSON Parse error: Unrecognized token '\\u001b' {\"value\":\"1\\u007f\\u009b\\u202e2\\n\"}",
       )
     } finally {
       errorSpy.mockRestore()
@@ -101,7 +102,7 @@ describe("logNonCriticalError", () => {
       logNonCriticalError("test.fields", new Error("bad amount"), {
         amount: "7".repeat(1_000_000),
         big: 12n,
-        odd: JSON.parse('{"toString":null}'),
+        odd: JSON.parse("{\"toString\":null}"),
         rpcUrls: ["http://node-1:53550", "http://node-2:53550"],
         workerId: 3,
         ok: true,
@@ -109,7 +110,7 @@ describe("logNonCriticalError", () => {
       })
       expect(lines).toEqual([
         `[loadgen] Non-critical error in test.fields: bad amount {"amount":"${"7".repeat(500)}…(1000000 chars)",` +
-          `"big":"12","odd":"object","rpcUrls":"array(2) [string,string]","workerId":3,"ok":true,"balance":null}`,
+          "\"big\":\"12\",\"odd\":\"object\",\"rpcUrls\":\"array(2) [string,string]\",\"workerId\":3,\"ok\":true,\"balance\":null}",
       ])
     } finally {
       errorSpy.mockRestore()
@@ -123,7 +124,7 @@ describe("logNonCriticalError", () => {
     })
     try {
       logNonCriticalError("test.message", new Error("m".repeat(5_000)))
-      logNonCriticalError("test.message", JSON.parse('{"toString":null}'))
+      logNonCriticalError("test.message", JSON.parse("{\"toString\":null}"))
       expect(lines).toEqual([
         `[loadgen] Non-critical error in test.message: ${"m".repeat(1_000)}…(5000 chars)`,
         "[loadgen] Non-critical error in test.message: object",
@@ -148,10 +149,10 @@ describe("logNonCriticalError", () => {
         cyclic,
       })
       expect(lines).toEqual([
-        `[loadgen] Non-critical error in test.objects: {"code":-32000,"message":"nonce too low"} ` +
+        "[loadgen] Non-critical error in test.objects: {\"code\":-32000,\"message\":\"nonce too low\"} " +
           String.raw`{"amount":"{\"value\":\"5\",\"decimals\":18}","big":"{\"value\":bigint}","cyclic":"{\"id\":1,\"self\":object}"}`,
       ])
-      expect(errorShapeKey({ code: -32000, message: "nonce 17 too low" })).toBe(`object:{"code":-#,"message":"nonce # too low"}`)
+      expect(errorShapeKey({ code: -32000, message: "nonce 17 too low" })).toBe("object:{\"code\":-#,\"message\":\"nonce # too low\"}")
     } finally {
       errorSpy.mockRestore()
     }
@@ -200,7 +201,7 @@ describe("logNonCriticalError", () => {
       contexts.forEach((context, i) => {
         const start = `${prefix}${context}: bad {"a":"`
         const whole = Math.floor((2_000 - start.length) / 6)
-        const total = start.length + 3_000 + `","b":"`.length + 3_000 + `"}`.length
+        const total = start.length + 3_000 + "\",\"b\":\"".length + 3_000 + "\"}".length
         expect(lines[i]).toBe(`${start}${nel.repeat(whole)}…(${total} chars)`)
       })
     } finally {
@@ -339,9 +340,9 @@ describe("textOrType", () => {
     expect(textOrType(12n)).toBe("12")
     expect(textOrType({ toString: () => "status 503" })).toBe("status 503")
     expect(textOrType(new Error("boom"))).toBe("Error: boom")
-    expect(textOrType(JSON.parse('{"toString":null}'))).toBe("object")
+    expect(textOrType(JSON.parse("{\"toString\":null}"))).toBe("object")
     // A small flat object reads the same as its JSON.
-    expect(textOrType({ amount: "5", decimals: 18, ok: true, owner: null })).toBe(`{"amount":"5","decimals":18,"ok":true,"owner":null}`)
+    expect(textOrType({ amount: "5", decimals: 18, ok: true, owner: null })).toBe("{\"amount\":\"5\",\"decimals\":18,\"ok\":true,\"owner\":null}")
   })
 
   it("shows null and undefined as text, and only primitives' text inside a preview", () => {
@@ -349,8 +350,19 @@ describe("textOrType", () => {
     expect(textOrType(undefined)).toBe("undefined")
     const fields = { u: undefined, n: Number.NaN, f: 1.5, b: false, big: 1n, sym: Symbol("s"), fn: () => 1, a: [1], o: { x: 1 } }
     expect(textOrType(fields)).toBe(
-      `{"u":undefined,"n":NaN,"f":1.5,"b":false,"big":bigint,"sym":symbol,"fn":function,"a":array,"o":object}`,
+      "{\"u\":undefined,\"n\":NaN,\"f\":1.5,\"b\":false,\"big\":bigint,\"sym\":symbol,\"fn\":function,\"a\":array,\"o\":object}",
     )
+  })
+
+  it("never splits a surrogate pair when it cuts a preview string at 80 characters", () => {
+    // The 80-character cut falls between the two code units of 😀; with a plain slice the
+    // lone high surrogate reached JSON.stringify, which writes it as the escape \ud83d.
+    const preview = textOrType({ memo: "1".repeat(79) + "😀" + "tail" })
+    expect(preview).toBe(`{"memo":"${"1".repeat(79)}"…(85 chars)}`)
+    expect(preview).not.toContain("\\ud83d")
+    expect(preview).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
+    // A key is cut the same way.
+    expect(textOrType({ ["k".repeat(79) + "😀"]: 1 })).toBe(`{"${"k".repeat(79)}"…(81 chars):1}`)
   })
 })
 
@@ -435,7 +447,7 @@ describe("truncatedError", () => {
       expect(lines).toHaveLength(1)
       expect(lines[0].length).toBeLessThan(1024)
       expect(lines[0]).toContain("…(1000000 chars)")
-      expect(lines[0]).toContain(`{"rpcUrl":"http://node-1:53550","workerId":3}`)
+      expect(lines[0]).toContain("{\"rpcUrl\":\"http://node-1:53550\",\"workerId\":3}")
     } finally {
       errorSpy.mockRestore()
     }
@@ -463,7 +475,7 @@ describe("truncatedError", () => {
         "[loadgen] Non-critical error in test.forgedworker: [Confirm] Transaction is not valid: rejected" +
           "\\n[loadgen] Non-critical error in transfer_loadgen.worker: all transfers succeeded" +
           "\\r\\u001b[2K\\u202eok\\u0085\\u007f" +
-          ` {"rpcUrl":"http://node-1:53550","workerId":4}`,
+          " {\"rpcUrl\":\"http://node-1:53550\",\"workerId\":4}",
       )
     } finally {
       errorSpy.mockRestore()
@@ -599,7 +611,7 @@ describe("truncatedError", () => {
     })
     try {
       const badName = new Error("rejected")
-      badName.name = JSON.parse('{"toString":null}')
+      badName.name = JSON.parse("{\"toString\":null}")
 
       // Same calls as the transfer_loadgen worker's catch; before the guard both threw "No default value".
       const bare = truncatedError(Object.create(null))
@@ -610,8 +622,8 @@ describe("truncatedError", () => {
       expect([bare.name, bare.message]).toEqual(["object", "object"])
       expect([named.name, named.message]).toEqual(["object", "rejected"])
       expect(lines).toEqual([
-        `[loadgen] Non-critical error in test.oddworker: object {"workerId":6}`,
-        `[loadgen] Non-critical error in test.oddworker: rejected {"workerId":7}`,
+        "[loadgen] Non-critical error in test.oddworker: object {\"workerId\":6}",
+        "[loadgen] Non-critical error in test.oddworker: rejected {\"workerId\":7}",
       ])
     } finally {
       errorSpy.mockRestore()
@@ -651,12 +663,12 @@ describe("truncatedError", () => {
         [true, "object", "object", "object:object"],
       ])
       expect(lines).toEqual([
-        `[loadgen] Non-critical error in test.badprops: object {"workerId":0}`,
-        `[loadgen] Non-critical error in test.badpropsworker: object {"workerId":0}`,
-        `[loadgen] Non-critical error in test.badprops: visible {"workerId":1}`,
-        `[loadgen] Non-critical error in test.badpropsworker: visible {"workerId":1}`,
-        `[loadgen] Non-critical error in test.badprops: object {"workerId":2}`,
-        `[loadgen] Non-critical error in test.badpropsworker: object {"workerId":2}`,
+        "[loadgen] Non-critical error in test.badprops: object {\"workerId\":0}",
+        "[loadgen] Non-critical error in test.badpropsworker: object {\"workerId\":0}",
+        "[loadgen] Non-critical error in test.badprops: visible {\"workerId\":1}",
+        "[loadgen] Non-critical error in test.badpropsworker: visible {\"workerId\":1}",
+        "[loadgen] Non-critical error in test.badprops: object {\"workerId\":2}",
+        "[loadgen] Non-critical error in test.badpropsworker: object {\"workerId\":2}",
       ])
     } finally {
       errorSpy.mockRestore()

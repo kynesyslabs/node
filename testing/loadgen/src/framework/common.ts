@@ -84,6 +84,7 @@ const LOG_ESCAPES: Record<string, string> = { "\n": String.raw`\n`, "\r": String
 // U+2066-U+2069) as escapes.
 // Every matched character is a single UTF-16 code unit, so codePointAt(0) is its code.
 export function escapeControlChars(text: string): string {
+  // eslint-disable-next-line no-control-regex
   return text.replace(/[\u0000-\u001f\u007f-\u009f\u{061c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]/gu,
     char => LOG_ESCAPES[char] ?? String.raw`\u${(char.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`)
 }
@@ -157,9 +158,10 @@ function previewType(value: unknown): string {
   return Array.isArray(value) ? "array" : typeof value
 }
 
-// A string's first 80 characters (sliced before quoting) plus its length when longer.
+// A string's first 80 characters (cut before quoting, without splitting a surrogate
+// pair) plus its length when longer.
 function previewString(text: string): string {
-  const shown = JSON.stringify(text.slice(0, PREVIEW_MAX_STRING_CHARS))
+  const shown = JSON.stringify(headOf(text, PREVIEW_MAX_STRING_CHARS))
   return text.length > PREVIEW_MAX_STRING_CHARS ? `${shown}…(${text.length} chars)` : shown
 }
 
