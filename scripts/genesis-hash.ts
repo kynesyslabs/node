@@ -33,7 +33,11 @@
 import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { freshGenesisProblems, genesisTimestampProblem } from "src/libs/blockchain/genesis/genesisPin"
+import {
+    freshGenesisProblems,
+    genesisScheduleProblems,
+    genesisTimestampProblem,
+} from "src/libs/blockchain/genesis/genesisPin"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { genesisBalancesProblems } from "src/libs/blockchain/genesis/mergeGenesisBalances"
@@ -347,6 +351,15 @@ export function genesisValues(
     } catch (e) {
         problems.push((e as Error).message)
     }
+    // A node pinned to these hashes runs this before it reads anything else,
+    // so a schedule it refuses must not get published as accepted
+    problems.push(
+        ...genesisScheduleProblems({
+            fileGenesisData: genesis,
+            pin: genesisDataHash,
+            blockPin: genesisBlockHash ?? "",
+        }),
+    )
     // Both are read only after block 0 is written, so a bad value would
     // otherwise surface first on the launch validators
     try {

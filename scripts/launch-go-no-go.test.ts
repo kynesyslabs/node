@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
-import { tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
+import { notaryKeyHex, tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
 import { TLSN_VERIFY_WASM_SHA256 } from "src/libs/tlsnotary/wasmVerifier"
 import {
     type GoNoGoInput,
@@ -22,6 +22,8 @@ import {
     sameCommit,
     parseArgs,
     treasuryReasons,
+    notaryKeysReasons,
+    parseExpectedNotaryKeys,
     KNOWN_TEST_TREASURIES,
     KNOWN_TEST_NOTARY_KEYS,
 } from "./launch-go-no-go"
@@ -536,6 +538,8 @@ describe("decideGoNoGo", () => {
 })
 
 const TREASURY = "0x" + "ab".repeat(32)
+/** The notary keys tlsnVerifiedPayload() lists, as --expected-notary-keys names them. */
+const NOTARY_KEYS = `demos-notary-1:${notaryKeyHex(0x11)},demos-notary-standby:${notaryKeyHex(0x22)}`
 
 /**
  * A mainnet fork at 0, gasFeeSeparation with the treasury and tlsnVerified
@@ -565,6 +569,7 @@ describe("checkLaunch", () => {
         operators: spread(launch),
         ...AGREED,
         expectedTreasury: TREASURY,
+        expectedNotaryKeys: NOTARY_KEYS,
     }
     const blockZero = (r: typeof rows) => ({ rows: r, source: "genesis" as const, reasons: [], warnings: [] })
 
@@ -647,6 +652,92 @@ describe("checkLaunch", () => {
         expect(MAINNET_FORKS).toContain("web2ProofBinding")
         expect(MAINNET_FORKS).toContain("tlsnProofEnforcement")
         expect(MAINNET_FORKS).toContain("xmProofBinding")
+    })
+
+    describe("the agreed notary keys", () => {
+        const OTHER_KEY = notaryKeyHex(0x33)
+
+        it("is NO-GO on the mainnet chain id when no notary keys were agreed", () => {
+            for (const expectedNotaryKeys of [null, undefined, " "]) {
+                const d = checkLaunch({ ...base, expectedNotaryKeys, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons).toEqual([
+                    "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                        "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+                ])
+            }
+        })
+
+        it("is NO-GO when the genesis lists another well-formed key", () => {
+            const payload = tlsnVerifiedPayload()
+            const keys = payload.notaryKeys as Array<{ id: string; alg: string; hex: string }>
+            keys[1] = { ...keys[1], hex: OTHER_KEY }
+            const forks = { ...mainnetForks(), tlsnVerified: { activationHeight: 0, ...payload } }
+            const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons).toEqual([
+                `the genesis tlsnVerified notaryKeys demos-notary-1:${notaryKeyHex(0x11)}, demos-notary-standby:${OTHER_KEY} ` +
+                    `are not the agreed notary keys demos-notary-1:${notaryKeyHex(0x11)}, demos-notary-standby:${notaryKeyHex(0x22)}`,
+            ])
+        })
+
+        it("is NO-GO when the genesis lists fewer or more keys than were agreed, or the same key under another id", () => {
+            const only = `demos-notary-1:${notaryKeyHex(0x11)}`
+            const g = genesisFile(rows)
+            expect(notaryKeysReasons(g, only).join("\n")).toContain("are not the agreed notary keys")
+            expect(notaryKeysReasons(g, `${NOTARY_KEYS},spare:${OTHER_KEY}`).join("\n")).toContain("are not the agreed notary keys")
+            const renamed = `demos-notary-1:${notaryKeyHex(0x11)},demos-notary-2:${notaryKeyHex(0x22)}`
+            expect(notaryKeysReasons(g, renamed).join("\n")).toContain("are not the agreed notary keys")
+            const doubled = genesisFile(rows, {
+                ...mainnetForks(),
+                tlsnVerified: {
+                    activationHeight: 0,
+                    ...tlsnVerifiedPayload(),
+                    notaryKeys: [0, 1].map(() => ({ id: "demos-notary-1", alg: "k256", hex: notaryKeyHex(0x11) })),
+                },
+            })
+            expect(notaryKeysReasons(doubled, NOTARY_KEYS).join("\n")).toContain("are not the agreed notary keys")
+            const forks = { ...mainnetForks(), tlsnVerified: { activationHeight: null } }
+            expect(notaryKeysReasons(genesisFile(rows, forks), NOTARY_KEYS)).toEqual([
+                `the genesis tlsnVerified has no notaryKeys; the agreed notary keys are demos-notary-1:${notaryKeyHex(0x11)}, ` +
+                    `demos-notary-standby:${notaryKeyHex(0x22)}`,
+            ])
+        })
+
+        it("compares without regard to order, case or surrounding spaces", () => {
+            const reordered = ` demos-notary-standby:${notaryKeyHex(0x22).toUpperCase()} , demos-notary-1:${notaryKeyHex(0x11)} `
+            const d = checkLaunch({ ...base, expectedNotaryKeys: reordered, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+            expect(d.reasons).toEqual([])
+            expect(d.go).toBe(true)
+        })
+
+        it("checks given keys on the testnet and devnet chain ids, and needs none there", () => {
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const g = { ...genesisFile(rows), properties: { id: chainId, shardSize: 10 } }
+                expect(notaryKeysReasons(g, null)).toEqual([])
+                expect(notaryKeysReasons(g, NOTARY_KEYS)).toEqual([])
+                expect(notaryKeysReasons(g, `demos-notary-1:${OTHER_KEY}`).join("\n")).toContain("are not the agreed notary keys")
+            }
+        })
+
+        it("refuses an agreed key the node would refuse in a genesis", () => {
+            expect(parseExpectedNotaryKeys(NOTARY_KEYS)).toEqual([
+                { id: "demos-notary-1", hex: notaryKeyHex(0x11) },
+                { id: "demos-notary-standby", hex: notaryKeyHex(0x22) },
+            ])
+            for (const [raw, why] of [
+                ["", "names no key"],
+                [notaryKeyHex(0x11), "entry 1 is not id:hex"],
+                [`:${notaryKeyHex(0x11)}`, "entry 1 is not id:hex"],
+                [`demos-notary-1:${notaryKeyHex(0x11).slice(0, 40)}`, "entry 1.hex must be a 33-byte compressed secp256k1 public key"],
+                [`demos notary:${notaryKeyHex(0x11)}`, "entry 1.id must match"],
+                [`a:${notaryKeyHex(0x11)},b:${notaryKeyHex(0x11)}`, "repeats hex"],
+                [`a:${notaryKeyHex(0x11)},a:${notaryKeyHex(0x22)}`, "repeats id a"],
+            ] as const) {
+                expect(() => parseExpectedNotaryKeys(raw)).toThrow(why)
+                expect(notaryKeysReasons(genesisFile(rows), raw).join("\n")).toContain(raw === "" ? "no --expected-notary-keys given" : why)
+            }
+        })
     })
 
     describe("the agreed treasury", () => {
@@ -968,7 +1059,8 @@ describe("launchGenesisExpectations", () => {
         const { buildGenesisBlock } = await import("src/libs/blockchain/genesis/buildGenesisBlock")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
+            // Every fork declared: the node refuses a mainnet chain id that leaves one out
+            forks: mainnetForks(),
             balances: [],
             timestamp: 1793318400,
         }
@@ -1010,6 +1102,9 @@ describe("command line", () => {
         const c = run(["--genesis", genesisPath(), "--expected-treasury", "0xab"])
         expect(c.code).toBe(2)
         expect(c.err).toContain("--expected-treasury must be 0x and 64 hex characters")
+        const n = run(["--genesis", genesisPath(), "--expected-notary-keys", "demos-notary-1"])
+        expect(n.code).toBe(2)
+        expect(n.err).toContain("--expected-notary-keys entry 1 is not id:hex")
         const b = run(["--genesis", genesisPath(), "--commit", "stabilisation"])
         expect(b.code).toBe(2)
         expect(b.err).toContain("--commit must be a 7 to 40 character hex SHA")
@@ -1039,5 +1134,14 @@ describe("parseArgs", () => {
         expect(parseArgs([], env).expectedTreasury).toBe(TREASURY)
         expect(parseArgs([], {}).expectedTreasury).toBeNull()
         expect(() => parseArgs(["--expected-treasury"], {})).toThrow("--expected-treasury needs a value")
+    })
+
+    it("takes the agreed notary keys from --expected-notary-keys, else from DEMOS_EXPECTED_NOTARY_KEYS", () => {
+        const env = { DEMOS_EXPECTED_NOTARY_KEYS: NOTARY_KEYS }
+        const other = `demos-notary-1:${notaryKeyHex(0x33)}`
+        expect(parseArgs(["--expected-notary-keys", other], env).expectedNotaryKeys).toBe(other)
+        expect(parseArgs([], env).expectedNotaryKeys).toBe(NOTARY_KEYS)
+        expect(parseArgs([], {}).expectedNotaryKeys).toBeNull()
+        expect(() => parseArgs(["--expected-notary-keys"], {})).toThrow("--expected-notary-keys needs a value")
     })
 })

@@ -216,7 +216,7 @@ Run it right after block 1 is produced, before any transaction is sent:
 ```bash
 bun scripts/launch-height1-check.ts --genesis mainnet/genesis.json \
     --snapshot mainnet/snapshot --genesis-hash <genesis block hash> \
-    [--rpc URL,URL,...] [--balances 100|all] [--timeout MS] [--json]
+    [--rpc URL,URL,...] [--balances 100|all] [--max-scan N] [--timeout MS] [--json]
 ```
 
 Without `--rpc` it checks every validator staked at block 0, at its
@@ -249,8 +249,10 @@ shape is reported as unreadable.
 
 A node answers state for its tip only. So the validator and balance comparison
 runs only while every block after block 0 is empty and the head is within
-`--max-scan` (default 20). Otherwise those two lines read `SKIP` with the
-reason. If any node could not be checked in full (block 1 unread, or its
+`--max-scan` (default 1000). Otherwise those two lines read `SKIP` with the
+reason. The blocks are read one request each, up to the first one that
+carries a transaction, and each request waits up to `--timeout` (default
+20000 ms), which a validator's RPC seen from outside its network can need. If any node could not be checked in full (block 1 unread, or its
 state skipped), the result is inconclusive (exit 3), even when the others
 pass: every launch validator has to be proven.
 

@@ -458,6 +458,26 @@ this restart is a fallback there.
     10 minutes until a second restart of that validator. Apply the restart
     rule in [Rolling upgrades](#rolling-upgrades).
 - From `v1.0.0-rc.13`:
+  - A chain started from an rc.12-or-earlier genesis on a mainnet chain id
+    refuses to boot on rc.13: `[GENESIS] Refusing to boot: the genesis does
+    not declare l2psSettlement, tlsnVerified`. rc.13 knows these two forks,
+    and on a mainnet chain id every fork the build knows must be declared in
+    the genesis file. The node stops before it writes anything. This does
+    not need a new chain: before the upgrade, the genesis owner publishes
+    the network's genesis file with
+    `"l2psSettlement": { "activationHeight": null }` and
+    `"tlsnVerified": { "activationHeight": null }` added to `forks` and
+    nothing else changed, and every validator mounts that file as it
+    upgrades. The restart check allows a file that differs from block 0
+    only in the fork schedule (`docs/design/genesis-enforcement.md`,
+    "Restart"), so `EXPECTED_GENESIS_HASH` and `EXPECTED_GENESIS_BLOCK_HASH`
+    stay the same, and `null` entries leave the fork schedule digest as it
+    was. Scheduling either fork at a height later is a schedule change (a
+    height above the tip + 50, and `tlsnVerified` with its full payload).
+    A reissued genesis (new hashes, see INSTALL.md "After the genesis is
+    reissued") starts a new chain and is needed only to start over. The
+    rc.13 `genesis-hash.ts` and `node-doctor --production` do not report
+    this refusal; from the first release after rc.13 both do (below).
   - A validator restarted in the middle of a round rejoins the committee
     within a round on its own. The secretary releases a late phase report
     it already released the group from, and a validator that sees the
@@ -636,6 +656,29 @@ this restart is a fallback there.
   - New runbooks: [chain-halt-recovery.md](chain-halt-recovery.md),
     [genesis-key-custody.md](genesis-key-custody.md) and
     [exchange-integration.md](../mainnet/exchange-integration.md).
+- From the first release after `v1.0.0-rc.13`:
+  - `genesis-hash.ts` and `node-doctor --production` run the fork schedule
+    check the node runs at boot (`genesisScheduleProblems`) and fail with
+    the node's own reason, such as `the genesis does not declare
+    l2psSettlement, tlsnVerified`. Run them before the node is stopped for
+    an upgrade. `node-doctor` runs the check in the node image under
+    compose (`docker compose run --rm --no-deps node bun
+    scripts/genesis-schedule-check.ts`) and with Bun on a bare-metal host.
+  - `launch-go-no-go` needs `--expected-notary-keys id:hex[,id:hex...]`
+    (or `DEMOS_EXPECTED_NOTARY_KEYS`) on a mainnet chain id, for GO and for
+    `--plan`, and is NO-GO when the genesis `tlsnVerified.notaryKeys` are
+    not exactly those keys. Before, any well-formed key that was not one of
+    this repository's test keys passed.
+  - `launch-height1-check` defaults to `--timeout 20000` and
+    `--max-scan 1000` (were 5000 and 20), and stops reading blocks at the
+    first one that carries a transaction. Run from outside the validators'
+    network, the old defaults timed a probe out and reported INCONCLUSIVE
+    once the head was past block 20.
+  - A node with `TLSNOTARY_ENABLED=true` and no notary answering at
+    `TLSNOTARY_HOST:TLSNOTARY_PORT` runs as a relay only: it logs a warning
+    and keeps serving `requestTLSNproxy`, and `/health` no longer reports
+    the `tlsnotary` subsystem as failed. With `TLSNOTARY_FATAL=true` it
+    still exits.
 
 ## Known limits
 
