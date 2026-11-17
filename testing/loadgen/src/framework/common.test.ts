@@ -218,6 +218,29 @@ describe("logNonCriticalError", () => {
       errorSpy.mockRestore()
     }
   })
+
+  it("drops a lone high surrogate at the cut and keeps a lone low one", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    const prefix = "[loadgen] Non-critical error in test.lone: "
+    try {
+      // The last kept unit is a high surrogate with no low surrogate after it ("t"
+      // follows), so the cut keeps one unit fewer, as it does for a whole pair.
+      logNonCriticalError("test.lone", `${"a".repeat(999)}\ud83dtail`)
+      logNonCriticalError("test.lone", "bad", { value: `${"a".repeat(499)}\ud83dtail` })
+      // A low surrogate is never the first half of a pair, so it is kept.
+      logNonCriticalError("test.lone", `${"a".repeat(999)}\ude00tail`)
+      expect(lines).toEqual([
+        `${prefix}${"a".repeat(999)}…(1004 chars)`,
+        `${prefix}bad {"value":"${"a".repeat(499)}…(504 chars)"}`,
+        `${prefix}${"a".repeat(999)}\ude00…(1004 chars)`,
+      ])
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
 })
 
 describe("textOrType", () => {
@@ -264,6 +287,15 @@ describe("textOrType", () => {
     expect(textOrType(JSON.parse('{"toString":null}'))).toBe("object")
     // A small flat object reads the same as its JSON.
     expect(textOrType({ amount: "5", decimals: 18, ok: true, owner: null })).toBe(`{"amount":"5","decimals":18,"ok":true,"owner":null}`)
+  })
+
+  it("shows null and undefined as text, and only primitives' text inside a preview", () => {
+    expect(textOrType(null)).toBe("null")
+    expect(textOrType(undefined)).toBe("undefined")
+    const fields = { u: undefined, n: Number.NaN, f: 1.5, b: false, big: 1n, sym: Symbol("s"), fn: () => 1, a: [1], o: { x: 1 } }
+    expect(textOrType(fields)).toBe(
+      `{"u":undefined,"n":NaN,"f":1.5,"b":false,"big":bigint,"sym":symbol,"fn":function,"a":array,"o":object}`,
+    )
   })
 })
 

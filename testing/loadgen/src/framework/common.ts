@@ -97,10 +97,13 @@ const LOG_RECORD_MAX_CHARS = 2_000
 
 // The first `maxChars` UTF-16 code units of a longer `text`, one fewer when the last
 // kept unit is a high surrogate, so a cut never leaves half of a surrogate pair.
+// The cut is taken first: the last unit of `head` has no unit after it, so
+// codePointAt returns that unit itself, never a whole pair's code point.
 function headOf(text: string, maxChars: number): string {
-  const last = text.charCodeAt(maxChars - 1)
+  const head = text.slice(0, maxChars)
+  const last = head.codePointAt(head.length - 1) ?? 0
   const splitsPair = text.length > maxChars && last >= 0xd800 && last <= 0xdbff
-  return text.slice(0, splitsPair ? maxChars - 1 : maxChars)
+  return splitsPair ? head.slice(0, -1) : head
 }
 
 // `text` cut to `maxChars` plus a "…(N chars)" marker with the full length.
@@ -125,7 +128,7 @@ type Printable = string | number | bigint | boolean | symbol | null | undefined 
 
 // False only for an object whose toString is Object's own, which String() shows as "[object Object]".
 function isPrintable(value: unknown): value is Printable {
-  return typeof value !== "object" || value === null || value.toString !== Object.prototype.toString
+  return typeof value !== "object" || value?.toString !== Object.prototype.toString
 }
 
 const PREVIEW_MAX_ITEMS = 20
@@ -142,10 +145,12 @@ function previewString(text: string): string {
   return text.length > PREVIEW_MAX_STRING_CHARS ? `${shown}…(${text.length} chars)` : shown
 }
 
+// Only null, undefined, numbers and booleans reach String(); objects, arrays and other
+// types show their type.
 function previewValue(value: unknown): string {
   if (typeof value === "string") return previewString(value)
-  const shown = value == null || typeof value === "number" || typeof value === "boolean"
-  return shown ? String(value) : previewType(value)
+  if (value == null || typeof value === "number" || typeof value === "boolean") return String(value)
+  return previewType(value)
 }
 
 // Bounded, JSON-like preview that never serializes or walks nested values: an array's
