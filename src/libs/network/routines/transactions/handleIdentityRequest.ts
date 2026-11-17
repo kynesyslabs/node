@@ -20,10 +20,7 @@ import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { attestationContextError } from "@/features/zk/proof/publicSignals"
 import { TLSN_CONTEXTS, WEB2_CONTEXTS } from "@/libs/identity/web2Contexts"
 
-interface IdentityResponse {
-    success: boolean
-    message: string
-}
+import type { IdentityResponse } from "./identityReply"
 
 /**
  * Verifies the signature in the identity payload using the appropriate handler
@@ -133,8 +130,9 @@ export default async function handleIdentityRequest(
                 sender,
             )
         case "tlsn_identity_assign":
-            // TLSNotary identity verification - verify proof structure
-            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
+            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload, {
+                sender,
+            })
         case "zk_commitmentadd": {
             const commitments = payload.payload as IdentityCommitmentPayload[]
             if (!Array.isArray(commitments) || commitments.length === 0) {

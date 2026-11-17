@@ -698,13 +698,34 @@ export const KNOWN_TEST_NOTARY_KEYS: readonly string[] = [
     "0297a6f938678de7b1ed4d1b8b9ce5bdded7e6e5dfe6ef42a08a4d0a6d1a188596",
 ]
 
+/** The committed sha256 file of the verifier wasm this build ships. */
+export const TLSN_VERIFIER_SHA256_FILE = path.join(
+    import.meta.dir,
+    "../native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256",
+)
+
+/** The sha256 the committed file names, or null when it cannot be read. */
+export function committedVerifierSha256(file = TLSN_VERIFIER_SHA256_FILE): string | null {
+    try {
+        const first = fs.readFileSync(file, "utf8").trim().split(/\s+/)[0]
+        return /^[0-9a-f]{64}$/.test(first) ? first : null
+    } catch {
+        return null
+    }
+}
+
 /**
  * NO-GO reasons for the tlsnVerified entry of a mainnet genesis: unset
  * (template FILL) or malformed notary keys and verifier pin, as the node
- * would refuse them, and keys whose private half is test material. The
- * keys come from the notary key ceremony, never from this repository.
+ * would refuse them, keys whose private half is test material, and a
+ * verifier pin other than the wasm this build ships: every node would then
+ * refuse to judge any TLSNotary presentation. The keys come from the notary
+ * key ceremony, never from this repository.
  */
-export function tlsnNotaryReasons(entry: Record<string, unknown> | undefined): string[] {
+export function tlsnNotaryReasons(
+    entry: Record<string, unknown> | undefined,
+    shippedVerifierSha256: string | null = committedVerifierSha256(),
+): string[] {
     if (!entry || entry.activationHeight === null || entry.activationHeight === undefined) return []
     const reasons: string[] = []
     const keys = Array.isArray(entry.notaryKeys) ? entry.notaryKeys : []
@@ -721,6 +742,19 @@ export function tlsnNotaryReasons(entry: Record<string, unknown> | undefined): s
     const problems = tlsnVerifiedProblems(entry, true)
     if (problems.length > 0) {
         reasons.push(`fork tlsnVerified is scheduled with a payload the node refuses: ${problems.join("; ")}`)
+    }
+    const pin = entry.verifierWasmSha256
+    if (typeof pin === "string" && !pin.startsWith("FILL")) {
+        if (shippedVerifierSha256 === null) {
+            reasons.push(
+                "the TLSNotary verifier pin cannot be checked: native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256 is missing or malformed",
+            )
+        } else if (pin !== shippedVerifierSha256) {
+            reasons.push(
+                `fork tlsnVerified pins verifier ${pin}, but this build ships ${shippedVerifierSha256} ` +
+                    "(native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256); no node could judge a TLSNotary presentation",
+            )
+        }
     }
     const test = keys
         .map(k => (k as { hex?: unknown } | null)?.hex)

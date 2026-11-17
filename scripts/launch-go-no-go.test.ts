@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test"
+import { createHash } from "node:crypto"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import { tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
+import { TLSN_VERIFY_WASM_SHA256 } from "src/libs/tlsnotary/wasmVerifier"
 import {
     type GoNoGoInput,
     KNOWN_FORKS,
@@ -13,6 +16,8 @@ import {
     type ValidatorProbe,
     checkLaunch,
     commitSha,
+    committedVerifierSha256,
+    tlsnNotaryReasons,
     decideGoNoGo,
     sameCommit,
     parseArgs,
@@ -779,6 +784,35 @@ describe("checkLaunch", () => {
             expect(d.go).toBe(false)
             expect(d.reasons.join("\n")).toContain("payload the node refuses")
             expect(d.reasons.join("\n")).toContain("verifierWasmSha256")
+        })
+
+        it("is NO-GO when the pin is not the verifier this build ships", () => {
+            const other = createHash("sha256").update("another verifier build").digest("hex")
+            const d = check(tlsnVerifiedPayload({ verifierWasmSha256: other }))
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain(`pins verifier ${other}, but this build ships`)
+        })
+
+        it("is NO-GO when the shipped verifier's sha256 file cannot be read", () => {
+            const entry = { activationHeight: 0, ...tlsnVerifiedPayload() }
+            expect(tlsnNotaryReasons(entry, null).join("\n")).toContain("verifier pin cannot be checked")
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tlsn-sha-"))
+            try {
+                expect(committedVerifierSha256(path.join(dir, "missing.sha256"))).toBeNull()
+                fs.writeFileSync(path.join(dir, "bad.sha256"), "not a digest\n")
+                expect(committedVerifierSha256(path.join(dir, "bad.sha256"))).toBeNull()
+            } finally {
+                fs.rmSync(dir, { recursive: true, force: true })
+            }
+        })
+
+        it("does not check a pin the template leaves unset", () => {
+            const entry = { activationHeight: 0, ...tlsnVerifiedPayload({ verifierWasmSha256: "FILL: sha256" }) }
+            expect(tlsnNotaryReasons(entry, null).join("\n")).not.toContain("verifier pin cannot be checked")
+        })
+
+        it("ships the verifier the node loads", () => {
+            expect(committedVerifierSha256()).toBe(TLSN_VERIFY_WASM_SHA256)
         })
 
         it("lists the devnet genesis keys as test keys", () => {

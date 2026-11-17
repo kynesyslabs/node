@@ -213,6 +213,7 @@ export default class GCRIdentityRoutines {
                         result = await applyTLSNIdentityAdd(
                             identityEdit,
                             accountGCR,
+                            entities,
                         )
                         break
 
