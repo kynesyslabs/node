@@ -2,7 +2,8 @@
  * nodeCall does not reject on an HTTP error status or a failed fetch: it resolves
  * with the reply body, or with the result 599 reply that rpcPost builds. getNodeSnapshot
  * must log those replies as well, once per node and read, and keep the values the
- * reads return (#708).
+ * reads return (#708). A reply's response has no size limit, so only its result code
+ * and a bounded preview of its response are logged; the reply is never serialized.
  *
  * Runs the real nodeCall and the real reads; only fetch and console.error are mocked.
  */
@@ -69,7 +70,8 @@ describe("peersync getNodeSnapshot with failed RPC replies", () => {
       const lines = snapshotLines(rpcUrl).filter(line =>
         line.includes(`Non-critical error in peersync.getNodeSnapshot.${call}: reply without result 200:`))
       expect(lines).toHaveLength(1)
-      expect(lines[0]).toContain(`{"error":"Service busy","message":"Too many requests"}`)
+      // The 503 body has neither result nor response; only those two bounded fields are logged.
+      expect(lines[0]).toContain(`reply without result 200: {"result":"undefined","response":"undefined"}`)
       expect(lines[0]).toContain(`{"rpcUrl":"${rpcUrl}"}`)
     }
 
@@ -93,6 +95,52 @@ describe("peersync getNodeSnapshot with failed RPC replies", () => {
       expect(lines).toHaveLength(1)
       expect(lines[0]).toContain(`"result":599`)
       expect(lines[0]).toContain("rpcPost failed: connect ECONNREFUSED 10.0.0.2:53550")
+    }
+  })
+
+  it("logs the result code and a bounded preview of a large response without serializing the reply", async () => {
+    const preview = "a".repeat(200)
+    const response = `${preview}${"z".repeat(4_000_000)}`
+    let toJsonCalls = 0
+    const reply = {
+      result: 500,
+      response,
+      toJSON() {
+        toJsonCalls++
+        return { result: 500, response }
+      },
+    }
+    rpcReply = async () => ({ ok: false, status: 500, json: async () => reply }) as unknown as Response
+    const rpcUrl = "http://node-d.invalid:53550"
+
+    const snapshot = await getNodeSnapshot(rpcUrl)
+
+    expect(snapshot.peerCount).toBe(0)
+    expect(snapshot.blockHash).toBe(response)
+    expect(toJsonCalls).toBe(0)
+    expect(snapshotLines(rpcUrl)).toHaveLength(3)
+    for (const call of READS) {
+      const lines = snapshotLines(rpcUrl).filter(line => line.includes(`peersync.getNodeSnapshot.${call}: `))
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toContain(
+        `reply without result 200: {"result":500,"response":"${preview}","responseLength":4000200}`)
+      expect(lines[0].length).toBeLessThan(1_000)
+    }
+  })
+
+  it("logs only the type of a reply that is not an object", async () => {
+    const replies: Array<[string, unknown]> = [["null", null], ["string", "z".repeat(4_000_000)]]
+    for (const [type, reply] of replies) {
+      rpcReply = async () => ({ ok: false, status: 500, json: async () => reply }) as unknown as Response
+      const rpcUrl = `http://node-${type}.invalid:53550`
+
+      await getNodeSnapshot(rpcUrl)
+
+      const lines = snapshotLines(rpcUrl)
+      expect(lines).toHaveLength(3)
+      for (const line of lines) {
+        expect(line).toContain(`reply without result 200: ${type} {"rpcUrl":"${rpcUrl}"}`)
+      }
     }
   })
 

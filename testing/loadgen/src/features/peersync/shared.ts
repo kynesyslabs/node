@@ -1,4 +1,4 @@
-import { envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeRpcUrl, sleep, textOrType } from "../../framework/common"
+import { envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeRpcUrl, sleep } from "../../framework/common"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
 import { getConsensusTargets, getLastBlockNumber, waitForConsensusTargets } from "../consensus/shared"
 
@@ -80,13 +80,29 @@ function snapshotFallback<T>(call: string, rpcUrl: string, fallback: T) {
   }
 }
 
+const REPLY_PREVIEW_CHARS = 200
+
+// Bounded log text for a failed reply: its result code and a preview of its response
+// (a string's first characters and length, else its type). The reply's response has no
+// size limit, so the reply itself is never serialized.
+function failedReplyPreview(res: unknown): string {
+  if (typeof res !== "object" || res === null) return res === null ? "null" : typeof res
+  const { result, response } = res as { result?: unknown; response?: unknown }
+  const isText = typeof response === "string"
+  return JSON.stringify({
+    result: typeof result === "number" ? result : typeof result,
+    response: isText ? response.slice(0, REPLY_PREVIEW_CHARS) : typeof response,
+    ...(isText ? { responseLength: response.length } : {}),
+  })
+}
+
 // nodeCall resolves on transport and HTTP errors too: rpcPost turns a failed fetch into a
 // result 599 reply, and nodeCall drops the HTTP status and passes the body on
 // (framework/rpc.ts). A node reply that succeeded carries result 200, so any other reply
 // is logged like a rejection; the read then handles it as before.
 const snapshotNodeCall: typeof nodeCall = async (rpcUrl, message, ...rest) => {
   const res = await nodeCall(rpcUrl, message, ...rest)
-  if (res?.result !== 200) logSnapshotRead(message, rpcUrl, `reply without result 200: ${textOrType(res)}`)
+  if (res?.result !== 200) logSnapshotRead(message, rpcUrl, `reply without result 200: ${failedReplyPreview(res)}`)
   return res
 }
 
