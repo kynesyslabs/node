@@ -190,6 +190,34 @@ describe("logNonCriticalError", () => {
       errorSpy.mockRestore()
     }
   })
+
+  it("never splits a surrogate pair when it cuts the message, a details value or the record", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    // A high surrogate not followed by a low one, or a low one not preceded by a high one
+    // (no u flag, so the class matches UTF-16 code units).
+    const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+    const prefix = "[loadgen] Non-critical error in "
+    try {
+      // In each case the cut falls between the two code units of 😀 (😀).
+      logNonCriticalError("test.surrogate", `${"a".repeat(999)}😀tail`)
+      logNonCriticalError("test.surrogate", "bad", { value: `${"a".repeat(499)}😀tail` })
+      const context = `${"a".repeat(1_999 - prefix.length)}😀tail`
+      logNonCriticalError(context, "bad")
+      expect(lines).toEqual([
+        `${prefix}test.surrogate: ${"a".repeat(999)}…(1005 chars)`,
+        `${prefix}test.surrogate: bad {"value":"${"a".repeat(499)}…(505 chars)"}`,
+        `${prefix}${"a".repeat(1_999 - prefix.length)}…(${prefix.length + context.length + ": bad".length} chars)`,
+      ])
+      for (const line of lines) expect(line).not.toMatch(LONE_SURROGATE)
+      // A pair that ends before the cap is kept whole.
+      expect(truncatedError(new Error(`${"a".repeat(498)}😀tail`)).message).toBe(`${"a".repeat(498)}😀…(504 chars)`)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
 })
 
 describe("textOrType", () => {

@@ -147,6 +147,7 @@ SUITE_FILES=(
     testing/loadgen/src/token_names_from_runs.test.ts
     testing/loadgen/src/token_script_complex_policy_amounts.test.ts
     testing/loadgen/src/token_script_complex_policy_object_amounts.test.ts
+    testing/loadgen/src/token_settle_check_balance_log.test.ts
     testing/loadgen/src/token_total_supply_log.test.ts
 )
 

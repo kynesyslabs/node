@@ -10,7 +10,7 @@ import {
   waitForRpcReady,
   waitForTxReady,
 } from "./token_shared"
-import { logNonCriticalErrorOnce } from "./framework/common"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -342,7 +342,7 @@ export async function runTokenSettleCheck() {
       try {
         expectedPresent[addr] = BigInt(balRaw ?? "0") > 0n
       } catch (error) {
-        logNonCriticalErrorOnce("token_settle_check.expectedPresent", "token_settle_check.expectedPresent", error, { address: addr })
+        logNonCriticalErrorOnce("token_settle_check.expectedPresent", "token_settle_check.expectedPresent", error, { address: addr, balance: textOrType(balRaw).slice(0, 80) })
         expectedPresent[addr] = false
       }
     }

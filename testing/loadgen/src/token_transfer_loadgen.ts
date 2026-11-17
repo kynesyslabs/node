@@ -16,7 +16,7 @@ import {
   waitForRpcReady,
   waitForTxReady,
 } from "./token_shared"
-import { logNonCriticalErrorOnce } from "./framework/common"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 type LoadgenConfig = {
   targets: string[]
@@ -362,7 +362,7 @@ export async function runTokenTransferLoadgen() {
         try {
           expectedPresent[addr] = BigInt(b[addr] ?? "0") > 0n
         } catch (error) {
-          logNonCriticalErrorOnce("token_transfer_loadgen.expectedPresent", "token_transfer_loadgen.expectedPresent", error, { address: addr })
+          logNonCriticalErrorOnce("token_transfer_loadgen.expectedPresent", "token_transfer_loadgen.expectedPresent", error, { address: addr, balance: textOrType(b[addr]).slice(0, 80) })
           expectedPresent[addr] = false
         }
       }

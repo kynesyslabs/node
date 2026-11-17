@@ -95,9 +95,17 @@ const LOG_MESSAGE_MAX_CHARS = 1_000
 const LOG_FIELD_MAX_CHARS = 500
 const LOG_RECORD_MAX_CHARS = 2_000
 
+// The first `maxChars` UTF-16 code units of a longer `text`, one fewer when the last
+// kept unit is a high surrogate, so a cut never leaves half of a surrogate pair.
+function headOf(text: string, maxChars: number): string {
+  const last = text.charCodeAt(maxChars - 1)
+  const splitsPair = text.length > maxChars && last >= 0xd800 && last <= 0xdbff
+  return text.slice(0, splitsPair ? maxChars - 1 : maxChars)
+}
+
 // `text` cut to `maxChars` plus a "…(N chars)" marker with the full length.
 function cutText(text: string, maxChars: number): string {
-  return text.length > maxChars ? `${text.slice(0, maxChars)}…(${text.length} chars)` : text
+  return text.length > maxChars ? `${headOf(text, maxChars)}…(${text.length} chars)` : text
 }
 
 // cutText for text that is escaped here: escapes can make the text up to six times
@@ -105,7 +113,7 @@ function cutText(text: string, maxChars: number): string {
 // length. Later cuts and escaping then leave the copy and its marker as they are.
 function cutEscaped(text: string, maxChars: number): string {
   let shown = ""
-  for (const char of text.slice(0, maxChars)) {
+  for (const char of headOf(text, maxChars)) {
     const escaped = escapeControlChars(char)
     if (shown.length + escaped.length > maxChars) return `${shown}…(${text.length} chars)`
     shown += escaped

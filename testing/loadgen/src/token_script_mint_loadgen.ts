@@ -17,7 +17,7 @@ import {
 } from "./token_shared"
 import { maybeUpgradeScript } from "./token_script_perf_shared"
 import { sleep, envInt, envBool, splitCsv, nowMs, unique, percentile, ReservoirSampler } from "./testing_utils"
-import { logNonCriticalErrorOnce } from "./framework/common"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 type LoadgenConfig = {
   targets: string[]
@@ -295,7 +295,7 @@ export async function runTokenScriptMintLoadgen() {
       try {
         expectedPresent[addr] = BigInt(balRaw ?? "0") > 0n
       } catch (error) {
-        logNonCriticalErrorOnce("token_script_mint_loadgen.expectedPresent", "token_script_mint_loadgen.expectedPresent", error, { address: addr })
+        logNonCriticalErrorOnce("token_script_mint_loadgen.expectedPresent", "token_script_mint_loadgen.expectedPresent", error, { address: addr, balance: textOrType(balRaw).slice(0, 80) })
         expectedPresent[addr] = false
       }
     }

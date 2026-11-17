@@ -14,7 +14,7 @@ import {
   waitForCrossNodeTokenConsistency,
   withDemosWallet,
 } from "./token_shared"
-import { logNonCriticalErrorOnce } from "./framework/common"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 type Config = {
   targets: string[]
@@ -260,7 +260,7 @@ export async function runTokenAclSmoke() {
       try {
         expectedPresent[addr] = BigInt(balRaw ?? "0") > 0n
       } catch (error) {
-        logNonCriticalErrorOnce("token_acl_smoke.expectedPresent", "token_acl_smoke.expectedPresent", error, { address: addr })
+        logNonCriticalErrorOnce("token_acl_smoke.expectedPresent", "token_acl_smoke.expectedPresent", error, { address: addr, balance: textOrType(balRaw).slice(0, 80) })
         expectedPresent[addr] = false
       }
     }
