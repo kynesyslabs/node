@@ -202,6 +202,19 @@ OFF_TREASURY = "0x" + "0" * 64
 # it, so a genesis without a treasury of its own, or with that one, gets this
 # drill-only account.
 DRILL_TREASURY = "0x" + "7d" * 32
+# Active, tlsnVerified needs its notary keys and verifier pin (loadForkConfig.ts
+# refuses it without them), so a genesis without a payload of its own gets the
+# devnet one: the keys of testing/devnet/genesis.devnet.json, test material only.
+DRILL_TLSN_VERIFIED = {
+    "notaryKeys": [
+        {"id": "devnet-test-notary-1", "alg": "k256", "hex": "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e"},
+        {"id": "devnet-test-notary-2", "alg": "k256", "hex": "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870"},
+    ],
+    "verifierWasmSha256": "5ed9774dd485266227b633504beba4cb3bed47c26af01b817ed128ce8517e455",
+    "maxPresentationBytes": 65536,
+    "freshnessWindowSec": 3600,
+    "futureSkewSec": 60,
+}
 
 # Forks the template activates at 0 that the drills keep off, by name, each with
 # the reason. The drills mount an empty data/snapshot, so genesis takes the legacy
@@ -262,8 +275,9 @@ def with_launch_forks(genesis, template):
     The whole `forks` object is replaced, so no fork keeps a height the
     template does not give it, and no fork is left to the node's own default
     (osDenomination, nonceEnforcement and gasFeeSeparation default to 0).
-    Payload fields (gasFeeSeparation's treasuryAddress) are kept from the
-    genesis' own entry, or filled with one the node accepts. Excluded forks (LAUNCH_EXCLUDED_FORKS) get an explicit
+    Payload fields (gasFeeSeparation's treasuryAddress, tlsnVerified's notary
+    keys) are kept from the genesis' own entry, or filled with ones the node
+    accepts. Excluded forks (LAUNCH_EXCLUDED_FORKS) get an explicit
     `activationHeight: null`.
     """
     own = genesis.get("forks") or {}
@@ -275,6 +289,8 @@ def with_launch_forks(genesis, template):
                 entry.setdefault("treasuryAddress", OFF_TREASURY)
             elif entry.get("treasuryAddress", OFF_TREASURY) == OFF_TREASURY:
                 entry["treasuryAddress"] = DRILL_TREASURY
+        if name == "tlsnVerified" and height is not None and "notaryKeys" not in entry:
+            entry = {**DRILL_TLSN_VERIFIED, **entry}
         forks[name] = {"activationHeight": height, **entry}
     out = dict(genesis)
     out["forks"] = forks
