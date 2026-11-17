@@ -1,6 +1,6 @@
 /**
  * fetchTlsNotaryJson falls back to json: null for a body that is not JSON and
- * logs the parse error. Bun's JSON.parse error quotes the offending body
+ * logs the parse error once per target and route. Bun's JSON.parse error quotes the offending body
  * character, so control characters the node sends must reach the log escaped,
  * on one line (#708).
  *
@@ -40,5 +40,28 @@ describe("tlsnotary fetchTlsNotaryJson", () => {
     expect(errors[0]).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u{202a}-\u{202e}\u{2066}-\u{2069}]/u)
     expect(errors[0]).toContain("Non-critical error in tlsnotary.requestJson: JSON Parse error: Unrecognized token '\\u001b'")
     expect(errors[0]).toContain(`"rpcUrl":"http://node-a.invalid:53551","route":"/tlsnotary/health","status":200`)
+  })
+
+  it("logs the first non-JSON body of each target and route once", async () => {
+    fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => new Response("busy", { status: 503 })) as any)
+    const targets = ["http://node-b.invalid:53553/", "http://node-c.invalid:53555/"]
+    const routes = ["/tlsnotary/health", "/tlsnotary/info", "/tlsnotary/verify"]
+
+    for (let round = 0; round < 2; round++) {
+      for (const rpcUrl of targets) {
+        for (const route of routes) {
+          expect((await fetchTlsNotaryJson(rpcUrl, route, { method: "GET" })).json).toBeNull()
+        }
+      }
+    }
+
+    // One line per target and route, from the first round; the second round logs nothing.
+    expect(errors).toHaveLength(6)
+    for (const rpcUrl of targets) {
+      for (const route of routes) {
+        const tag = `"rpcUrl":"${rpcUrl}","route":"${route}","status":503`
+        expect(errors.filter(line => line.includes(tag))).toHaveLength(1)
+      }
+    }
   })
 })

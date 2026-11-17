@@ -45,7 +45,8 @@ export async function fetchTlsNotaryJson(
     try {
       json = text.length > 0 ? JSON.parse(text) : null
     } catch (error) {
-      logNonCriticalErrorOnce("tlsnotary.requestJson", "tlsnotary.requestJson", error, { rpcUrl, route, status: response.status })
+      // Once per target and route: the targets are configured and the routes fixed, so the keys are bounded.
+      logNonCriticalErrorOnce(`tlsnotary.requestJson:${rpcUrl}${route}`, "tlsnotary.requestJson", error, { rpcUrl, route, status: response.status })
       json = null
     }
     return {

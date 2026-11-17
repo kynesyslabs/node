@@ -124,6 +124,17 @@ function cutEscaped(text: string, maxChars: number): string {
   return text.length > maxChars ? `${shown}…(${text.length} chars)` : shown
 }
 
+// A trailing partial escape (`\`, `\u`, `\u0`, `\u00`, `\u008`). Backslashes before it
+// pair up as escaped backslashes (`\\`), which are kept whole.
+const PARTIAL_ESCAPE_AT_END = /(?<!\\)((?:\\\\)*)\\(?:u[\da-fA-F]{0,3})?$/
+
+// The escaped line cut to the record cap, minus any partial escape the cut ends in; the
+// marker gives the escaped line's length in UTF-16 code units.
+function cutRecord(line: string): string {
+  if (line.length <= LOG_RECORD_MAX_CHARS) return line
+  return `${headOf(line, LOG_RECORD_MAX_CHARS).replace(PARTIAL_ESCAPE_AT_END, "$1")}…(${line.length} chars)`
+}
+
 type Printable = string | number | bigint | boolean | symbol | null | undefined | { toString(): string }
 
 // False only for an object whose toString is Object's own, which String() shows as "[object Object]".
@@ -217,7 +228,8 @@ function stringifyLogDetails(details: Record<string, unknown> | undefined): stri
 
 // One record per call: the message escaped and cut (so its marker stays within the
 // record cap), each details value cut, control characters escaped across the whole
-// line (JSON.stringify leaves DEL, C1 and bidi controls raw), then the line cut.
+// line (JSON.stringify leaves DEL, C1 and bidi controls raw), then the line cut
+// between escapes.
 export function logNonCriticalError(
   context: string,
   error: unknown,
@@ -225,7 +237,7 @@ export function logNonCriticalError(
 ) {
   const message = cutEscaped(messageText(error), LOG_MESSAGE_MAX_CHARS)
   const line = `[loadgen] Non-critical error in ${context}: ${message}${stringifyLogDetails(details)}`
-  console.error(cutText(escapeControlChars(line), LOG_RECORD_MAX_CHARS))
+  console.error(cutRecord(escapeControlChars(line)))
 }
 
 export function logNonCriticalErrorOnce(

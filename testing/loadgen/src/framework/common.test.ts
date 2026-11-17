@@ -170,10 +170,63 @@ describe("logNonCriticalError", () => {
       expect(lines[0]).not.toMatch(RAW_CONTROL)
       expect(lines[0]).toStartWith("[loadgen] Non-critical error in test.record: \\u0001\\u007f\\u202e")
       const [, kept, total] = lines[0].match(/^([\s\S]*)…\((\d+) chars\)$/) ?? []
-      expect(kept).toHaveLength(2_000)
+      // The 2,000-character cut ends in the partial escape `\u00`, which is dropped.
+      expect(kept).toHaveLength(1_996)
+      expect(kept).toEndWith("\\u202e")
       expect(Number(total)).toBeGreaterThan(2_000)
       // The message is escaped before its own cut, so its marker survives the record cut.
       expect(lines[0]).toContain(`: ${escapeControlChars(controls.slice(0, 166))}…(600 chars) {"a":`)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it("never ends the record cut inside an escape", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    const prefix = "[loadgen] Non-critical error in "
+    const nel = "\\u0085"
+    try {
+      // Each U+0085 is written as the 6-character escape \u0085. Context lengths 0 to 5
+      // characters apart put the 2,000-character cut after each of `\`, `\u`, `\u0`,
+      // `\u00`, `\u008` and a whole escape.
+      const contexts = ["", "x", "xx", "xxx", "xxxx", "xxxxx"].map(pad => `test.recordescape${pad}`)
+      for (const context of contexts) {
+        logNonCriticalError(context, "bad", { a: "\u0085".repeat(500), b: "\u0085".repeat(500) })
+      }
+      expect(lines).toHaveLength(6)
+      contexts.forEach((context, i) => {
+        const start = `${prefix}${context}: bad {"a":"`
+        const whole = Math.floor((2_000 - start.length) / 6)
+        const total = start.length + 3_000 + `","b":"`.length + 3_000 + `"}`.length
+        expect(lines[i]).toBe(`${start}${nel.repeat(whole)}…(${total} chars)`)
+      })
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it("keeps an escaped backslash whole at the record cut", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    const prefix = "[loadgen] Non-critical error in "
+    try {
+      // JSON writes each backslash as `\\`. One context puts the cut after a whole `\\`,
+      // the other between its two characters.
+      const contexts = ["test.pairs", "test.pairsx"]
+      for (const context of contexts) {
+        logNonCriticalError(context, "bad", { a: "\\".repeat(500), b: "\\".repeat(500) })
+      }
+      contexts.forEach((context, i) => {
+        const start = `${prefix}${context}: bad {"a":"${"\\".repeat(1_000)}","b":"`
+        const keptB = 2_000 - start.length - ((2_000 - start.length) % 2)
+        expect(lines[i]).toBe(`${start}${"\\".repeat(keptB)}…(${start.length + 1_000 + 2} chars)`)
+      })
+      expect(new Set(contexts.map(context => (2_000 - prefix.length - context.length) % 2)).size).toBe(2)
     } finally {
       errorSpy.mockRestore()
     }
