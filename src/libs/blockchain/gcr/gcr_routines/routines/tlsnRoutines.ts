@@ -442,7 +442,10 @@ export async function rollbackTLSNIdentityRemove(
 
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     const links: TLSNLink[] = accountGCR.identities.web2[context] || []
+    // A TLSN unlink leaves the account's other web2 links, a gist link of
+    // the same platform account among them, so only a TLSN link blocks it.
     const back = (id: TLSNLink) =>
+        id.proofType === "tlsn" &&
         removed.some(({ value }) =>
             value.userId === undefined || value.userId === null || value.userId === ""
                 ? id.username === value.username

@@ -769,8 +769,12 @@ describe("undoing TLSN links and unlinks", () => {
         )
 
     it("the undo of an unlink puts the link back byte for byte, its token as it was, verifying nothing", async () => {
+        // A gist link of the same GitHub account, stored with a numeric id
+        // before canonical ids: the unlink leaves it, and its undo too.
         const holder = account(BIND_SENDER, {
-            github: [{ username: "older", userId: "1", proof: "p", proofHash: "h", timestamp: 1 }],
+            github: [
+                { username: "older", userId: Number(claimed(K256()).userId), proof: "p", proofHash: "h", timestamp: 1 },
+            ],
         })
         const entities = caches(holder)
         expect((await applyAt(BLOCK_TIME, await linkEdit(), entities)).success).toBe(true)
@@ -784,7 +788,7 @@ describe("undoing TLSN links and unlinks", () => {
             HandleGCR.applyGCREdit(structuredClone(unlink), entities, false, false, place),
         )
         expect(removed.success).toBe(true)
-        expect(holder.identities.web2.github).toHaveLength(1)
+        expect(holder.identities.web2.github).toEqual([expect.objectContaining({ username: "older" })])
 
         verifyCalls = 0
         chain.judgeReads = 0
