@@ -1,19 +1,28 @@
 /**
  * TLSNotary Port Allocator
  *
- * Manages a pool of ports (55000-57000) for wstcp proxy instances.
+ * Manages the pool of ports (TLSNOTARY_PROXY_PORT_MIN-MAX) for proxy sessions.
  * Uses sequential allocation with recycling of freed ports.
  *
  * @module features/tlsnotary/portAllocator
  */
 
-// REVIEW: TLSNotary port pool management for wstcp proxy instances
 import * as net from "net"
 import log from "@/utilities/logger"
 // Single source of truth for the proxy port window, so the env-overridable
 // range (TLSNOTARY_PROXY_PORT_MIN/MAX) actually drives allocation — a local
 // hardcoded copy here would silently ignore the published host range.
 import { PORT_CONFIG } from "./constants"
+
+/**
+ * Address the per-session proxy listeners bind. Loopback unless the operator
+ * says otherwise: the reverse proxy on this host is the only intended client.
+ * Under docker compose the node sets 0.0.0.0, because Caddy reaches the node
+ * over the compose network and the host publishes the window on loopback.
+ */
+export function proxyBindHost(): string {
+    return process.env.WSTCP_BIND_HOST || "127.0.0.1"
+}
 
 /**
  * Port pool state interface
@@ -73,11 +82,9 @@ export async function isPortAvailable(port: number): Promise<boolean> {
             server.close(() => finish(true))
         })
 
-        // Probe the same bind host that spawnProxy will use (Epic 12 T9).
-        // Otherwise we'd return "available" on 0.0.0.0 then fail to bind
-        // on 127.0.0.1 (or vice versa) inside the actual spawn.
-        const bindHost = process.env.WSTCP_BIND_HOST || "0.0.0.0"
-        server.listen(port, bindHost)
+        // Probe the host the relay will bind, or a port taken on one
+        // address reads as free on the other.
+        server.listen(port, proxyBindHost())
     })
 }
 
