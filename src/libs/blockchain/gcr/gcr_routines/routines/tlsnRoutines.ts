@@ -405,12 +405,22 @@ export async function rollbackTLSNIdentityAdd(
 
     links.splice(at, 1)
     accountGCR.identities.web2[context] = links
+    // Points are awarded once per account and platform: an add that found
+    // them already paid (by another link of the context, web2 or TLSN)
+    // awarded nothing. Undo runs from the tip down, so a link of the context
+    // still here is older than this one and holds those points. Only the
+    // context's last link can have earned them, as for a web2 link. Whether
+    // the add paid is decided in a side effect after the block commits, so
+    // the apply's undo records never hold it.
+    const wasLastOfContext = links.length === 0
 
     return {
         success: true,
         message: "TLSN identity add rolled back",
         entity: accountGCR,
-        sideEffect: () => deductTLSNPoints(context, link, editOperation.account),
+        sideEffect: wasLastOfContext
+            ? () => deductTLSNPoints(context, link, editOperation.account)
+            : undefined,
         ...(used ? { tlsNotary: freedToken(used) } : {}),
     }
 }
