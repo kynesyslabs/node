@@ -222,7 +222,7 @@ describe("native send confirmation fee quote", () => {
     it("documents the shipped SDK fee report and cap gap", async () => {
         const doc = await Bun.file("docs/native-send-fee-quote.md").text()
         expect(doc).toContain("gross fee (excluding the amount)")
-        expect(doc).toMatch(/SDK (?:up to|through|≤) 4\.0\.19/)
+        expect(doc).toMatch(/SDK up to and including 4\.0\.21/)
         expect(doc).toContain("With `gasFeeSeparation` active and `feeBinding` dormant, the SDK undercounts")
         expect(doc).toContain("With it dormant, the SDK overcounts")
         expect(doc).toContain("with `gasFeeSeparation` active")
