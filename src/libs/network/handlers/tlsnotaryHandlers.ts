@@ -8,7 +8,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
             const { requestProxy, ProxyError } = await import(
                 "@/features/tlsnotary/proxyManager"
             )
-            const { validateToken, consumeRetry } = await import(
+            const { validateProxyToken, consumeRetry } = await import(
                 "@/features/tlsnotary/tokenManager"
             )
 
@@ -40,7 +40,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
 
-            const validation = validateToken(
+            const validation = await validateProxyToken(
                 data.tokenId,
                 data.owner,
                 data.targetUrl,

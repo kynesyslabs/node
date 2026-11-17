@@ -9,6 +9,11 @@
 
 // REVIEW: TLSNotary token management for paid attestation access
 import { randomUUID } from "crypto"
+import { isForkActive } from "@/forks/forkGates"
+import {
+    findLiveTlsnRequest,
+    type TlsnRequestRefusal,
+} from "@/libs/tlsnotary/onchainRequests"
 import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -203,6 +208,72 @@ export function validateToken(
         return { valid: false, error: "TOKEN_NO_RETRIES_LEFT" }
     }
 
+    return { valid: true, token }
+}
+
+const CHAIN_REFUSAL_ERRORS: Record<TlsnRequestRefusal, string> = {
+    NOT_FOUND: "TOKEN_NOT_FOUND",
+    OWNER_MISMATCH: "TOKEN_OWNER_MISMATCH",
+    DOMAIN_MISMATCH: "TOKEN_DOMAIN_MISMATCH",
+    EXPIRED: "TOKEN_EXPIRED",
+    ALREADY_STORED: "TOKEN_ALREADY_STORED",
+}
+
+/**
+ * Validate a token for proxy access. Under `tlsnVerified` the token is the
+ * on-chain `tlsn_request` row: `tokenId` is the request tx hash, and it must
+ * be owned by `owner`, locked to the URL's host, not yet stored and not
+ * expired at the next block. Any node can then serve it, and a restart
+ * loses nothing. The in-memory token is only this node's retry count for
+ * that row, created on first use. Before the fork, the in-memory token
+ * created at admission is the token, as {@link validateToken} checks it.
+ */
+export async function validateProxyToken(
+    tokenId: string,
+    owner: string,
+    targetUrl: string,
+): Promise<TokenValidationResult> {
+    if (!isForkActive("tlsnVerified", getSharedState.lastBlockNumber ?? 0)) {
+        return validateToken(tokenId, owner, targetUrl)
+    }
+    let domain: string
+    try {
+        domain = extractDomain(targetUrl)
+    } catch {
+        return { valid: false, error: "TOKEN_DOMAIN_MISMATCH" }
+    }
+    const chain = await findLiveTlsnRequest(tokenId, {
+        sender: owner,
+        height: (getSharedState.lastBlockNumber ?? 0) + 1,
+        domain,
+        pendingOnly: true,
+    })
+    if (chain.ok === false) {
+        return { valid: false, error: CHAIN_REFUSAL_ERRORS[chain.reason] }
+    }
+
+    const store = getTokenStore()
+    const id = chain.request.tokenId
+    let token = store.tokens.get(id)
+    if (!token) {
+        const now = Date.now()
+        token = {
+            id,
+            owner: chain.request.owner,
+            domain: chain.request.domain,
+            status: TokenStatus.PENDING,
+            createdAt: now,
+            // Local bookkeeping only: the chain's expiry height decides.
+            expiresAt: now + TOKEN_CONFIG.EXPIRY_MS,
+            retriesLeft: TOKEN_CONFIG.MAX_RETRIES,
+            txHash: id,
+        }
+        store.tokens.set(id, token)
+    }
+    if (token.retriesLeft <= 0) {
+        token.status = TokenStatus.EXHAUSTED
+        return { valid: false, error: "TOKEN_NO_RETRIES_LEFT" }
+    }
     return { valid: true, token }
 }
 

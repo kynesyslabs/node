@@ -48,6 +48,15 @@ import {
 import { tokenStakingRefusal } from "@/forks/tokenStakingGate"
 import { isL2psTx } from "@/forks/l2psGate"
 import { carriesTlsn } from "@/forks/tlsnDisabledGate"
+import {
+    type GCREditTlsnVerifiedStore,
+    isNodeDerivedTlsnEdit,
+    prepareTlsnTransitions,
+    shippedTlsnEditRefusal,
+    tlsnVerifiedAtTip,
+    withTlsnEdit,
+    withoutNodeDerivedTlsnEdits,
+} from "./tlsnTransitions"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
@@ -922,6 +931,7 @@ export default class HandleGCR {
         const namedElsewhere = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
         const affectedTokenIds = new Set<string>()
+        const affectedAttestationIds = new Set<string>()
         const affectedWorkIds = new Set<string>()
         const affectedSlotKeys = new Set<string>()
 
@@ -945,6 +955,13 @@ export default class HandleGCR {
                     affectedTokenIds.add(
                         (edit as unknown as GCREditTLSNotary).data.tokenId,
                     )
+                    // A store is judged against every row holding its
+                    // attestation id, which may belong to another token.
+                    if (isNodeDerivedTlsnEdit(edit)) {
+                        const attestationId = (edit as unknown as GCREditTlsnVerifiedStore)
+                            .data.attestationId
+                        if (attestationId) affectedAttestationIds.add(attestationId)
+                    }
                 } else if (
                     (editType as string) === "work-attempt" ||
                     (editType as string) === "work-receipt"
@@ -985,7 +1002,7 @@ export default class HandleGCR {
         ] = await Promise.all([
             this.loadGCRMainEntities(affectedPubkeys, createdAccounts),
             this.loadStorageProgramEntities(affectedStorageAddresses),
-            this.loadTLSNotaryEntities(affectedTokenIds),
+            this.loadTLSNotaryEntities(affectedTokenIds, affectedAttestationIds),
             this.loadAtomicWorks(affectedWorkIds),
             this.loadResourceSlots(affectedSlotKeys),
         ])
@@ -1099,13 +1116,19 @@ export default class HandleGCR {
 
     private static async loadTLSNotaryEntities(
         tokenIds: Set<string>,
+        attestationIds: Set<string> = new Set(),
     ): Promise<Map<string, GCRTLSNotary>> {
         const cache = new Map<string, GCRTLSNotary>()
         if (tokenIds.size === 0) return cache
 
         const repo = dataSource.getRepository(GCRTLSNotary)
         const existing = await repo.find({
-            where: { tokenId: In([...tokenIds]) },
+            where: [
+                { tokenId: In([...tokenIds]) },
+                ...(attestationIds.size > 0
+                    ? [{ attestationId: In([...attestationIds]) }]
+                    : []),
+            ],
         })
 
         for (const entry of existing) {
@@ -1377,6 +1400,23 @@ export default class HandleGCR {
             }
         }
 
+        // Under tlsnVerified only the node writes the TLSN table.
+        if (!isRollback && tlsnVerifiedAtTip()) {
+            const refusal = shippedTlsnEditRefusal(tx)
+            if (refusal) {
+                log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${refusal}`)
+                return {
+                    success: false,
+                    entities,
+                    message: refusal,
+                    sideEffects: [],
+                    deferredWrites: [],
+                    appliedEditsCount: 0,
+                    unproven: true,
+                }
+            }
+        }
+
         // Skip txs without GCR edits (valid but no state changes)
         if (
             !tx.content.gcr_edits ||
@@ -1453,7 +1493,8 @@ export default class HandleGCR {
             // Once editBinding binds the set at admission and in the apply
             // pre-pass, this check only has to agree with that comparison, which
             // ignores the order of an edit's keys.
-            const { match } = await verifyGcrEditsMatch(tx, {
+            // The derived TLSN edit is the node's, not part of what was signed.
+            const { match } = await verifyGcrEditsMatch(withoutNodeDerivedTlsnEdits(tx), {
                 expectFeeEdits,
                 keyOrderInsensitive: (await editBindingState()).active,
             })
@@ -1842,7 +1883,14 @@ export default class HandleGCR {
         // This handles side-effects that aren't part of GCR edits (e.g., token creation)
         // Token creation happens during simulation (mempool entry) so user can immediately use it
         // The token is created optimistically - if tx fails consensus, token will expire unused
-        if (simulate && !isRollback && tx.content.type === "native") {
+        // Under tlsnVerified the token is the chain row a block writes, so
+        // admission changes nothing.
+        if (
+            simulate &&
+            !isRollback &&
+            tx.content.type === "native" &&
+            !tlsnVerifiedAtTip()
+        ) {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
@@ -1960,6 +2008,14 @@ export default class HandleGCR {
                     } else if (edit.type === "tlsnotary") {
                         const tlsEdit = edit as unknown as GCREditTLSNotary
                         keys.push("tls:" + tlsEdit.data.tokenId)
+                        // Two stores of one attestation must apply in order,
+                        // so the second sees the first's row.
+                        const attestationId = (
+                            tlsEdit.data as { attestationId?: unknown }
+                        ).attestationId
+                        if (typeof attestationId === "string" && attestationId) {
+                            keys.push("tlsatt:" + attestationId)
+                        }
                         // Conservative: tlsnotary edits carry an account
                         // field; key it even though today's routine only
                         // touches entities.tlsNotaries.
@@ -2430,6 +2486,21 @@ export default class HandleGCR {
             isRollback,
             clock?.height,
         )
+        const tlsnEdits = prepareTlsnTransitions(
+            txs.filter(tx => !refused.has(tx.hash)),
+            {
+                height: clock?.height ?? (getSharedState.lastBlockNumber ?? 0) + 1,
+                isRollback,
+                refuse: (tx, reason) => {
+                    log.error(
+                        `[applyTransactions] Refusing TLSNotary tx ${tx.hash}` +
+                            (clock?.height !== undefined ? ` of block ${clock.height}` : "") +
+                            `: ${reason}`,
+                    )
+                    refused.add(tx.hash)
+                },
+            },
+        )
         const candidates =
             refused.size > 0 ? txs.filter(tx => !refused.has(tx.hash)) : txs
 
@@ -2552,6 +2623,9 @@ export default class HandleGCR {
             finalTxs = finalTxs.map(tx =>
                 withSettlementEdits(tx, settlements.get(tx.hash)),
             )
+        }
+        if (tlsnEdits.size > 0) {
+            finalTxs = finalTxs.map(tx => withTlsnEdit(tx, tlsnEdits.get(tx.hash)))
         }
 
         // A block touches each Work, slot and storage address from at most one
@@ -3305,6 +3379,7 @@ export default class HandleGCR {
                     editOperation,
                     tlsEntity ?? null,
                     simulate,
+                    entities.tlsNotaries,
                 )
 
                 if (

@@ -53,6 +53,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/gcr_routines/routines/identityContextKeys.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/handleGCR.supply.test.ts
+    src/libs/blockchain/gcr/handleGCR.tlsnOnchain.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/gcr/storableRows.test.ts
@@ -112,6 +113,8 @@ SUITE_FILES=(
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
+    src/libs/tlsnotary/storedPresentation.test.ts
+    src/libs/tlsnotary/tlsnOnchainPg.test.ts
     src/libs/tlsnotary/wasmVerifier.test.ts
     src/libs/utils/clockProbe.test.ts
     src/libs/utils/keyMaker.test.ts
