@@ -80,8 +80,10 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 }
                 response.response = result
             } else {
+                // The validated id: under tlsnVerified a 0x or upper-case
+                // tokenId is the same chain token, and must spend its retries.
                 const updatedToken = consumeRetry(
-                    data.tokenId,
+                    validation.token?.id ?? data.tokenId,
                     result.proxyId,
                 )
                 if (updatedToken) {
@@ -135,11 +137,18 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
             const notaryUrl = getPublicUrl(port)
             const proxyUrl = getPublicUrl(proxyPort)
 
+            // The SDK refuses an oversize presentation before signing a
+            // store with this cap; the chain refuses one over it anyway.
+            const { tlsnVerifiedParams } = await import("@/forks/tlsnVerifiedGate")
+            const { getSharedState } = await import("@/utilities/sharedState")
+            const params = tlsnVerifiedParams(getSharedState.lastBlockNumber ?? 0)
+
             response.response = {
                 notaryUrl,
                 proxyUrl,
                 publicKey,
                 version: "0.1.0",
+                ...(params ? { maxPresentationBytes: params.maxPresentationBytes } : {}),
             }
         } catch (error) {
             log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)
@@ -154,7 +163,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
     "tlsnotary.getToken": async (data, response) => {
         try {
-            const { getTokenByTxHash, getToken } = await import(
+            const { lookupToken } = await import(
                 "@/features/tlsnotary/tokenManager"
             )
 
@@ -163,12 +172,8 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 txHash?: string
             }
 
-            let token
-            if (tokenId) {
-                token = getToken(tokenId)
-            } else if (txHash) {
-                token = getTokenByTxHash(txHash)
-            } else {
+            const id = tokenId || txHash
+            if (typeof id !== "string" || !id) {
                 response.result = 400
                 response.response = {
                     error: "INVALID_REQUEST",
@@ -177,6 +182,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
 
+            const token = await lookupToken(id)
             if (!token) {
                 response.result = 404
                 response.response = {
@@ -184,16 +190,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                     message: "No token found for the provided identifier",
                 }
             } else {
-                response.response = {
-                    token: {
-                        id: token.id,
-                        owner: token.owner,
-                        domain: token.domain,
-                        status: token.status,
-                        expiresAt: token.expiresAt,
-                        retriesLeft: token.retriesLeft,
-                    },
-                }
+                response.response = { token }
             }
         } catch (error) {
             log.error("[manageNodeCall] tlsnotary.getToken error: " + error)

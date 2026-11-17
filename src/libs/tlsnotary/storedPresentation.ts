@@ -91,10 +91,14 @@ function anyAuthed(ranges: [number, number][], start: number, end: number): bool
 }
 
 interface HeaderLine {
+    /** Lowercase name; empty when the line has no colon. */
     name: string
     value: string
     start: number
+    /** Offset of the colon, or -1. */
+    colon: number
     valueStart: number
+    /** Offset of the line's CRLF, or of the head's end when it has none. */
     end: number
 }
 
@@ -110,19 +114,18 @@ function headerLines(sent: Buffer): HeaderLine[] {
     while (start < head) {
         let end = sent.indexOf("\r\n", start)
         if (end === -1 || end > head) end = head
-        const colon = sent.indexOf(":", start)
-        if (colon !== -1 && colon < end) {
-            const name = sent.subarray(start, colon).toString("latin1").trim().toLowerCase()
-            let valueStart = colon + 1
-            while (valueStart < end && (sent[valueStart] === 0x20 || sent[valueStart] === 0x09)) valueStart++
-            lines.push({
-                name,
-                value: sent.subarray(valueStart, end).toString("latin1").trim(),
-                start,
-                valueStart,
-                end,
-            })
-        }
+        let colon = sent.indexOf(":", start)
+        if (colon >= end) colon = -1
+        let valueStart = colon === -1 ? end : colon + 1
+        while (valueStart < end && (sent[valueStart] === 0x20 || sent[valueStart] === 0x09)) valueStart++
+        lines.push({
+            name: colon === -1 ? "" : sent.subarray(start, colon).toString("latin1").trim().toLowerCase(),
+            value: sent.subarray(valueStart, end).toString("latin1").trim(),
+            start,
+            colon,
+            valueStart,
+            end,
+        })
         start = end + 2
     }
     return lines
@@ -156,16 +159,32 @@ export function readBindHeader(
     return { ok: true, bind: { context: parts[2], sender: parts[3], requestTxHash: parts[4] } }
 }
 
-/** The name of a secret header whose value the presentation reveals, or null. */
+/**
+ * Why the presentation may reveal a credential, or null. A secret header
+ * (Authorization, Cookie, Proxy-Authorization) must keep its value hidden.
+ * A header line is either revealed whole, with its CRLF, or reveals at most
+ * its name and colon. Hidden bytes read as zeros, so a line that reveals part
+ * of its value could hide the name of a secret header, or a CRLF that joins
+ * a secret header to the line before it.
+ */
 export function revealedSecretHeader(
     verified: Pick<TlsnVerifiedPresentation, "sent" | "sentAuthed">,
 ): string | null {
     if (verified.sent === null || verified.sentAuthed === null) return null
     const sent = Buffer.from(verified.sent, "hex")
+    const ranges = verified.sentAuthed
     for (const line of headerLines(sent)) {
-        if (!SECRET_HEADERS.has(line.name)) continue
-        if (line.end > line.valueStart && anyAuthed(verified.sentAuthed, line.valueStart, line.end)) {
-            return line.name
+        const lineEnd = Math.min(line.end + 2, sent.length)
+        if (!anyAuthed(ranges, line.start, line.end)) continue
+        if (authed(ranges, line.start, lineEnd)) {
+            if (SECRET_HEADERS.has(line.name) && line.end > line.valueStart) return line.name
+            continue
+        }
+        const nameShown = line.colon !== -1 && authed(ranges, line.start, line.colon + 1)
+        const valueShown = anyAuthed(ranges, line.colon === -1 ? line.start : line.valueStart, line.end)
+        if (!nameShown || valueShown) {
+            const shown = line.name.replace(/[^\x21-\x7e]/g, "")
+            return `partly revealed ${shown || "unnamed"}`
         }
     }
     return null

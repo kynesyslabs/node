@@ -40,13 +40,18 @@ const trustedKeys: { alg: string; publicKey: string }[] = JSON.parse(
     readFileSync(join(VECTORS, "trusted-notary-keys.json"), "utf8"),
 )
 
-/** `out` with its github bind header rewritten to bind a store, ranges shifted to match. */
-function asStore(out: Record<string, any>): Record<string, any> {
+/**
+ * `out` with its github bind header rewritten to bind a store, ranges shifted
+ * to match. `sdkForm` drops the 0x of the request hash, as the SDK writes it.
+ */
+function asStore(out: Record<string, any>, sdkForm = false): Record<string, any> {
     const sent = Buffer.from(out.sent, "hex").toString("latin1")
     const from = "demos-tlsn:v1:github:"
     const at = sent.indexOf(from)
     expect(at).toBeGreaterThan(-1)
-    const rewritten = sent.replace(from, "demos-tlsn:v1:store:")
+    let rewritten = sent.replace(from, "demos-tlsn:v1:store:")
+    if (sdkForm) rewritten = rewritten.replace(`:${REQUEST}\r\n`, `:${REQUEST.slice(2)}\r\n`)
+    expect(rewritten).not.toBe(sent)
     const shift = rewritten.length - sent.length
     return {
         ...out,
@@ -114,6 +119,53 @@ describe("revealedSecretHeader", () => {
         expect(revealedSecretHeader(vector("valid-local"))).toBeNull()
     })
 
+    /** A head whose bytes outside `hidden` (substrings of it) are authenticated, as the verifier reports it. */
+    function partly(head: string, ...hidden: string[]) {
+        const sent = Buffer.from(head, "latin1")
+        const cuts = hidden
+            .map(h => {
+                const at = head.indexOf(h)
+                expect(at).toBeGreaterThan(-1)
+                return [at, at + h.length] as [number, number]
+            })
+            .sort((a, b) => a[0] - b[0])
+        const ranges: [number, number][] = []
+        let at = 0
+        for (const [from, to] of cuts) {
+            if (from > at) ranges.push([at, from])
+            sent.fill(0, from, to)
+            at = to
+        }
+        if (at < sent.length) ranges.push([at, sent.length])
+        return { sent: sent.toString("hex"), sentAuthed: ranges }
+    }
+    const HEAD = "GET / HTTP/1.1\r\nhost: a.test\r\nx-note: hi\r\nauthorization: Bearer s3cret\r\nx-demos-bind: b\r\n\r\n"
+
+    it("accepts a secret header whose value alone is hidden", () => {
+        expect(revealedSecretHeader(partly(HEAD, "Bearer s3cret"))).toBeNull()
+    })
+
+    it("refuses a hidden header name over a revealed value", () => {
+        expect(revealedSecretHeader(partly(HEAD, "authorization"))).not.toBeNull()
+        expect(revealedSecretHeader(partly(HEAD, "author"))).not.toBeNull()
+    })
+
+    it("refuses a hidden colon or CRLF that would hide a secret header in another line", () => {
+        expect(revealedSecretHeader(partly(HEAD, "authorization:"))).not.toBeNull()
+        expect(revealedSecretHeader(partly(HEAD, "hi\r\n"))).not.toBeNull()
+    })
+
+    it("refuses a value revealed only in part", () => {
+        expect(revealedSecretHeader(partly(HEAD, "s3cret"))).not.toBeNull()
+        expect(revealedSecretHeader(partly(HEAD, "a.test"))).not.toBeNull()
+    })
+
+    it("accepts a line hidden up to its CRLF, and refuses one whose CRLF is hidden too", () => {
+        expect(revealedSecretHeader(partly(HEAD, "authorization: Bearer s3cret"))).toBeNull()
+        // Its zeros then lead the next line, whose name can no longer be read.
+        expect(revealedSecretHeader(partly(HEAD, "authorization: Bearer s3cret\r\n"))).not.toBeNull()
+    })
+
     it("names the Authorization header when its value is authenticated", () => {
         const out = vector("valid-local")
         expect(revealedSecretHeader({ ...out, sentAuthed: [[0, out.transcriptLength.sent]] })).toBe("authorization")
@@ -142,6 +194,15 @@ describe("verifyStoredPresentation", () => {
             attestedTimeSec: vector("valid-local").time,
             canonicalProof: JSON.stringify({ version: "0.1.0-alpha.12", data: "ab".repeat(64) }),
         })
+    })
+
+    it("accepts the bind value in the SDK's form: sender with 0x, request hash without", () => {
+        const out = asStore(vector("valid-local"), true)
+        const sent = Buffer.from(out.sent, "hex").toString("latin1")
+        expect(sent).toContain(`x-demos-bind: demos-tlsn:v1:store:${SENDER}:${REQUEST.slice(2)}\r\n`)
+        nextOutput = out
+
+        expect(verifyStoredPresentation(input({ requestTxHash: REQUEST.slice(2) })).ok).toBe(true)
     })
 
     it("accepts the k256 vector too", () => {

@@ -186,8 +186,9 @@ async function store(
     )
 }
 
+/** The bind value the SDK writes: the sender with 0x, the request hash without. */
 const bind = (requestHash: string, sender = SENDER, context = "store") =>
-    `demos-tlsn:v1:${context}:${sender}:0x${requestHash}`
+    `demos-tlsn:v1:${context}:${sender}:${requestHash}`
 
 const facts = (
     requestHash: string,

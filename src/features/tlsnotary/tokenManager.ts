@@ -12,6 +12,7 @@ import { randomUUID } from "crypto"
 import { isForkActive } from "@/forks/forkGates"
 import {
     findLiveTlsnRequest,
+    getOnChainTlsnRequest,
     type TlsnRequestRefusal,
 } from "@/libs/tlsnotary/onchainRequests"
 import log from "@/utilities/logger"
@@ -375,6 +376,49 @@ export function getTokenByTxHash(txHash: string): AttestationToken | undefined {
         }
     }
     return undefined
+}
+
+/** A token as `tlsnotary.getToken` reports it. */
+export interface TokenView {
+    id: string
+    owner: string
+    domain: string
+    status: TokenStatus
+    /** Local proxy bookkeeping, ms; null when this node has not served the token yet. */
+    expiresAt: number | null
+    /** Last block height the chain accepts the token at (tlsnVerified only). */
+    expiresAtHeight?: number
+    retriesLeft: number
+}
+
+/**
+ * The token `idOrTxHash` names. Under tlsnVerified it is the committed
+ * request, so a client finds it as soon as the request is in a block, with
+ * this node's retry count once the proxy has served it.
+ */
+export async function lookupToken(idOrTxHash: string): Promise<TokenView | null> {
+    const tip = getSharedState.lastBlockNumber ?? 0
+    if (!isForkActive("tlsnVerified", tip)) {
+        const token = getToken(idOrTxHash) ?? getTokenByTxHash(idOrTxHash)
+        if (!token) return null
+        const { id, owner, domain, status, expiresAt, retriesLeft } = token
+        return { id, owner, domain, status, expiresAt, retriesLeft }
+    }
+    const request = await getOnChainTlsnRequest(idOrTxHash)
+    if (!request) return null
+    const local = getToken(request.tokenId)
+    let status = local?.status ?? TokenStatus.PENDING
+    if (request.status === "stored") status = TokenStatus.STORED
+    else if (tip + 1 > request.expiresAtHeight) status = TokenStatus.EXPIRED
+    return {
+        id: request.tokenId,
+        owner: request.owner,
+        domain: request.domain,
+        status,
+        expiresAt: local?.expiresAt ?? null,
+        expiresAtHeight: request.expiresAtHeight,
+        retriesLeft: local?.retriesLeft ?? TOKEN_CONFIG.MAX_RETRIES,
+    }
 }
 
 /**
