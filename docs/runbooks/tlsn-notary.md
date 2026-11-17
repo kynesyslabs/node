@@ -64,6 +64,23 @@ Files: `tlsnotary/notary-service/` in the node repository.
   people and the hosts run nothing else.
 - **Availability.** A notary outage stops new identity links and stores
   only. Consensus never calls the notary.
+- **Deadline for users: store within one hour of attesting.** Two limits
+  apply to a presentation, and the earlier one wins:
+
+  | Limit | Mainnet value | Measured | Where it is set |
+  |---|---|---|---|
+  | `tlsn_request` token lifetime | 500 blocks (about 83 min at 10 s blocks, 58 min at 7 s) | from the block the request landed in | `TLSN_REQUEST_TTL_BLOCKS`, `src/libs/tlsnotary/onchainRequests.ts` |
+  | attestation age | 3600 s | from the time the notary attested to the time of the block the store or link lands in | genesis `tlsnVerified.freshnessWindowSec`, checked in `src/libs/tlsnotary/presentationGate.ts` |
+
+  A user attests after the request is included, so at 10 s blocks the age
+  limit binds: a `tlsn_store` or TLSN identity link included more than
+  3600 s after the attestation is refused with `attestation is stale`, even
+  if its token is still unused and unexpired. At faster blocks the token
+  can expire first. This is intended and safe; tell integrators to store or
+  link right after attesting. The SDK exports the value as
+  `TLSN_ATTESTATION_MAX_AGE_SECONDS`. Support cases of "attestation is
+  stale" with a live token are this rule, not a fault; a notary clock behind
+  the chain (section 8) shows the same refusal sooner than an hour.
 
 Why each guard exists (TLSN design, section 2.5):
 
