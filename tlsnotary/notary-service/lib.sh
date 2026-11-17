@@ -4,31 +4,40 @@
 
 # shellcheck shell=sh
 
+# The guard and the ceremony read private keys; a trace (sh -x, SHELLOPTS)
+# would copy them into a journal.
+set +x
+
 NOTARY_LOG_TAG=${NOTARY_LOG_TAG:-tlsn-notary}
 
 notary_log() {
     printf '%s: %s\n' "${NOTARY_LOG_TAG}" "$*" >&2
 }
 
-# A k256 notary key as the verifier reports it and the fork payload lists it.
-is_compressed_pubkey() {
-    printf '%s' "$1" | grep -Eqx '0[23][0-9a-f]{64}'
+# One line, no newline inside: grep -x alone matches line by line, so a
+# value with an embedded newline could pass it.
+single_line() {
+    [ "$(printf '%s' "$1" | wc -l | tr -d ' ')" = 0 ]
 }
 
-# The DER of the single PEM block labelled $2 in file $1, as lowercase hex.
-# Fails when the file holds no block, several blocks, or any other label, so
-# an encrypted or SEC1 key cannot slip past the PKCS#8 layout check below.
+# A k256 notary key as the verifier reports it and the fork payload lists it.
+is_compressed_pubkey() {
+    single_line "$1" && printf '%s' "$1" | grep -Eqx '0[23][0-9a-f]{64}'
+}
+
+# The DER of the PEM block labelled $2 in file $1, as lowercase hex, on
+# stdout. The file must be that one block and nothing else: its first line
+# the BEGIN line, its last non-empty line the END line, no other label, so
+# an encrypted or SEC1 key, or text the notary's parser might reject, is
+# refused here. Streams end to end so no secret is held in a variable.
 pem_der_hex() {
     _file=$1
     _label=$2
     [ "$(grep -c -- '-----BEGIN ' "${_file}")" = 1 ] || return 1
-    [ "$(grep -c -- "-----BEGIN ${_label}-----" "${_file}")" = 1 ] || return 1
-    [ "$(grep -c -- "-----END ${_label}-----" "${_file}")" = 1 ] || return 1
-    _b64=$(sed -n "/-----BEGIN ${_label}-----/,/-----END ${_label}-----/p" "${_file}" | sed '1d;$d' | tr -d ' \t\r\n')
-    [ -n "${_b64}" ] || return 1
-    printf '%s' "${_b64}" | base64 -d >/dev/null 2>&1 || return 1
-    printf '%s' "${_b64}" | base64 -d 2>/dev/null | od -An -v -tx1 | tr -d ' \n'
-    _b64=
+    [ "$(grep -c -- '-----END ' "${_file}")" = 1 ] || return 1
+    [ "$(head -n 1 "${_file}" | tr -d '\r')" = "-----BEGIN ${_label}-----" ] || return 1
+    [ "$(grep -v '^[[:space:]]*$' "${_file}" | tail -n 1 | tr -d '\r')" = "-----END ${_label}-----" ] || return 1
+    sed '1d;/^-----END /,$d' "${_file}" | tr -d ' \t\r\n' | base64 -d 2>/dev/null | od -An -v -tx1 | tr -d ' \n'
 }
 
 # 04 || X || Y (130 hex) -> 02/03 || X, the form the fork payload pins.
@@ -51,10 +60,10 @@ compress_point() {
 # the scalar (elliptic-curve's SEC1 import checks the pair), so the key
 # checked here is the key the notary signs with.
 k256_pkcs8_pubkey() {
-    _hex=$(pem_der_hex "$1" "PRIVATE KEY") || { _hex=; return 1; }
-    _point=$(printf '%s' "${_hex}" |
+    # Only the public point is ever captured; a failed or partial base64
+    # decode cannot match the whole-DER pattern.
+    _point=$(pem_der_hex "$1" "PRIVATE KEY" |
         sed -n 's/^308184020100301006072a8648ce3d020106052b8104000a046d306b0201010420[0-9a-f]\{64\}a14403420004\([0-9a-f]\{128\}\)$/04\1/p')
-    _hex=
     [ -n "${_point}" ] || return 1
     compress_point "${_point}"
 }
@@ -123,7 +132,8 @@ clock_status() {
     if command -v "${_chr}" >/dev/null 2>&1; then
         _tracking=$("${_chr}" -n tracking 2>/dev/null)
         if [ -n "${_tracking}" ]; then
-            if printf '%s\n' "${_tracking}" | grep -Eq '^Leap status *: *Normal'; then
+            # A leap second announcement is still a synchronised clock
+            if printf '%s\n' "${_tracking}" | grep -Eq '^Leap status *: *(Normal|Insert second|Delete second)$'; then
                 [ "${CLOCK_SYNCED}" = no ] || CLOCK_SYNCED=yes
             else
                 CLOCK_SYNCED=no

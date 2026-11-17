@@ -32,6 +32,14 @@ Files: `tlsnotary/notary-service/` in the node repository.
   lists as the running key ([docs/mainnet/genesis.md](../mainnet/genesis.md)).
 - **`demos-notary-standby`** is listed in the genesis too but never runs
   until a rotation (section 6). It stays SOPS-encrypted with the holders.
+- **Failover is active/passive, or sticky per session.** A prover's
+  `POST /session` and its `/notarize?sessionId=...` websocket must reach the
+  same notary process: the session lives in that process's memory. Send all
+  traffic to one instance and switch to the other only when the first fails
+  its health check (a proxy with a backup upstream, or DNS failover), or pin
+  each client to one instance. Round-robin per request breaks every second
+  session. A switch drops the sessions in flight on the failed instance;
+  their provers retry.
 - Running the two instances on distinct keys is possible (up to 8 keys) but
   needs a third `notaryKeys` entry in the genesis and the SDK pins; that is an
   owner decision (section 10).
@@ -93,9 +101,11 @@ checked with `git verify-tag` (INSTALL.md, "Run a released image").
    journalctl -u tlsn-notary -n 20   # "preflight passed: key SHA256:..." then "checked, starting notary-server"
    ```
 
-   Start, stop and restart only through the unit. `docker compose up` by
-   hand, or a Docker daemon restart, finds no fresh preflight stamp and the
-   container refuses to start (exit 7).
+   Start, stop and restart only through the unit. Docker never restarts the
+   container itself (restart policy "no"); systemd restarts it through the
+   preflight. `docker compose up` or `docker start` by hand, more than 300 s
+   after the last preflight, finds no fresh stamp and the container refuses
+   to start (exit 7).
 5. **TLS reverse proxy.** The notary listens on `127.0.0.1:7047` without TLS.
    Put it behind the site that serves the notary URL; the prover uses
    `POST /session` and a websocket on `/notarize?sessionId=...`, so the proxy
@@ -105,6 +115,10 @@ checked with `git verify-tag` (INSTALL.md, "Run a released image").
    Rate-limit `/session` per client address: each session holds about 1 GiB
    of the notary's memory for up to 5 minutes.
 6. **Check.** `notary-check.sh` (section 5) exits 0.
+7. **Failover drill.** With both hosts up, stop the active instance
+   (`systemctl stop tlsn-notary`), check that the public URL serves the
+   other one (`<notary-url>/info` shows the same key, a test link
+   completes), then start it again. Repeat after every proxy change.
 
 Memory and sessions: `NOTARY_CONCURRENCY` (default 2) is the number of
 sessions in flight; each peaks near 1 GiB and the server keeps a few hundred
@@ -123,7 +137,7 @@ code (`exec`):
 | Code | Meaning | Fix |
 |---|---|---|
 | 2 | configuration: `NOTARY_EXPECTED_PUBKEY` malformed, no key path, `NOTARY_BIND` on every interface | the env file |
-| 3 | key file missing, not a file, unreadable, empty or oversized | section 2, step 2 |
+| 3 | key file missing, not a file, unreadable, empty or oversized; in the preflight also a file the container user cannot read (owner not `NOTARY_UID`, and not group `NOTARY_GID` with group read) | section 2, step 2 (`chown 10001:10001`) |
 | 4 | key file readable by others or writable by its group | `chmod 0400` |
 | 5 | not an unencrypted PKCS#8 secp256k1 key with its public key (P-256, SEC1, encrypted, truncated) | decrypt the ceremony's file again |
 | 6 | the key file holds another key than `NOTARY_EXPECTED_PUBKEY` | the wrong key or the wrong env file; never "fix" by changing the expected key to what the file holds |
@@ -158,9 +172,12 @@ and writes:
   that is not access-controlled for that purpose.
 - `<id>.notary-key.json`: `{"id","alg":"k256","hex"}` for the fork payload.
 
-The private key is made in a RAM-backed temporary directory, never printed,
-and wiped on exit. The script refuses an existing output (a key id is made
-once). `--allow-online` exists for rehearsal keys only.
+The private key is made in a RAM-backed temporary directory (`/dev/shm`, or
+`TMPDIR` when that is tmpfs), never printed, and wiped on exit. Without a
+RAM-backed directory the script refuses (exit 6); `--allow-disk-temp` lets
+it use disk, for rehearsal keys only, since a wiped file can survive on an
+SSD. The script refuses an existing output (a key id is made once).
+`--allow-online` exists for rehearsal keys only.
 
 Before the ceremony ends, each holder decrypts their copy and checks it:
 
@@ -213,7 +230,7 @@ Run it every minute from root's crontab and alert on a non-zero exit through
 the team's alert route (owner decision, section 10):
 
 ```cron
-* * * * * set -a; . /etc/tlsn-notary/notary.env; set +a; <checkout>/tlsnotary/notary-service/notary-check.sh > /run/tlsn-notary/check.last 2>&1 || <alert command> "tlsn-notary $(hostname): exit $? $(grep FAIL /run/tlsn-notary/check.last | head -3)"
+* * * * * set -a; . /etc/tlsn-notary/notary.env; set +a; <checkout>/tlsnotary/notary-service/notary-check.sh > /run/tlsn-notary/check.last 2>&1 || { rc=$?; <alert command> "tlsn-notary $(hostname): exit ${rc} $(grep FAIL /run/tlsn-notary/check.last | head -3)"; }
 ```
 
 Check the public URL from outside too (any uptime monitor on
@@ -239,12 +256,19 @@ again whenever a block is applied, a resync from block 0 included.
 Planned rotation to the standby (no release needed, the standby is already
 pinned):
 
-1. Holders decrypt `demos-notary-standby` to both hosts (section 2, step 2).
-2. Per host, one at a time: set `NOTARY_EXPECTED_PUBKEY` to the standby key,
-   `systemctl restart tlsn-notary`, run `notary-check.sh`.
-3. Hold a new ceremony for the next standby and ship it as an added key
+1. Holders stream `demos-notary-standby` to both hosts as a second file,
+   `/etc/tlsn-notary/notary-standby.key` (section 2, step 2, with that
+   name: owner 10001, mode 0400). The running key file stays untouched, so
+   a host can go back to it at any point.
+2. Per host, one at a time, starting with the passive one: in
+   `/etc/tlsn-notary/notary.env` change `NOTARY_KEY_FILE` to the standby
+   file and `NOTARY_EXPECTED_PUBKEY` to the standby key together (the guard
+   refuses with exit 6 if only one changes), `systemctl restart
+   tlsn-notary`, run `notary-check.sh`. Then switch the active one.
+3. When both hosts serve the standby key, destroy the old key's plain
+   copies on the hosts (`shred -u /etc/tlsn-notary/notary.key`).
+4. Hold a new ceremony for the next standby and ship it as an added key
    (above).
-4. Destroy the old key's plain copies on the hosts (`shred -u`).
 
 Rehearse this on the rehearsal network (TLSN design, section 6, key-rotation
 drill) before mainnet needs it.
@@ -262,7 +286,10 @@ holder machine with the age key on it.
    [fork-schedule-policy.md](fork-schedule-policy.md)), refuses
    `tlsn_request`, `tlsn_store` and every `tlsnotary` edit from H, before
    any fee. An identity link needs a pending `tlsn_request` of its sender,
-   so new links stop once the requests made before H have expired.
+   so new links stop once the requests made before H have expired: a
+   request lives 500 blocks (`TLSN_REQUEST_TTL_BLOCKS`), about an hour at
+   the 7 s block target. Links made with the key in that window are
+   recorded in step 3.
 2. **Stop both notaries** (`systemctl stop tlsn-notary`) if the key they run
    is the compromised one, and destroy its plain copies.
 3. **Record** the height H, the key id and every link made with the key

@@ -3,8 +3,9 @@
 #
 # The preflight runs before every start, restarts included, so the notary
 # never starts on a missing or foreign key or an unsynchronised clock.
-# Compose's restart policy is "no": a container Docker restarted by itself
-# would skip the preflight (its entrypoint then refuses on a stale stamp).
+# Compose's restart policy is "no", so Docker never restarts the container
+# on its own; systemd restarts it through the preflight. A container started
+# by hand long after its preflight refuses on the stale stamp.
 #
 # <checkout> is the node checkout on the host, at the release tag in use.
 

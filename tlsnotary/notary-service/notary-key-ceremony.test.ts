@@ -6,6 +6,8 @@ import { isSecp256k1CompressedPoint } from "../../src/forks/tlsnVerifiedPayload"
 import { CEREMONY, GUARD, compressedPubOf, hasTool, makeTmp, run, scalarOf } from "./testSupport"
 
 const REAL_SOPS = hasTool("sops") && hasTool("age-keygen")
+// CI installs both; there a missing tool must fail the run, not skip it
+const SKIP_REAL_SOPS = !REAL_SOPS && !process.env.CI
 const TEMPLATE = path.join(import.meta.dir, "../../docs/mainnet/genesis.template.json")
 
 let dir: string
@@ -44,6 +46,10 @@ done
 [ -n "$cfg" ] && [ -f "$in" ] || exit 9
 cp "$in" "${dir}/plaintext-seen-by-sops.key"
 recips=$(sed -n 's/.*age: "\\(.*\\)"/\\1/p' "$cfg")
+# Real sops adds the recipients of these variables; STUB_EXTRA stands for
+# any other source of an extra recipient
+[ -n "\${SOPS_AGE_RECIPIENTS:-}" ] && recips="$recips,$SOPS_AGE_RECIPIENTS"
+[ -n "\${STUB_EXTRA:-}" ] && recips="$recips,$STUB_EXTRA"
 printf '{"data":"ENC[AES256_GCM,data:x,type:str]","sops":{"age":['
 first=1
 for r in $(printf '%s' "$recips" | tr ',' ' '); do
@@ -103,6 +109,9 @@ describe("notary-key-ceremony.sh", () => {
             NOTARY_EXPECTED_PUBKEY: entry.hex,
             NOTARY_KEY_FILE: seen,
             NOTARY_ALLOW_UNSYNCED_CLOCK: "1",
+            NOTARY_STAMP_DIR: path.join(dir, "stamp"),
+            NOTARY_UID: String(process.getuid?.()),
+            NOTARY_GID: String(process.getgid?.()),
         })
         expect(guard.status).toBe(0)
     })
@@ -123,7 +132,22 @@ describe("notary-key-ceremony.sh", () => {
         expect(tlsnNotaryReasons(filled)).toEqual([])
     })
 
-    it.skipIf(!REAL_SOPS)("encrypts with sops so that each holder alone can decrypt the key", () => {
+    it("encrypts to exactly the holders given", () => {
+        const env = stubSops()
+        const extra = "age1" + "x".repeat(58)
+        const args = (id: string) => ["--id", id, "--recipient", FAKE_RECIPIENTS[0], "--recipient", FAKE_RECIPIENTS[1], "--out-dir", out, "--allow-online"]
+        // A recipient variable in the operator's shell is cleared for sops
+        const r = ceremony(args("k-env"), { ...env, SOPS_AGE_RECIPIENTS: extra })
+        expect(r.status).toBe(0)
+        expect(fs.readFileSync(path.join(out, "k-env.key.sops.json"), "utf8")).not.toContain(extra)
+        // Any other extra recipient fails the ceremony and leaves nothing behind
+        const x = ceremony(args("k-extra"), { ...env, STUB_EXTRA: extra })
+        expect(x.status).toBe(6)
+        expect(x.stderr).toContain("names 3 recipients, not the 2 holders")
+        expect(fs.readdirSync(out).filter(n => n.startsWith("k-extra"))).toEqual([])
+    })
+
+    it.skipIf(SKIP_REAL_SOPS)("encrypts with sops so that each holder alone can decrypt the key", () => {
         const holders = [0, 1].map(i => {
             const id = path.join(dir, `holder-${i}.agekey`)
             expect(run(["age-keygen", "-o", id], {}).status).toBe(0)
@@ -162,6 +186,8 @@ describe("notary-key-ceremony.sh", () => {
             ["--id", "k", "--recipient", a, "--recipient", "ssh-ed25519 AAAA", "--out-dir", out],
             ["--id", "k", "--recipient", a, "--recipient", b],
             ["--id", "k", "--recipient", a, "--recipient", b, "--out-dir", out, "--force"],
+            ["--id", "ok\n../../x", "--recipient", a, "--recipient", b, "--out-dir", out],
+            ["--id", "k", "--recipient", `${a}\n${b}`, "--recipient", b, "--out-dir", out],
         ]
         for (const args of cases) {
             const r = ceremony([...args, "--allow-online"])

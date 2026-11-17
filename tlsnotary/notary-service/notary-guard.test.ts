@@ -3,6 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import {
     GUARD,
+    SERVICE_DIR,
     chronycStub,
     makeKey,
     makeTmp,
@@ -32,6 +33,9 @@ const preflight = (env: Record<string, string | undefined> = {}) =>
         NOTARY_EXPECTED_PUBKEY: key.pub,
         NOTARY_KEY_FILE: key.file,
         NOTARY_STAMP_FILE: stamp,
+        // The test's own user stands for the container user
+        NOTARY_UID: String(process.getuid?.()),
+        NOTARY_GID: String(process.getgid?.()),
         ...syncedClock,
         ...env,
     })
@@ -63,10 +67,31 @@ describe("preflight then exec", () => {
         expect(r.stdout.trim()).toBe("notary-server started")
     })
 
-    it("never prints the private key", () => {
+    it("never prints the private key, traced or not", () => {
         const scalar = scalarOf(key.file)
-        const out = [preflight(), execGuard(), execGuard({ NOTARY_EXPECTED_PUBKEY: "02" + "1".repeat(64) })]
-        for (const r of out) expect((r.stdout + r.stderr).toLowerCase()).not.toContain(scalar)
+        const body = fs.readFileSync(key.file, "utf8").split("\n")[1]
+        const out = [
+            preflight(),
+            execGuard(),
+            execGuard({ NOTARY_EXPECTED_PUBKEY: "02" + "1".repeat(64) }),
+            // An operator debugging the unit with sh -x
+            run(["sh", "-x", GUARD, "preflight"], {
+                NOTARY_EXPECTED_PUBKEY: key.pub,
+                NOTARY_KEY_FILE: key.file,
+                NOTARY_STAMP_FILE: stamp,
+                NOTARY_UID: String(process.getuid?.()),
+                NOTARY_GID: String(process.getgid?.()),
+                ...syncedClock,
+            }),
+            // The parser itself traced: it must stream the key, never hold it
+            run(["sh", "-c", `. "${SERVICE_DIR}/lib.sh"; set -x; k256_pkcs8_pubkey "$0"`, key.file], {}),
+        ]
+        expect(out[4].stdout).toBe(key.pub)
+        for (const r of out) {
+            const all = r.stdout + r.stderr
+            expect(all.toLowerCase()).not.toContain(scalar)
+            expect(all).not.toContain(body)
+        }
     })
 })
 
@@ -95,6 +120,18 @@ describe("key file refusals", () => {
         const r = preflight()
         expect(r.status).toBe(3)
         expect(r.stderr).toContain("not readable")
+    })
+
+    it("refuses in the preflight a key file the container user could not read", () => {
+        const r = preflight({ NOTARY_UID: "10001", NOTARY_GID: "10001" })
+        expect(r.status).toBe(3)
+        expect(r.stderr).toContain("could not read it")
+        // Another owner, but the container's group with group read
+        const gid = String(process.getgid?.())
+        fs.chmodSync(key.file, 0o440)
+        expect(preflight({ NOTARY_UID: "10001", NOTARY_GID: gid }).status).toBe(0)
+        fs.chmodSync(key.file, 0o400)
+        expect(preflight({ NOTARY_UID: "10001", NOTARY_GID: gid }).status).toBe(3)
     })
 
     it("refuses a key file others can read or its group can write", () => {
@@ -133,6 +170,13 @@ describe("key file refusals", () => {
         const lines = fs.readFileSync(key.file, "utf8").trim().split("\n")
         fs.writeFileSync(truncated, [lines[0], lines[1], lines[lines.length - 1]].join("\n") + "\n", { mode: 0o400 })
         cases.truncated = truncated
+        const pem = fs.readFileSync(key.file, "utf8")
+        const leading = path.join(dir, "leading.key")
+        fs.writeFileSync(leading, "notary key\n" + pem, { mode: 0o400 })
+        cases.leadingText = leading
+        const trailing = path.join(dir, "trailing.key")
+        fs.writeFileSync(trailing, pem + "copied from the ceremony\n", { mode: 0o400 })
+        cases.trailingText = trailing
 
         for (const [name, file] of Object.entries(cases)) {
             const r = preflight({ NOTARY_KEY_FILE: file })
@@ -151,7 +195,7 @@ describe("key file refusals", () => {
     })
 
     it("refuses a malformed expected key", () => {
-        for (const bad of ["", "04" + "a".repeat(64), "02" + "A".repeat(64), "02abc", "FILL: primary notary public key"]) {
+        for (const bad of ["", "04" + "a".repeat(64), "02" + "A".repeat(64), "02abc", "FILL: primary notary public key", `${key.pub}\n${key.pub}`]) {
             expect(preflight({ NOTARY_EXPECTED_PUBKEY: bad }).status).toBe(2)
         }
     })
@@ -173,6 +217,8 @@ describe("clock refusals", () => {
         expect(far.stderr).toContain("-45.5")
         const near = preflight({ NOTARY_TIMEDATECTL: ABSENT, NOTARY_CHRONYC: chronycStub(dir, "Normal", 0.002) })
         expect(near.status).toBe(0)
+        // A leap second announcement is still a synchronised clock
+        expect(preflight({ NOTARY_TIMEDATECTL: ABSENT, NOTARY_CHRONYC: chronycStub(dir, "Insert second", 0.002) }).status).toBe(0)
         expect(preflight({
             NOTARY_TIMEDATECTL: ABSENT,
             NOTARY_CHRONYC: chronycStub(dir, "Normal", 3),
@@ -203,6 +249,8 @@ describe("clock refusals", () => {
         expect(r.status).toBe(0)
         expect(r.stderr).toContain("local development only")
         expect(fs.existsSync(stamp)).toBe(false)
+        // The stamp directory exists for the compose bind mount
+        expect(fs.existsSync(path.dirname(stamp))).toBe(true)
         expect(preflight({ NOTARY_TIMEDATECTL: ABSENT, NOTARY_CHRONYC: ABSENT, NOTARY_ALLOW_UNSYNCED_CLOCK: "yes" }).status).toBe(7)
     })
 })

@@ -2,12 +2,14 @@
 # Notary key ceremony: makes one secp256k1 notary signing key, offline.
 #
 #   notary-key-ceremony.sh --id <key-id> --recipient <age1...> --recipient <age1...> \
-#       --out-dir <dir> [--allow-online]
+#       --out-dir <dir> [--allow-online] [--allow-disk-temp]
 #
 # The private key is written only SOPS-encrypted to the age recipients given
 # (one per key holder, at least two, so the key survives the loss of one
-# holder). It is generated in a private temporary directory (RAM-backed when
-# /dev/shm is writable), never printed, and wiped on exit. What leaves the
+# holder), and to no one else. It is generated in a private temporary
+# directory on tmpfs (/dev/shm, or TMPDIR when that is tmpfs), never printed,
+# and wiped on exit; a disk-backed TMPDIR needs --allow-disk-temp, since
+# shred cannot be trusted on journalled or flash storage. What leaves the
 # ceremony:
 #
 #   <out-dir>/<id>.key.sops.json     the encrypted private key, for the holders
@@ -18,10 +20,11 @@
 #                                    fingerprint, for the holders to publish
 #
 # Without --allow-online it refuses to run on a host with a default route,
-# so a production key is made offline. --allow-online is for rehearsal keys.
+# or one whose routes it cannot read, so a production key is made offline.
+# --allow-online is for rehearsal keys.
 #
 # Exit codes: 0 done, 2 usage, 3 a tool is missing, 4 the host is online,
-# 5 the outputs already exist, 6 generation or encryption failed.
+# 5 the outputs already exist, 6 no tmpfs, or generation or encryption failed.
 
 set -u
 set +x
@@ -33,7 +36,7 @@ NOTARY_LOG_TAG=notary-key-ceremony
 
 usage() {
     notary_log "$*"
-    notary_log "usage: notary-key-ceremony.sh --id <key-id> --recipient <age1...> --recipient <age1...> --out-dir <dir> [--allow-online]"
+    notary_log "usage: notary-key-ceremony.sh --id <key-id> --recipient <age1...> --recipient <age1...> --out-dir <dir> [--allow-online] [--allow-disk-temp]"
     exit 2
 }
 
@@ -41,25 +44,32 @@ ID=
 OUT=
 RECIPIENTS=
 ALLOW_ONLINE=0
+ALLOW_DISK_TEMP=0
 while [ $# -gt 0 ]; do
     case $1 in
         --id) [ $# -ge 2 ] || usage "--id needs a value"; ID=$2; shift 2 ;;
-        --recipient) [ $# -ge 2 ] || usage "--recipient needs a value"; RECIPIENTS="${RECIPIENTS} $2"; shift 2 ;;
+        --recipient)
+            [ $# -ge 2 ] || usage "--recipient needs a value"
+            single_line "$2" && printf '%s' "$2" | grep -Eqx 'age1[02-9ac-hj-np-z]{58}' ||
+                usage "--recipient $2 is not an age X25519 recipient (age1...)"
+            RECIPIENTS="${RECIPIENTS} $2"
+            shift 2
+            ;;
         --out-dir) [ $# -ge 2 ] || usage "--out-dir needs a value"; OUT=$2; shift 2 ;;
         --allow-online) ALLOW_ONLINE=1; shift ;;
+        --allow-disk-temp) ALLOW_DISK_TEMP=1; shift ;;
         *) usage "unknown argument $1" ;;
     esac
 done
 
 # The fork payload's key id rule (src/forks/tlsnVerifiedPayload.ts)
-printf '%s' "${ID}" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9._-]{0,63}' ||
+single_line "${ID}" && printf '%s' "${ID}" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9._-]{0,63}' ||
     usage "--id must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}, as notaryKeys[].id does"
 [ -n "${OUT}" ] || usage "--out-dir is required"
 
 count=0
 seen=
 for r in ${RECIPIENTS}; do
-    printf '%s' "${r}" | grep -Eqx 'age1[02-9ac-hj-np-z]{58}' || usage "--recipient ${r} is not an age X25519 recipient (age1...)"
     case " ${seen} " in *" ${r} "*) usage "--recipient ${r} is given twice" ;; esac
     seen="${seen} ${r}"
     count=$((count + 1))
@@ -72,10 +82,11 @@ done
 
 if [ "${ALLOW_ONLINE}" != 1 ]; then
     online=
+    [ -r /proc/net/route ] || [ -r /proc/net/ipv6_route ] || online="unknown: no readable route table"
     [ -r /proc/net/route ] && awk 'NR > 1 && $2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route && online=IPv4
     [ -r /proc/net/ipv6_route ] && awk '$1 == "00000000000000000000000000000000" && $2 == "00" && $10 != "lo" { found = 1 } END { exit !found }' /proc/net/ipv6_route && online="${online} IPv6"
     if [ -n "${online}" ]; then
-        notary_log "this host has a default route (${online}); make a production notary key offline, or pass --allow-online for a rehearsal key"
+        notary_log "this host may be online (${online}); make a production notary key offline, or pass --allow-online for a rehearsal key"
         exit 4
     fi
 fi
@@ -90,6 +101,15 @@ done
 umask 077
 base=${TMPDIR:-/tmp}
 [ -d /dev/shm ] && [ -w /dev/shm ] && base=/dev/shm
+case $(stat -f -c '%T' "${base}" 2>/dev/null) in
+    tmpfs | ramfs) ;;
+    *)
+        if [ "${ALLOW_DISK_TEMP}" != 1 ]; then
+            notary_log "${base} is not tmpfs and /dev/shm is not writable; the key would touch a disk. Point TMPDIR at a tmpfs or pass --allow-disk-temp"
+            exit 6
+        fi
+        ;;
+esac
 WORK=$(mktemp -d "${base}/notary-ceremony.XXXXXXXX") || exit 6
 
 wipe() {
@@ -129,15 +149,20 @@ is_compressed_pubkey "${PUB}" || failed "unexpected public key form"
 
 # An explicit --config with one catch-all rule naming only the holders
 # given here, so a .sops.yaml in or above the working directory cannot add
-# or swap recipients.
+# or swap recipients; the recipient variables sops also reads are cleared
+# for the same reason, and the result must name exactly these holders.
 AGE_LIST=$(printf '%s' "${seen# }" | tr ' ' ',')
 printf 'creation_rules:\n  - age: "%s"\n' "${AGE_LIST}" > "${WORK}/sops.yaml"
-sops --config "${WORK}/sops.yaml" --encrypt --input-type binary --output-type json \
+env -u SOPS_AGE_RECIPIENTS -u SOPS_PGP_FP -u SOPS_KMS_ARN -u SOPS_GCP_KMS_IDS \
+    -u SOPS_AZURE_KEYVAULT_URLS -u SOPS_HC_VAULT_URIS \
+    sops --config "${WORK}/sops.yaml" --encrypt --input-type binary --output-type json \
     "${KEY}" > "${ENC}.tmp" 2>"${WORK}/sops.err" || failed "sops could not encrypt: $(head -c 300 "${WORK}/sops.err")"
 grep -q 'PRIVATE KEY' "${ENC}.tmp" && failed "the encrypted file holds the key in plain text"
 for r in ${seen}; do
-    grep -q "${r}" "${ENC}.tmp" || failed "the encrypted file does not name recipient ${r}"
+    grep -q "\"${r}\"" "${ENC}.tmp" || failed "the encrypted file does not name recipient ${r}"
 done
+named=$(grep -o '"recipient"' "${ENC}.tmp" | wc -l | tr -d ' ')
+[ "${named}" = "${count}" ] || failed "the encrypted file names ${named} recipients, not the ${count} holders given"
 mv "${ENC}.tmp" "${ENC}" || failed "cannot write ${ENC}"
 
 printf '{"id":"%s","alg":"k256","hex":"%s"}\n' "${ID}" "${PUB}" > "${ENTRY}" || failed "cannot write ${ENTRY}"

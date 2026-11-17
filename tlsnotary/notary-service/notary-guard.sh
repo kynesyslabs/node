@@ -19,12 +19,15 @@
 #       stamp is fresh and names the same key, then execs <command>. A
 #       container cannot read the host's NTP state, so the stamp carries the
 #       host check in; a container started without the preflight (a bare
-#       `docker compose up`, a Docker daemon restart) does not start.
+#       `docker compose up`, a `docker start` long after) does not start.
 #
 # Settings (environment):
 #   NOTARY_EXPECTED_PUBKEY       required: the key's 33-byte compressed public
 #                                key, lowercase hex, as the fork payload lists it
 #   NOTARY_KEY_FILE              preflight: the key file on the host
+#   NOTARY_UID, NOTARY_GID       preflight: the container user (default
+#                                10001); the key file must be its own, or its
+#                                group's with group read
 #   NOTARY_STAMP_FILE            stamp path (default $NOTARY_STAMP_DIR/clock.ok,
 #                                NOTARY_STAMP_DIR defaulting to /run/tlsn-notary)
 #   NOTARY_STAMP_MAX_AGE_SEC     exec: oldest stamp accepted (default 300)
@@ -38,13 +41,15 @@
 # Exit codes:
 #   0  preflight passed (exec mode replaces itself with <command>)
 #   2  usage or configuration error
-#   3  key file missing, not a regular file, unreadable or oversized
+#   3  key file missing, not a regular file, unreadable (by the container
+#      user, in the preflight) or oversized
 #   4  key file readable by others, or writable by its group or others
 #   5  key file is not a PKCS#8 secp256k1 private key with its public key
 #   6  key file holds another key than NOTARY_EXPECTED_PUBKEY
 #   7  clock not NTP-synchronised or too far off, or the preflight stamp is
 #      missing, stale or for another key
 
+set +x
 set -u
 
 NOTARY_SERVICE_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -71,6 +76,15 @@ check_key_file() {
     # the container's group)
     if [ $((0${_mode} & 07)) -ne 0 ] || [ $((0${_mode} & 020)) -ne 0 ]; then
         refuse 4 "key file ${_key} has mode ${_mode}; make it 0400 or 0440 (chmod 0400 ${_key})"
+    fi
+    # The preflight runs as root, for whom any file is readable; the
+    # container reads the key as NOTARY_UID:NOTARY_GID.
+    if [ -n "${2:-}" ]; then
+        _owner=$(stat -c '%u' "${_key}")
+        _group=$(stat -c '%g' "${_key}")
+        if [ "${_owner}" != "$2" ] && { [ "${_group}" != "${3:-}" ] || [ $((0${_mode} & 040)) -eq 0 ]; }; then
+            refuse 3 "key file ${_key} is owned by ${_owner}:${_group} with mode ${_mode}; the notary runs as $2:${3:-} and could not read it (chown $2:${3:-$2} ${_key})"
+        fi
     fi
     _pub=$(k256_pkcs8_pubkey "${_key}") ||
         refuse 5 "key file ${_key} is not an unencrypted PKCS#8 secp256k1 private key with its public key (the form notary-key-ceremony.sh writes)"
@@ -100,7 +114,8 @@ case ${mode} in
             0.0.0.0 | '::' | '[::]' | '*')
                 refuse 2 "NOTARY_BIND=${NOTARY_BIND} publishes the notary on every interface; bind it to loopback or a private address behind the TLS reverse proxy" ;;
         esac
-        check_key_file "${NOTARY_KEY_FILE:-}"
+        check_key_file "${NOTARY_KEY_FILE:-}" "${NOTARY_UID:-10001}" "${NOTARY_GID:-10001}"
+        mkdir -p "$(dirname -- "${STAMP}")" || refuse 2 "cannot create $(dirname -- "${STAMP}")"
         if clock_override; then
             warn_override
         else
@@ -108,7 +123,6 @@ case ${mode} in
             clock_status
             problem=$(clock_problem "${max}")
             [ -z "${problem}" ] || refuse 7 "${problem}"
-            mkdir -p "$(dirname -- "${STAMP}")" || refuse 2 "cannot create $(dirname -- "${STAMP}")"
             printf '%s %s\n' "$(date -u +%s)" "${NOTARY_EXPECTED_PUBKEY}" > "${STAMP}.tmp" &&
                 chmod 0644 "${STAMP}.tmp" && mv -f "${STAMP}.tmp" "${STAMP}" ||
                 refuse 2 "cannot write the stamp ${STAMP}"
