@@ -148,6 +148,7 @@ export async function processPayload(
                 return await manageNodeCall(
                     payload.params[0] as NodeCall,
                     sender,
+                    clientIP,
                 )
             } catch (error) {
                 log.error(`[RPC Call] Error in nodeCall: ${error}`)

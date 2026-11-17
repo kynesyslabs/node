@@ -13,7 +13,7 @@ import { isOperatorRequest } from "./operatorAuth"
 import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
 import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
-import { BODY_BOUND_METHODS, SUDO_METHODS } from "./peerHttpAuth"
+import { BODY_BOUND_METHODS, BODY_BOUND_NODE_CALLS, SUDO_METHODS } from "./peerHttpAuth"
 import { admitSudoCall } from "./sudoReplayFloor"
 import Hashing from "src/libs/crypto/hashing"
 import { handleError } from "src/errors"
@@ -487,6 +487,24 @@ export async function serverRpcBun() {
                     {
                         result: 401,
                         response: `${payload.method} requires a body-bound signature`,
+                        require_reply: false,
+                        extra: null,
+                    },
+                    401,
+                )
+            }
+
+            const nodeCallMessage =
+                payload.method === "nodeCall" ? (payload.params?.[0] as any)?.message : undefined
+            if (
+                typeof nodeCallMessage === "string" &&
+                BODY_BOUND_NODE_CALLS.has(nodeCallMessage) &&
+                !(authCtx.bodyHash && authCtx.audienceBound)
+            ) {
+                return jsonResponse(
+                    {
+                        result: 401,
+                        response: `${nodeCallMessage} requires a body-bound signature naming this node as the audience`,
                         require_reply: false,
                         extra: null,
                     },

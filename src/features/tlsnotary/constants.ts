@@ -50,7 +50,7 @@ export const SIGNING_KEY_FILE_MODE = 0o600
  */
 export const PORT_CONFIG = {
   /**
-   * Minimum/maximum port for wstcp proxy allocation. Overridable via env so
+   * Minimum/maximum port for proxy session allocation. Overridable via env so
    * the published host range (docker-compose `ports:`) can be narrowed to a
    * window the reverse proxy can actually reach — the proxies bind dynamic
    * ports in this range and nginx forwards `/tlsn/<port>/` to them, so the
@@ -59,12 +59,61 @@ export const PORT_CONFIG = {
    */
   PORT_MIN: Number(process.env.TLSNOTARY_PROXY_PORT_MIN) || 55000,
   PORT_MAX: Number(process.env.TLSNOTARY_PROXY_PORT_MAX) || 57000,
-  /** Idle timeout before a proxy is considered stale (30 seconds) */
-  IDLE_TIMEOUT_MS: 30000,
-  /** Maximum number of spawn retry attempts */
+  /** Maximum number of listen attempts on fresh ports per proxy request */
   MAX_SPAWN_RETRIES: 3,
-  /** Timeout for wstcp process to start (5 seconds) */
+  /** Timeout for probing whether a port is free (5 seconds) */
   SPAWN_TIMEOUT_MS: 5000,
+}
+
+// ============================================================================
+// Proxy session limits (proxyRelay.ts, proxyAccess.ts)
+// ============================================================================
+
+/**
+ * Bounds on what one paid tlsn_request can make this node relay. The relay is
+ * a raw TCP tunnel from the node's address, so every session ends on its own
+ * whatever the client does.
+ */
+export const PROXY_LIMITS = {
+  /**
+   * Hard end of a session after it is granted. The prover runs the notary
+   * setup before it opens the proxy websocket, which takes tens of seconds in
+   * a browser and longer on a phone.
+   */
+  SESSION_MAX_LIFETIME_MS: 5 * 60 * 1000,
+  /** End of a connected session that relays nothing in either direction. */
+  SESSION_IDLE_MS: 60 * 1000,
+  /** How long a client may take to read what the target sent before it closed. */
+  CLOSE_DRAIN_MS: 10 * 1000,
+  /**
+   * Room over the notary's plaintext limits for the TLS handshake (the
+   * server's certificate chain dominates), record framing and alerts.
+   */
+  SENT_MARGIN_BYTES: 16 * 1024,
+  RECV_MARGIN_BYTES: 32 * 1024,
+  /** Sessions one token can open on this node, one live at a time. */
+  MAX_SESSIONS_PER_TOKEN: 3,
+  MAX_LIVE_SESSIONS_PER_OWNER: 2,
+  MAX_LIVE_SESSIONS_PER_IP: 4,
+  /** requestTLSNproxy calls per window, counted before any chain read. */
+  REQUESTS_PER_WINDOW_PER_IP: 20,
+  REQUESTS_PER_WINDOW_PER_OWNER: 6,
+  RATE_WINDOW_MS: 60 * 1000,
+}
+
+/**
+ * Byte caps per direction for one session: twice the notary's plaintext limit
+ * plus the margin, so an attestation the notary accepts is never cut while a
+ * session cannot become a general-purpose tunnel.
+ */
+export function proxyByteCaps(maxSentData: number, maxRecvData: number): {
+  maxSentBytes: number
+  maxRecvBytes: number
+} {
+  return {
+    maxSentBytes: 2 * maxSentData + PROXY_LIMITS.SENT_MARGIN_BYTES,
+    maxRecvBytes: 2 * maxRecvData + PROXY_LIMITS.RECV_MARGIN_BYTES,
+  }
 }
 
 // ============================================================================

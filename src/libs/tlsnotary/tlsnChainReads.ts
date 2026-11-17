@@ -55,6 +55,60 @@ export async function findTlsnLinkedToken(
     return row
 }
 
+/** A committed `tlsn_request` transaction, as the pre-fork proxy check reads it. */
+export interface TlsnRequestRecord {
+    hash: string
+    /** "confirmed" or "failed", as the block recorded it. */
+    status: string
+    blockNumber: number
+    /** ed25519 address of the signer. */
+    sender: string
+    /** content.type of the transaction. */
+    type: string
+    /** nativeOperation of a native transaction, else null. */
+    nativeOperation: string | null
+    /** args[0] of a native transaction (the target URL of a tlsn_request). */
+    targetUrl: string | null
+}
+
+/**
+ * The committed transaction with this hash, or null when the chain holds
+ * none. Only transactions of earlier blocks are in the table while a block
+ * applies, so the answer is the same on every node applying that block.
+ */
+export async function findTlsnRequestTx(hash: string): Promise<TlsnRequestRecord | null> {
+    const { getTransactionsRepo } = await import("@/libs/blockchain/chainDb")
+    const row = await readState("tlsn_request lookup", () =>
+        getTransactionsRepo().findOneBy({ hash }),
+    )
+    if (!row) return null
+    const content = (row.content ?? {}) as {
+        type?: unknown
+        from?: unknown
+        data?: unknown
+    }
+    const payload = Array.isArray(content.data)
+        ? (content.data[1] as { nativeOperation?: unknown; args?: unknown } | undefined)
+        : undefined
+    const args = Array.isArray(payload?.args) ? payload.args : []
+    const sender =
+        typeof row.from_ed25519_address === "string" && row.from_ed25519_address
+            ? row.from_ed25519_address
+            : typeof content.from === "string"
+              ? content.from
+              : ""
+    return {
+        hash: row.hash,
+        status: String(row.status),
+        blockNumber: Number(row.blockNumber),
+        sender,
+        type: typeof content.type === "string" ? content.type : String(row.type),
+        nativeOperation:
+            typeof payload?.nativeOperation === "string" ? payload.nativeOperation : null,
+        targetUrl: typeof args[0] === "string" ? args[0] : null,
+    }
+}
+
 export interface TlsnLinkQuery {
     context: string
     userId: string
@@ -121,4 +175,15 @@ export async function tipBlockTimestampSec(): Promise<number> {
         throw new StateReadError("tip block", "it has no timestamp")
     }
     return Math.floor(ts)
+}
+
+/**
+ * Timestamp, in seconds, of the block at this height, or null when this node
+ * holds no such block.
+ */
+export async function blockTimestampSec(blockNumber: number): Promise<number | null> {
+    const { getBlockByNumber } = await import("@/libs/blockchain/chainBlocks")
+    const block = await readState("block by number", () => getBlockByNumber(blockNumber))
+    const ts = Number(block?.content?.timestamp)
+    return Number.isFinite(ts) ? Math.floor(ts) : null
 }

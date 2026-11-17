@@ -27,6 +27,8 @@ SUITE_FILES=(
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/features/tlsnotary/proxyToken.test.ts
+    src/features/tlsnotary/proxyRelay.test.ts
+    src/features/tlsnotary/relayTarget.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
@@ -91,6 +93,7 @@ SUITE_FILES=(
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
     src/libs/network/handlers/tlsnotaryGetInfo.test.ts
+    src/libs/network/handlers/requestTlsnProxy.test.ts
     src/libs/network/helloGenesisGate.test.ts
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts

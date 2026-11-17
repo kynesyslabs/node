@@ -3,9 +3,10 @@
 # The node advertises EVERY TLSN endpoint under /tlsn/<port>/ (buildWsUrl's
 # default path), and two upstreams live behind that prefix:
 #   - the notary websocket — `tlsnotary` container on $TLSNOTARY_PORT
-#   - the per-target wstcp proxies — spawned in the `node` container on a
-#     dynamic port in TLSNOTARY_PROXY_PORT_MIN..MAX (wstcp binds 0.0.0.0,
-#     so it's reachable by service name on the compose network)
+#   - the per-session proxies — each listens in the `node` container on a
+#     port in TLSNOTARY_PROXY_PORT_MIN..MAX (compose sets WSTCP_BIND_HOST
+#     to 0.0.0.0, so it's reachable by service name on the compose network)
+#     and admits only the websocket whose last path segment is its session id
 # Both must be routed or the SDK's attest() websocket closes with 1006.
 # Caddy upgrades the websocket automatically; no extra headers needed.
 #
@@ -21,10 +22,10 @@ handle_path /tlsn/{$TLSNOTARY_PORT:7047}/* {
 	reverse_proxy tlsnotary:{$TLSNOTARY_PORT:7047}
 }
 
-# Dynamic per-target wstcp proxies: /tlsn/<port>/ -> node:<port>.
+# Per-session proxies: /tlsn/<port>/<session-id> -> node:<port>/<session-id>.
 # The literal notary path above is more specific, so it wins for the
 # notary port; everything else under /tlsn/<digits>/ lands here.
-# Restrict to the 55000-57999 wstcp allocation window so this can't proxy
+# Restrict to the 55000-57999 proxy allocation window so this can't proxy
 # arbitrary node ports (RPC 53550, MCP 3001, metrics 9090, ...) publicly.
 @tlsnproxy path_regexp tlsnport ^/tlsn/(5[567]\d{3})(/.*)?$
 handle @tlsnproxy {

@@ -10,13 +10,10 @@
 // REVIEW: TLSNotary token management for paid attestation access
 import { randomUUID } from "crypto"
 import { isForkActive } from "@/forks/forkGates"
-import {
-    findLiveTlsnRequest,
-    getOnChainTlsnRequest,
-    type TlsnRequestRefusal,
-} from "@/libs/tlsnotary/onchainRequests"
+import { getOnChainTlsnRequest } from "@/libs/tlsnotary/onchainRequests"
 import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
+import { PROXY_LIMITS } from "./constants"
 
 /**
  * Token configuration constants
@@ -52,9 +49,6 @@ export interface AttestationToken {
     retriesLeft: number
     txHash: string // original payment tx hash
     proxyId?: string // linked proxy ID once spawned
-    // Set for tokens backed by an on-chain tlsn_request: the retry count must
-    // outlive the wall-clock expiry for as long as the chain request is live.
-    expiresAtHeight?: number
 }
 
 /**
@@ -215,74 +209,6 @@ export function validateToken(
     return { valid: true, token }
 }
 
-const CHAIN_REFUSAL_ERRORS: Record<TlsnRequestRefusal, string> = {
-    NOT_FOUND: "TOKEN_NOT_FOUND",
-    OWNER_MISMATCH: "TOKEN_OWNER_MISMATCH",
-    DOMAIN_MISMATCH: "TOKEN_DOMAIN_MISMATCH",
-    EXPIRED: "TOKEN_EXPIRED",
-    // The pre-fork error name: a used token was a stored one.
-    ALREADY_USED: "TOKEN_ALREADY_STORED",
-}
-
-/**
- * Validate a token for proxy access. Under `tlsnVerified` the token is the
- * on-chain `tlsn_request` row: `tokenId` is the request tx hash, and it must
- * be owned by `owner`, locked to the URL's host, not yet stored and not
- * expired at the next block. Any node can then serve it, and a restart
- * loses nothing. The in-memory token is only this node's retry count for
- * that row, created on first use. Before the fork, the in-memory token
- * created at admission is the token, as {@link validateToken} checks it.
- */
-export async function validateProxyToken(
-    tokenId: string,
-    owner: string,
-    targetUrl: string,
-): Promise<TokenValidationResult> {
-    if (!isForkActive("tlsnVerified", getSharedState.lastBlockNumber ?? 0)) {
-        return validateToken(tokenId, owner, targetUrl)
-    }
-    let domain: string
-    try {
-        domain = extractDomain(targetUrl)
-    } catch {
-        return { valid: false, error: "TOKEN_DOMAIN_MISMATCH" }
-    }
-    const chain = await findLiveTlsnRequest(tokenId, {
-        sender: owner,
-        height: (getSharedState.lastBlockNumber ?? 0) + 1,
-        domain,
-        pendingOnly: true,
-    })
-    if (chain.ok === false) {
-        return { valid: false, error: CHAIN_REFUSAL_ERRORS[chain.reason] }
-    }
-
-    const store = getTokenStore()
-    const id = chain.request.tokenId
-    let token = store.tokens.get(id)
-    if (!token) {
-        const now = Date.now()
-        token = {
-            id,
-            owner: chain.request.owner,
-            domain: chain.request.domain,
-            status: TokenStatus.PENDING,
-            createdAt: now,
-            // Local bookkeeping only: the chain's expiry height decides.
-            expiresAt: now + TOKEN_CONFIG.EXPIRY_MS,
-            retriesLeft: TOKEN_CONFIG.MAX_RETRIES,
-            txHash: id,
-            expiresAtHeight: chain.request.expiresAtHeight,
-        }
-        store.tokens.set(id, token)
-    }
-    if (token.retriesLeft <= 0) {
-        token.status = TokenStatus.EXHAUSTED
-        return { valid: false, error: "TOKEN_NO_RETRIES_LEFT" }
-    }
-    return { valid: true, token }
-}
-
 /**
  * Consume a retry attempt and mark token as active
  *
@@ -389,7 +315,7 @@ export interface TokenView {
     owner: string
     domain: string
     status: TokenStatus
-    /** Local proxy bookkeeping, ms; null when this node has not served the token yet. */
+    /** This node's proxy bookkeeping, ms; null when it has not served the token yet. */
     expiresAt: number | null
     /** Last block height the chain accepts the token at (tlsnVerified only). */
     expiresAtHeight?: number
@@ -399,7 +325,7 @@ export interface TokenView {
 /**
  * The token `idOrTxHash` names. Under tlsnVerified it is the committed
  * request, so a client finds it as soon as the request is in a block, with
- * this node's retry count once the proxy has served it.
+ * the proxy sessions this node has left for it.
  */
 export async function lookupToken(idOrTxHash: string): Promise<TokenView | null> {
     const tip = getSharedState.lastBlockNumber ?? 0
@@ -411,20 +337,22 @@ export async function lookupToken(idOrTxHash: string): Promise<TokenView | null>
     }
     const request = await getOnChainTlsnRequest(idOrTxHash)
     if (!request) return null
-    const local = getToken(request.tokenId)
-    let status = local?.status ?? TokenStatus.PENDING
+    const { proxyTokenUse } = await import("./proxyAccess")
+    const use = proxyTokenUse(request.tokenId)
+    let status = TokenStatus.PENDING
     if (request.status === "stored") status = TokenStatus.STORED
     // Used up by an identity link: attested, nothing stored.
     else if (request.status === "linked") status = TokenStatus.COMPLETED
     else if (tip + 1 > request.expiresAtHeight) status = TokenStatus.EXPIRED
+    else if (use?.sessionsLeft === 0) status = TokenStatus.EXHAUSTED
     return {
         id: request.tokenId,
         owner: request.owner,
         domain: request.domain,
         status,
-        expiresAt: local?.expiresAt ?? null,
+        expiresAt: use?.expiresAtMs ?? null,
         expiresAtHeight: request.expiresAtHeight,
-        retriesLeft: local?.retriesLeft ?? TOKEN_CONFIG.MAX_RETRIES,
+        retriesLeft: use?.sessionsLeft ?? PROXY_LIMITS.MAX_SESSIONS_PER_TOKEN,
     }
 }
 
@@ -434,15 +362,10 @@ export async function lookupToken(idOrTxHash: string): Promise<TokenView | null>
 export function cleanupExpiredTokens(): number {
     const store = getTokenStore()
     const now = Date.now()
-    const nextHeight = (getSharedState.lastBlockNumber ?? 0) + 1
     let cleaned = 0
 
     for (const [id, token] of store.tokens) {
-        const expired =
-            token.expiresAtHeight !== undefined
-                ? nextHeight > token.expiresAtHeight
-                : now > token.expiresAt
-        if (expired && token.status !== TokenStatus.STORED) {
+        if (now > token.expiresAt && token.status !== TokenStatus.STORED) {
             store.tokens.delete(id)
             cleaned++
         }
