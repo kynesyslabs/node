@@ -24,7 +24,7 @@ mock.module("src/utilities/logger", () => ({ __esModule: true, default: quietLog
 const sharedState: Record<string, unknown> = {}
 mock.module("@/utilities/sharedState", () => ({ getSharedState: sharedState }))
 
-const { openRelaySession, endAllRelaySessions, liveSessions, sessionIdFromPath } = await import(
+const { openRelaySession, endAllRelaySessions, endRelaySession, liveSessions, sessionIdFromPath } = await import(
     "./proxyRelay"
 )
 type RelaySession = Awaited<ReturnType<typeof import("./proxyRelay").openRelaySession>>
@@ -33,11 +33,18 @@ type RelaySession = Awaited<ReturnType<typeof import("./proxyRelay").openRelaySe
 let target: TCPSocketListener<unknown>
 let replyBytes = 0
 const targetSeen: number[] = []
+let targetOpen = 0
 beforeAll(() => {
     target = Bun.listen({
         hostname: "127.0.0.1",
         port: 0,
         socket: {
+            open() {
+                targetOpen += 1
+            },
+            close() {
+                targetOpen -= 1
+            },
             data(socket, data) {
                 targetSeen.push(data.byteLength)
                 if (replyBytes > 0) socket.write(new Uint8Array(replyBytes).fill(7))
@@ -101,6 +108,14 @@ async function upgradeStatus(port: number, path: string): Promise<number> {
         },
     })
     return res.status
+}
+
+async function waitFor(done: () => boolean, ms = 2000): Promise<void> {
+    const deadline = Date.now() + ms
+    while (!done()) {
+        if (Date.now() > deadline) throw new Error("condition not reached in time")
+        await Bun.sleep(10)
+    }
 }
 
 async function portFree(port: number): Promise<boolean> {
@@ -196,6 +211,40 @@ describe("TLSNotary relay session", () => {
         expect(session.bytesRecv).toBeLessThanOrEqual(8192)
         expect(await code).toBe(1009)
         expect(await portFree(session.port)).toBe(true)
+    })
+
+    it("closes its target connection when the node ends the session", async () => {
+        const session = await open()
+        const ws = await connect(session, `/${session.sessionId}`)
+        const reply = nextMessage(ws)
+        ws.send(new Uint8Array([9]))
+        await reply
+        expect(targetOpen).toBe(1)
+        endRelaySession(session, "shutdown")
+        expect(await closed(ws)).toBe(1001)
+        await waitFor(() => targetOpen === 0)
+    })
+
+    it("leaves no session, port or target connection behind after many sessions", async () => {
+        const ports = new Set<number>()
+        for (let round = 0; round < 10; round++) {
+            const sessions = await Promise.all(Array.from({ length: 10 }, () => open()))
+            await Promise.all(
+                sessions.map(async (session, i) => {
+                    ports.add(session.port)
+                    const ws = await connect(session, `/${session.sessionId}`)
+                    const reply = nextMessage(ws)
+                    ws.send(new Uint8Array([round, i]))
+                    await reply
+                    if (i % 2 === 0) ws.close()
+                    else endRelaySession(session, "shutdown")
+                    await session.ended
+                }),
+            )
+        }
+        expect(liveSessions()).toEqual([])
+        await waitFor(() => targetOpen === 0)
+        for (const port of ports) expect(await portFree(port)).toBe(true)
     })
 
     it("ends when the target cannot be reached", async () => {

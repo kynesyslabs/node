@@ -42,6 +42,10 @@ const { handlerRegistry } = await import("./index")
 const { resetProxyAccessState } = await import("@/features/tlsnotary/proxyAccess")
 const { liveSessions, endAllRelaySessions } = await import("@/features/tlsnotary/proxyRelay")
 const { PROXY_LIMITS } = await import("@/features/tlsnotary/constants")
+const { handleNodeCall } = await import("src/libs/omniprotocol/protocol/handlers/control")
+const { encodeNodeCallRequest, decodeNodeCallResponse } = await import(
+    "src/libs/omniprotocol/serialization/control"
+)
 
 const ALICE = "a1".repeat(32)
 const BOB = "b0".repeat(32)
@@ -124,6 +128,20 @@ describe("requestTLSNproxy authorisation", () => {
         expect(liveSessions()).toEqual([])
     })
 
+    it("refuses the call over OmniProtocol, whose envelope does not sign the request", async () => {
+        const reply = await handleNodeCall({
+            message: {
+                payload: encodeNodeCallRequest({
+                    method: "nodeCall",
+                    params: [{ message: "requestTLSNproxy", data: { tokenId: onChain(), targetUrl: TARGET }, muid: "" }],
+                }),
+            },
+            context: { isAuthenticated: true, peerIdentity: ALICE, remoteAddress: freshIp() },
+        } as any)
+        expect(decodeNodeCallResponse(reply).status).toBe(401)
+        expect(liveSessions()).toEqual([])
+    })
+
     it("refuses an owner field that is not the signer", async () => {
         const res = await call(onChain(), BOB, freshIp(), { owner: ALICE })
         expect(res.status).toBe(403)
@@ -189,6 +207,22 @@ describe("requestTLSNproxy authorisation", () => {
         expect(liveSessions().length).toBe(1)
     })
 
+    it("keeps the live session when its replacement fails to open", async () => {
+        const hash = onChain()
+        expect((await call(hash, ALICE)).error).toBeUndefined()
+        const live = liveSessions()[0]
+        process.env.TLSNOTARY_ALLOWED_PORTS = "8443"
+        Config.resetInstance()
+        try {
+            expect((await call(hash, ALICE)).error).toBe("TARGET_NOT_ALLOWED")
+        } finally {
+            delete process.env.TLSNOTARY_ALLOWED_PORTS
+            Config.resetInstance()
+        }
+        expect(live.endReason).toBeUndefined()
+        expect(liveSessions().map(s => s.proxyId)).toEqual([live.proxyId])
+    })
+
     it("does not count a refused open against the token", async () => {
         const hash = onChain()
         process.env.TLSNOTARY_ALLOWED_PORTS = "8443"
@@ -238,6 +272,14 @@ describe("requestTLSNproxy limits", () => {
         const res = await call(onChain(), ALICE, ip)
         expect(res.status).toBe(429)
         expect(res.error).toBe("RATE_LIMITED")
+    })
+
+    it("does not spend an address's budget on unsigned calls", async () => {
+        const ip = "203.0.113.51"
+        for (let i = 0; i < PROXY_LIMITS.REQUESTS_PER_WINDOW_PER_IP * 2; i++) {
+            expect((await call(onChain(), "", ip)).error).toBe("AUTH_REQUIRED")
+        }
+        expect((await call(onChain(), ALICE, ip)).error).toBeUndefined()
     })
 
     it("rate-limits requests per owner across addresses", async () => {

@@ -120,6 +120,23 @@ async function main(): Promise<number> {
             }),
         })
 
+        // The node refuses an unsigned requestTLSNproxy with 401 before the
+        // handler runs: it needs a signature over the body naming this node.
+        // That refusal still proves the call crossed the reverse proxy.
+        if (res.status === 401) {
+            const text = await res.text()
+            if (/body-bound signature/i.test(text)) {
+                log(
+                    "pass",
+                    "requestTLSNproxy reached the node (401: unsigned calls are refused; a real client signs over the body for this node).",
+                )
+                log(
+                    "info",
+                    "Full proxy URL validation needs a signed call carrying a confirmed tlsn_request hash. Use a browser/Playwright driver for that path.",
+                )
+                return 0
+            }
+        }
         if (!res.ok) {
             log("fail", `requestTLSNproxy -> HTTP ${res.status}`)
             return 1

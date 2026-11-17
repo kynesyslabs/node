@@ -136,17 +136,19 @@ export async function authorizeProxyRequest(
     const now = req.now ?? Date.now()
     const clientKey = rateLimitSubject(req.clientIP || "unknown")
 
-    // Counted before any database read, so a flood costs this node nothing
-    // but a map update.
-    if (overBudget(ipWindows, clientKey, PROXY_LIMITS.REQUESTS_PER_WINDOW_PER_IP, now)) {
-        return refuse(429, "RATE_LIMITED", "Too many proxy requests from this address")
-    }
+    // Unsigned calls are refused before they are counted, so a stranger
+    // behind the same address cannot spend a signer's budget for free.
     if (!req.sender) {
         return refuse(
             401,
             "AUTH_REQUIRED",
             "requestTLSNproxy must be signed by the account that sent the tlsn_request",
         )
+    }
+    // Counted before any database read, so a flood costs this node nothing
+    // but a map update.
+    if (overBudget(ipWindows, clientKey, PROXY_LIMITS.REQUESTS_PER_WINDOW_PER_IP, now)) {
+        return refuse(429, "RATE_LIMITED", "Too many proxy requests from this address")
     }
     const owner = bindSenderForm(req.sender)
     if (req.owner !== undefined && req.owner !== null && req.owner !== "") {

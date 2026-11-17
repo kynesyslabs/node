@@ -228,9 +228,10 @@ EXPECTED_HOST=localhost \
     bun run ../../scripts/test-tlsnotary-proxy.ts
 ```
 
-Verifies that `requestTLSNproxy` reaches the node handler through
-Caddy. Returns PASS-with-caveat — a real DAHR token is needed for the
-full WS proxy URL response.
+Verifies that `requestTLSNproxy` reaches the node through Caddy. Returns
+PASS-with-caveat: the node refuses the unsigned call with 401, and the full
+WS proxy URL needs a call signed over its body for this node, carrying the
+hash of a confirmed `tlsn_request`.
 
 Full (Playwright + WASM notary session):
 

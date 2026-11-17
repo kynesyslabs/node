@@ -21,9 +21,11 @@ reverse proxy is the only piece an operator may need to touch by hand.
 `requestTLSNproxy` opens a session only when all of these hold:
 
 - TLSNotary is on for this node (`TLSNOTARY_ENABLED=true`);
-- the call is signed (the `identity`/`signature`/`timestamp` headers), and the
-  signer is the sender of the `tlsn_request` whose hash is the `tokenId`. A
-  `owner` field in the body, if sent, must name the same account;
+- the call comes over the HTTP RPC, signed over its body and naming this node
+  as the audience (the `body-hash` and `audience` auth headers; the older
+  `identity:timestamp` form is refused with 401), and the signer is the sender
+  of the `tlsn_request` whose hash is the `tokenId`. A `owner` field in the
+  body, if sent, must name the same account;
 - that `tlsn_request` is confirmed on chain, for the same host as `targetUrl`,
   and its block is less than 30 minutes old;
 - the token has opened fewer than 3 sessions on this node. A new request for a

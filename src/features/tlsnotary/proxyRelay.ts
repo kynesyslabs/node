@@ -185,8 +185,10 @@ export function endRelaySession(session: RelaySession, reason: RelayEndReason): 
         } catch {
             // already closed
         }
+        // terminate, not end: end waits for the target to close its side,
+        // and a target that never does would keep the socket open.
         try {
-            inner.tcp?.end()
+            inner.tcp?.terminate()
         } catch {
             // already closed
         }
@@ -243,7 +245,7 @@ async function dialTarget(session: RelaySession): Promise<void> {
             },
         })
         if (session.endReason) {
-            tcp.end()
+            tcp.terminate()
             return
         }
         inner.tcp = tcp

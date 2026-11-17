@@ -52,7 +52,6 @@ export async function requestTlsnProxy(
         if ("error" in grant) return fail(grant.status, grant.error, grant.message)
 
         try {
-            if (grant.supersedes) endRelaySession(grant.supersedes, "superseded")
             const cfg = Config.getInstance().tlsnotary
             const result = await requestProxy({
                 targetUrl,
@@ -78,6 +77,8 @@ export async function requestTlsnProxy(
                 }
             }
             grant.commit(result.proxyId)
+            // Only now: a failed open must leave the caller's working session alone.
+            if (grant.supersedes) endRelaySession(grant.supersedes, "superseded")
             log.info(
                 `[TLSNotary] Proxy ${result.proxyId} opened for token ${grant.txHash} (${grant.sessionsLeft} sessions left)`,
             )

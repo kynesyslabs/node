@@ -347,9 +347,18 @@ window.harness = {
       const body = await res.json()
       // 400 "Missing tokenId or owner" means we reached the handler
       // without a real DAHR token. PASS-with-caveat (same as Node).
-      const responseMsg = (body.response && (body.response.message || body.response.error)) || ""
+      const responseMsg =
+        typeof body.response === "string"
+          ? body.response
+          : (body.response && (body.response.message || body.response.error)) || ""
       if (body.result === 400 && /tokenId|owner/i.test(responseMsg)) {
         log("PASS RPC reached handler through proxy:", responseMsg)
+        return { ok: true, stage: "rpc-reach", message: responseMsg }
+      }
+      // The node refuses this unsigned call before the handler: a real
+      // client signs over the body for this node. Reaching it is the check.
+      if (body.result === 401 && /body-bound signature/i.test(responseMsg)) {
+        log("PASS RPC reached the node through proxy:", responseMsg)
         return { ok: true, stage: "rpc-reach", message: responseMsg }
       }
       if (body.result === 200) {
