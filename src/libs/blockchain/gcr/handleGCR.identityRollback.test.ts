@@ -215,6 +215,54 @@ describe("rolling back a block's identity transactions in a later apply", () => 
     }
 })
 
+describe("rolling back a TLSN link made before tlsnVerified", () => {
+    // As the pre-fork add stores it: no attestation id, no request token.
+    const preForkLink = {
+        userId: "4242",
+        username: "dave",
+        proof: { version: "0.1.0-alpha.12", data: "00", meta: {} },
+        proofHash: "h4242",
+        proofType: "tlsn",
+        timestamp: 5,
+    }
+    const tlsnAdd = () =>
+        identityTx("tlsn", "add", {
+            context: "github",
+            data: {
+                username: "dave",
+                userId: "4242",
+                proof: JSON.stringify(preForkLink.proof),
+                recvHash: "ab".repeat(32),
+                proofRanges: { recv: [], sent: [] },
+                revealedRecv: [],
+            },
+        })
+
+    for (const tip of [100, 300]) {
+        it(`removes exactly the link the add wrote, with the tip ${tip < 200 ? "below" : "above"} the fork's height`, async () => {
+            getSharedState.forkConfig.tlsnVerified.activationHeight = 200
+            getSharedState.lastBlockNumber = tip
+            const before = structuredClone(account())
+            before.identities.web2.github = [
+                { username: "dave", userId: 4242, proof: "gist", proofHash: "g", timestamp: 1 },
+            ]
+            const linked = structuredClone(before)
+            linked.identities.web2.github.push(structuredClone(preForkLink))
+            caches.accounts.set(SENDER, linked)
+            const tx = tlsnAdd()
+            // The rollback undoes the nonce too.
+            linked.nonce = before.nonce + 1
+
+            const undone = await HandleGCR.applyTransactions([tx], true)
+
+            expect(undone.failedTxs).toEqual([])
+            expect(undone.successfulTxs).toEqual([tx.hash])
+            expect(account()).toEqual(before)
+            expect(caches.tlsNotaries.size).toBe(0)
+        })
+    }
+})
+
 describe("undo records of an unlink", () => {
     it("are kept by a block apply, in that apply's caches only", async () => {
         await HandleGCR.applyTransactions([web2Remove()], false)

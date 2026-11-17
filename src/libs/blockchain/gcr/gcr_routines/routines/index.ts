@@ -17,4 +17,9 @@ export { applyZkCommitmentAdd, applyZkAttestationAdd } from "./zkRoutines"
 export { applyNomisIdentityUpsert, applyNomisIdentityRemove } from "./nomisRoutines"
 export { applyHumanPassportIdentityAdd, applyHumanPassportIdentityRemove } from "./humanpassportRoutines"
 export { applyEthosIdentityUpsert, applyEthosIdentityRemove } from "./ethosRoutines"
-export { applyTLSNIdentityAdd, applyTLSNIdentityRemove, rollbackTLSNIdentityAdd } from "./tlsnRoutines"
+export {
+    applyTLSNIdentityAdd,
+    applyTLSNIdentityRemove,
+    rollbackTLSNIdentityAdd,
+    rollbackTLSNIdentityRemove,
+} from "./tlsnRoutines"

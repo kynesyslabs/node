@@ -37,9 +37,12 @@ const chain = {
     /** Stored accounts, as the database holds them before the block. */
     stored: [] as { pubkey: string; identities: { web2: Record<string, any[]> } }[],
     failing: false,
+    /** Reads a link's judgement makes: an undo must make none. */
+    judgeReads: 0,
 }
 const chainReads = () => ({
     findTlsnRequest: async (hash: string, held?: ReadonlyMap<string, any>) => {
+        chain.judgeReads++
         if (held?.has(hash)) return held.get(hash) ?? null
         if (chain.failing) throw new StateReadError("tlsn_request token", "database down")
         return chain.requests.get(hash) ?? null
@@ -58,6 +61,7 @@ const chainReads = () => ({
         account: string
         skip: readonly string[]
     }) => {
+        chain.judgeReads++
         if (chain.failing) throw new StateReadError("tlsn linked userId", "database down")
         const others = chain.stored.filter(a => !q.skip.includes(a.pubkey))
         const links = (a: (typeof chain.stored)[number]) => a.identities.web2[q.context] ?? []
@@ -66,7 +70,10 @@ const chainReads = () => ({
             attestationUsed: others.some(a => links(a).some(l => l.attestationId === q.attestationId)),
         }
     },
-    tipBlockTimestampSec: async () => chain.tipTimeSec,
+    tipBlockTimestampSec: async () => {
+        chain.judgeReads++
+        return chain.tipTimeSec
+    },
 })
 mock.module("@/libs/tlsnotary/tlsnChainReads", chainReads)
 mock.module("./tlsnChainReads", chainReads)
@@ -88,6 +95,7 @@ const { TLSN_IDENTITY_ENDPOINTS, parseBindValue, setTlsnIdentityEndpointsForTest
     "./identityPolicy"
 )
 const { TlsnVerifierUnavailableAtApplyError } = await import("./verifiedIdentity")
+const { tlsnTableDigest } = await import("@/libs/blockchain/gcr/gcr_routines/hashGCR")
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../..")
 const VECTORS = join(REPO, "testing/tlsn-vectors")
@@ -280,6 +288,7 @@ beforeEach(() => {
     chain.requests.clear()
     chain.stored = []
     chain.failing = false
+    chain.judgeReads = 0
     verifyCalls = 0
     sdkBindForm = true
     setPresentationVerifierForTests(testVerifier)
@@ -723,6 +732,127 @@ describe("one request backs one attestation", () => {
         expect((await applyAt(BLOCK_TIME + 7, unlink, entities)).success).toBe(true)
         expect(holder.identities.web2.github).toHaveLength(0)
         expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({ status: "linked", txhash: LINK_TX })
+    })
+})
+
+describe("undoing TLSN links and unlinks", () => {
+    const LINK_TX = "e1".repeat(32)
+    const UNLINK_TX = "e2".repeat(32)
+    const ATTESTATION = () => K256().output!.attestationId as string
+
+    const linkEdit = async () => {
+        const { edit } = await link({ hex: K256().hex, ...claimed(K256()) })
+        return { ...edit, txhash: LINK_TX }
+    }
+    const unlinkEdit = (): any => ({
+        type: "identity",
+        context: "tlsn",
+        operation: "remove",
+        account: BIND_SENDER,
+        txhash: UNLINK_TX,
+        isRollback: false,
+        data: { context: "github", username: claimed(K256()).username },
+    })
+    /** Where a block apply meets the unlink: its record lives in that apply. */
+    const unlinkPlace = () => ({ txhash: UNLINK_TX, position: 1, removed: new Map() })
+
+    /** The GCR state the block hash covers: the accounts and the TLSN table. */
+    const stateHash = (entities: any) =>
+        createHash("sha256")
+            .update(JSON.stringify([...entities.accounts.entries()].sort()))
+            .update(tlsnTableDigest([...entities.tlsNotaries.values()].filter(Boolean), true))
+            .digest("hex")
+
+    const undo = (edit: any, entities: any, place?: any) =>
+        withBlockTime(BLOCK_TIME + 7, () =>
+            HandleGCR.applyGCREdit(structuredClone(edit), entities, true, false, place),
+        )
+
+    it("the undo of an unlink puts the link back byte for byte, its token as it was, verifying nothing", async () => {
+        const holder = account(BIND_SENDER, {
+            github: [{ username: "older", userId: "1", proof: "p", proofHash: "h", timestamp: 1 }],
+        })
+        const entities = caches(holder)
+        expect((await applyAt(BLOCK_TIME, await linkEdit(), entities)).success).toBe(true)
+        const linked = JSON.stringify(holder.identities.web2.github)
+        const beforeUnlink = stateHash(entities)
+        expect(holder.identities.web2.github[1]).toMatchObject({ attestationId: ATTESTATION(), proofType: "tlsn" })
+
+        const place = unlinkPlace()
+        const unlink = unlinkEdit()
+        const removed = await withBlockTime(BLOCK_TIME + 7, () =>
+            HandleGCR.applyGCREdit(structuredClone(unlink), entities, false, false, place),
+        )
+        expect(removed.success).toBe(true)
+        expect(holder.identities.web2.github).toHaveLength(1)
+
+        verifyCalls = 0
+        chain.judgeReads = 0
+        const undone = await undo(unlink, entities, place)
+
+        expect(undone.success).toBe(true)
+        expect(JSON.stringify(entities.accounts.get(BIND_SENDER).identities.web2.github)).toBe(linked)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({
+            status: "linked",
+            attestationId: ATTESTATION(),
+            txhash: LINK_TX,
+        })
+        expect(stateHash(entities)).toBe(beforeUnlink)
+        expect(verifyCalls).toBe(0)
+        expect(chain.judgeReads).toBe(0)
+    })
+
+    it("the undo of an unlink fails without this node's record of it, changing nothing", async () => {
+        const holder = account(BIND_SENDER)
+        const entities = caches(holder)
+        expect((await applyAt(BLOCK_TIME, await linkEdit(), entities)).success).toBe(true)
+        const unlink = unlinkEdit()
+        expect((await applyAt(BLOCK_TIME + 7, unlink, entities)).success).toBe(true)
+        const after = stateHash(entities)
+
+        verifyCalls = 0
+        const undone = await undo(unlink, entities)
+
+        expect(undone.success).toBe(false)
+        expect(undone.message).toContain("No record of the removed TLSN identity")
+        expect(stateHash(entities)).toBe(after)
+        expect(verifyCalls).toBe(0)
+    })
+
+    it("the undo of a link frees its token and its attestation, even below the fork's height", async () => {
+        // The context bucket is there before the link: an undo leaves the
+        // bucket an add created, as for web2 and cross-chain links.
+        const holder = account(BIND_SENDER, { github: [] })
+        const entities = caches(holder)
+        // The block holds the pending token as it loaded it.
+        entities.tlsNotaries.set(REQUEST_HASH, structuredClone(chain.requests.get(REQUEST_HASH)))
+        const beforeLink = stateHash(entities)
+        const edit = await linkEdit()
+        expect((await applyAt(BLOCK_TIME, edit, entities)).success).toBe(true)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({ status: "linked", attestationId: ATTESTATION() })
+
+        // An orphan rollback that reaches below the activation height judges
+        // at a tip where the fork is not active yet.
+        getSharedState.forkConfig.tlsnVerified.activationHeight = 500
+        getSharedState.lastBlockNumber = 499
+        verifyCalls = 0
+        const undone = await undo(edit, entities)
+        getSharedState.lastBlockNumber = 500
+
+        expect(undone.success).toBe(true)
+        expect(verifyCalls).toBe(0)
+        expect(holder.identities.web2.github).toHaveLength(0)
+        expect(entities.tlsNotaries.get(REQUEST_HASH)).toMatchObject({
+            status: "pending",
+            attestationId: null,
+            storedAtHeight: null,
+            txhash: REQUEST_HASH,
+        })
+        expect(stateHash(entities)).toBe(beforeLink)
+
+        // The same attestation, on the same request, links again.
+        expect((await applyAt(BLOCK_TIME, edit, entities)).success).toBe(true)
+        expect(holder.identities.web2.github[0].attestationId).toBe(ATTESTATION())
     })
 })
 
