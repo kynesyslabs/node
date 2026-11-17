@@ -349,4 +349,31 @@ describe("observeNode block scan", () => {
             server.stop(true)
         }
     })
+
+    it("reads only block 1 when the head is past the scan window", async () => {
+        const read: number[] = []
+        const server = Bun.serve({
+            port: 0,
+            hostname: "127.0.0.1",
+            async fetch(req) {
+                if (req.method === "GET") return Response.json({ hash: BLOCK0 })
+                const { message, data } = (await req.json()).params[0]
+                const ok = (response: unknown) => Response.json({ result: 200, response })
+                if (message === "getLastBlockNumber") return ok(5000)
+                if (message === "getBlockByNumber") {
+                    read.push(data.blockNumber)
+                    return ok({ hash: BLOCK1, content: { previousHash: BLOCK0, ordered_transactions: [] } })
+                }
+                return ok([])
+            },
+        })
+        try {
+            const obs = await observeNode(`http://127.0.0.1:${server.port}`, [id(100)], 1000, 2000)
+            expect(read).toEqual([1])
+            const d = decideHeight1(expectation(), [obs], { maxScan: 1000 })
+            expect(d.checks.find(c => c.name === "balances")?.detail).toContain("past the first 1000 blocks")
+        } finally {
+            server.stop(true)
+        }
+    })
 })

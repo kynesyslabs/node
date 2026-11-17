@@ -607,8 +607,9 @@ export async function observeNode(
         const firstHead = Number(await nodeCall(base, "getLastBlockNumber", {}, timeoutMs))
         obs.head = firstHead
         if (!(firstHead >= 1)) return obs
-        // Past the scan window only block 1 is needed, for its parent
-        obs.blocks = await readBlocks(base, 1, Math.min(firstHead, maxScan), timeoutMs)
+        // Past the scan window the state is out of the comparison anyway, so
+        // only block 1 is read, for its parent and agreement checks
+        obs.blocks = await readBlocks(base, 1, firstHead > maxScan ? 1 : firstHead, timeoutMs)
         if (stateNotComparable(obs, maxScan) !== null) return obs
 
         try {

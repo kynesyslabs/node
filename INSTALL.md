@@ -1145,7 +1145,7 @@ sudo chown 1000:1000 seed/subnet.key seed/subnet.iv   # keep mode 600
 docker compose run --rm --no-deps -v "$PWD/seed:/seed:ro" node \
     bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join \
     --l2ps-key-file /seed/subnet.key --l2ps-iv-file /seed/subnet.iv
-shred -u seed/subnet.key seed/subnet.iv
+sudo shred -u seed/subnet.key seed/subnet.iv   # uid 1000 owns them now
 ```
 
 or read the key and IV silently into the shell as above and pass them by name, so the values stay off the command line:
