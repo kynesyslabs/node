@@ -99,6 +99,30 @@ describe("logNonCriticalError", () => {
     }
   })
 
+  it("logs an object String() shows as [object Object] as JSON, or its type when JSON fails", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    try {
+      const cyclic: Record<string, unknown> = { id: 1 }
+      cyclic.self = cyclic
+      // A JSON-RPC error object thrown as is, and RPC values that are plain objects.
+      logNonCriticalError("test.objects", { code: -32000, message: "nonce too low" }, {
+        amount: { value: "5", decimals: 18 },
+        big: { value: 12n },
+        cyclic,
+      })
+      expect(lines).toEqual([
+        `[loadgen] Non-critical error in test.objects: {"code":-32000,"message":"nonce too low"} ` +
+          String.raw`{"amount":"{\"value\":\"5\",\"decimals\":18}","big":"object","cyclic":"object"}`,
+      ])
+      expect(errorShapeKey({ code: -32000, message: "nonce 17 too low" })).toBe(`object:{"code":-#,"message":"nonce # too low"}`)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("cuts the escaped record to 2,000 characters", () => {
     const lines: string[] = []
     const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {

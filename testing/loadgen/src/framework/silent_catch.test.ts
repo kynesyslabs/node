@@ -22,11 +22,6 @@ const REPORTED_ELSEWHERE: Record<string, number> = {
   "token_invariants_known_holders.ts": 1,
   // The one catch is inside a token-script source string that runs in the node's script VM.
   "token_script_rejects.ts": 1,
-  // logValue falls back to typeof value when String(value) throws; that is the
-  // diagnostic text for the amount-parse log, which still logs the error.
-  "token_script_complex_policy_smoke.ts": 1,
-  "token_script_complex_policy_escrow_state_machine.ts": 1,
-  "token_script_complex_policy_vesting_lockup.ts": 1,
 }
 
 // Same: every catch in this file is inside a token-script source string.

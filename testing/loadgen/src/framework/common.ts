@@ -76,13 +76,14 @@ export function normalizeHexAddress(address: string): string {
 
 const loggedNonCriticalKeys = new Set<string>()
 
-const LOG_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t" }
+const LOG_ESCAPES: Record<string, string> = { "\n": String.raw`\n`, "\r": String.raw`\r`, "\t": String.raw`\t` }
 
 // Peer- or node-supplied text can hold newlines, terminal escapes or bidi overrides
 // that forge or hide log lines: show C0/C1 controls, DEL and bidi controls as escapes.
+// Every matched character is a single UTF-16 code unit, so codePointAt(0) is its code.
 export function escapeControlChars(text: string): string {
   return text.replace(/[\u0000-\u001f\u007f-\u009f\u{202a}-\u{202e}\u{2066}-\u{2069}]/gu,
-    char => LOG_ESCAPES[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)
+    char => LOG_ESCAPES[char] ?? String.raw`\u${(char.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`)
 }
 
 // Peer- or node-supplied text (RPC amounts, error messages) has no size limit, so each
@@ -110,10 +111,19 @@ function cutEscaped(text: string, maxChars: number): string {
   return text.length > maxChars ? `${shown}…(${text.length} chars)` : shown
 }
 
-// String() throws on values such as RPC JSON {"toString":null}; log the type instead.
-function textOrType(value: unknown): string {
+type Printable = string | number | bigint | boolean | symbol | null | undefined | { toString(): string }
+
+// False only for an object whose toString is Object's own, which String() shows as "[object Object]".
+function isPrintable(value: unknown): value is Printable {
+  return typeof value !== "object" || value === null || value.toString !== Object.prototype.toString
+}
+
+// Log text for a value: String(), or JSON for an object String() would show as
+// "[object Object]". String() throws on values such as RPC JSON {"toString":null}, and
+// JSON.stringify on bigints and cycles; log the type instead.
+export function textOrType(value: unknown): string {
   try {
-    return String(value)
+    return isPrintable(value) ? String(value) : JSON.stringify(value) ?? typeof value
   } catch {
     return typeof value
   }
@@ -207,7 +217,7 @@ export function truncatedError(error: unknown, maxChars = 500): Error {
 // error name plus the message with hex runs and digits replaced, capped at 200 chars.
 export function errorShapeKey(error: unknown): string {
   const name = errorName(error)
-  const message = error instanceof Error ? error.message : String(error)
+  const message = error instanceof Error ? error.message : textOrType(error)
   const shape = message.replace(/0x[0-9a-f]+|\b(?=[0-9a-f]*\d)[0-9a-f]+\b|\d+/gi, "#")
   return `${name}:${shape}`.slice(0, 200)
 }
