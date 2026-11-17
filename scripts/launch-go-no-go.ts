@@ -694,6 +694,9 @@ export const KNOWN_TEST_NOTARY_KEYS: readonly string[] = [
     "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e",
     "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870",
     // spike-notary-k and the stock notary's ephemeral key in the test vectors
+    "031b38ff37bef18876d8196c53461c59f7ac587b239fb88380b4c2af2d3f0feb8e",
+    "03371c811e56a2b3472038341ab5a7f4c447504c05003ac0536db236c0c731b9e0",
+    // the same two keys from the W1a spike run, which earlier vectors carried
     "03d60e95452b0bef1253df2dc6bbc3c955b0e1511d0ce37a0543d888a6430b580c",
     "0297a6f938678de7b1ed4d1b8b9ce5bdded7e6e5dfe6ef42a08a4d0a6d1a188596",
 ]

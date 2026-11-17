@@ -823,6 +823,21 @@ describe("checkLaunch", () => {
                 expect(KNOWN_TEST_NOTARY_KEYS).toContain(key.hex)
             }
         })
+
+        it("lists the secp256k1 keys of the TLSNotary test vectors as test keys", () => {
+            const vectors = path.join(import.meta.dir, "../testing/tlsn-vectors")
+            const trusted = JSON.parse(fs.readFileSync(path.join(vectors, "trusted-notary-keys.json"), "utf8"))
+            const ephemeral = JSON.parse(
+                fs.readFileSync(path.join(vectors, "default-notary-k256/output.json"), "utf8"),
+            ).verifyingKey
+            const k256 = [
+                ...trusted.filter((k: { alg: string }) => k.alg === "k256").map((k: { publicKey: string }) => k.publicKey),
+                ephemeral.hex,
+            ]
+            expect(ephemeral.alg).toBe("k256")
+            expect(k256).toHaveLength(2)
+            for (const hex of k256) expect(KNOWN_TEST_NOTARY_KEYS).toContain(hex)
+        })
     })
 
     it("launches with the Storage Program fee kept in the supply", () => {
