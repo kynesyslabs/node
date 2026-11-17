@@ -20,15 +20,25 @@ import {
   truncatedError,
 } from "./common"
 
-// C0 and C1 controls, DEL and the bidi embedding, override and isolate controls.
-const RAW_CONTROL = /[\u0000-\u001f\u007f-\u009f\u{202a}-\u{202e}\u{2066}-\u{2069}]/u
+// C0 and C1 controls, DEL, the line and paragraph separators, and the bidi marks,
+// embedding, override and isolate controls.
+const RAW_CONTROL =
+  /[\u0000-\u001f\u007f-\u009f\u{061c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]/u
+// Characters that end a line for JavaScript and for many log viewers.
+const LINE_BREAK = /\r\n|[\n\r\u{0085}\u{2028}\u{2029}]/u
 
 describe("escapeControlChars", () => {
-  it("shows C0/C1 controls, DEL and bidi controls as visible escapes", () => {
+  it("shows C0/C1 controls, DEL, line separators and bidi controls as visible escapes", () => {
     expect(escapeControlChars("a\nb\rc\td")).toBe("a\\nb\\rc\\td")
     expect(escapeControlChars("\u0000\u001b[2K\u001f")).toBe("\\u0000\\u001b[2K\\u001f")
     expect(escapeControlChars("\u007f\u0080\u0085\u009b\u009f")).toBe("\\u007f\\u0080\\u0085\\u009b\\u009f")
     expect(escapeControlChars("\u{202a}\u{202e}\u{2066}\u{2069}")).toBe("\\u202a\\u202e\\u2066\\u2069")
+    // Line and paragraph separators, then the left-to-right, right-to-left and Arabic letter marks.
+    const separatorsAndMarks = "a\u{2028}[loadgen] forged\u{2029}b\u{200e}c\u{200f}d\u{061c}e"
+    const escaped = escapeControlChars(separatorsAndMarks)
+    expect(escaped).toBe("a\\u2028[loadgen] forged\\u2029b\\u200ec\\u200fd\\u061ce")
+    expect(escaped).not.toMatch(RAW_CONTROL)
+    expect(escaped.split(LINE_BREAK)).toHaveLength(1)
   })
 
   it("leaves printable text unchanged", () => {
@@ -53,6 +63,27 @@ describe("logNonCriticalError", () => {
       expect(lines[0]).not.toMatch(RAW_CONTROL)
       expect(lines[0]).toBe(
         `[loadgen] Non-critical error in test.sink: JSON Parse error: Unrecognized token '\\u001b' {"value":"1\\u007f\\u009b\\u202e2\\n"}`,
+      )
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it("escapes line and paragraph separators and the remaining bidi marks, one record per call", () => {
+    const lines: string[] = []
+    const errorSpy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "))
+    })
+    try {
+      // JSON.stringify leaves U+2028, U+2029, U+200E, U+200F and U+061C raw in details.
+      const forged = "\u{2028}[loadgen] Non-critical error in test.forged: ok\u{2029}\u{200e}\u{200f}\u{061c}"
+      logNonCriticalError("test.separators", new Error(`rejected${forged}`), { memo: `x${forged}` })
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).not.toMatch(RAW_CONTROL)
+      expect(lines[0].split(LINE_BREAK)).toHaveLength(1)
+      const shown = "\\u2028[loadgen] Non-critical error in test.forged: ok\\u2029\\u200e\\u200f\\u061c"
+      expect(lines[0]).toBe(
+        `[loadgen] Non-critical error in test.separators: rejected${shown} {"memo":"x${shown}"}`,
       )
     } finally {
       errorSpy.mockRestore()
