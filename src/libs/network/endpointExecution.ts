@@ -34,11 +34,17 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
-import { submitValidatedTx } from "./txSubmission"
+import { gossipSizeRefusal, submitValidatedTx } from "./txSubmission"
+import GossipManager from "src/libs/gossip/GossipManager"
 import { isSelfStaked } from "src/libs/consensus/stakedSet"
 import handleL2PS from "./routines/transactions/handleL2PS"
 
-import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
+import {
+    isReferenceBlockAllowed,
+    isReferenceBlockAllowedAt,
+} from "@/libs/blockchain/referenceBlockWindow"
+import Mempool from "src/libs/blockchain/mempool"
+import { ErrorCode } from "@/errors"
 
 /**
  * How an accepted transaction left this node. "mempool" is the only path
@@ -93,6 +99,51 @@ function refusedForCredentials(
     result.success = false
     result.response = { error: "WEB2_CREDENTIALS_IN_TX", message }
     result.extra = { error: "WEB2_CREDENTIALS_IN_TX", message }
+    return true
+}
+
+/**
+ * Marks `result` refused when the reference block is outside the window at
+ * our head, or outside the window of the block the mempool would queue the
+ * tx for: during a consensus round, the block after the one being forged.
+ * Best effort at broadcast: it uses this node's head and round state at the
+ * time of the check, so a node that is behind the network, a validator that
+ * is not in the current round's committee (it leaves the round at once), a
+ * round that starts before the tx is queued, or a block-capped pool that holds
+ * the tx past the queued block can still let one through; a round that fails
+ * before the tx is queued can refuse one that would have been included.
+ */
+function refusedForReferenceBlock(
+    result: ExecutionResult,
+    referenceBlock: number,
+    head: number,
+): boolean {
+    if (!isReferenceBlockAllowed(referenceBlock, head)) {
+        log.error(
+            "[handleExecuteTransaction] Invalid validityData block reference: " +
+                referenceBlock +
+                " - " +
+                head,
+        )
+        result.success = false
+        result.response = false
+        result.extra = "Invalid block reference"
+        return true
+    }
+
+    const targetBlock = Mempool.nextBlockRef()
+    if (isReferenceBlockAllowedAt(referenceBlock, targetBlock, head)) {
+        return false
+    }
+    const error = ErrorCode.TX_REFERENCE_BLOCK_OUT_OF_RANGE_AT_INCLUSION
+    const message =
+        `Reference block ${referenceBlock} is outside the window of block ` +
+        `${targetBlock}, the block this transaction would be included in. ` +
+        "Confirm the transaction again and broadcast the new validity data."
+    log.error("[handleExecuteTransaction] " + message)
+    result.success = false
+    result.response = { error, message }
+    result.extra = { error, message }
     return true
 }
 
@@ -164,16 +215,7 @@ export async function handleExecuteTransaction(
         `[SERVER] Read last block number in ${handleBlockNumberEnd - handleBlockNumberStart}ms`,
     )
 
-    if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
-        log.error(
-            "[handleExecuteTransaction] Invalid validityData block reference: " +
-                blockNumber +
-                " - " +
-                lastBlockNumber,
-        )
-        result.success = false
-        result.response = false
-        result.extra = "Invalid block reference"
+    if (refusedForReferenceBlock(result, blockNumber, lastBlockNumber)) {
         return result
     }
 
@@ -185,6 +227,25 @@ export async function handleExecuteTransaction(
         result.success = false
         result.response = false
         result.extra = validatedData.data.message
+        return result
+    }
+
+    // l2psEncryptedTx returns before submission and never reaches the tx topic.
+    const sizeRefusal =
+        GossipManager.isEnabled() &&
+        validatedData.data.transaction?.content?.type !== "l2psEncryptedTx"
+            ? gossipSizeRefusal(validatedData)
+            : null
+    if (sizeRefusal) {
+        result.success = false
+        result.response = {
+            message: "Failed to add transaction to mempool",
+        }
+        result.extra = {
+            confirmationBlock: null,
+            lastBlockNumber: getSharedState.lastBlockNumber,
+            error: sizeRefusal,
+        }
         return result
     }
 

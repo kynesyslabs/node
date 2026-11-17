@@ -46,6 +46,7 @@ import {
     type ForkName,
 } from "src/forks/forkConfig"
 import { treasuryAddressProblem } from "src/forks/treasuryAddress"
+import { tlsnVerifiedProblems } from "src/forks/tlsnVerifiedPayload"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -187,18 +188,27 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
-    "l2psGate",
-    "tlsnDisabled",
     "xmProofBinding",
     "storageFeeSettlement",
     "referenceBlockRoom10",
+    "l2psSettlement",
+    "tlsnVerified",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
+ * l2psGate and tlsnDisabled are the L2PS and TLSNotary kill switches: both
+ * features run from block 0 and a switch is scheduled only if its feature
+ * has to be stopped.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["atomicWork", "networkGovernance", "tokenStaking"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
+    "atomicWork",
+    "networkGovernance",
+    "tokenStaking",
+    "l2psGate",
+    "tlsnDisabled",
+]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a
@@ -628,8 +638,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 /**
  * NO-GO reasons for a genesis whose fork block is not mainnet's: a mainnet
  * fork not at block 0, a launch-dormant fork scheduled, a fork this build
- * knows left undeclared, or a scheduled gasFeeSeparation without its own
- * treasury.
+ * knows left undeclared, a scheduled gasFeeSeparation without its own
+ * treasury, or a scheduled tlsnVerified without real notary keys.
  */
 export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
     if (!genesis) {
@@ -660,6 +670,7 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
                 "or null, or it takes the code default (see docs/mainnet/genesis.md)",
         )
     }
+    reasons.push(...tlsnNotaryReasons(forks.tlsnVerified))
     const gas = forks.gasFeeSeparation
     if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
         if (typeof gas.treasuryAddress !== "string") {
@@ -668,6 +679,57 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
             const problem = treasuryAddressProblem(gas.treasuryAddress)
             if (problem) reasons.push(`fork gasFeeSeparation is scheduled with a treasuryAddress the node refuses: ${problem}`)
         }
+    }
+    return reasons
+}
+
+/**
+ * Notary keys of the devnet genesis and of the TLSNotary spike and its test
+ * vectors (testing/tlsn-vectors). None comes from the notary key ceremony: their
+ * private halves are test material nobody guards, so whoever holds one could
+ * attest anything on mainnet.
+ */
+export const KNOWN_TEST_NOTARY_KEYS: readonly string[] = [
+    // testing/devnet/genesis.devnet.json
+    "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e",
+    "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870",
+    // spike-notary-k and the stock notary's ephemeral key in the test vectors
+    "03d60e95452b0bef1253df2dc6bbc3c955b0e1511d0ce37a0543d888a6430b580c",
+    "0297a6f938678de7b1ed4d1b8b9ce5bdded7e6e5dfe6ef42a08a4d0a6d1a188596",
+]
+
+/**
+ * NO-GO reasons for the tlsnVerified entry of a mainnet genesis: unset
+ * (template FILL) or malformed notary keys and verifier pin, as the node
+ * would refuse them, and keys whose private half is test material. The
+ * keys come from the notary key ceremony, never from this repository.
+ */
+export function tlsnNotaryReasons(entry: Record<string, unknown> | undefined): string[] {
+    if (!entry || entry.activationHeight === null || entry.activationHeight === undefined) return []
+    const reasons: string[] = []
+    const keys = Array.isArray(entry.notaryKeys) ? entry.notaryKeys : []
+    const unset = keys.filter(k => {
+        const hex = (k as { hex?: unknown } | null)?.hex
+        return typeof hex !== "string" || hex.startsWith("FILL")
+    })
+    if (keys.length === 0 || unset.length > 0) {
+        reasons.push(
+            "fork tlsnVerified is scheduled with placeholder or unset notary keys; " +
+                "fill notaryKeys with the public keys from the notary key ceremony",
+        )
+    }
+    const problems = tlsnVerifiedProblems(entry, true)
+    if (problems.length > 0) {
+        reasons.push(`fork tlsnVerified is scheduled with a payload the node refuses: ${problems.join("; ")}`)
+    }
+    const test = keys
+        .map(k => (k as { hex?: unknown } | null)?.hex)
+        .filter((hex): hex is string => typeof hex === "string" && KNOWN_TEST_NOTARY_KEYS.includes(hex.toLowerCase()))
+    if (test.length > 0) {
+        reasons.push(
+            `fork tlsnVerified lists the test notary key ${test.join(", ")}; ` +
+                "it is test material of this repository, so mainnet needs keys from the notary key ceremony",
+        )
     }
     return reasons
 }
@@ -725,6 +787,20 @@ export function treasuryReasons(
     const expected = typeof expectedTreasury === "string" && expectedTreasury.trim() ? normTreasury(expectedTreasury) : null
     const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
     const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (mainnet) {
+        const named = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+            ?.treasuryAddress
+        const test = [named, expected]
+            .filter((a): a is string => typeof a === "string")
+            .map(normTreasury)
+            .filter(a => KNOWN_TEST_TREASURIES.includes(a))
+        if (test.length > 0) {
+            return [
+                `the treasury ${test[0]} is the treasury of a test genesis in this repository; ` +
+                    "its key is not held by the owners alone, so the mainnet treasury needs a key generated for it",
+            ]
+        }
+    }
     if (expected === null) {
         return mainnet
             ? [
@@ -743,6 +819,16 @@ export function treasuryReasons(
     }
     return []
 }
+
+/**
+ * Treasuries of the devnet, rehearsal and fixture genesis files in this
+ * repository. Their keys come from shared test mnemonics, so one copied into
+ * the mainnet genesis would hand the fees to anyone holding those.
+ */
+export const KNOWN_TEST_TREASURIES: readonly string[] = [
+    "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23",
+    "0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface",
+]
 
 function normTreasury(address: string): string {
     return address.trim().toLowerCase()

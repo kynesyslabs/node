@@ -15,6 +15,7 @@ import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { isLoopbackHost, parseNodeUrl } from "src/config"
+import { canonicalIpv6 } from "src/config/nodeUrl"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import {
@@ -23,7 +24,7 @@ import {
     standbyKeepsKnownUrl,
     URL_BOUND_TO_OTHER,
 } from "./helloAuth"
-import { noteCallerKnownAt } from "./identityLiveness"
+import { isSelfProof, noteCallerKnownAt } from "./identityLiveness"
 import { signingStopState } from "../identity/signingRecord"
 import { corroborateSyncData } from "./syncClaims"
 import {
@@ -39,12 +40,57 @@ export type HelloVerdict =
     | "verified"
     | "unsigned"
     | "invalid"
+    /** Our nonce signed by our key at a URL known to be served by this process. */
+    | "self"
     /** The peer proved its key but runs another chain (genesis block hash differs). */
     | "other-genesis"
     | "unreachable"
     | "skipped"
 
 export default class PeerManager {
+    private static dualStackProbe: Promise<boolean> | undefined
+    private static mappedIpv4Probe: Promise<boolean> | undefined
+
+    private static async ipv6WildcardAcceptsIpv4(): Promise<boolean> {
+        const probe = (PeerManager.dualStackProbe ??= (async () => {
+            let server: ReturnType<typeof Bun.serve> | undefined
+            try {
+                server = Bun.serve({ hostname: "::", port: 0, fetch: () => new Response("ok") })
+                const response = await fetch(`http://127.0.0.1:${server.port}`, {
+                    signal: AbortSignal.timeout(500),
+                })
+                return response.ok && await response.text() === "ok"
+            } catch {
+                return false
+            } finally {
+                server?.stop(true)
+            }
+        })())
+        const supported = await probe
+        if (!supported && PeerManager.dualStackProbe === probe) PeerManager.dualStackProbe = undefined
+        return supported
+    }
+
+    private static async ipv4WildcardAcceptsMappedIpv4(): Promise<boolean> {
+        const probe = (PeerManager.mappedIpv4Probe ??= (async () => {
+            let server: ReturnType<typeof Bun.serve> | undefined
+            try {
+                server = Bun.serve({ hostname: "0.0.0.0", port: 0, fetch: () => new Response("ok") })
+                const response = await fetch(`http://[::ffff:127.0.0.1]:${server.port}`, {
+                    signal: AbortSignal.timeout(500),
+                })
+                return response.ok && await response.text() === "ok"
+            } catch {
+                return false
+            } finally {
+                server?.stop(true)
+            }
+        })())
+        const supported = await probe
+        if (!supported && PeerManager.mappedIpv4Probe === probe) PeerManager.mappedIpv4Probe = undefined
+        return supported
+    }
+
     private static instance: PeerManager
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
     private offlinePeers: Record<string, Peer> // Storing all the offline peers to be retried later
@@ -603,6 +649,30 @@ export default class PeerManager {
         }
     }
 
+    /** Only an exact bind or a loopback address covered by a wildcard is ours. */
+    static async urlIsOurAddress(url: URL): Promise<boolean> {
+        const effectivePort = url.port || (url.protocol === "https:" ? "443" : url.protocol === "http:" ? "80" : "")
+        if (effectivePort !== String(getSharedState.serverPort)) return false
+        const host = url.hostname.replace(/^\[(.*)\]$/, "$1").toLowerCase()
+        const rawBind = Config.getInstance().server.rpcBind.replace(/^\[(.*)\]$/, "$1").toLowerCase()
+        const bind = canonicalIpv6(rawBind)
+        if (host === bind && bind !== "0.0.0.0" && bind !== "::") return true
+        const ipv4Loopback = /^127(?:\.\d{1,3}){3}$/.test(host) && isLoopbackHost(host)
+        const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host)
+        const mappedIpv4 = mappedHex
+            ? [Number.parseInt(mappedHex[1], 16), Number.parseInt(mappedHex[2], 16)]
+                .flatMap(part => [part >> 8, part & 255]).join(".")
+            : host.startsWith("::ffff:") ? host.slice("::ffff:".length) : ""
+        const mappedLoopback = isLoopbackHost(mappedIpv4) && /^127(?:\.\d{1,3}){3}$/.test(mappedIpv4)
+        if (bind === "0.0.0.0") {
+            return ipv4Loopback || (mappedLoopback && await PeerManager.ipv4WildcardAcceptsMappedIpv4())
+        }
+        if (bind === "::") {
+            return host === "::1" || ((ipv4Loopback || mappedLoopback) && await PeerManager.ipv6WildcardAcceptsIpv4())
+        }
+        return false
+    }
+
     /** Identities with a hello in flight; breaks hello/hello-back cycles. */
     static verifying = new Set<string>()
 
@@ -724,12 +794,26 @@ export default class PeerManager {
                 typeof response.extra?.msg === "string" &&
                 response.extra.msg.startsWith("Peer is us")
             ) {
-                log.warning(
-                    `[PEERMANAGER] ${peer.connection.string} answered as ourselves: dropping bogus peer ${peer.identity}`,
-                )
+                // A signed reply outside the proven listener refuses the anchor,
+                // but it cannot establish that another process is signing.
+                const self = await isSelfProof(
+                    response.extra,
+                    nonce,
+                    getSharedState.exposedUrl,
+                    input => TxValidatorPool.getInstance().verify(
+                        input as Parameters<TxValidatorPool["verify"]>[0],
+                    ),
+                ).catch(() => false)
+                const dialedUrl = parseNodeUrl(peer.connection.string)
+                const ownAddress = self && dialedUrl && await PeerManager.urlIsOurAddress(dialedUrl)
+                if (self && !ownAddress && peerman.getSeedPeers().some(seed => seed.connection.string === peer.connection.string)) {
+                    log.error(`[PEERMANAGER] ${peer.connection.string} answered with this node's signed identity (this node reached through another address, a copy of this node, or a relay); remove that peer-list entry`)
+                } else {
+                    log.warning(`[PEERMANAGER] ${peer.connection.string} ${self ? "answered as ourselves" : `answered "Peer is us" without a valid proof for our URL ${getSharedState.exposedUrl}`}: dropping bogus peer ${peer.identity}`)
+                }
                 peerman.removeOnlinePeer(peer.identity)
                 peerman.removeOfflinePeer(peer.identity)
-                return { peers: [], verdict: "invalid" }
+                return { peers: [], verdict: ownAddress ? "self" : "invalid" }
             }
 
             const verdict = await PeerManager.verifyHelloResponse(

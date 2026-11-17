@@ -277,11 +277,11 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
             "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "gasFeeSeparation",
-            "web2ProofBinding", "tlsnProofEnforcement", "l2psGate", "tlsnDisabled", "xmProofBinding",
+            "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "l2psSettlement", "tlsnVerified",
         ]) {
             expect(expected[n]).toBe(0)
         }
-        for (const n of ["atomicWork", "networkGovernance"]) {
+        for (const n of ["atomicWork", "networkGovernance", "l2psGate", "tlsnDisabled"]) {
             expect(expected[n]).toBeNull()
         }
     })
@@ -374,6 +374,18 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             expect(withLaunchForks(base, active).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x(?!0{64}$)[0-9a-f]{64}$/)
         }
         expect(withLaunchForks(own, active).forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
+    })
+    it("gives an active tlsnVerified the devnet payload when the genesis has none, and keeps one it has", () => {
+        const active = template({ ...MIN, tlsnVerified: { activationHeight: 0, notaryKeys: [{ hex: "FILL" }] } })
+        const devnet = JSON.parse(readFileSync(resolve(import.meta.dir, "../../devnet/genesis.devnet.json"), "utf8"))
+        const { activationHeight: _h, ...devnetPayload } = devnet.forks.tlsnVerified
+        expect(withLaunchForks(genesis(), active).forks.tlsnVerified).toEqual({ activationHeight: 0, ...devnetPayload })
+        const ownPayload = { ...devnetPayload, maxPresentationBytes: 4096 }
+        const own = { ...genesis(), forks: { tlsnVerified: { activationHeight: null, ...ownPayload } } }
+        expect(withLaunchForks(own, active).forks.tlsnVerified).toEqual({ activationHeight: 0, ...ownPayload })
+        // off, it needs no payload and gets none
+        const off = template({ ...MIN, tlsnVerified: { activationHeight: null } })
+        expect(withLaunchForks(genesis(), off).forks.tlsnVerified).toEqual({ activationHeight: null })
     })
     it("keeps the rest of the genesis and does not modify its input", () => {
         const input = genesis()
@@ -489,14 +501,38 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
                 treasuryAddress: devnet.forks.gasFeeSeparation.treasuryAddress,
             })
         })
-        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set", () => {
+        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set (three with --binding off)", () => {
             const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
+            expect(devnet.forks.commitLock).toEqual({ activationHeight: 0 })
             for (const [forkSet, binding, committee] of [[null, "on", 0], ["devnet", "on", 0], [null, "off", null]] as const) {
                 const { r, genesis: g } = gen(forkSet, binding)
                 expect(r.status).toBe(0)
-                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee } })
+                // off turns commitLock off with committeeBinding: the loader refuses it alone
+                const lock = binding === "off" ? { commitLock: { activationHeight: null } } : {}
+                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee }, ...lock })
                 // no exclusion list for the other scenarios
                 expect(existsSync(join(dir, `run-${forkSet}-${binding}-4`, "inputs", "launch-excluded.json"))).toBe(false)
+            }
+        })
+        it("the --binding off genesis loads: committeeBinding and commitLock off, quorumParity at 0", () => {
+            const saved = getSharedState.forkConfig
+            try {
+                for (const binding of ["on", "off"]) {
+                    const { genesis: g } = gen("devnet", binding)
+                    getSharedState.forkConfig = cloneDefaultForkConfig()
+                    loadForkConfigFromGenesis(g)
+                    const loaded = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
+                    const height = binding === "on" ? 0 : null
+                    expect(loaded.committeeBinding.activationHeight).toBe(height)
+                    expect(loaded.commitLock.activationHeight).toBe(height)
+                    expect(loaded.quorumParity.activationHeight).toBe(0)
+                }
+                // what the loader refused before: commitLock at 0 without committeeBinding
+                const { genesis: off } = gen("devnet", "off")
+                getSharedState.forkConfig = cloneDefaultForkConfig()
+                expect(() => loadForkConfigFromGenesis({ ...off, forks: { ...off.forks, commitLock: { activationHeight: 0 } } })).toThrow(/commitLock is scheduled at 0 but committeeBinding is not scheduled/)
+            } finally {
+                getSharedState.forkConfig = saved
             }
         })
         it("--fork-set launch refuses --binding off", () => {
@@ -509,8 +545,8 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
 
 describe("run.sh fork set", () => {
     const sh = readFileSync(resolve(import.meta.dir, "../../devnet/quorum-drills/run.sh"), "utf8")
-    it("runs the launch fork set for the three mainnet-shape drills and no other scenario", () => {
-        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\) FORK_SET=launch ;; esac/)
+    it("runs the launch fork set for the mainnet-shape drills (and every 30-validator one) and no other scenario", () => {
+        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\|\*-n30s10\) FORK_SET=launch ;; esac/)
         expect(sh).toContain("--fork-set \"${FORK_SET}\"")
         expect(sh).toContain("FORK_SET=devnet\n")
     })

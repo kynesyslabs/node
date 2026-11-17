@@ -9,6 +9,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { TXS_MAX_BYTES } from "src/libs/gossip/topics"
+
+// The gate measures with the product function, so a change to how it counts
+// bytes shows up here and not only in rpcGossipSize.test.ts. Loaded before
+// the partial mocks below, which its imports could not link against.
+const { gossipSizeRefusal: realGossipSizeRefusal } = await import("./txSubmission")
 
 const OUR_KEY = "aa".repeat(32)
 const HASH = "0x" + "11".repeat(32)
@@ -25,6 +31,8 @@ const submitValidatedTx = jest.fn(async (..._args: unknown[]) => ({
     confirmationBlock: 102,
     error: undefined as string | undefined,
 }))
+let gossipOn = true
+const gossipSizeRefusal = jest.fn(realGossipSizeRefusal)
 const quietLog = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() }
 
 mock.module("src/utilities/logger", () => ({ __esModule: true, default: quietLog }))
@@ -42,7 +50,12 @@ mock.module("../blockchain/gcr/handleGCR", () => ({
     default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
     withDerivedFeeEdits: (tx: unknown) => tx,
 }))
-mock.module("./txSubmission", () => ({ submitValidatedTx }))
+mock.module("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal }))
+mock.module("src/libs/gossip/GossipManager", () => ({
+    __esModule: true,
+    default: { isEnabled: () => gossipOn },
+}))
+mock.module("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 mock.module("src/libs/consensus/stakedSet", () => ({ isSelfStaked: async () => true }))
 const handleDemosWorkRequest = jest.fn(async (..._args: unknown[]) => ({ result: 200, response: {} }))
 mock.module("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({
@@ -61,7 +74,8 @@ mock.module("../utils/web2RequestUtils", () => ({
 }))
 mock.module("./routines/transactions/handleIdentityRequest", () => ({ __esModule: true, default: jest.fn() }))
 mock.module("./routines/transactions/handleNativeBridgeTx", () => ({ __esModule: true, default: jest.fn() }))
-mock.module("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
+const handleL2PS = jest.fn(async (..._args: unknown[]) => ({ result: 200 }))
+mock.module("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: handleL2PS }))
 
 const { handleExecuteTransaction } = await import("./endpointExecution")
 const { Config: appConfig } = await import("src/config")
@@ -101,12 +115,60 @@ function setSwitch(name: (typeof SWITCHES)[number], on: boolean) {
 }
 
 beforeEach(() => {
+    gossipOn = true
     for (const s of SWITCHES) delete process.env[s]
     appConfig.resetInstance()
     submitValidatedTx.mockClear()
     handleDemosWorkRequest.mockClear()
     digest.mockClear()
+    handleL2PS.mockClear()
+    gossipSizeRefusal.mockClear()
     handleWeb2ProxyRequest.mockClear()
+})
+
+describe("tx gossip size gate before type effects", () => {
+    for (const [type, effect] of [
+        ["crosschainOperation", digest],
+        ["subnet", handleL2PS],
+    ] as const) {
+        it(`refuses an oversized ${type} before its handler runs`, async () => {
+            const data = tx(type, { blob: "x".repeat(TXS_MAX_BYTES + 1) })
+            const reply = await handleExecuteTransaction(data, "sender")
+            expect(reply.success).toBe(false)
+            expect(reply.response).toEqual({ message: "Failed to add transaction to mempool" })
+            expect(reply.extra).toMatchObject({ error: expect.stringContaining(`${TXS_MAX_BYTES}`) })
+            expect(effect).not.toHaveBeenCalled()
+            expect(submitValidatedTx).not.toHaveBeenCalled()
+        })
+
+        it(`lets a small ${type} reach its handler`, async () => {
+            const reply = await handleExecuteTransaction(tx(type, {}), "sender")
+            expect(reply.success).toBe(true)
+            expect(effect).toHaveBeenCalledTimes(1)
+            expect(submitValidatedTx).toHaveBeenCalledTimes(1)
+        })
+    }
+
+    it("lets an oversized l2psEncryptedTx reach handleL2PS, since it never goes on the tx topic", async () => {
+        const data = tx("l2psEncryptedTx", { encrypted_data: "x".repeat(TXS_MAX_BYTES + 1) })
+        data.data.transaction.signature = { type: "ed25519", data: "cc".repeat(64) }
+        const reply = await handleExecuteTransaction(data, "sender")
+        expect(reply.success).toBe(true)
+        expect(reply.extra).toMatchObject({ disposition: "mempool" })
+        expect(handleL2PS).toHaveBeenCalledTimes(1)
+        expect(submitValidatedTx).not.toHaveBeenCalled()
+    })
+
+    it("lets an oversized transaction reach the handler with gossip off", async () => {
+        gossipOn = false
+        const reply = await handleExecuteTransaction(
+            tx("subnet", { blob: "x".repeat(TXS_MAX_BYTES + 1) }),
+            "sender",
+        )
+        expect(reply.success).toBe(true)
+        expect(gossipSizeRefusal).not.toHaveBeenCalled()
+        expect(handleL2PS).toHaveBeenCalledTimes(1)
+    })
 })
 
 afterEach(() => {

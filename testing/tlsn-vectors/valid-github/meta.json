@@ -1,0 +1,12 @@
+{
+  "description": "Notary K (secp256k1 key file, SDK default request), real api.github.com /users/octocat, production webpki-roots store, bind header revealed (no Authorization header on this one).",
+  "root": null,
+  "verifier": "ok",
+  "nodePolicy": "accept",
+  "expect": {
+    "server": "api.github.com",
+    "method": "GET",
+    "path": "/users/octocat",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

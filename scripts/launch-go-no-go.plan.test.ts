@@ -19,6 +19,7 @@ import {
     mainnetGenesisReasons,
     validatorTable,
 } from "./launch-go-no-go"
+import { tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
 
 const ROOT = join(import.meta.dir, "..")
 const TEMPLATE = join(ROOT, "docs/mainnet/genesis.template.json")
@@ -34,6 +35,7 @@ function filledTemplate(validators = 10) {
     g.properties.currency = "DEM"
     delete g.properties.sudoPubkey
     g.forks.gasFeeSeparation = { activationHeight: 0, treasuryAddress: TREASURY }
+    g.forks.tlsnVerified = { ...g.forks.tlsnVerified, ...tlsnVerifiedPayload() }
     delete g.snapshot
     g.balances = []
     g.timestamp = "1793318400"
@@ -71,10 +73,16 @@ describe("mainnet genesis template", () => {
     it("schedules every mainnet fork at block 0", () => {
         const forks = readTemplate().forks
         for (const name of MAINNET_FORKS) {
-            const { treasuryAddress, ...schedule } = forks[name]
-            expect(schedule).toEqual({ activationHeight: 0 })
-            // Only gasFeeSeparation carries a payload: the treasury the owners fill
-            expect(treasuryAddress === undefined || name === "gasFeeSeparation").toBe(true)
+            expect(forks[name].activationHeight).toBe(0)
+            // Only gasFeeSeparation and tlsnVerified carry a payload: the
+            // treasury, and the notary keys and verifier pin
+            const payload = Object.keys(forks[name]).filter(k => k !== "activationHeight")
+            if (name === "gasFeeSeparation") expect(payload).toEqual(["treasuryAddress"])
+            else if (name === "tlsnVerified") {
+                expect(payload.sort()).toEqual(
+                    ["freshnessWindowSec", "futureSkewSec", "maxPresentationBytes", "notaryKeys", "verifierWasmSha256"],
+                )
+            } else expect(payload).toEqual([])
         }
     })
 
@@ -86,6 +94,8 @@ describe("mainnet genesis template", () => {
         const g = readTemplate()
         for (const v of [
             g.forks.gasFeeSeparation.treasuryAddress,
+            ...g.forks.tlsnVerified.notaryKeys.map((k: { hex: string }) => k.hex),
+            g.forks.tlsnVerified.verifierWasmSha256,
             g.balances,
             g.timestamp,
             g.validators,
@@ -113,6 +123,33 @@ describe("mainnet genesis template", () => {
         const e = await launchGenesisExpectations(g)
         expect(e.genesisFileProblems).toEqual([])
         expect(e.genesisFileBlockHash).toMatch(/^[0-9a-f]{64}$/)
+    })
+
+    it("lists a primary and a standby notary key, secp256k1, for the ceremony to fill", () => {
+        const keys = readTemplate().forks.tlsnVerified.notaryKeys
+        expect(keys.map((k: { id: string }) => k.id)).toEqual(["demos-notary-1", "demos-notary-standby"])
+        expect(keys.every((k: { alg: string }) => k.alg === "k256")).toBe(true)
+    })
+
+    it("refuses the template's placeholder notary keys, and passes once the ceremony keys are in", async () => {
+        const g = filledTemplate()
+        g.forks.tlsnVerified = readTemplate().forks.tlsnVerified
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).toContain("fork tlsnVerified is scheduled with placeholder or unset notary keys")
+        expect(reasons).toContain("genesis.forks.tlsnVerified.notaryKeys[0].hex")
+        await expect(launchGenesisExpectations(g)).rejects.toThrow("Genesis fork \"tlsnVerified\" is invalid")
+
+        const filled = filledTemplate()
+        expect(mainnetGenesisReasons(filled)).toEqual([])
+        await expect(launchGenesisExpectations(filled)).resolves.toBeDefined()
+    })
+
+    it("shows unset notary keys on the genesis forks line of --plan", () => {
+        const g = filledTemplate()
+        g.forks.tlsnVerified = readTemplate().forks.tlsnVerified
+        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY })
+        expect(failing(checks)).toContain("genesis forks")
+        expect(checks.find(c => c.name === "genesis forks")?.details.join("\n")).toContain("placeholder or unset notary keys")
     })
 
     it("refuses a placeholder treasury that block 0 would migrate, unless the snapshot carries the fork", async () => {

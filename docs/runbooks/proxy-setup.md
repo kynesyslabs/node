@@ -44,6 +44,14 @@ published and drops every other host port of the node.
    whitelisted key or the node's own key are exempt from these limits, and
    failed checks claiming one of those keys are counted for that key alone,
    so only forged claims of that very key from the same address block it.
+   Every loopback source address (all of `127.0.0.0/8` and `::1`) skips the
+   HTTP RPC's per-address limits (HTTP rate limiter, identity confirm cap,
+   web2 per-caller caps); it still counts toward the web2 node-wide cap and
+   the per-caller Human Passport claim limit, and OmniProtocol's per-IP
+   limits still apply. A reverse proxy or sidecar on the same host must
+   therefore be listed in `TRUSTED_PROXIES`, and must set `X-Forwarded-For`
+   or `X-Real-IP` to the client's address; a forwarder that sets neither
+   makes every client it relays local.
 
 ## Step-by-step
 

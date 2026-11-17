@@ -142,6 +142,47 @@ describe("an allow-listed caller RPC stays with that caller", () => {
     })
 })
 
+describe("EVM RPC lookup reads configured keys only", () => {
+    it.each([
+        ["constructor", "name"],
+        ["constructor", "constructor"],
+        ["constructor", "length"],
+        ["eth", "toString"],
+        ["eth", "__proto__"],
+        ["toString", "name"],
+        ["__proto__", "sepolia"],
+        ["hasOwnProperty", "name"],
+        ["eth", "unknown"],
+        ["unknown", "sepolia"],
+    ])("pay on %s.%s reports the RPC URL as not found", async (chain, subchain) => {
+        const create = spyOn(multichain.EVM, "createInstance")
+        spyOn(multichain.EVM, "getInstance").mockReturnValue(null as any)
+        const result = await handlePayOperation(
+            { ...op(chain, subchain, true), rpc: undefined },
+            1,
+        )
+        expect(result).toEqual({
+            result: "error",
+            error: `RPC URL not found for ${chain}.${subchain}`,
+        })
+        expect(create).not.toHaveBeenCalled()
+    })
+
+    it("contract_write on an inherited key reports the RPC URL as not found", async () => {
+        const create = spyOn(multichain.EVM, "createInstance")
+        spyOn(multichain.EVM, "getInstance").mockReturnValue(null as any)
+        const result = await handleContractWrite(
+            { ...op("constructor", "name", true), rpc: undefined },
+            1,
+        )
+        expect(result).toEqual({
+            result: "error",
+            error: "RPC URL not found for constructor.name",
+        })
+        expect(create).not.toHaveBeenCalled()
+    })
+})
+
 describe("pickRpcUrl", () => {
     const configured = "https://rpc.configured.example/"
 

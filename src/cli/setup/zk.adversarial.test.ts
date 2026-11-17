@@ -6,7 +6,7 @@ import { collectChecks, isFatal } from "./checks"
 import { runCli } from "./cli"
 import { CODE_ROOT, ZK_IDENTITY_VKEY, createContext } from "./context"
 import { IDENTITY_CIRCUIT_DIGEST, IDENTITY_DIGEST_ENV, byCodePoint, canonicalDigest, downloadWithFetch, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
-import { BATCH_VKEY, GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
+import { BATCH_VKEY, GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch, zkKeyNames, type ZkKeySet } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -14,7 +14,7 @@ beforeEach(() => {
 })
 afterEach(() => removeRoot(root))
 
-const keysDir = (size: number) => path.join(root, "src/libs/l2ps/zk/keys", `batch_${size}`)
+const keysDir = (size: ZkKeySet) => path.join(root, "src/libs/l2ps/zk/keys", zkKeyNames(size).dir)
 const COMMITTED = BATCH_VKEY
 
 /** A fake toolchain whose verification key equals the committed one. */
@@ -22,7 +22,7 @@ const toolchain = (opts: { vkeyJson?: string; failOn?: string } = {}) =>
     fakeRunner({ vkeyJson: JSON.stringify(COMMITTED), ...opts })
 
 function seedCommitted(content: object = COMMITTED) {
-    for (const size of [5, 10]) {
+    for (const size of [5, 10, "settlement"] as const) {
         fs.mkdirSync(keysDir(size), { recursive: true })
         fs.writeFileSync(path.join(keysDir(size), "verification_key.json"), JSON.stringify(content))
     }
@@ -45,7 +45,7 @@ function keyFiles(): string[] {
 
 const finalFiles = (size: number) => keyFiles().filter(f => f.includes(`batch_${size}/`) && !f.includes(".building"))
 const stagingLeft = () =>
-    [5, 10].map(n => path.join(keysDir(n), ".building")).filter(d => fs.existsSync(d)).map(d => path.relative(root, d))
+    ([5, 10, "settlement"] as const).map(n => path.join(keysDir(n), ".building")).filter(d => fs.existsSync(d)).map(d => path.relative(root, d))
 
 describe("a build that fails", () => {
     for (const step of ["circom2 compile", "snarkjs plonk setup", "snarkjs zkey export"]) {

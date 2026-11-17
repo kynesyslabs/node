@@ -57,10 +57,39 @@ A bare-metal node reads the process environment and then `.env`; run
 | `MIN_VALIDATOR_STAKE` | `1000000000000` (1000 DEM in OS) | `getGenesisNetworkParameters`, `getMinValidatorStake` (stake tx validation), `getBigintBounds` (governance floor = 1%) | A node with another floor accepts or refuses stake transactions the others do not, and checks governance proposals against another floor. |
 | `ZK_ATTESTATION_POINTS` | `10` | `zkRoutines` (ZK attestation apply) | Points are written into the sender's account at apply. A node with another value holds different points for the same chain, and since the block's `native_tables_hashes` do not cover accounts, nothing flags it. |
 | `PROD` | `true` | `SharedState.PROD`, `loader.ts` | Production refusals (loopback or missing `EXPOSED_URL`, missing build commit, missing identity file) and the block-signing policy. Overdraft refusal no longer depends on it. A node whose genesis has the mainnet chain id refuses to start without it (`devModeProblem`). |
-| `DEMOS_REQUIRE_VALIDATORS` | `true` | `getShard`, `loader.ts` | Without it a node that cannot read the validator set uses every online peer as the committee, and `warn` mismatch policy is not refused. |
+| `DEMOS_REQUIRE_VALIDATORS` | `true` | `getShard`, `loader.ts`, `findGenesisBlock` | Without it a node that cannot read the validator set uses every online peer as the committee, and `warn` mismatch policy is not refused. A node whose genesis has the mainnet chain id refuses to start without it (`requireValidatorsProblem`). |
 | `FORK_SCHEDULE_MISMATCH_POLICY` | `abstain` | `loader.ts` | `warn` keeps voting on another fork schedule inside the pre-activation window; a validator would sign blocks its peers reject at the activation height. The node refuses `warn` together with `DEMOS_REQUIRE_VALIDATORS=true`. |
 | `EXPECTED_GENESIS_HASH` | published with the genesis | `findGenesisBlock`, `genesisMismatch` | Without it a fresh node can adopt whatever genesis its first peers serve. The value is added to `parameters.env` when the genesis is published ([genesis-hash.md](genesis-hash.md)); until then `node-doctor` checks only that it is a 64-hex hash. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | published with the genesis | `findGenesisBlock` | Two genesis files with one genesis hash can still build different blocks 0; this pin refuses any other block 0. Same publication as above. |
+
+### Launch settings
+
+These keys do not decide whether a block is valid, so a node with another
+value stays on the chain. They are on the sheet so that every validator
+starts with the same public surface, and `node-doctor --production` checks
+them like the values above.
+
+| Variable | Mainnet | Why |
+|---|---|---|
+| `SIGNALING_ENABLED` | `false` | The WebRTC signaling server (`RPC_SIGNALING_PORT`, 3005) serves instant-messaging clients; consensus does not use it. While it runs, each online message becomes a node-signed `instantMessaging` transaction with no fee, and the online path has no per-sender cap. When it is off, the node logs `Signaling server disabled (SIGNALING_ENABLED=false)` and `/health` lists the `signaling` subsystem as skipped. Compose still publishes the port; nothing answers on it. |
+| `XM_ENABLED`, `DEMOSWORK_ENABLED` | TBD (owner) | Cross-chain (XM) execution is on by default (`src/config/defaults.ts`). If the owner turns it off at launch, both lines go on the sheet as `false` before the genesis is published; DemosWork steps share the XM dispatch path. Web2 requests stay on either way. |
+
+The `v1.0.0-rc.11` tag carries a sheet without these lines. A validator
+installing that tag appends `SIGNALING_ENABLED=false` to `.env` by hand,
+after the sheet, and confirms the container has it:
+
+```bash
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" | grep '^SIGNALING_ENABLED='
+```
+
+L2PS and TLSNotary are not switched here: `l2psSettlement` and `tlsnVerified`
+are at block 0 and their kill switches, `l2psGate` and `tlsnDisabled`, are
+unscheduled in the mainnet genesis, so L2PS settles on every node and every
+node verifies TLSNotary presentations against the notary keys in the genesis,
+whatever its environment says ([genesis.md](genesis.md)). The `tlsnVerified`
+payload (notary keys, verifier wasm sha256, `maxPresentationBytes`,
+`freshnessWindowSec`, `futureSkewSec`) is a genesis value, not an environment
+setting: a node cannot override it.
 
 ### Must stay unset
 
@@ -89,8 +118,10 @@ and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 The sheet uses the current built-in values. These are product decisions
 rather than technical constraints:
 
-- Fees of 1 DEM per component, 3 DEM per transaction (the code still carries
-  a note that the three should later add up to 1 DEM).
+- Fees of 1 DEM per component (the code still carries a note that the three
+  should later add up to 1 DEM). A native send pays `NETWORK_FEE` +
+  `RPC_FEE` = 2 DEM; `BURN_FEE` is not charged on top, the burn share comes
+  out of the network fee (INSTALL.md, "Fees charged per native send").
 - The 1000 DEM validator stake floor.
 - 10 points per ZK attestation.
 - The 10 s block time and the 1 s / 60 s timestamp bounds (the time policy

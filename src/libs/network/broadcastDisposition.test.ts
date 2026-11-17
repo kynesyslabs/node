@@ -43,7 +43,12 @@ jest.mock("../blockchain/gcr/handleGCR", () => ({
     },
     withDerivedFeeEdits: jest.fn((tx: any) => ({ ...tx, content: { ...tx.content, gcr_edits: ["derived fee"] } })),
 }))
-jest.mock("./txSubmission", () => ({ submitValidatedTx }))
+jest.mock("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal: () => null }))
+jest.mock("src/libs/gossip/GossipManager", () => ({
+    __esModule: true,
+    default: { isEnabled: () => true },
+}))
+jest.mock("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 jest.mock("src/libs/consensus/stakedSet", () => ({ isSelfStaked }))
 jest.mock("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: {} }))

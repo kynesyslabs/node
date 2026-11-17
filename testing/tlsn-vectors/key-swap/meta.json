@@ -1,0 +1,16 @@
+{
+  "description": "wrong-notary-key with the embedded verifying key replaced by the trusted key A (signature is still B's)",
+  "root": "test-ca.der",
+  "verifier": "refused",
+  "refusal": {
+    "class": "verify",
+    "contains": "attestation error"
+  },
+  "nodePolicy": "refuse",
+  "expect": {
+    "server": "api.demos-spike.test",
+    "method": "GET",
+    "path": "/user",
+    "bind": "demos-tlsn:v1:github:0x1111111111111111111111111111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

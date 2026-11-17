@@ -157,6 +157,8 @@ export interface EditBindingState extends ValueRules {
     stakingOpen: boolean
     l2psOff: boolean
     tlsnOff: boolean
+    /** l2psSettlement: a batch settles through its record, so it is admitted as one. */
+    settling: boolean
     tip: number
 }
 
@@ -173,6 +175,7 @@ export async function editBindingState(): Promise<EditBindingState> {
         stakingOpen: tokenStakingOpen(tip),
         l2psOff: l2psOffAt(tip),
         tlsnOff: tlsnDisabledAt(tip),
+        settling: isForkActive("l2psSettlement", tip),
         sendBound: isForkActive("nativeSendBinding", tip),
         canonical: isForkActive("canonicalAddresses", tip),
         feeBound: isForkActive("feeBinding", tip),
@@ -226,9 +229,10 @@ export async function loadAdmissionReads(
     txs: Transaction[],
     reads: AdmissionReads,
 ): Promise<void> {
-    const { messageBinding, feeBound } = await reads.state()
-    if (feeBound && txs.length > 0) await reads.parameters()
-    if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
+    const { messageBinding, feeBound, settling } = await reads.state()
+    const batches = settling && txs.some(isSettlementBatch)
+    if ((feeBound || batches) && txs.length > 0) await reads.parameters()
+    if ((messageBinding && txs.some(isNodeMessage)) || batches) await reads.validators()
 }
 
 /**
@@ -601,6 +605,10 @@ export async function verifyAdmissionEdits(
             const messageRefusal = nodeMessageRefusal(tx, await reads.validators())
             if (messageRefusal) return refuse(messageRefusal)
         }
+        if (state.settling && isSettlementBatch(tx)) {
+            const batchRefusal = await settlementBatchRefusal(tx, reads)
+            if (batchRefusal) return refuse(batchRefusal)
+        }
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
         const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
@@ -621,6 +629,25 @@ export async function verifyAdmissionEdits(
             `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
         )
     }
+}
+
+function isSettlementBatch(tx: { content?: unknown }): boolean {
+    return (tx.content as { type?: unknown } | undefined)?.type === "l2psBatch"
+}
+
+/**
+ * Why a settlement batch may not be pooled, or null: the same verdict for the
+ * producer's own insert and for a peer's batch in the merge, so every member
+ * holds the batches the producer does. Throws when a read fails.
+ */
+export async function settlementBatchRefusal(
+    tx: Transaction,
+    reads: AdmissionReads = admissionReads(),
+): Promise<string | null> {
+    // Lazy: the settlement checks reach gcr.ts, which imports this module.
+    const { settlementAdmissionRefusal } = await import("@/libs/l2ps/settlement/admission")
+    await reads.parameters()
+    return settlementAdmissionRefusal(tx, await reads.validators())
 }
 
 /** What admission checked before `editBinding`, kept for nodes on either side of its height. */

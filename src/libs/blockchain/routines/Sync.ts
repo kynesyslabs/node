@@ -1139,6 +1139,19 @@ export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
         return false
     }
 
+    // A settlement's fee credits are rebuilt from the body with the fee
+    // split live now, which governance may have changed since the block
+    // applied; the undo could then credit back other amounts.
+    const settles =
+        blocks.some(block => isForkActive("l2psSettlement", block - 1)) &&
+        txs.some(tx => (tx.content?.type as string) === "l2psBatch")
+    if (settles) {
+        log.error(
+            "[applySyncedBlock] cannot roll back orphaned GCR state: it holds an l2psBatch settlement, whose fee credits cannot be rebuilt from the body",
+        )
+        return false
+    }
+
     // Undo in reverse apply order so a credit is never undone before the
     // spend that depended on it. All or nothing: the assignments are what
     // finds this orphan again after a restart, so writing the undos that

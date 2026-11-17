@@ -16,21 +16,7 @@ import {
 import { safeGCRSave, isFirstConnection } from "./utils"
 import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
 import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
-
-/**
- * Expected API endpoints for TLSN verification per context
- */
-const TLSN_EXPECTED_ENDPOINTS: Record<
-    string,
-    { server: string; pathPrefix: string }
-> = {
-    github: { server: "api.github.com", pathPrefix: "/user" },
-    discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
-    telegram: {
-        server: "telegram-backend",
-        pathPrefix: "/api/telegram/user",
-    },
-}
+import { TLSN_CONTEXTS } from "@/libs/identity/web2Contexts"
 
 /**
  * Add an identity via TLSNotary proof verification.
@@ -116,8 +102,9 @@ export async function applyTLSNIdentityAdd(
         }
     }
 
-    // 1. Validate context is supported
-    if (!TLSN_EXPECTED_ENDPOINTS[context]) {
+    // 1. Validate context is supported. A set, not an object lookup, so an
+    // inherited name such as constructor is not taken for a platform.
+    if (!TLSN_CONTEXTS.has(context)) {
         return {
             success: false,
             message: `Unsupported TLSN context: ${context}`,
@@ -267,7 +254,7 @@ export async function applyTLSNIdentityRemove(
         }
     }
 
-    if (!TLSN_EXPECTED_ENDPOINTS[context]) {
+    if (!TLSN_CONTEXTS.has(context)) {
         return {
             success: false,
             message: `Unsupported TLSN context: ${context}`,
