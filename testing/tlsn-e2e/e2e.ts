@@ -8,7 +8,7 @@
  * and identity transactions. The harness only reads what each node holds
  * and compares the four.
  */
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Demos, DemosTransactions, bodyBoundAuthHeaders } from "@kynesyslabs/demosdk/websdk"
@@ -62,8 +62,9 @@ const GITHUB = "https://api.github.com"
 const STORE_URL = `${GITHUB}/users/octocat`
 const ID_URL = `${GITHUB}/user`
 const UA = { "User-Agent": "demos-tlsn-e2e" }
-// Shaped like a credential so the node's header rule fires; GitHub answers 401.
-const FAKE_AUTH = { Authorization: "Bearer demos-tlsn-e2e-not-a-credential" }
+// A random value per run, shaped like a credential so the node's header rule
+// fires; GitHub answers 401 to it.
+const FAKE_AUTH = { Authorization: `Bearer e2e-${randomUUID()}` }
 const TTL_BLOCKS = 500
 const GH_TOKEN = process.env.TLSN_E2E_GITHUB_TOKEN ?? ""
 const redact = (s: string) => (GH_TOKEN ? s.split(GH_TOKEN).join("<redacted>") : s)
