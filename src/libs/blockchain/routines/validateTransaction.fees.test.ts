@@ -17,6 +17,7 @@ mock.module("src/libs/blockchain/gcr/gcr", () => ({
         getAccountNonce: async () => 7,
         getAccountBalance: async (address: string) => {
             balanceReads.push(address)
+            onBalanceRead?.()
             return balance(address)
         },
     },
@@ -32,7 +33,7 @@ mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
     default: { getInstance: () => ({ sign: async () => ({ signature: new Uint8Array(1) }) }) },
 }))
 
-import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import { DemosTransactions, GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import { Identities } from "@kynesyslabs/demosdk/abstraction"
 import { D402Client } from "@kynesyslabs/demosdk/d402/client"
 import { getSharedState } from "@/utilities/sharedState"
@@ -62,8 +63,10 @@ const original = {
     bulkUpdateAssignedTxs: HandleGCR.bulkUpdateAssignedTxs,
 }
 const sdkParameters = demos._getNetworkParametersCached
+const sdkGasEdit = GCRGeneration.createGasEdit
 let caches: GCREntityCaches
 const balanceReads: string[] = []
+let onBalanceRead: (() => void) | null = null
 const balance = (key: string): bigint => caches.accounts.get(key)?.balance ?? 0n
 const quote = (tx: Transaction): bigint => BigInt((tx.attrs as typeof tx.attrs & { total_fee: string }).total_fee)
 const pay = async (amount: bigint) => onTheWire(await DemosTransactions.pay(PEER, amount, demos))
@@ -104,6 +107,8 @@ afterEach(() => {
     Object.assign(getSharedState, saved)
     Object.assign(HandleGCR, original)
     demos._getNetworkParametersCached = sdkParameters
+    GCRGeneration.createGasEdit = sdkGasEdit
+    onBalanceRead = null
 })
 
 afterAll(() => mock.restore())
@@ -359,6 +364,59 @@ describe("native send confirmation fee quote", () => {
             expect(quote(tx)).toBe(debits - amount)
             expect(quote(tx)).toBe(fee * OS)
         })
+    }
+
+    // A block commits while confirmation awaits the SDK gas edit the quote
+    // reads, or a balance read: each commit advances lastBlockNumber by one
+    // from 100. Fee forks at 101 are crossed by the first commit; at 0 or
+    // null no commit crosses them, and the change of height alone refuses.
+    // The 100 DEM send would otherwise be refused by the quote's balance
+    // check with this node's quote attached; with both fee forks active the
+    // ingress fee check refuses it before the quote, so only 1 DEM is sent.
+    const advancedRefusal =
+        "[Tx Validation] [FEE ERROR] the chain advanced while the fee was being quoted; confirm again\n"
+    const commit = (): void => {
+        getSharedState.lastBlockNumber = (getSharedState.lastBlockNumber ?? 0) + 1
+    }
+    const commitDuring = {
+        "the gas edit": () => {
+            GCRGeneration.createGasEdit = async (...args: Parameters<typeof sdkGasEdit>) => {
+                const edit = await sdkGasEdit(...args)
+                commit()
+                return edit
+            }
+        },
+        "a balance read": () => { onBalanceRead = commit },
+    }
+    const midQuoteCommits: Array<[string, number | null, number | null, keyof typeof commitDuring, bigint[]]> = [
+        ["crossing the fee forks", 101, 101, "the gas edit", [1n, 100n]],
+        ["crossing the fee forks", 101, 101, "a balance read", [1n, 100n]],
+        ["crossing no fork, both fee forks active", 0, 0, "a balance read", [1n]],
+        ["crossing no fork, gasFeeSeparation active", 0, null, "the gas edit", [1n, 100n]],
+        ["crossing no fork, gasFeeSeparation active", 0, null, "a balance read", [1n, 100n]],
+        ["crossing no fork, fee forks dormant", null, null, "the gas edit", [1n, 100n]],
+        ["crossing no fork, fee forks dormant", null, null, "a balance read", [1n, 100n]],
+    ]
+    for (const [label, separation, binding, during, amounts] of midQuoteCommits) {
+        for (const amount of amounts) {
+            it(`refuses without a quote when a block commits during ${during} (${label}, send ${amount} DEM)`, async () => {
+                chainIs(true, null)
+                getSharedState.forkConfig.gasFeeSeparation.activationHeight = separation
+                getSharedState.forkConfig.feeBinding.activationHeight = binding
+                caches.accounts.get(SENDER)!.balance = 100n * OS
+                const tx = await pay(amount * OS)
+                commitDuring[during]()
+
+                const response = await handleValidateTransaction(tx, SENDER)
+
+                expect(getSharedState.lastBlockNumber).toBeGreaterThan(100)
+                expect(response.data.valid).toBe(false)
+                expect(response.data.message).toBe(advancedRefusal)
+                expect(response.data.reference_block).toBe(100)
+                expect(response.data.transaction).toBe(tx)
+                expect(tx.attrs as unknown).toEqual({ reference_block: 100 })
+            })
+        }
     }
 
     // The fee forks are active at lastBlockNumber 101 but not at reference

@@ -161,7 +161,14 @@ async function quoteNativeSendFee(
         tx.content.amount,
         isForkActive("osDenomination", height),
     )
-    return nativeSendBalanceError(tx, sendAmount, total)
+    const balanceError = await nativeSendBalanceError(tx, sendAmount, total)
+    // The derived fee edits and legacyGasRetired read the height live, so a
+    // block committed since `height` can make quote, debits and charge differ.
+    if ((getSharedState.lastBlockNumber ?? 0) !== height) {
+        delete tx.attrs.total_fee
+        return "[Tx Validation] [FEE ERROR] the chain advanced while the fee was being quoted; confirm again\n"
+    }
+    return balanceError
 }
 
 async function signWithNativeSendFeeQuote(
