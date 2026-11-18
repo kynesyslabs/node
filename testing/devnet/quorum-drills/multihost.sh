@@ -16,21 +16,31 @@
 #    (mh_install_overrides): node RPC is read from the controller over each
 #    node's public URL, and the database calls go to the node's own host.
 # Host clocks must be NTP-synced: `docker logs --since` takes controller time.
+#
+# ssh options from the environment (exported, so the stand-in sees them too):
+# QDRILL_SSH_IDENTITY a private key file, QDRILL_SSH_KNOWN_HOSTS a known_hosts
+# file to use instead of ~/.ssh/known_hosts, QDRILL_SSH_ACCEPT_NEW=1 to trust
+# a host key seen for the first time (rented hosts are usually new; a changed
+# key is still refused).
 
 MH_SSH_OPTS=(-o BatchMode=yes -o ControlMaster=auto -o "ControlPath=/tmp/qdrill-ssh-%C" -o ControlPersist=120
     -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+[ -n "${QDRILL_SSH_IDENTITY:-}" ] && MH_SSH_OPTS+=(-i "${QDRILL_SSH_IDENTITY}" -o IdentitiesOnly=yes)
+[ -n "${QDRILL_SSH_KNOWN_HOSTS:-}" ] && MH_SSH_OPTS+=(-o "UserKnownHostsFile=${QDRILL_SSH_KNOWN_HOSTS}")
+[ "${QDRILL_SSH_ACCEPT_NEW:-0}" = 1 ] && MH_SSH_OPTS+=(-o StrictHostKeyChecking=accept-new)
 
 # One POSIX single-quoted word per argument: the remote login shell may be sh
 mh_q() { local a; for a in "$@"; do printf "'%s' " "${a//\'/\'\\\'\'}"; done; }
 
-# Map file (QDRILL_MH_MAP), one host per line: index, user@ip, remote run dir, nodes (csv)
+# Map file (QDRILL_MH_MAP), one host per line: index, user@ip, remote run dir,
+# nodes (csv), ssh port (22 when the column is missing)
 mh_load_map() {
-    local k ssh dir nodes i
-    MH_KS=(); MH_SSH=(); MH_DIR=(); MH_HOST_OF=()
+    local k ssh dir nodes port i
+    MH_KS=(); MH_SSH=(); MH_DIR=(); MH_PORT=(); MH_HOST_OF=()
     [ -r "${QDRILL_MH_MAP:-}" ] || { echo "multihost: no host map (QDRILL_MH_MAP=${QDRILL_MH_MAP:-})" >&2; return 1; }
-    while IFS=$'\t' read -r k ssh dir nodes; do
+    while IFS=$'\t' read -r k ssh dir nodes port; do
         [ -n "${k}" ] || continue
-        MH_KS+=("${k}"); MH_SSH[k]="${ssh}"; MH_DIR[k]="${dir}"
+        MH_KS+=("${k}"); MH_SSH[k]="${ssh}"; MH_DIR[k]="${dir}"; MH_PORT[k]="${port:-22}"
         for i in ${nodes//,/ }; do MH_HOST_OF[i]="${k}"; done
     done < "${QDRILL_MH_MAP}"
     [ "${#MH_KS[@]}" -gt 0 ]
@@ -39,7 +49,37 @@ mh_load_map() {
 mh_ssh() { # $1 host index, [-n: no stdin], then the remote command line (already quoted)
     local k="$1" o=(); shift
     [ "${1:-}" = -n ] && { o=(-n); shift; }
-    ssh "${MH_SSH_OPTS[@]}" "${o[@]}" "${MH_SSH[k]}" "$@"
+    ssh "${MH_SSH_OPTS[@]}" -p "${MH_PORT[k]:-22}" "${o[@]}" "${MH_SSH[k]}" "$@"
+}
+
+# The registry of an image reference: its first path component when that
+# looks like a host (has a dot or a port, or is localhost), else Docker Hub
+mh_registry_of() {
+    local first="${1%%/*}"
+    if [ "${first}" != "$1" ] && { [[ "${first}" == *.* ]] || [[ "${first}" == *:* ]] || [ "${first}" = localhost ]; }; then
+        echo "${first}"
+    else
+        echo docker.io
+    fi
+}
+
+# Pulls $2 on host $1 unless it is already there (the reference is by
+# digest, so a present image is the same bytes). With REGISTRY_TOKEN set the
+# pull logs in first, into a throwaway DOCKER_CONFIG that is removed when the
+# pull ends: the token travels on ssh's stdin, never in a command line, and no
+# credential stays on the host.
+mh_pull() {
+    local k="$1" img="$2" reg
+    mh_ssh "${k}" -n "docker image inspect $(mh_q "${img}") >/dev/null 2>&1" && { echo "host ${k}: ${img} already present"; return 0; }
+    if [ -z "${REGISTRY_TOKEN:-}" ]; then
+        mh_ssh "${k}" -n "docker pull -q $(mh_q "${img}")"
+        return
+    fi
+    reg=$(mh_registry_of "${img}")
+    printf '%s\n' "${REGISTRY_TOKEN}" | mh_ssh "${k}" "d=\$(mktemp -d) || exit 1
+        trap 'rm -rf \"\$d\"' EXIT
+        DOCKER_CONFIG=\"\$d\" docker login $(mh_q "${reg}") -u $(mh_q "${REGISTRY_USER:-token}") --password-stdin >/dev/null &&
+            DOCKER_CONFIG=\"\$d\" docker pull -q $(mh_q "${img}")"
 }
 
 # The `docker` stand-in
@@ -127,12 +167,12 @@ mh_docker_plain() {
 # Reads the hosts file into the plan (drill_inputs.py hosts) and writes the
 # docker stand-in. Exits 2 on a bad file.
 mh_init() {
-    local line k ssh ip max nodes
+    local line k ssh ip max nodes port
     MH_PLAN=$(python3 -I "${HERE}/drill_inputs.py" hosts --file "${HOSTS_FILE}" --nodes "${N}" 2>&1) ||
         { echo "--hosts ${HOSTS_FILE}: ${MH_PLAN}" >&2; exit 2; }
-    MH_KS=(); MH_SSH=(); MH_IP=(); MH_NODES=(); MH_HOST_OF=()
-    while IFS=$'\t' read -r k ssh ip max nodes; do
-        MH_KS+=("${k}"); MH_SSH[k]="${ssh}"; MH_IP[k]="${ip}"; MH_NODES[k]="${nodes}"
+    MH_KS=(); MH_SSH=(); MH_IP=(); MH_NODES=(); MH_PORT=(); MH_HOST_OF=()
+    while IFS=$'\t' read -r k ssh ip max nodes port; do
+        MH_KS+=("${k}"); MH_SSH[k]="${ssh}"; MH_IP[k]="${ip}"; MH_NODES[k]="${nodes}"; MH_PORT[k]="${port:-22}"
         for line in ${nodes//,/ }; do MH_HOST_OF[line]="${k}"; done
     done <<< "${MH_PLAN}"
     mkdir -p "${RUN_DIR}/mhbin"
@@ -181,10 +221,10 @@ mh_preflight() {
         [ "${harness:-0}" = 0 ] || abort_pre "host ${k}: another harness stack is running"
         MH_DIR[k]="${home}/qdrill-runs/${RUN_ID}"
     done
-    say "pulling ${IMAGE} and postgres:16-alpine on ${#MH_KS[@]} hosts"
+    say "pulling ${IMAGE} and postgres:16-alpine on ${#MH_KS[@]} hosts$([ -n "${REGISTRY_TOKEN:-}" ] && echo " (registry login from REGISTRY_TOKEN)")"
     local -a pids=()
     for k in "${MH_KS[@]}"; do
-        mh_ssh "${k}" -n "docker pull -q $(mh_q "${IMAGE}") && docker pull -q postgres:16-alpine" >> "${STEP_LOG}" 2>&1 &
+        { mh_pull "${k}" "${IMAGE}" && mh_pull "${k}" postgres:16-alpine; } >> "${STEP_LOG}" 2>&1 &
         pids+=("$!")
     done
     for k in "${!pids[@]}"; do wait "${pids[k]}" || abort_pre "host ${MH_KS[k]}: docker pull of ${IMAGE} or postgres:16-alpine failed (see 01-preflight.log)"; done
@@ -193,7 +233,7 @@ mh_preflight() {
         mh_ssh "${k}" -n "umask 077 && mkdir -p $(mh_q "${MH_DIR[k]}") && chmod 700 \"\$HOME/qdrill-runs\" $(mh_q "${MH_DIR[k]}")" >> "${STEP_LOG}" 2>&1 ||
             abort_pre "host ${k}: could not make ${MH_DIR[k]}"
         MH_DIRS_MADE+=("${k}")
-        printf '%s\t%s\t%s\t%s\n' "${k}" "${MH_SSH[k]}" "${MH_DIR[k]}" "${MH_NODES[k]}" >> "${QDRILL_MH_MAP}"
+        printf '%s\t%s\t%s\t%s\t%s\n' "${k}" "${MH_SSH[k]}" "${MH_DIR[k]}" "${MH_NODES[k]}" "${MH_PORT[k]}" >> "${QDRILL_MH_MAP}"
     done
     export PATH="${RUN_DIR}/mhbin:${PATH}"
 }
@@ -267,5 +307,5 @@ mh_cleanup_dirs() {
             >> "${LOG_DIR}/teardown.log" 2>&1 || say "WARNING: host ${k}: could not remove ${d}"
     done
     MH_DIRS_MADE=()
-    for k in "${MH_KS[@]}"; do ssh "${MH_SSH_OPTS[@]}" -O exit "${MH_SSH[k]}" >/dev/null 2>&1 || true; done
+    for k in "${MH_KS[@]}"; do ssh "${MH_SSH_OPTS[@]}" -p "${MH_PORT[k]:-22}" -O exit "${MH_SSH[k]}" >/dev/null 2>&1 || true; done
 }

@@ -163,6 +163,10 @@ live. With N > shardSize (`halt-n13s10`, `ride-n13s10`) it does not: see
 | `halt-n30s10` | 30 | 10 | 7 | Stops validators 7-30 at once (6 live < q), holds, restarts them | Same P1-P6 |
 | `ride-n30s10` | 30 | 10 | 7 | Stops validators 28-30 at once (3 = 10 - q), waits for `RIDE_BLOCKS` blocks | Same as `ride-n13s10` |
 | `restart-n30s10` | 30 | 10 | 7 | Restarts `RESTARTS` (5) random validators one at a time, each at a random point of a round it is a committee member of | Each back signing at its first or second committee round, no stall over `MAX_GAP_S`, one chain, no crash (`judgeRestartDrill.ts`) |
+| `<kind>-n<N>s<S>` | 4-400 | <= N | | `halt`, `ride` or `restart` at any size (`halt` stops N - q + 1, `ride` S - q), and the three below | As the fixed cases of the same kind |
+| `third-n<N>s<S>` | N | S | | Stops N / 3 validators at once (the survivors must still hold q), holds `SAFE_ROUNDS` rounds, restarts them | S2 every survivor answers and never goes back, S3 one hash per height and quorum signatures up to the common height (the chain may pause or forge meanwhile), P5 recovery, P6 no crash (`judgeHaltDrill.ts`, mode `safe`) |
+| `load-n<N>s<S>` | N | S | | Native transfers from `LOAD_WALLETS` genesis-funded wallets at `LOAD_TPS` for `LOAD_DURATION_S`, signed by the image's own SDK (`load-client.ts`) | L1 the load was carried, L2 at least `LOAD_MIN_INCLUDED` of the accepted transfers included, L3 no stall over `MAX_GAP_S`, L4 one chain with quorum signatures, L5 no crash; reports main TPS, block times and time to inclusion (`judgeLoadDrill.ts`) |
+| `hostloss-n<N>s<S>` | N | S | | `--hosts` only: stops every validator of the last host at once, as a host outage would | As `ride`; refused when the host runs more validators than `guaranteedTolerance(S, N)` |
 | `listed-stall` | 10 staked, 7 running | 10 | 7 | Stops a listed validator, starts the 3 staked ones that never ran, then brings the listed one back | Stall after the stop, still stalled with the 3 extras up (the listed pool holds q, so the staked-set fallback does not apply), progress once the listed one is back |
 | `fallback` | 10 | 10 | 7 | Stops every node on one head, rewrites that block's committed peerlist in every database to 6 validators (below q), restarts all 10 | `--binding on`: progress, with the `drawing the committee from all 10 staked validators` log line. `--binding off`: stall (the pre-fork pool is the 6 listed) |
 | `partition` | 6 | 4 | 3 | Splits the network into {1,2,3} and {4,5,6} for `PARTITION_TIME`, then heals it | `--binding on`: at most one side forges, no height carries two hashes, one chain after the heal. `--binding off`: both sides forge, two hashes at one height (the pre-fork finding) |
@@ -279,6 +283,106 @@ testing/devnet/quorum-drills/run.sh --image IMAGE restart-n30s10
 testing/devnet/quorum-drills/run.sh --hosts hosts.txt --image ghcr.io/ORG/demos-node@sha256:DIGEST \
     --netem "delay 80ms 20ms" halt-n30s10
 ```
+
+## Cloud drill
+
+`cloud-drill.sh` runs the drills on rented hosts with one command. Its only
+provider input is an inventory, one host per line,
+`address ssh_user ssh_port validators` (`inventory.example`: 10 hosts x 3
+validators); what to rent is in `PROVIDER-SPEC.md`.
+
+```
+REGISTRY_TOKEN=... QDRILL_SSH_IDENTITY=~/.ssh/drill QDRILL_SSH_ACCEPT_NEW=1 \
+testing/devnet/quorum-drills/cloud-drill.sh --inventory inventory.txt \
+    --image ghcr.io/kynesyslabs/node:v1.0.0-rc.13@sha256:6ec7fa4848b7118ad32ece271ee01ab59bd2cb7403fb8acfa81f3e677080d0cc \
+    --prepare --carryover rc13
+```
+
+1. The inventory becomes a `--hosts` file (`drill_inputs.py inventory`); N is
+   the sum of its validators, the committee `--shard` (10).
+2. `--prepare` runs `prepare-host.sh` on every host through `sudo -n`, with
+   the node ports opened to the inventory's addresses and the controller's
+   public address (or `--allow-from`).
+3. Host facts (CPUs, RAM, free disk, kernel, Docker, NTP) go to `hosts.tsv`,
+   with each host's clock offset from the controller: over `CLOCK_MAX_MS`
+   (500) the campaign stops, as node logs are read by time. An inter-host
+   ping matrix goes to `ping-matrix.tsv`.
+4. One `run.sh --hosts` per scenario of `--scenarios` (default
+   `restart third hostloss halt load`), each as `<kind>-n<N>s<S>`, with
+   `HEADROOM_MB=1536` (the hosts run nothing else) and `BIND_HOST_IP=1` (ports
+   published on the inventory address only). `hostloss` is skipped when the
+   last host runs more validators than the committee tolerates. Each run
+   generates its own genesis (every fork of the launch template at 0 as the
+   release does, chain id 1337, rehearsal notary keys), pulls the image by
+   digest on every host (`REGISTRY_TOKEN`, see `HOSTS.md`), checks headroom
+   per host, and tears down with `down -v`.
+5. The evidence of every run, without its keys and inputs, goes to
+   `campaigns/<time>-<label>/evidence/`, and `summary.md` sums up the results,
+   the load metrics, the per-container resources and the teardown checks.
+6. Last, every host is checked for a `qdrill-` container, volume or run dir
+   left behind (`leftovers.txt`); one makes the campaign exit 2.
+
+Exit 0 when every scenario passed, 1 when one failed, 2 when one could not
+run or a host was left dirty. `--dry-run` prints the plan without contacting
+a host. `cloud-drill-stub.test.sh` runs the whole flow against stubbed ssh
+hosts.
+
+What each run records for sizing (also in a single-host run):
+
+- `logs/resources.tsv`: `docker stats` of every container of the run every
+  `RESOURCE_SAMPLE_S` (15) s from bring-up to the verdict, per host;
+  `resources-summary.json` gives per container and per role (node,
+  postgres) the memory peak, mean and peak CPU (% of one core), and network
+  MB per hour.
+- `logs/pg-sizes.tsv`: each node database's size at the end, and
+  `logs/disk.txt` the volumes of the run as `docker system df -v` sees them.
+- `teardown-check.txt`: the run's containers, networks and volumes after
+  `down -v`, on every host.
+
+What has been run: `cloud-drill.sh` over ssh against one local host with the
+rc.13 release image, 4 validators: `third-n4s4` PASS, `load-n4s4` PASS (2 TPS,
+main TPS 1.92, 360 of 360 included, blocks p50/p95 10/10 s, time to inclusion
+p50/p95 6/10.5 s) and `load-n4s4 --carryover` PASS (every fork the launch
+genesis activates at block 0, main TPS 1.87, 240 of 240 included), each torn
+down clean. The 30-validator campaign on rented hosts has not been run yet;
+the sizing it needs is in `PROVIDER-SPEC.md`.
+
+### The new scenarios
+
+**third.** A third of the validators (N / 3, the survivors must hold q) stop
+at once. Unlike `halt`, the chain may go on forging or pause: with 20 of 30
+live, a committee of 10 drawn from the pool holds 7 live members only
+sometimes, until the stopped ones leave the peerlist. What must hold is
+safety: every survivor answers and never goes back, every height up to the
+common one has one hash and quorum signatures, then all rejoin and the chain
+moves on (`judgeHaltDrill.ts`, mode `safe`).
+
+**hostloss.** Every validator of the last host stops at once, as a host
+outage would. With 3 validators per host and a committee of 10 that is
+within `guaranteedTolerance(10, 30) = 3`, so the chain must keep forging;
+judged as `ride`.
+
+**load.** `LOAD_WALLETS` (8) wallets are funded in the genesis and send
+native transfers of 1,000,000 units at `LOAD_TPS` (4) for `LOAD_DURATION_S` (300), each
+signed by the SDK inside the image under test (`load-client.ts` runs as the
+compose `load` service on host 1) and sent through confirm + broadcast to
+the nodes round-robin. A wallet keeps at most 18 transfers in flight, under
+the node's 20-ahead nonce window. Every accepted transfer is followed with
+`getTransactionStatus` until it is included or `LOAD_DRAIN_S` (180) passes.
+`judgeLoadDrill.ts` reports the four load metrics: main TPS (included
+transfers over the time from the first send to the block of the last),
+L2PS TPS (not measured here), block times p50/p95/max, and time to
+inclusion (submit to `included` seen on the entry node; submit to the
+block's timestamp as well).
+
+**--carryover.** By default the drills exclude `identityCarryover` (it needs
+a genesis snapshot). With `--carryover` the run copies the image's own
+`/app/data/snapshot`, builds the carry-over snapshot for the drill's
+validators with `scripts/state-snapshot/carryover.ts`, binds its manifest
+hash into the genesis on every host, and runs every fork the launch genesis
+activates at block 0. Before bring-up the run checks that the genesis
+declares exactly the forks the image knows (`DEFAULT_FORK_CONFIG`), so a
+genesis older than the image is caught before any node refuses it.
 
 ## Mainnet-shape halt and ride drills
 
@@ -591,8 +695,10 @@ node with its share of postgres and 3072 MB headroom) and the timeouts in
 | `*-n30s10` | 30 | 51,072 MB (49.9 GiB) | 30 x 1536 MB + 3000 MB | genesis delay 810 s, then as the matching case; `restart-n30s10` about 1-6 min per restart |
 
 Disk: the preflight needs 10 GB free on `/` (`MIN_DISK_GB`). Node and
-postgres state are on tmpfs, so they count as RAM; the run's own disk use is
-the 13 container logs and the run dir, which has not been measured.
+postgres state are on tmpfs, so they count as RAM; the image's anonymous
+volumes take about 68 MB per node and each run records its own use
+(`logs/disk.txt`, `logs/pg-sizes.tsv`). Measured per-validator figures:
+`PROVIDER-SPEC.md`.
 
 ### Postgres connections
 

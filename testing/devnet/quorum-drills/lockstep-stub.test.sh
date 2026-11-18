@@ -310,6 +310,12 @@ echo "== postgres connection limit: 'too many clients' never ends in a pass or a
 # The gate's real log reads (and grep_logs, the reader it used up to ef47fe4c19)
 # against the fake docker: a case has 13 started nodes whose logs are FAKE/nodelog.<n>
 for f in pg_gate_unreadable grep_logs teardown; do source <(fn_src "${f}"); done
+# The backstop is tested on its own here: the sampler and the leak check it
+# also calls are run for real by the whole-run cases further down
+stop_sampler() { :; }
+run_volumes() { :; }
+teardown_check() { echo clean > "${RUN_DIR}/teardown-check.txt"; }
+mkdir -p "${RUN_DIR}"
 write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
 gate_case() { # $1 name, $2 the result before the gate
     new_case "$1" 25; N=13; STARTED=(); for i in $(seq 1 13); do STARTED[i]=1; done
@@ -862,6 +868,7 @@ case "$1" in
         # run-devnet probe finds it unless STUB_START=image; every other
         # throwaway container (exec and gossip checks) succeeds
         case "$*" in *"testing/devnet/run-devnet ]"*) [ "${STUB_START}" = image ] && exit 1 ;; esac
+        case "$*" in *DEFAULT_FORK_CONFIG*) echo "${STUB_FORKS}" ;; esac
         case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
     exec)
         case "$*" in *"SHOW max_connections"*) echo "${STUB_MAXCONN}" ;; esac ;;
@@ -1016,9 +1023,11 @@ for spec in "late 10 12 9 11 2 0 unset" "slow-read 12 12 11 11 2 1 unset" "in-ti
 done
 
 echo "== run.sh executed from the top (stub docker and bun): the preflight is defined where the call runs"
+# The forks the image knows, as run.sh reads them from DEFAULT_FORK_CONFIG: the template's
+STUB_FORKS=$(jq -c '.forks | keys' "${HERE}/../../../docs/mainnet/genesis.template.json"); export STUB_FORKS
 run_from_top() { # $1 what max_connections the stub postgres reports, $2 start path (run-devnet), $3 node whose migration fails
     STUB_LOG="${WORK}/run-top.docker.log"; : > "${STUB_LOG}"
-    STUB_LOG="${STUB_LOG}" STUB_MAXCONN="$1" STUB_START="${2:-run-devnet}" STUB_MIGRATE_FAIL="${3:-none}" STUB_LOGDRIVER="${STUB_LOGDRIVER:-json-file}" \
+    STUB_LOG="${STUB_LOG}" STUB_FORKS="${STUB_FORKS}" STUB_MAXCONN="$1" STUB_START="${2:-run-devnet}" STUB_MIGRATE_FAIL="${3:-none}" STUB_LOGDRIVER="${STUB_LOGDRIVER:-json-file}" \
         PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
         NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
         timeout 120 bash "${RUN_SH}" halt-n13s10 stubtop > "${WORK}/run-top.out" 2>&1
@@ -1196,8 +1205,11 @@ case "$1" in
             *"{{.Id}}"*) echo sha256:0123456789abcdef0123456789abcdef ;;
             *Entrypoint* | *Cmd*) echo null ;;
         esac ;;
-    run) case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
+    run)
+        case "$*" in *DEFAULT_FORK_CONFIG*) echo "${STUB_FORKS}" ;; esac
+        case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
     info) echo json-file ;;
+    volume) [ "$2" = inspect ] && exit 1 ;; # every volume of the run is gone after down -v
     compose)
         shift 5 # compose -f FILE -p PROJECT
         case "$1" in
@@ -1249,9 +1261,18 @@ case "$1" in
         case "$*" in
             *RestartCount*) stalls restart; echo 0 ;;
             *LogConfig*) echo "${STUB_LOGCONF:-null}" ;;
+            *Mounts*) shift 3; for c in "$@"; do echo "vol-${c}-data"; done ;;
             *) echo "/qdrill-${@: -1}" ;;
         esac ;;
-    stats) shift 4; for c in "$@"; do echo "${c} 100MiB / 1.8GiB 1.00%"; done ;;
+    stats)
+        shift 3; fmt="$1"; shift
+        for c in "$@"; do
+            case "${fmt}" in
+                *NetIO*) [ "${c}" = fakepg ] && n=qdrill-stub-postgres-1 || n="qdrill-stub-node-${c#c}-1"
+                         printf '%s\t1.50%%\t100MiB / 1.5GiB\t1kB / 2kB\t0B / 4kB\n' "${n}" ;;
+                *) echo "${c} 100MiB / 1.8GiB 1.00%" ;;
+            esac
+        done ;;
     logs)
         n=${@: -1}; n=${n#c}; stalls "logs:${n}"
         printf '[INFO] node-%s up\n\e[32m[INFO] We are forging block %s\e[0m\n' "${n}" $(($(head_now) + 1))
@@ -1268,7 +1289,7 @@ full_run() { # $1 label, $2.. run.sh's options and scenario; STUB_* from the cal
     FULL="${WORK}/full-${label}"; rm -rf "${FULL}"; mkdir -p "${FULL}/state" "${FULL}/runs"; echo "0 0" > "${FULL}/state/chain"
     t0=$(date +%s%N)
     STUB_STATE="${FULL}/state" STUB_LOG="${FULL}/docker.log" STUB_RESULTS="${FULL}/runs/results.tsv" PATH="${WORK}/fullbin:${PATH}" RUNS_DIR="${FULL}/runs" \
-        QDRILL_TEST_LOG_READ_TIMEOUT_S=3 NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 GENESIS_DELAY=-1000 \
+        QDRILL_TEST_LOG_READ_TIMEOUT_S=3 NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 GENESIS_DELAY=-1000 RESOURCE_SAMPLE_S="${RESOURCE_SAMPLE_S:-0}" \
         CONSENSUS_TIME=1 STALL_WINDOW=3 timeout 240 bash "${RUN_SH}" "$@" "${label}" > "${FULL}/out" 2>&1
     echo "rc=$?" >> "${FULL}/out"
     ms=$(( ($(date +%s%N) - t0) / 1000000 ))
@@ -1312,6 +1333,15 @@ check "ride-n13s10: exit 0, and verdict.json and results.tsv say PASS" eval 'exi
 check "ride-n13s10: the judge got restart counts of the 10 survivors, before and after" \
     jq -e '(.restartCounts.before | length) == 10 and (.restartCounts.after | length) == 10' "${RD}/drill-input.json"
 check "ride-n13s10: one rotation option set: the other is named as none set" fout 'node log rotation: max-size 20m, max-file none set$'
+check "ride-n13s10: the genesis declares every fork the image knows (checked, said so)" fout 'fork list: the genesis declares all [0-9]* forks'
+check "ride-n13s10: teardown proved the volumes it saw mounted gone with the project" \
+    grep -q '^clean: no container, network or volume of qdrill-.* left on 1 host(s); [0-9]* volume(s) removed$' "${RD}/teardown-check.txt"
+STUB_N=13 STUB_MIN_LIVE=1 RESOURCE_SAMPLE_S=1 full_run ride-sampled ride-n13s10
+check "ride-n13s10 sampled: exit 0, PASS" eval 'exited 0 && recorded PASS'
+check "ride-n13s10 sampled: container stats in resources.tsv, six tab-separated fields a line" \
+    bash -c '[ -s "$1" ] && awk -F"\t" "NF != 6 { exit 1 }" "$1"' _ "${RD}/logs/resources.tsv"
+check "ride-n13s10 sampled: summarized per container and role (13 nodes, postgres)" \
+    jq -e '.roles.node.containers == 13 and .roles.postgres.containers == 1 and .roles.node.memPeakMiBMax == 100 and .skipped == 0' "${RD}/resources-summary.json"
 STUB_N=13 STUB_MIN_LIVE=1 STUB_JUDGE=refuse full_run ride-refused ride-n13s10
 check "ride-n13s10, the judge refuses the fork set (exit 2): ERROR, exit 2, and the detail names the fork" \
     eval 'exited 2 && recorded ERROR "(exit 2); forks.commitLock: the drill needs commitLock active at block 0, got null"'

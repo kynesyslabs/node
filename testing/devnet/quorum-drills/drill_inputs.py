@@ -43,15 +43,32 @@ on, and the value gen-inputs.py starts the shared postgres with (run.sh refuses
 a postgres below the first).
 
     drill_inputs.py hosts --file FILE --nodes N
-reads a hosts file (one `user@ip [max_nodes]` per line, see parse_hosts) and
-prints one tab-separated line per host: index (1-based), user@ip, ip, max_nodes
-(0 = no limit) and the comma-separated nodes assigned to it (assign_nodes).
-Exit 2 with the reason on a malformed file or too little capacity.
+reads a hosts file (one `user@ip[:port] [max_nodes]` per line, see
+parse_hosts) and prints one tab-separated line per host: index (1-based),
+user@ip, ip, max_nodes (0 = no limit), the comma-separated nodes assigned to
+it (assign_nodes) and the ssh port. Exit 2 with the reason on a malformed
+file or too little capacity.
+
+    drill_inputs.py inventory --file FILE --hosts-out PATH
+reads a cloud inventory (one `address ssh_user ssh_port validators` per line,
+see parse_inventory), writes the equivalent hosts file to PATH and prints
+"VALIDATORS HOSTS". Exit 2 with the reason on a malformed inventory.
+
+    drill_inputs.py bind-carryover --run-dir DIR --manifest-sha SHA
+binds the carry-over snapshot built into DIR/inputs/snapshot to every genesis
+of the run (DIR/inputs and each DIR/hosts/<k>/inputs, whose snapshot/ it fills
+with a copy), see bind_carryover.
+
+    drill_inputs.py resources --file FILE
+summarises the resource samples run.sh took (resources.tsv) per container as
+JSON: peak memory, mean and peak CPU, network and block I/O at the last sample.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 
 EMPTY_SNAPSHOT = "empty-snapshot"
@@ -123,16 +140,27 @@ def gossip_port(i):
     return 54549 + i
 
 
-_HOST_RE = re.compile(r"^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+)$")
+_USER_RE = r"[A-Za-z0-9._-]+"
+_ADDR_RE = r"[A-Za-z0-9.-]+"
+_HOST_RE = re.compile(rf"^({_USER_RE})@({_ADDR_RE})(?::([0-9]+))?$")
+# The node ports are published on every host (53551 and up, 54550 and up);
+# MAX_NODES keeps them below 55000 and inside prepare-host.sh's reservation
+MAX_NODES = 400
+
+
+def _ssh_port(text, where):
+    if not re.fullmatch(r"[1-9][0-9]{0,4}", text) or int(text) > 65535:
+        raise ValueError(f"{where}: ssh port must be 1..65535, got {text!r}")
+    return int(text)
 
 
 def parse_hosts(text):
-    """Hosts of a --hosts file: [{"ssh": "user@ip", "ip": ip, "max": int or 0}].
+    """Hosts of a --hosts file: [{"ssh": "user@ip", "ip": ip, "port": int, "max": int or 0}].
 
-    One host per line, `user@ip [max_nodes]`; blank lines and `#` comments are
-    skipped. max_nodes is a positive integer, absent means no limit (0). The
-    same ip twice is refused: both entries would run the same compose project
-    on one Docker daemon.
+    One host per line, `user@ip[:port] [max_nodes]`; blank lines and `#`
+    comments are skipped. port is the ssh port (22 when absent). max_nodes is
+    a positive integer, absent means no limit (0). The same ip twice is
+    refused: both entries would publish the same node ports on one address.
     """
     hosts = []
     for lineno, raw in enumerate(text.splitlines(), 1):
@@ -142,18 +170,61 @@ def parse_hosts(text):
         parts = line.split()
         m = _HOST_RE.match(parts[0])
         if not m or len(parts) > 2:
-            raise ValueError(f"line {lineno}: expected `user@ip [max_nodes]`, got {raw.strip()!r}")
+            raise ValueError(f"line {lineno}: expected `user@ip[:port] [max_nodes]`, got {raw.strip()!r}")
+        port = _ssh_port(m.group(3), f"line {lineno}") if m.group(3) is not None else 22
         cap = 0
         if len(parts) == 2:
             if not re.fullmatch(r"[1-9][0-9]*", parts[1]):
                 raise ValueError(f"line {lineno}: max_nodes must be a positive integer, got {parts[1]!r}")
             cap = int(parts[1])
-        if any(h["ip"] == m.group(1) for h in hosts):
-            raise ValueError(f"line {lineno}: {m.group(1)} is listed twice")
-        hosts.append({"ssh": parts[0], "ip": m.group(1), "max": cap})
+        if any(h["ip"] == m.group(2) for h in hosts):
+            raise ValueError(f"line {lineno}: {m.group(2)} is listed twice")
+        hosts.append({"ssh": f"{m.group(1)}@{m.group(2)}", "ip": m.group(2), "port": port, "max": cap})
     if not hosts:
         raise ValueError("no hosts in the file")
     return hosts
+
+
+def parse_inventory(text):
+    """Hosts of a cloud inventory, as parse_hosts returns them.
+
+    One host per line, `address ssh_user ssh_port validators`, whitespace
+    separated; blank lines and `#` comments are skipped. `address` is what the
+    controller and the other hosts reach the host at (it goes into every node
+    URL), `validators` the exact number of validators the host runs. This is
+    the only provider-specific input of cloud-drill.sh: everything else is
+    derived from it.
+    """
+    hosts = []
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        where = f"line {lineno}"
+        if len(parts) != 4:
+            raise ValueError(f"{where}: expected `address ssh_user ssh_port validators`, got {raw.strip()!r}")
+        addr, user, port, count = parts
+        if not re.fullmatch(_ADDR_RE, addr):
+            raise ValueError(f"{where}: address must be an IPv4 address or a host name, got {addr!r}")
+        if not re.fullmatch(_USER_RE, user):
+            raise ValueError(f"{where}: unexpected characters in the ssh user {user!r}")
+        if not re.fullmatch(r"[1-9][0-9]*", count) or int(count) > MAX_NODES:
+            raise ValueError(f"{where}: validators must be 1..{MAX_NODES}, got {count!r}")
+        if any(h["ip"] == addr for h in hosts):
+            raise ValueError(f"{where}: {addr} is listed twice")
+        hosts.append({"ssh": f"{user}@{addr}", "ip": addr, "port": _ssh_port(port, where), "max": int(count)})
+    if not hosts:
+        raise ValueError("no hosts in the inventory")
+    total = sum(h["max"] for h in hosts)
+    if total > MAX_NODES:
+        raise ValueError(f"the inventory runs {total} validators, more than the {MAX_NODES} the port plan allows")
+    return hosts
+
+
+def hosts_file_text(hosts):
+    """A --hosts file for `hosts` (parse_hosts reads it back unchanged)."""
+    return "".join(f"{h['ssh']}:{h['port']} {h['max']}\n" if h["max"] else f"{h['ssh']}:{h['port']}\n" for h in hosts)
 
 
 def assign_nodes(hosts, n):
@@ -227,6 +298,32 @@ DRILL_TLSN_VERIFIED = {
 LAUNCH_EXCLUDED_FORKS = {
     "identityCarryover": "needs a genesis snapshot; the drills use the legacy genesis path",
 }
+# With --carryover (run.sh) the drill builds the carry-over snapshot from the
+# image's own data/snapshot and binds it in the genesis, so this fork runs as at
+# launch and leaves the excluded list
+CARRYOVER_FORK = "identityCarryover"
+
+# Chain ids the node treats as test networks (NON_MAINNET_CHAIN_IDS in
+# src/forks/forkConfig.ts; drillInputs.test.ts keeps the two equal). Any other
+# id is mainnet's to the node: it then demands the launch inputs (pins, a
+# ceremony notary key, every fork declared), which a drill does not have.
+TEST_CHAIN_IDS = (1, 1337)
+
+
+def test_chain_problem(genesis):
+    """None when the genesis is on a test chain id, else why it is refused."""
+    cid = (genesis.get("properties") or {}).get("id")
+    if type(cid) is int and cid in TEST_CHAIN_IDS:
+        return None
+    return (
+        f"chain id {cid!r} is not a test network's ({', '.join(map(str, TEST_CHAIN_IDS))}): "
+        "a drill must never run on a chain id the node treats as mainnet"
+    )
+
+
+def excluded_forks(carryover=False):
+    """LAUNCH_EXCLUDED_FORKS, without identityCarryover when the drill carries a snapshot."""
+    return {n: why for n, why in LAUNCH_EXCLUDED_FORKS.items() if not (carryover and n == CARRYOVER_FORK)}
 
 
 def _active_at_zero(entry):
@@ -234,19 +331,20 @@ def _active_at_zero(entry):
     return type(h) is int and h == 0
 
 
-def launch_fork_heights(template):
+def launch_fork_heights(template, carryover=False):
     """Fork name -> 0 or None, from a mainnet genesis template's `forks`.
 
     A fork is active at 0 only where the template's activationHeight is the
     number 0. null, a "FILL: ..." placeholder and anything else stay off, and
     so does every fork in LAUNCH_EXCLUDED_FORKS, whatever the template says
-    (it is in the result as None even when the template does not list it).
+    (it is in the result as None even when the template does not list it),
+    except identityCarryover when `carryover` is set.
     """
     forks = template.get("forks")
     if not isinstance(forks, dict) or not forks:
         raise ValueError("the genesis template has no forks object")
     heights = {name: 0 if _active_at_zero(entry) else None for name, entry in forks.items()}
-    for name in LAUNCH_EXCLUDED_FORKS:
+    for name in excluded_forks(carryover):
         heights[name] = None
     missing = [n for n in DRILL_REQUIRED_FORKS if heights.get(n) != 0]
     if missing:
@@ -254,14 +352,14 @@ def launch_fork_heights(template):
     return heights
 
 
-def launch_excluded(template):
+def launch_excluded(template, carryover=False):
     """Name -> reason, for the excluded forks the template activates at 0.
 
     Those are the forks the drills took out of the template's launch set.
     """
-    launch_fork_heights(template)  # the same checks on the template
+    launch_fork_heights(template, carryover)  # the same checks on the template
     forks = template["forks"]
-    return {n: why for n, why in LAUNCH_EXCLUDED_FORKS.items() if _active_at_zero(forks.get(n))}
+    return {n: why for n, why in excluded_forks(carryover).items() if _active_at_zero(forks.get(n))}
 
 
 def excluded_text(excluded):
@@ -269,7 +367,7 @@ def excluded_text(excluded):
     return ", ".join(f"{n} ({why})" for n, why in excluded.items()) or "none"
 
 
-def with_launch_forks(genesis, template):
+def with_launch_forks(genesis, template, carryover=False):
     """Copy of `genesis` whose forks are the template's launch set.
 
     The whole `forks` object is replaced, so no fork keeps a height the
@@ -278,11 +376,12 @@ def with_launch_forks(genesis, template):
     Payload fields (gasFeeSeparation's treasuryAddress, tlsnVerified's notary
     keys) are kept from the genesis' own entry, or filled with ones the node
     accepts. Excluded forks (LAUNCH_EXCLUDED_FORKS) get an explicit
-    `activationHeight: null`.
+    `activationHeight: null`. With `carryover`, identityCarryover keeps the
+    template's height; the caller binds the snapshot (bind_carryover).
     """
     own = genesis.get("forks") or {}
     forks = {}
-    for name, height in launch_fork_heights(template).items():
+    for name, height in launch_fork_heights(template, carryover).items():
         entry = {k: v for k, v in own.get(name, {}).items() if k not in ("activationHeight", "description")}
         if name == "gasFeeSeparation":
             if height is None:
@@ -308,6 +407,223 @@ def fork_set_text(forks, excluded=None):
     if excluded is not None:
         text += f" | excluded: {excluded_text(excluded)}"
     return text
+
+
+def with_carryover_snapshot(genesis, manifest_sha):
+    """Copy of `genesis` bound to the carry-over snapshot whose manifest.json
+    hashes to `manifest_sha` (lowercase hex), as the launch genesis is."""
+    if not re.fullmatch(r"[0-9a-f]{64}", manifest_sha or ""):
+        raise ValueError(f"manifest sha256 must be 64 lowercase hex, got {manifest_sha!r}")
+    out = dict(genesis)
+    out["snapshot"] = {"manifestSha256": manifest_sha}
+    return out
+
+
+def bind_carryover(run_dir, manifest_sha):
+    """Binds RUN_DIR/inputs/snapshot (built by scripts/state-snapshot/carryover.ts
+    from RUN_DIR/inputs/genesis.json) into every genesis of the run, and copies
+    the snapshot into each host's inputs. Returns the genesis files written."""
+    src = os.path.join(run_dir, "inputs", "snapshot")
+    with open(os.path.join(src, "manifest.json"), "rb") as f:
+        actual = hashlib.sha256(f.read()).hexdigest()
+    if actual != manifest_sha:
+        raise ValueError(f"{src}/manifest.json hashes to {actual}, not {manifest_sha}")
+    written = []
+    targets = [os.path.join(run_dir, "inputs")]
+    hosts_dir = os.path.join(run_dir, "hosts")
+    if os.path.isdir(hosts_dir):
+        targets += [os.path.join(hosts_dir, k, "inputs") for k in sorted(os.listdir(hosts_dir))]
+    for d in targets:
+        path = os.path.join(d, "genesis.json")
+        with open(path) as f:
+            g = json.load(f)
+        if (g.get("forks") or {}).get(CARRYOVER_FORK, {}).get("activationHeight") != 0:
+            raise ValueError(f"{path}: {CARRYOVER_FORK} is not at 0; generate the inputs with --carryover")
+        write_json(path, with_carryover_snapshot(g, manifest_sha))
+        written.append(path)
+        if d != os.path.join(run_dir, "inputs"):
+            dst = os.path.join(d, "snapshot")
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+    return written
+
+
+_SIZE_UNITS = {
+    "b": 1, "kb": 1e3, "mb": 1e6, "gb": 1e9, "tb": 1e12,
+    "kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4,
+}
+
+
+def parse_size(text):
+    """Bytes of a docker stats size ("575.6MiB", "1.2kB", "0B")."""
+    m = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]+)\s*", text or "")
+    if not m or m.group(2).lower() not in _SIZE_UNITS:
+        raise ValueError(f"not a docker size: {text!r}")
+    return float(m.group(1)) * _SIZE_UNITS[m.group(2).lower()]
+
+
+def _pair(text):
+    a, _, b = (text or "").partition("/")
+    return parse_size(a), parse_size(b)
+
+
+def container_role(name):
+    """"node", "postgres" or "other", from a compose container name."""
+    if re.search(r"(^|[-_])node-[0-9]+([-_]|$)", name):
+        return "node"
+    if re.search(r"(^|[-_])postgres([-_]|$)", name):
+        return "postgres"
+    return "other"
+
+
+def summarize_resources(text):
+    """Per-container and per-role figures from run.sh's resources.tsv.
+
+    Each line: epoch seconds, container name, CPU % (of one core), memory
+    "used / limit", network "rx / tx" and block I/O "read / write", tab
+    separated, as `docker stats --no-stream` reports them. Network and block
+    I/O are counters since the container started, so the last sample is the
+    total and its rate is taken between the first and the last sample. A line
+    that does not parse (docker prints "--" for a container stopping while it
+    is sampled) is skipped and counted in "skipped".
+    """
+    per = {}
+    skipped = 0
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        parts = raw.split("\t")
+        try:
+            if len(parts) != 6:
+                raise ValueError("not 6 fields")
+            ts, name, cpu, mem, net, blk = parts
+            t = int(ts)
+            c = float(cpu.strip().rstrip("%"))
+            used, _ = _pair(mem)
+            rx, tx = _pair(net)
+            br, bw = _pair(blk)
+        except ValueError:
+            skipped += 1
+            continue
+        per.setdefault(name, []).append((t, c, used, rx, tx, br, bw))
+    containers = {}
+    for name, rows in sorted(per.items()):
+        rows.sort()
+        first, last = rows[0], rows[-1]
+        span_h = (last[0] - first[0]) / 3600
+        containers[name] = {
+            "role": container_role(name),
+            "samples": len(rows),
+            "spanS": last[0] - first[0],
+            "memPeakMiB": round(max(r[2] for r in rows) / 1024**2, 1),
+            "cpuMeanPct": round(sum(r[1] for r in rows) / len(rows), 1),
+            "cpuPeakPct": round(max(r[1] for r in rows), 1),
+            "netRxMB": round(last[3] / 1e6, 2),
+            "netTxMB": round(last[4] / 1e6, 2),
+            "netMBPerHour": round(((last[3] - first[3]) + (last[4] - first[4])) / 1e6 / span_h, 1) if span_h > 0 else None,
+            "blockReadMB": round(last[5] / 1e6, 2),
+            "blockWriteMB": round(last[6] / 1e6, 2),
+        }
+    roles = {}
+    for role in ("node", "postgres"):
+        cs = [c for c in containers.values() if c["role"] == role]
+        if not cs:
+            continue
+        rates = [c["netMBPerHour"] for c in cs if c["netMBPerHour"] is not None]
+        roles[role] = {
+            "containers": len(cs),
+            "memPeakMiBMax": max(c["memPeakMiB"] for c in cs),
+            "memPeakMiBMean": round(sum(c["memPeakMiB"] for c in cs) / len(cs), 1),
+            "cpuMeanPct": round(sum(c["cpuMeanPct"] for c in cs) / len(cs), 1),
+            "cpuPeakPctMax": max(c["cpuPeakPct"] for c in cs),
+            "netMBPerHourMean": round(sum(rates) / len(rates), 1) if rates else None,
+            "netMBPerHourMax": max(rates) if rates else None,
+        }
+    return {"roles": roles, "containers": containers, "skipped": skipped}
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _tsv_table(text):
+    """A markdown table from a TSV text whose first line is the header."""
+    rows = [r.split("\t") for r in text.strip().splitlines() if r.strip()]
+    if not rows:
+        return ""
+    out = ["| " + " | ".join(rows[0]) + " |", "|" + "---|" * len(rows[0])]
+    out += ["| " + " | ".join(r) + " |" for r in rows[1:]]
+    return "\n".join(out)
+
+
+def campaign_summary(campaign_dir):
+    """summary.md of a cloud-drill.sh campaign, from the files it left there.
+
+    Reads hosts.tsv, ping-matrix.tsv, results.tsv and leftovers.txt, and per
+    run in evidence/: logs/verdict.json, drill-verdict.json (the load metrics),
+    resources-summary.json and teardown-check.txt. A file that is missing is
+    reported as missing, never guessed.
+    """
+    md = [f"# Quorum drill campaign {os.path.basename(campaign_dir.rstrip('/'))}", ""]
+    for title, name in (("Hosts", "hosts.tsv"), ("Round trip between hosts (ms)", "ping-matrix.tsv"), ("Results", "results.tsv")):
+        text = _read(os.path.join(campaign_dir, name))
+        md += [f"## {title}", "", _tsv_table(text) if text else f"({name} missing)", ""]
+    evidence = os.path.join(campaign_dir, "evidence")
+    runs = sorted(os.listdir(evidence)) if os.path.isdir(evidence) else []
+    md += ["## Runs", ""]
+    if not runs:
+        md += ["(no run evidence)", ""]
+    for run in runs:
+        d = os.path.join(evidence, run)
+        md += [f"### {run}", ""]
+        verdict = _read(os.path.join(d, "logs", "verdict.json"))
+        if verdict:
+            try:
+                v = json.loads(verdict)
+                md.append(f"- result: **{v.get('result')}** ({v.get('detail', '')})")
+                summary = (v.get("drill") or {}).get("summary")
+                if summary:
+                    md.append(f"- judge: {summary}")
+            except ValueError:
+                md.append("- verdict.json does not parse")
+        else:
+            md.append("- verdict.json missing")
+        drill = _read(os.path.join(d, "drill-verdict.json"))
+        try:
+            m = json.loads(drill).get("metrics") if drill else None
+        except ValueError:
+            m = None
+        if m and "mainTps" in m:
+            bt, ti = m.get("blockTimeS") or {}, m.get("timeToInclusionS") or {}
+            md.append(
+                f"- load: main TPS {m.get('mainTps')} at {m.get('offeredTps')} offered, "
+                f"included {m.get('includedRatio')}, block time p50/p95 {bt.get('p50')}/{bt.get('p95')} s, "
+                f"time to inclusion p50/p95 {ti.get('p50')}/{ti.get('p95')} s, L2PS TPS not measured"
+            )
+        res = _read(os.path.join(d, "resources-summary.json"))
+        try:
+            roles = json.loads(res).get("roles", {}) if res else {}
+        except ValueError:
+            roles = {}
+        for role, r in sorted(roles.items()):
+            md.append(
+                f"- {role} ({r['containers']}): memory peak max {r['memPeakMiBMax']} MiB (mean {r['memPeakMiBMean']}), "
+                f"CPU mean {r['cpuMeanPct']}% / peak {r['cpuPeakPctMax']}% of a core, "
+                f"network {r.get('netMBPerHourMean')} MB/h mean, {r.get('netMBPerHourMax')} max"
+            )
+        if not res:
+            md.append("- resources: not sampled")
+        td = _read(os.path.join(d, "teardown-check.txt"))
+        md.append(f"- teardown: {td.strip() if td else 'teardown-check.txt missing'}")
+        md.append("")
+    left = _read(os.path.join(campaign_dir, "leftovers.txt"))
+    md += ["## Hosts after the campaign", "", left.strip() if left else "(leftovers.txt missing)", ""]
+    return "\n".join(md)
 
 
 def seed_peerlist(pubs, node1_port):
@@ -389,8 +705,10 @@ def main():
     rd.add_argument("--dir", required=True)
     lf = sub.add_parser("launch-forks")
     lf.add_argument("--template", required=True)
+    lf.add_argument("--carryover", action="store_true")
     le = sub.add_parser("launch-excluded")
     le.add_argument("--template", required=True)
+    le.add_argument("--carryover", action="store_true")
     tf = sub.add_parser("tmpfs")
     tf.add_argument("--uid", type=int)
     tf.add_argument("--gid", type=int)
@@ -399,6 +717,16 @@ def main():
     hs = sub.add_parser("hosts")
     hs.add_argument("--file", required=True)
     hs.add_argument("--nodes", type=int, required=True)
+    iv = sub.add_parser("inventory")
+    iv.add_argument("--file", required=True)
+    iv.add_argument("--hosts-out", required=True)
+    bc = sub.add_parser("bind-carryover")
+    bc.add_argument("--run-dir", required=True)
+    bc.add_argument("--manifest-sha", required=True)
+    rs = sub.add_parser("resources")
+    rs.add_argument("--file", required=True)
+    cs = sub.add_parser("campaign-summary")
+    cs.add_argument("--dir", required=True)
     a = ap.parse_args()
     if a.cmd == "hosts":
         try:
@@ -407,7 +735,35 @@ def main():
         except (OSError, ValueError) as e:
             hs.error(f"{a.file}: {e}")
         for h in plan:
-            print("\t".join([str(h["index"]), h["ssh"], h["ip"], str(h["max"]), ",".join(map(str, h["nodes"]))]))
+            print("\t".join([str(h["index"]), h["ssh"], h["ip"], str(h["max"]), ",".join(map(str, h["nodes"])), str(h["port"])]))
+        return
+    if a.cmd == "inventory":
+        try:
+            with open(a.file) as f:
+                hosts = parse_inventory(f.read())
+        except (OSError, ValueError) as e:
+            iv.error(f"{a.file}: {e}")
+        with open(a.hosts_out, "w") as f:
+            f.write(hosts_file_text(hosts))
+        print(sum(h["max"] for h in hosts), len(hosts))
+        return
+    if a.cmd == "bind-carryover":
+        try:
+            for path in bind_carryover(a.run_dir, a.manifest_sha):
+                print(f"bound {path}")
+        except (OSError, ValueError) as e:
+            bc.error(str(e))
+        return
+    if a.cmd == "resources":
+        try:
+            with open(a.file) as f:
+                json.dump(summarize_resources(f.read()), sys.stdout, indent=2)
+        except (OSError, ValueError) as e:
+            rs.error(f"{a.file}: {e}")
+        print()
+        return
+    if a.cmd == "campaign-summary":
+        print(campaign_summary(a.dir))
         return
     if a.cmd == "readable":
         make_readable(a.dir)
@@ -423,11 +779,11 @@ def main():
         return
     if a.cmd == "launch-forks":
         with open(a.template) as f:
-            json.dump(with_launch_forks(json.load(sys.stdin), json.load(f)), sys.stdout)
+            json.dump(with_launch_forks(json.load(sys.stdin), json.load(f), a.carryover), sys.stdout)
         return
     if a.cmd == "launch-excluded":
         with open(a.template) as f:
-            json.dump(launch_excluded(json.load(f)), sys.stdout)
+            json.dump(launch_excluded(json.load(f), a.carryover), sys.stdout)
         return
     with open(a.genesis) as f:
         genesis = json.load(f)

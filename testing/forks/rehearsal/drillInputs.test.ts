@@ -3,7 +3,7 @@ import { spawnSync } from "child_process"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
-import { cloneDefaultForkConfig } from "@/forks/forkConfig"
+import { NON_MAINNET_CHAIN_IDS, cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import {
@@ -247,6 +247,33 @@ describe("drillOverrideYaml", () => {
         for (const bad of [0, -1, 2.5, Number.NaN]) {
             expect(() => drillOverrideYaml(staged, [1], { consensusTimeS: bad })).toThrow(/positive whole/)
         }
+    })
+})
+
+describe("what a cloud drill runs (drill_inputs.py)", () => {
+    const SCRIPT = resolve(import.meta.dir, "../../devnet/quorum-drills/drill_inputs.py")
+    const py = (args: string[], input?: string) => spawnSync(systemBinary("python3"), ["-I", SCRIPT, ...args], { encoding: "utf8", input })
+
+    it("refuses every chain id but the ones the node treats as test networks", () => {
+        // Read from the script, so the two lists cannot drift apart
+        const m = readFileSync(SCRIPT, "utf8").match(/^TEST_CHAIN_IDS = \(([0-9, ]+)\)$/m)
+        expect(m).not.toBeNull()
+        expect(m![1].split(",").map(Number)).toEqual([...NON_MAINNET_CHAIN_IDS])
+    })
+    it("declares every fork the node knows, so a node that demands the full set boots", () => {
+        const g = withLaunchForks(genesis())
+        expect(Object.keys(g.forks).sort()).toEqual(Object.keys(cloneDefaultForkConfig()).sort())
+    })
+    it("with --carryover keeps identityCarryover at the template's 0 and excludes nothing", () => {
+        const real = JSON.parse(readFileSync(LAUNCH_GENESIS_TEMPLATE, "utf8")).forks
+        const r = py(["launch-forks", "--template", LAUNCH_GENESIS_TEMPLATE, "--carryover"], JSON.stringify(genesis()))
+        expect(r.status).toBe(0)
+        const forks = JSON.parse(r.stdout).forks
+        expect(forks.identityCarryover.activationHeight).toBe(real.identityCarryover.activationHeight === 0 ? 0 : null)
+        const atZero = Object.entries<any>(real).filter(([, f]) => f.activationHeight === 0).map(([n]) => n).sort()
+        expect(Object.keys(forks).filter(n => forks[n].activationHeight === 0).sort()).toEqual(atZero)
+        const ex = py(["launch-excluded", "--template", LAUNCH_GENESIS_TEMPLATE, "--carryover"])
+        expect([ex.status, JSON.parse(ex.stdout)]).toEqual([0, {}])
     })
 })
 
@@ -545,8 +572,8 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
 
 describe("run.sh fork set", () => {
     const sh = readFileSync(resolve(import.meta.dir, "../../devnet/quorum-drills/run.sh"), "utf8")
-    it("runs the launch fork set for the mainnet-shape drills (and every 30-validator one) and no other scenario", () => {
-        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\|\*-n30s10\) FORK_SET=launch ;; esac/)
+    it("runs the launch fork set for the mainnet-shape drills (every halt, ride, restart, third, load and hostloss one, and every 30-validator one) and no other scenario", () => {
+        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-\*\|ride-\*\|restart-\*\|third-\*\|load-\*\|hostloss-\*\|\*-n30s10\) FORK_SET=launch ;; esac/)
         expect(sh).toContain("--fork-set \"${FORK_SET}\"")
         expect(sh).toContain("FORK_SET=devnet\n")
     })
