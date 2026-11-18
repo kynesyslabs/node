@@ -225,6 +225,53 @@ if [ "${1:-}" = "--list" ]; then
     exit 0
 fi
 
+# Sharding. Unset means one shard holding everything, so the default invocation
+# is unchanged. Set by the CI matrix, or passed as "--shard INDEX/TOTAL".
+#
+# Files are dealt round-robin over the stable sorted list rather than packed by
+# measured duration: the per-file timings that would make packing better are not
+# collected anywhere yet, and guessing them would produce an uneven split that
+# looks considered. Round-robin keeps the split exact -- every file lands in
+# exactly one shard, no gaps and no duplicates -- and is close to even by count.
+SHARD_INDEX="${SHARD_INDEX:-}"
+SHARD_TOTAL="${SHARD_TOTAL:-}"
+if [ "${1:-}" = "--shard" ]; then
+    # Capture the raw argument before shifting it away: the validation below
+    # compares against it, and any named files that follow must survive in $@.
+    _shard_arg="${2:-}"
+    SHARD_INDEX="${_shard_arg%%/*}"
+    SHARD_TOTAL="${_shard_arg#*/}"
+    if [ "$SHARD_TOTAL" = "$_shard_arg" ]; then
+        echo "::error::--shard expects INDEX/TOTAL, got '$_shard_arg'"
+        exit 2
+    fi
+    shift 2 || true
+fi
+SHARD_INDEX="${SHARD_INDEX:-1}"
+SHARD_TOTAL="${SHARD_TOTAL:-1}"
+
+case "$SHARD_INDEX$SHARD_TOTAL" in
+    ''|*[!0-9]*)
+        echo "::error::shard index and total must be integers, got '$SHARD_INDEX/$SHARD_TOTAL'"
+        exit 2
+        ;;
+esac
+if [ "$SHARD_TOTAL" -lt 1 ]; then
+    echo "::error::shard total must be at least 1, got '$SHARD_TOTAL'"
+    exit 2
+fi
+if [ "$SHARD_INDEX" -lt 1 ] || [ "$SHARD_INDEX" -gt "$SHARD_TOTAL" ]; then
+    echo "::error::shard index must be between 1 and $SHARD_TOTAL, got '$SHARD_INDEX'"
+    exit 2
+fi
+
+# Build this shard's file list. The total is carried in the summary line so a
+# shard that was handed an empty slice can be told apart from a suite that has
+# genuinely lost its tests.
+shard_files() {
+    awk -v idx="$SHARD_INDEX" -v tot="$SHARD_TOTAL" '((NR - 1) % tot) == (idx - 1)'
+}
+
 runner_for() {
     if grep -q 'from "bun:test"' "$1"; then
         echo bun
@@ -251,20 +298,40 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
+# The candidate list is either the files named on the command line or the whole
+# suite; the shard then selects its portion of that list. Both features compose:
+# `--shard 2/4` narrows the suite, and `--shard 2/4 <files...>` narrows the named
+# subset the same way.
 done < <(
     if [[ "$#" -gt 0 ]]; then
         printf '%s\n' "$@"
     else
-        list_suite_files | sort -u
-    fi
+        list_suite_files
+    fi | sort -u | shard_files
 )
 
-echo "consensus suites: $count files, ${#failed[@]} failed"
+echo "consensus suites: $count files in shard $SHARD_INDEX/$SHARD_TOTAL, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then
-    echo "::error::no test files found under ${SUITE_DIRS[*]}"
-    exit 1
+    # A single-shard run must never silently pass having tested nothing, so that
+    # stays a hard failure. In a multi-shard run an empty slice is legitimate
+    # only when the suite has fewer files than shards; warn rather than fail, and
+    # rely on the other shards plus the aggregate job to notice a lost suite.
+    if [ "$SHARD_TOTAL" -eq 1 ]; then
+        echo "::error::no test files found under ${SUITE_DIRS[*]}"
+        exit 1
+    fi
+    echo "::warning::shard $SHARD_INDEX/$SHARD_TOTAL received no files (suite smaller than shard count)"
 fi
-for file in "${failed[@]}"; do
-    echo "  FAILED $file"
-done
+# Guarded rather than written as `for file in "${failed[@]}"`: with `set -u`,
+# bash below 4.4 treats an empty array as an unbound variable and aborts the
+# script even though every test passed. Bash 5 (the CI runner) accepts the plain
+# form, so the abort was invisible there -- but it made a no-failure run
+# impossible to reproduce locally on macOS, which is exactly the case a shard
+# hits routinely. Testing the length first keeps that fix from printing a
+# spurious "FAILED" line on a shard that passed.
+if [ "${#failed[@]}" -gt 0 ]; then
+    for file in "${failed[@]}"; do
+        echo "  FAILED $file"
+    done
+fi
 [ "${#failed[@]}" -eq 0 ]
