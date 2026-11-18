@@ -19,6 +19,7 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun scripts/check-secret-logs.ts
       - run: bun run type-check
       - run: bun run test:release
 
