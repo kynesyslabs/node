@@ -2,7 +2,7 @@
  * Node-side checks of an `l2psBatch` settlement record, shared by block apply
  * (forge, block validation and Sync go through HandleGCR.applyTransactions),
  * forge selection and the member's admission and aggregation.
- * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1".
+ * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1.2".
  *
  * Every check here returns a refusal instead of throwing, and depends only on
  * the transaction, the chain id, the network fee parameters and the working
@@ -32,6 +32,7 @@ import {
 } from "./encoding"
 import { verifySettlementProof } from "./prover"
 import { verifyEd25519 } from "./ed25519"
+import { L2PS_NONCE_EDIT, l2psNonceOf, type GCREditL2PSNonce } from "./l2psNonce"
 import type { SettlementChange, SettlementProof } from "./types"
 
 // Forging reads the cap without the proof verifier and the chain behind it.
@@ -253,8 +254,9 @@ export function settlementFeeRefusal(settlement: ParsedSettlement, minimumFee: b
 }
 
 /**
- * Each signer's transfers carry consecutive nonces from its account nonce + 1,
- * in batch order. `nonceOf` reads the working state at this transaction.
+ * Each signer's transfers carry consecutive nonces from its L2PS nonce in the
+ * batch's subnet + 1, in batch order. `nonceOf` reads the working state at
+ * this transaction.
  */
 export function settlementNonceRefusal(
     settlement: ParsedSettlement,
@@ -264,14 +266,14 @@ export function settlementNonceRefusal(
     for (const [i, t] of settlement.transfers.entries()) {
         const expected = next.get(t.signer) ?? nonceOf(t.signer) + 1n
         if (t.nonce !== expected) {
-            return `transfer ${i} nonce ${t.nonce} is not ${t.signer}'s next nonce ${expected}`
+            return `transfer ${i} nonce ${t.nonce} is not ${t.signer}'s next L2PS nonce ${expected}`
         }
         next.set(t.signer, expected + 1n)
     }
     return null
 }
 
-/** Transfers per signer: the amount each signer's nonce moves by. */
+/** Transfers per signer: the amount each signer's L2PS nonce moves by. */
 export function settlementNonceSpend(settlement: ParsedSettlement): Map<string, number> {
     const spend = new Map<string, number>()
     for (const t of settlement.transfers) spend.set(t.signer, (spend.get(t.signer) ?? 0) + 1)
@@ -279,21 +281,20 @@ export function settlementNonceSpend(settlement: ParsedSettlement): Map<string, 
 }
 
 /**
- * Public signals rebuilt from the transaction and the working state, and the
- * PLONK proof checked against them. Only a false verdict refuses the batch:
+ * Public signals rebuilt from the transaction alone, and the PLONK proof
+ * checked against them: the statement binds no balance, so a proof made
+ * before an L1 transaction moved a touched account still holds. Only a false verdict refuses the batch:
  * it is the same on every honest node. A verifier that throws could not judge
  * (a missing key, a failed curve build, no memory), so the error leaves the
  * block apply and this node halts instead of failing a batch its peers apply.
  */
 export async function settlementProofRefusal(
     settlement: ParsedSettlement,
-    balanceOf: (account: string) => bigint,
 ): Promise<string | null> {
     let signals: bigint[]
     try {
         const accounts: PublicAccount[] = settlement.changes.map(c => ({
             account: c.account,
-            balanceBefore: balanceOf(c.account),
             delta: c.delta,
         }))
         signals = settlementPublicSignals(
@@ -313,26 +314,51 @@ export async function settlementProofRefusal(
 }
 
 /**
- * The working-state checks of Interface v1 step 2 (nonces) and 3 (proof), on
- * the accounts the block's earlier transactions left. Accounts missing from
- * the caches read as a fresh account: nonce 0, balance 0.
+ * Every change its account can take: the proof shows only that the deltas
+ * net the batch's transfers, so whether a balance covers its net debit is
+ * judged here, in public, on the working state. The batch applies all or
+ * nothing, so a transfer may be funded by a credit of the same batch.
+ */
+export function settlementCoverageRefusal(
+    settlement: ParsedSettlement,
+    balanceOf: (account: string) => bigint,
+): string | null {
+    for (const c of settlement.changes) {
+        if (c.delta >= 0n) continue
+        const balance = balanceOf(c.account)
+        if (balance + c.delta < 0n) {
+            return `account ${c.account} balance ${balance} does not cover its net change ${c.delta}`
+        }
+    }
+    return null
+}
+
+/**
+ * The working-state checks of Interface v1.2 steps 2 (L2PS nonces), 3
+ * (coverage) and 4 (proof), on the accounts the block's earlier transactions
+ * left. Accounts missing from the caches read as a fresh account: L2PS nonce
+ * 0, balance 0.
  */
 export async function settlementStateRefusal(
     settlement: ParsedSettlement,
     accounts: Map<string, GCRMain>,
 ): Promise<string | null> {
     const nonceRefusal = settlementNonceRefusal(settlement, account =>
-        BigInt(accounts.get(account)?.nonce ?? 0),
+        BigInt(l2psNonceOf(accounts.get(account), settlement.l2psUid)),
     )
     if (nonceRefusal) return nonceRefusal
-    return settlementProofRefusal(settlement, account =>
+    const coverageRefusal = settlementCoverageRefusal(settlement, account =>
         BigInt(accounts.get(account)?.balance ?? 0n),
     )
+    if (coverageRefusal) return coverageRefusal
+    return settlementProofRefusal(settlement)
 }
 
 /**
  * The edits a valid settlement applies: each change as a balance edit, each
- * signer's nonce moved by its transfer count, and each fee's distribution
+ * signer's L2PS nonce in the batch's subnet moved by its transfer count (its
+ * L1 nonce is never touched, so an L1 transaction need not wait for a
+ * private transfer to settle), and each fee's distribution
  * credits without the sender debit, which the signer's delta already holds.
  * Derived from the transaction and the fee split live at apply, so an
  * orphaned settlement is left for a resync rather than rebuilt for rollback.
@@ -352,14 +378,16 @@ export function settlementEdits(settlement: ParsedSettlement, txHash: string): G
     }
     const spend = [...settlementNonceSpend(settlement)].sort(([a], [b]) => compareAccounts(a, b))
     for (const [account, count] of spend) {
-        edits.push({
-            type: "nonce",
+        const edit: GCREditL2PSNonce = {
+            type: L2PS_NONCE_EDIT,
             operation: "add",
             account,
+            l2psUid: settlement.l2psUid,
             amount: count,
             txhash: txHash,
             isRollback: false,
-        } as GCREdit)
+        }
+        edits.push(edit as unknown as GCREdit)
     }
     edits.push(...settlementFeeCredits(settlement, txHash))
     return edits

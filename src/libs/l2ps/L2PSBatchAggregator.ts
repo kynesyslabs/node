@@ -945,7 +945,7 @@ export class L2PSBatchAggregator {
                 }
                 return openSettlementTransfer(inner as any, row.hash)
             },
-            tip: accounts => readTipAccounts(accounts),
+            tip: (l2psUid, accounts) => readTipAccounts(accounts, l2psUid),
             minimumFee: async () => {
                 // Stale parameters would drop correctly priced transfers.
                 await ensureNetworkParametersCurrent()
