@@ -84,7 +84,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "block_height",
+                    "expr": "demos_block_height",
                     "refId": "A"
                 }
             ],
@@ -149,7 +149,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "seconds_since_last_block",
+                    "expr": "demos_seconds_since_last_block",
                     "refId": "A"
                 }
             ],
@@ -206,7 +206,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "last_block_tx_count",
+                    "expr": "demos_last_block_tx_count",
                     "refId": "A"
                 }
             ],
@@ -263,7 +263,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "last_block_timestamp",
+                    "expr": "demos_last_block_timestamp",
                     "refId": "A"
                 }
             ],
@@ -352,7 +352,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "block_height",
+                    "expr": "demos_block_height",
                     "legendFormat": "Block Height",
                     "refId": "A"
                 }
@@ -442,7 +442,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "last_block_tx_count",
+                    "expr": "demos_last_block_tx_count",
                     "legendFormat": "TX Count",
                     "refId": "A"
                 }
@@ -553,7 +553,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "seconds_since_last_block",
+                    "expr": "demos_seconds_since_last_block",
                     "legendFormat": "Time Since Block",
                     "refId": "A"
                 }
