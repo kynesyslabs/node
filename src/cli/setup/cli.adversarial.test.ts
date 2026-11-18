@@ -135,9 +135,9 @@ describe("values are validated, not coerced", () => {
     }
 
     it("subnet ids: letters, digits, _ and - up to the documented length", () => {
-        expect(parseSetupArgs(["--l2ps-uid", "a".repeat(255)], {}).uid).toBe("a".repeat(255))
-        expect(HELP).toContain("up to 255")
-        for (const bad of ["a".repeat(256), "a".repeat(5000), "", "   ", "../x", "a/b", "a b", "..", ".", "ünï", "a\u0000b", "a;b", "-"+"/"]) {
+        expect(parseSetupArgs(["--l2ps-uid", "a".repeat(128)], {}).uid).toBe("a".repeat(128))
+        expect(HELP).toContain("up to 128")
+        for (const bad of ["a".repeat(129), "a".repeat(256), "a".repeat(5000), "", "   ", "../x", "a/b", "a b", "..", ".", "ünï", "a\u0000b", "a;b", "-"+"/"]) {
             rejects(["--l2ps-uid", bad])
         }
         rejects([], { DEMOS_SETUP_L2PS_UID: "   " })

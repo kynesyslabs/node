@@ -11,6 +11,7 @@ import { Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
+import { L2PS_UID_MAX_LENGTH } from "@/libs/l2ps/settlement/encoding"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { L2PSNotConfiguredError } from "./l2psErrors"
@@ -110,8 +111,8 @@ export default class ParallelNetworks {
      */
     async loadL2PS(uid: string): Promise<L2PS> {
         // Validate uid to prevent path traversal attacks
-        if (!uid || !/^[A-Za-z0-9_-]+$/.test(uid)) {
-            throw new L2PSNotConfiguredError(`Invalid L2PS uid: ${uid}`)
+        if (!uid || uid.length > L2PS_UID_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(uid)) {
+            throw new L2PSNotConfiguredError(`Invalid L2PS uid: ${String(uid).slice(0, L2PS_UID_MAX_LENGTH)}`)
         }
 
         if (this.l2pses.has(uid)) {
