@@ -17,12 +17,18 @@ REPO = os.path.abspath(os.path.join(HERE, "../../.."))
 sys.path.insert(0, HERE)
 
 from drill_inputs import (  # noqa: E402
+    CARRYOVER_FORK,
     assign_nodes,
+    campaign_summary,
     gossip_port,
     host_plan,
+    hosts_file_text,
     node_port,
     parse_hosts,
+    parse_inventory,
     pg_max_connections,
+    summarize_resources,
+    test_chain_problem,
 )
 
 DIGEST = "ghcr.io/example/demos-node@sha256:" + "a" * 64
@@ -198,6 +204,193 @@ class GenInputs30On4Hosts(unittest.TestCase):
             r = gen(d, extra=("--src", REPO))
             self.assertEqual(r.returncode, 2)
             self.assertIn("--src cannot be used with --hosts-file", r.stderr)
+
+
+INVENTORY = """
+# address user port validators
+203.0.113.11 drill 22 3
+198.51.100.21 ubuntu 2222 3
+192.0.2.40 drill 22 4
+"""
+
+
+class Inventory(unittest.TestCase):
+    def test_parse_and_hosts_file(self):
+        hosts = parse_inventory(INVENTORY)
+        self.assertEqual([h["max"] for h in hosts], [3, 3, 4])
+        self.assertEqual([h["port"] for h in hosts], [22, 2222, 22])
+        text = hosts_file_text(hosts)
+        self.assertEqual(text.splitlines()[1], "ubuntu@198.51.100.21:2222 3")
+        # run.sh reads the hosts file back to the same hosts
+        self.assertEqual(parse_hosts(text), hosts)
+        # every validator placed, each host at exactly its count
+        owner = assign_nodes(hosts, 10)
+        self.assertEqual([owner.count(k) for k in range(3)], [3, 3, 4])
+
+    def test_parse_errors(self):
+        for bad in ("1.2.3.4 u 22\n", "1.2.3.4 u 22 0\n", "1.2.3.4 u 70000 3\n", "1.2.3.4 u;x 22 3\n",
+                    "1.2.3.4 u 22 3\n1.2.3.4 v 22 3\n", "# nothing\n", "1.2.3.4 u 22 401\n",
+                    "node-a.example.net u 22 3\n", "1.2.3.256 u 22 3\n"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    parse_inventory(bad)
+
+    def test_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            f, out = os.path.join(d, "inv"), os.path.join(d, "hosts")
+            with open(f, "w") as fh:
+                fh.write(INVENTORY)
+            r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "drill_inputs.py"), "inventory", "--file", f, "--hosts-out", out],
+                               capture_output=True, text=True)
+            self.assertEqual((r.returncode, r.stdout), (0, "10 3\n"), r.stderr)
+            with open(out) as fh:
+                self.assertEqual(parse_hosts(fh.read()), parse_inventory(INVENTORY))
+        with open(os.path.join(HERE, "inventory.example")) as fh:
+            example = parse_inventory(fh.read())
+        self.assertEqual((len(example), sum(h["max"] for h in example)), (10, 30))
+
+
+class ChainGuard(unittest.TestCase):
+    def test_test_chain_ids_only(self):
+        self.assertIsNone(test_chain_problem({"properties": {"id": 1337}}))
+        self.assertIsNone(test_chain_problem({"properties": {"id": 1}}))
+        for cid in (53, "1337", None, True, 1337.0):
+            with self.subTest(cid=cid):
+                self.assertIn("is not a test network's", test_chain_problem({"properties": {"id": cid}}))
+
+    def test_devnet_genesis_is_on_a_test_chain(self):
+        with open(os.path.join(REPO, "testing", "devnet", "genesis.devnet.json")) as f:
+            self.assertIsNone(test_chain_problem(json.load(f)))
+
+
+class CloudInputs(unittest.TestCase):
+    """--bind-host-ip, load wallets and --carryover on 6 nodes over 2 hosts."""
+
+    HOSTS2 = "drill@10.0.0.1:22 3\ndrill@10.0.0.2:2222 3\n"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.run_dir = cls.tmp.name
+        load = os.path.join(cls.run_dir, "inputs", "load")
+        os.makedirs(load)
+        for j in (1, 2):
+            with open(os.path.join(load, f"wallet{j}.pub"), "w") as f:
+                f.write(f"0x{0xF0 + j:064X}")
+        with open(os.path.join(load, "load-client.ts"), "w") as f:
+            f.write("// stub")
+        cls.r = gen(cls.run_dir, nodes=6, hosts_text=cls.HOSTS2, extra=("--bind-host-ip", "--carryover"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        self.assertEqual(self.r.returncode, 0, self.r.stderr)
+
+    def load(self, *parts):
+        with open(os.path.join(self.run_dir, *parts)) as f:
+            return json.load(f)
+
+    def test_ports_bound_to_the_host_address(self):
+        c = self.load("hosts", "2", "compose.yml")
+        p, gp = node_port(2), gossip_port(2)
+        self.assertEqual(c["services"]["node-2"]["ports"], [f"10.0.0.2:{p}:{p}", f"10.0.0.2:{p + 1}:{p + 1}", f"10.0.0.2:{gp}:{gp}"])
+
+    def test_load_wallets_funded_and_load_service_on_host_1(self):
+        g = self.load("inputs", "genesis.json")
+        funded = {b[0] for b in g["balances"]}
+        self.assertTrue({f"0x{0xF1:064x}", f"0x{0xF2:064x}"} <= funded)
+        c1, c2 = self.load("hosts", "1", "compose.yml"), self.load("hosts", "2", "compose.yml")
+        self.assertNotIn("load", c2["services"])
+        svc = c1["services"]["load"]
+        self.assertEqual(svc["image"], DIGEST)
+        self.assertEqual(svc["profiles"], ["load"])
+        self.assertIn("./inputs/load/load-client.ts:/app/qdrill-load-client.ts:ro", svc["volumes"])
+        self.assertTrue(os.path.exists(os.path.join(self.run_dir, "hosts", "1", "inputs", "load", "load-client.ts")))
+        self.assertFalse(os.path.exists(os.path.join(self.run_dir, "hosts", "2", "inputs", "load")))
+
+    def test_carryover_mounts_and_bind(self):
+        g = self.load("inputs", "genesis.json")
+        self.assertEqual(g["forks"][CARRYOVER_FORK]["activationHeight"], 0)
+        c = self.load("hosts", "1", "compose.yml")
+        self.assertIn("./inputs/snapshot:/app/data/snapshot:ro", c["services"]["node-1"]["volumes"])
+        snap = os.path.join(self.run_dir, "inputs", "snapshot")
+        with open(os.path.join(snap, "manifest.json"), "w") as f:
+            f.write('{"stub": true}')
+        import hashlib
+        with open(os.path.join(snap, "manifest.json"), "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+        cli = [sys.executable, "-I", os.path.join(HERE, "drill_inputs.py"), "bind-carryover", "--run-dir", self.run_dir]
+        r = subprocess.run([*cli, "--manifest-sha", "0" * 64], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("hashes to", r.stderr)
+        r = subprocess.run([*cli, "--manifest-sha", sha], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("bound "), 3)
+        for k in ("1", "2"):
+            self.assertEqual(self.load("hosts", k, "inputs", "genesis.json")["snapshot"], {"manifestSha256": sha})
+            self.assertTrue(os.path.exists(os.path.join(self.run_dir, "hosts", k, "inputs", "snapshot", "manifest.json")))
+
+    def test_refusals(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run([sys.executable, os.path.join(HERE, "gen-inputs.py"), "--run-dir", d, "--repo", REPO, "--nodes", "4",
+                                "--shard-size", "4", "--binding", "on", "--genesis-ts", "1", "--image", DIGEST, "--node-mem", "1g",
+                                "--consensus-time", "10", "--bind-host-ip"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("--bind-host-ip applies to --hosts-file only", r.stderr)
+
+
+STATS = "\n".join([
+    "100\th1:qdrill-x-node-1-1\t50.0%\t600MiB / 1.5GiB\t1MB / 2MB\t0B / 10MB",
+    "160\th1:qdrill-x-node-1-1\t150.0%\t640MiB / 1.5GiB\t4MB / 5MB\t0B / 20MB",
+    "100\th1:qdrill-x-postgres-1\t5.0%\t140MiB / 2GiB\t1kB / 1kB\t0B / 1MB",
+    "130\th1:qdrill-x-node-2-1\t--\t-- / --\t-- / --\t-- / --",
+    "garbage",
+])
+
+
+class Resources(unittest.TestCase):
+    def test_summary(self):
+        s = summarize_resources(STATS)
+        self.assertEqual(s["skipped"], 2)
+        n = s["containers"]["h1:qdrill-x-node-1-1"]
+        self.assertEqual((n["samples"], n["spanS"], n["memPeakMiB"], n["cpuMeanPct"], n["cpuPeakPct"]), (2, 60, 640.0, 100.0, 150.0))
+        # (3 + 3) MB more in 60 s
+        self.assertEqual(n["netMBPerHour"], 360.0)
+        self.assertEqual(s["roles"]["node"]["containers"], 1)
+        self.assertEqual(s["roles"]["postgres"]["memPeakMiBMax"], 140.0)
+        self.assertIsNone(s["containers"]["h1:qdrill-x-postgres-1"]["netMBPerHour"])
+
+    def test_counters_through_a_restart(self):
+        # rx 5 MB, then 1 MB after a restart, then 3 MB: 5 + 1 + 2 = 8 MB in all
+        rows = "\n".join(f"{t}\th1:qdrill-x-node-2-1\t10%\t500MiB / 1GiB\t{rx}MB / 0B\t0B / 0B"
+                         for t, rx in ((0, 5), (60, 1), (120, 3)))
+        n = summarize_resources(rows)["containers"]["h1:qdrill-x-node-2-1"]
+        self.assertEqual(n["netRxMB"], 8.0)
+        # 3 MB grown in the 2 minutes sampled
+        self.assertEqual(n["netMBPerHour"], 90.0)
+
+
+class CampaignSummary(unittest.TestCase):
+    def test_from_the_campaign_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "results.tsv"), "w") as f:
+                f.write("scenario\texit\tresult\tminutes\trun\nhalt-n6s6\t0\tPASS\t9\tr1\n")
+            run = os.path.join(d, "evidence", "r1")
+            os.makedirs(os.path.join(run, "logs"))
+            with open(os.path.join(run, "logs", "verdict.json"), "w") as f:
+                json.dump({"result": "PASS", "detail": "ok", "drill": {"summary": "halted, recovered"}}, f)
+            with open(os.path.join(run, "resources-summary.json"), "w") as f:
+                json.dump(summarize_resources(STATS), f)
+            md = campaign_summary(d)
+        self.assertIn("| halt-n6s6 | 0 | PASS | 9 | r1 |", md)
+        self.assertIn("- result: **PASS** (ok)", md)
+        self.assertIn("- judge: halted, recovered", md)
+        self.assertIn("node (1): memory peak max 640.0 MiB", md)
+        self.assertIn("(hosts.tsv missing)", md)
+        self.assertIn("teardown-check.txt missing", md)
+        self.assertIn("(leftovers.txt missing)", md)
 
 
 if __name__ == "__main__":

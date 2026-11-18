@@ -2,25 +2,31 @@
 # Prepares a fresh Ubuntu 24.04 host for multi-host quorum drills (HOSTS.md).
 # Idempotent: a second run changes nothing. Run as root on the host.
 #
-#   prepare-host.sh --user USER [--nodes N] [--allow-from ADDR]...
+#   prepare-host.sh --user USER [--nodes N] [--ssh-port PORT] [--allow-from ADDR]...
 #
 #   --user USER        the account run.sh connects as; added to the docker group
 #   --nodes N          highest node index this host may run (default 30): sizes
 #                      the firewall rules
+#   --ssh-port PORT    the port sshd listens on (default 22), kept open when
+#                      ufw is enabled
 #   --allow-from ADDR  a controller or peer host address (or CIDR) the node ports
-#                      are opened to with ufw; repeatable. Without it the
-#                      firewall is left untouched.
+#                      are opened to with ufw, and the only sources Docker's
+#                      DOCKER-USER chain lets reach the published node ports
+#                      (chain QDRILL, rebuilt on every run); repeatable.
+#                      Without it the firewall is left untouched.
 set -euo pipefail
 
 USER_NAME=""
 NODES=30
+SSH_PORT=22
 ALLOW=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --user) USER_NAME="$2"; shift 2 ;;
         --nodes) NODES="$2"; shift 2 ;;
+        --ssh-port) SSH_PORT="$2"; shift 2 ;;
         --allow-from) ALLOW+=("$2"); shift 2 ;;
-        -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -28,6 +34,7 @@ done
 [ -n "${USER_NAME}" ] || { echo "--user is required" >&2; exit 2; }
 id "${USER_NAME}" >/dev/null 2>&1 || { echo "no such user: ${USER_NAME}" >&2; exit 2; }
 [[ "${NODES}" =~ ^[1-9][0-9]*$ ]] && [ "${NODES}" -le 400 ] || { echo "--nodes must be 1..400" >&2; exit 2; }
+[[ "${SSH_PORT}" =~ ^[1-9][0-9]*$ ]] && [ "${SSH_PORT}" -le 65535 ] || { echo "--ssh-port must be 1..65535" >&2; exit 2; }
 . /etc/os-release
 [ "${ID}" = ubuntu ] && [ "${VERSION_ID}" = 24.04 ] || echo "WARNING: written for Ubuntu 24.04, this is ${PRETTY_NAME}" >&2
 
@@ -117,7 +124,8 @@ fi
 # ── firewall ────────────────────────────────────────────────────────────
 if [ "${#ALLOW[@]}" -gt 0 ]; then
     command -v ufw >/dev/null 2>&1 || apt-get install -y -q ufw
-    ufw allow OpenSSH >/dev/null
+    # The port the controller is connected on, which is not always OpenSSH's 22
+    ufw allow proto tcp to any port "${SSH_PORT}" >/dev/null
     rpc_range="53551:$((53549 + 2 * NODES + 1))"
     gossip_range="54550:$((54549 + NODES))"
     for a in "${ALLOW[@]}"; do
@@ -128,9 +136,23 @@ if [ "${#ALLOW[@]}" -gt 0 ]; then
     ufw status | grep -q '^Status: active' || ufw --force enable >/dev/null
     say "ufw: tcp ${rpc_range} and ${gossip_range} open to ${ALLOW[*]}"
     # Published ports go through Docker's own iptables chains, before ufw's: a
-    # port Docker publishes is reachable from anywhere whatever ufw says.
-    # DOCKER-USER is where a restriction to these addresses would go.
-    say "note: Docker-published ports bypass ufw; restrict them in the DOCKER-USER chain or the provider's firewall"
+    # port Docker publishes is reachable from anywhere whatever ufw says. So
+    # the same restriction goes into DOCKER-USER, which Docker consults first
+    # and never flushes. The drill publishes each port on the same number
+    # inside, so the destination port still names the node port after DNAT.
+    # Replies and traffic from this host's own bridges (a container reaching a
+    # node by the host's address) pass; any other source is dropped.
+    iptables -N QDRILL 2>/dev/null || iptables -F QDRILL
+    iptables -A QDRILL -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+    iptables -A QDRILL -i docker0 -j RETURN
+    iptables -A QDRILL -i br-+ -j RETURN
+    for a in "${ALLOW[@]}"; do iptables -A QDRILL -s "${a}" -j RETURN; done
+    iptables -A QDRILL -j DROP
+    iptables -N DOCKER-USER 2>/dev/null || true
+    jump=(-p tcp -m multiport --dports "${rpc_range},${gossip_range}" -j QDRILL)
+    iptables -C DOCKER-USER "${jump[@]}" 2>/dev/null || iptables -I DOCKER-USER 1 "${jump[@]}"
+    say "DOCKER-USER: published tcp ${rpc_range} and ${gossip_range} reachable from ${ALLOW[*]} and this host's bridges only"
+    say "note: not persisted across a reboot; rerun this script after one"
 fi
 
 say "docker $(docker version --format '{{.Server.Version}}'), compose $(docker compose version --short)"

@@ -57,10 +57,16 @@ jobs:
       # run.sh's lockstep wait, database reads, postgres gate and judge hand-off
       # against a fake curl/docker, including run.sh executed from the top
       - run: bash testing/devnet/quorum-drills/lockstep-stub.test.sh
+      # multihost.sh's docker stand-in and cloud-drill.sh over stubbed ssh
+      # hosts; the inventory, compose and evidence helpers in Python
+      - run: bash testing/devnet/quorum-drills/multihost-stub.test.sh
+      - run: bash testing/devnet/quorum-drills/cloud-drill-stub.test.sh
+      - run: python3 -m unittest discover -s testing/devnet/quorum-drills -p 'test_*.py'
       # bun build has no --no-emit (it is ignored and the whole bundle lands
       # in the log); write it to a scratch dir instead. A broken import still
       # fails the step.
       - run: bun build testing/forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts --target=bun --outdir "$RUNNER_TEMP/rehearsal-drill-bundle"
+      - run: bun build testing/devnet/quorum-drills/load-client.ts --target=bun --outdir "$RUNNER_TEMP/load-client-bundle"
 
   tlsn-notary-ops:
     # The notary's start guard, health check and key ceremony

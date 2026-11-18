@@ -1,0 +1,17 @@
+# cloud-drill.sh --inventory: one host per line,
+#   address  ssh_user  ssh_port  validators
+# address is what the controller and the other hosts reach the host at (it goes
+# into every node URL); validators is how many this host runs. The 10 x 3 layout
+# below is the recommended one (PROVIDER-SPEC.md): losing a whole host stops 3
+# validators, within the tolerance of a committee of 10. Spread the hosts over 3
+# regions, in this order, so consecutive lines are in different regions.
+203.0.113.11  drill  22  3
+198.51.100.21 drill  22  3
+192.0.2.31    drill  22  3
+203.0.113.12  drill  22  3
+198.51.100.22 drill  22  3
+192.0.2.32    drill  22  3
+203.0.113.13  drill  22  3
+198.51.100.23 drill  22  3
+192.0.2.33    drill  22  3
+203.0.113.14  drill  22  3
