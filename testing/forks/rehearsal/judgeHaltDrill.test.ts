@@ -277,6 +277,14 @@ describe("halt drill verdict", () => {
         expect(failedPhases(input)).toEqual(["P5"])
         expect(reasonsOf(input, "P5")[0]).toContain("height 11: hash divergence")
     })
+    it("fails recovery when the halt block was rewritten after the settle read", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        const halt = Math.max(...raw.settle.rows.map((r: any) => r.number))
+        for (const r of raw.recovery.rows) if (r.number === halt) r.hash = "0xrewritten"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5").some(r => r.startsWith(`height ${halt}: node-`))).toBe(true)
+    })
     it("fails recovery when a restarted validator never reaches the target", () => {
         const raw = loadRaw("halt-n13s10.pass")
         raw.recovery.heads["13"] = 10
@@ -502,6 +510,13 @@ describe("safe drill verdict (a third stopped)", () => {
         const reasons = reasonsOf(parseDrillInput(raw), "P5")
         expect(reasons).toContain("node-11 head 11 < target 13")
         expect(reasons.some(r => r.includes("height 12: hash divergence"))).toBe(true)
+    })
+    it("fails a block rewritten after the settle read, even when every node agrees on the new hash", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const r of raw.recovery.rows) if (r.number === 10) r.hash = "0xrewritten"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5").some(r => r.startsWith("height 10: node-") && r.includes("0xrewritten"))).toBe(true)
     })
     it("refuses more than a third stopped, or survivors below the quorum", () => {
         const raw = loadRaw("third-n12s10.pass")

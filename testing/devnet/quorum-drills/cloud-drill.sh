@@ -23,8 +23,9 @@
 # offsets and an inter-host ping matrix (a host whose clock is off by more than
 # CLOCK_MAX_MS ends the campaign: node logs are read by time); one run.sh --hosts
 # per scenario; the evidence of every run (keys left out) and summary.md in
-# campaigns/<time>-<label>/; last, a check that no drill container, volume or
-# run dir is left on any host.
+# campaigns/<time>-<label>/; last, a check that no drill container, network,
+# volume or run dir is left on any host. A run whose own teardown check found
+# something left counts as exit 2.
 #
 # Environment: REGISTRY_TOKEN [REGISTRY_USER] for a private registry (HOSTS.md);
 # QDRILL_SSH_IDENTITY, QDRILL_SSH_KNOWN_HOSTS, QDRILL_SSH_ACCEPT_NEW; CAMPAIGNS_DIR;
@@ -230,6 +231,8 @@ for s in "${PLAN[@]}"; do
     rc=${PIPESTATUS[0]}
     run=$(ls -1d "${CAMPAIGN}/runs/"*"-${s}-${BINDING:-on}-${LABEL}"* 2>/dev/null | tail -1)
     result=$(jq -r .result "${run}/logs/verdict.json" 2>/dev/null || echo none)
+    # A run that left resources behind counts as one that could not run
+    [ -n "${run}" ] && grep -q '^LEFT BEHIND' "${run}/teardown-check.txt" 2>/dev/null && [ "${rc}" -lt 2 ] && rc=2
     printf '%s\t%s\t%s\t%s\t%s\n' "${s}" "${rc}" "${result}" $(( (SECONDS - t0 + 59) / 60 )) "${run##*/}" >> "${CAMPAIGN}/results.tsv"
     [ "${rc}" -gt "${worst}" ] && worst="${rc}"
     # The evidence, without the throwaway keys and inputs the run dir also holds
@@ -247,10 +250,12 @@ say "checking the hosts for leftovers"
 left=""
 for i in "${!HOST_LINES[@]}"; do
     out=$(hssh "${i}" 'echo "containers=$(docker ps -aq --filter name=qdrill- | wc -l)"
+        echo "networks=$(docker network ls -q --filter name=qdrill- | wc -l)"
         echo "volumes=$(docker volume ls -q --filter label=com.docker.compose.project | while read -r v; do docker volume inspect -f "{{index .Labels \"com.docker.compose.project\"}}" "$v"; done | grep -c "^qdrill-")"
         echo "rundirs=$(ls -1 "$HOME/qdrill-runs" 2>/dev/null | wc -l)"' < /dev/null 2>&1) || { left+=" host $((i + 1)): ssh failed;"; continue; }
-    c=$(sed -n 's/^containers=//p' <<< "${out}"); v=$(sed -n 's/^volumes=//p' <<< "${out}"); d=$(sed -n 's/^rundirs=//p' <<< "${out}")
-    [ "${c:-1}${v:-1}${d:-1}" = 000 ] || left+=" host $((i + 1)): ${c} containers, ${v} volumes, ${d} run dirs;"
+    c=$(sed -n 's/^containers=//p' <<< "${out}"); nw=$(sed -n 's/^networks=//p' <<< "${out}")
+    v=$(sed -n 's/^volumes=//p' <<< "${out}"); d=$(sed -n 's/^rundirs=//p' <<< "${out}")
+    [ "${c:-1}${nw:-1}${v:-1}${d:-1}" = 0000 ] || left+=" host $((i + 1)): ${c} containers, ${nw} networks, ${v} volumes, ${d} run dirs;"
 done
 close_masters
 if [ -n "${left}" ]; then
@@ -258,7 +263,7 @@ if [ -n "${left}" ]; then
     echo "LEFT BEHIND:${left}" > "${CAMPAIGN}/leftovers.txt"
     worst=2
 else
-    echo "clean: no drill container, volume or run dir on ${HOST_COUNT} hosts" > "${CAMPAIGN}/leftovers.txt"
+    echo "clean: no drill container, network, labelled volume or run dir on ${HOST_COUNT} hosts (each run's own volumes: its teardown-check.txt)" > "${CAMPAIGN}/leftovers.txt"
 fi
 
 # ── summary.md ──────────────────────────────────────────────────────────

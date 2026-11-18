@@ -75,7 +75,9 @@ RECOVERY_TIMEOUT="${RECOVERY_TIMEOUT:-300}"
 RIDE_BLOCKS="${RIDE_BLOCKS:-5}"
 RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
 # restart-* drills (README.md "restart-n30s10")
-RESTARTS="${RESTARTS:-5}"
+# Default 5, fewer below 6 validators (node-1 is never restarted): set after
+# the scenario gives N
+RESTARTS="${RESTARTS:-}"
 REJOIN_BOOT_S="${REJOIN_BOOT_S:-180}"
 REJOIN_SYNC_S="${REJOIN_SYNC_S:-60}"
 REJOIN_ROUND_S="${REJOIN_ROUND_S:-$((3 * CONSENSUS_TIME))}"
@@ -91,7 +93,9 @@ LOAD_DURATION_S="${LOAD_DURATION_S:-300}"
 LOAD_DRAIN_S="${LOAD_DRAIN_S:-180}"
 # One wallet keeps at most 18 transactions in flight (the node's 20-ahead nonce
 # window), so at 10 s blocks one wallet carries about 1.8 TPS
-LOAD_WALLETS="${LOAD_WALLETS:-8}"
+# Each wallet sends through one node: default 8, or one per validator above
+# that, so every node takes client submissions (set after the scenario gives N)
+LOAD_WALLETS="${LOAD_WALLETS:-}"
 LOAD_MIN_INCLUDED="${LOAD_MIN_INCLUDED:-0.95}"
 # Container stats every RESOURCE_SAMPLE_S seconds into logs/resources.tsv; 0 is off
 RESOURCE_SAMPLE_S="${RESOURCE_SAMPLE_S:-15}"
@@ -167,6 +171,8 @@ case "${SCENARIO}" in
         ;;
     *) usage >&2; exit 2 ;;
 esac
+[ -n "${RESTARTS}" ] || RESTARTS=$(( N - 1 < 5 ? N - 1 : 5 ))
+[ -n "${LOAD_WALLETS}" ] || LOAD_WALLETS=$(( N > 8 ? N : 8 ))
 # The halt and ride drills always run with gossip on, whatever the environment
 # says. With it off a restarted node never learns that the network is ahead:
 # a height claim above its own chain is refused unless it comes as a gossip
@@ -355,6 +361,7 @@ teardown_check() { # $1 the run_volumes file
     else
         echo "LEFT BEHIND:${left}" > "${RUN_DIR}/teardown-check.txt"
         say "WARN: teardown left${left} (teardown-check.txt)"
+        return 1
     fi
 }
 
@@ -401,7 +408,12 @@ teardown() {
         [ -n "${HOSTS_FILE:-}" ] && mh_netem_clear
         run_volumes > "${RUN_DIR}/run-volumes.txt" 2>> "${LOG_DIR}/teardown.log"
         dc down -v --remove-orphans >>"${LOG_DIR}/teardown.log" 2>&1 || true
-        teardown_check "${RUN_DIR}/run-volumes.txt"
+        # A host left dirty is a run that could not be carried out cleanly:
+        # exit 2 whatever the verdict, which stays as the judge gave it
+        if ! teardown_check "${RUN_DIR}/run-volumes.txt" && [ "${rc}" -le 1 ]; then
+            say "exit ${rc} replaced by 2: the teardown left resources on a host"
+            rc=2
+        fi
         say "teardown: $(cat "${RUN_DIR}/teardown-check.txt")"
     fi
     # Every host's run dir, whether or not the stack got started

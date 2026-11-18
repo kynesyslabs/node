@@ -447,6 +447,30 @@ function agreementAt(
     return evaluateRecovery(nodes, height, height, heads, rows, quorum).reasons
 }
 
+/**
+ * The recovery read alone cannot see a block rewritten after the settle read:
+ * every node may agree on the new hash. A height in both reads must keep the
+ * hash the survivors settled on.
+ */
+function rewrittenSinceSettle(settleRows: BlockRow[], recoveryRows: BlockRow[]): string[] {
+    const settled = new Map<number, Set<string>>()
+    for (const r of settleRows) {
+        const s = settled.get(r.number) ?? new Set<string>()
+        s.add(r.hash)
+        settled.set(r.number, s)
+    }
+    const reasons: string[] = []
+    for (const r of recoveryRows) {
+        const s = settled.get(r.number)
+        if (s !== undefined && !s.has(r.hash)) {
+            reasons.push(
+                `height ${r.number}: node-${r.node} holds ${r.hash} at recovery, settled as ${[...s].join(" / ")}`,
+            )
+        }
+    }
+    return reasons
+}
+
 function span(from: number | null, to: number | null): number | null {
     return from === null || to === null ? null : to - from
 }
@@ -597,7 +621,8 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
                 input.recovery.rows,
                 quorum,
             )
-            phases.push(phase("P5", "recovery", withinDeadline(r.reasons, input.marks.t_converged)))
+            const reasons = [...r.reasons, ...(settle === null ? [] : rewrittenSinceSettle(settle.rows, input.recovery.rows))]
+            phases.push(phase("P5", "recovery", withinDeadline(reasons, input.marks.t_converged)))
         }
         crash()
         return verdict()
@@ -668,7 +693,8 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
             input.recovery.rows,
             quorum,
         )
-        phases.push(phase("P5", "recovery", withinDeadline(r.reasons, input.marks.t_converged)))
+        const reasons = [...r.reasons, ...(settle === null ? [] : rewrittenSinceSettle(settle.rows, input.recovery.rows))]
+        phases.push(phase("P5", "recovery", withinDeadline(reasons, input.marks.t_converged)))
     }
 
     crash()

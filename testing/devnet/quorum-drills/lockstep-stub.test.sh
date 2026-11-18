@@ -562,6 +562,14 @@ gate_case td_clean PASS; echo "clean" > "${FAKE}/nodelog.1"
 teardown_rc 0
 check "exit 0, every log collected and clean: exit 0" has "rc=0"
 for st in 0 1; do
+    gate_case td_left PASS; PG_GATE_PASSED=1; echo "clean" > "${FAKE}/nodelog.1"
+    teardown_check() { echo "LEFT BEHIND: host 1: volume v1;" > "${RUN_DIR}/teardown-check.txt"; return 1; }
+    teardown_rc "${st}"
+    teardown_check() { echo clean > "${RUN_DIR}/teardown-check.txt"; }
+    check "exit ${st}, the teardown left a volume: exit 2, saying why" \
+        bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "exit $2 replaced by 2: the teardown left resources on a host" <<< "$1"' _ "${OUT}" "${st}"
+done
+for st in 0 1; do
     gate_case td_unwritten FAIL; STARTED=(); STARTED[7]=1; echo "FATAL:  sorry, too many clients already" > "${FAKE}/nodelog.7"
     teardown_rc "${st}" unwritable
     echo "${OUT}" | grep -E 'ABORT|^rc=' | cut -c1-220 | sed 's/^/    | /'

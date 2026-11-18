@@ -28,12 +28,14 @@ echo "${h} $*" >> "${STUB_WORK}/ssh-calls"
 cd "${STUB_WORK}/hosts/${h}" || exit 255
 HOME="${STUB_WORK}/hosts/${h}" STUB_HOST="${h}" PATH="${STUB_WORK}/remote/bin:${PATH}" sh -c "$*"
 EOF
-# The remote docker: a version, and leftovers only where STUB_LEFT names the host
+# The remote docker: a version, and leftovers only where STUB_LEFT (a container)
+# or STUB_LEFT_NET (a network) names the host
 cat > "${WORK}/remote/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
     version) echo 27.3.1 ;;
     ps) [ "${STUB_LEFT:-}" = "${STUB_HOST}" ] && echo abc123 ;;
+    network) [ "${STUB_LEFT_NET:-}" = "${STUB_HOST}" ] && echo net123 ;;
     volume) ;;
 esac
 exit 0
@@ -70,7 +72,11 @@ case "${s}" in halt-*) result=FAIL; rc=1 ;; esac
 printf '{"result":"%s","detail":"stub","drill":{"summary":"stub summary %s"}}\n' "${result}" "${s}" > "${d}/logs/verdict.json"
 echo '{"roles":{"node":{"containers":4,"memPeakMiBMax":640.5,"memPeakMiBMean":600,"cpuMeanPct":35.2,"cpuPeakPctMax":180,"netMBPerHourMean":40.1,"netMBPerHourMax":55}},"containers":{},"skipped":0}' > "${d}/resources-summary.json"
 case "${s}" in load-*) echo '{"metrics":{"mainTps":1.9,"offeredTps":2,"includedRatio":0.99,"blockTimeS":{"p50":10,"p95":11},"timeToInclusionS":{"p50":8,"p95":12}}}' > "${d}/drill-verdict.json" ;; esac
-echo "clean: no container, network or volume of qdrill-x left on 2 host(s); 12 volume(s) removed" > "${d}/teardown-check.txt"
+if [ -n "${STUB_DIRTY:-}" ]; then
+    echo "LEFT BEHIND: host 1: volume qdrill-x_node-1-data;" > "${d}/teardown-check.txt"
+else
+    echo "clean: no container, network or volume of qdrill-x left on 2 host(s); 12 volume(s) removed" > "${d}/teardown-check.txt"
+fi
 printf 'run\tscenario\n%s\t%s\n' "${d##*/}" "${s}" >> "${RUNS_DIR}/results.tsv"
 echo "[qdrill 00:00:00] RESULT ${result}: ${s}"
 exit "${rc}"
@@ -140,14 +146,22 @@ check "summary.md: results, load metrics, resources, teardown" bash -c "
     grep -q 'node (4): memory peak max 640.5 MiB' '${C}/summary.md' &&
     grep -q 'judge: stub summary load-n6s6' '${C}/summary.md' &&
     grep -q '^- teardown: clean' '${C}/summary.md' &&
-    grep -q '^clean: no drill container, volume or run dir on 2 hosts' '${C}/summary.md'"
+    grep -q '^clean: no drill container, network, labelled volume or run dir on 2 hosts' '${C}/summary.md'"
 check "the campaign dir is private" bash -c "[ \"\$(stat -c %a '${C}')\" = 700 ]"
 
 echo "leftovers"
 STUB_LEFT=10.0.0.2 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 left; rc=$?
 C=$(last_campaign left)
 check "a container left on host 2: exit 2" [ "${rc}" = 2 ]
-check "a container left on host 2: leftovers.txt names it" grep -q "LEFT BEHIND: host 2: 1 containers, 0 volumes, 0 run dirs;" "${C}/leftovers.txt"
+check "a container left on host 2: leftovers.txt names it" grep -q "LEFT BEHIND: host 2: 1 containers, 0 networks, 0 volumes, 0 run dirs;" "${C}/leftovers.txt"
+STUB_LEFT_NET=10.0.0.1 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 leftnet; rc=$?
+C=$(last_campaign leftnet)
+check "a network left on host 1: exit 2" [ "${rc}" = 2 ]
+check "a network left on host 1: leftovers.txt names it" grep -q "LEFT BEHIND: host 1: 0 containers, 1 networks, 0 volumes, 0 run dirs;" "${C}/leftovers.txt"
+STUB_DIRTY=1 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 dirty; rc=$?
+C=$(last_campaign dirty)
+check "a PASS run whose own teardown left a volume: exit 2" [ "${rc}" = 2 ]
+check "that run counts as exit 2 in results.tsv" grep -q $'^restart-n6s6\t2\tPASS\t' "${C}/results.tsv"
 
 echo "clock"
 STUB_SKEW_MS=4000 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 skew; rc=$?

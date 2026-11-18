@@ -162,7 +162,7 @@ live. With N > shardSize (`halt-n13s10`, `ride-n13s10`) it does not: see
 | `drop-n30s10` | 30 | 10 | 7 | Stops validators 30, 29, 28, 27 in turn, each while it is a member of the round in flight, then restarts them | Progress after each stop, the stopped validators gone from the committed peerlist, progress after the restart ([30 validators](#30-validators)) |
 | `halt-n30s10` | 30 | 10 | 7 | Stops validators 7-30 at once (6 live < q), holds, restarts them | Same P1-P6 |
 | `ride-n30s10` | 30 | 10 | 7 | Stops validators 28-30 at once (3 = 10 - q), waits for `RIDE_BLOCKS` blocks | Same as `ride-n13s10` |
-| `restart-n30s10` | 30 | 10 | 7 | Restarts `RESTARTS` (5) random validators one at a time, each at a random point of a round it is a committee member of | Each back signing at its first or second committee round, no stall over `MAX_GAP_S`, one chain, no crash (`judgeRestartDrill.ts`) |
+| `restart-n30s10` | 30 | 10 | 7 | Restarts `RESTARTS` (5, at most N-1) random validators one at a time, each at a random point of a round it is a committee member of | Each back signing at its first or second committee round, no stall over `MAX_GAP_S`, one chain, no crash (`judgeRestartDrill.ts`) |
 | `<kind>-n<N>s<S>` | 4-400 | <= N | | `halt`, `ride` or `restart` at any size (`halt` stops N - q + 1, `ride` S - q), and the three below | As the fixed cases of the same kind |
 | `third-n<N>s<S>` | N | S | | Stops N / 3 validators at once (the survivors must still hold q), holds `SAFE_ROUNDS` rounds, restarts them | S2 every survivor answers and never goes back, S3 one hash per height and quorum signatures up to the common height (the chain may pause or forge meanwhile), P5 recovery, P6 no crash (`judgeHaltDrill.ts`, mode `safe`) |
 | `load-n<N>s<S>` | N | S | | Native transfers from `LOAD_WALLETS` genesis-funded wallets at `LOAD_TPS` for `LOAD_DURATION_S`, signed by the image's own SDK (`load-client.ts`) | L1 the load was carried, L2 at least `LOAD_MIN_INCLUDED` of the accepted transfers included, L3 no stall over `MAX_GAP_S`, L4 one chain with quorum signatures, L5 no crash; reports main TPS, block times and time to inclusion (`judgeLoadDrill.ts`) |
@@ -364,11 +364,11 @@ outage would. With 3 validators per host and a committee of 10 that is
 within `guaranteedTolerance(10, 30) = 3`, so the chain must keep forging;
 judged as `ride`.
 
-**load.** `LOAD_WALLETS` (8) wallets are funded in the genesis and send
-native transfers of 1,000,000 units at `LOAD_TPS` (4) for `LOAD_DURATION_S` (300), each
+**load.** `LOAD_WALLETS` wallets (one per validator, at least 8) are funded
+in the genesis and send native transfers of 1,000,000 units at `LOAD_TPS` (4) for `LOAD_DURATION_S` (300), each
 signed by the SDK inside the image under test (`load-client.ts` runs as the
-compose `load` service on host 1) and sent through confirm + broadcast to
-the nodes round-robin. A wallet keeps at most 18 transfers in flight, under
+compose `load` service on host 1) and sent through confirm + broadcast,
+wallet i through node i (mod N), so every node takes client submissions. A wallet keeps at most 18 transfers in flight, under
 the node's 20-ahead nonce window. Every accepted transfer is followed with
 `getTransactionStatus` until it is included or `LOAD_DRAIN_S` (180) passes.
 `judgeLoadDrill.ts` reports the four load metrics: main TPS (included
@@ -949,7 +949,7 @@ the `docker inspect` of each container's IP before the `partition` drill. For th
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
 `RIDE_TIMEOUT` (300); the first five are scenario 12's values. The judge
 needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
-For `restart-*`: `RESTARTS` (5), `REJOIN_BOOT_S` (180), `REJOIN_SYNC_S` (60),
+For `restart-*`: `RESTARTS` (5, or N-1 below 6 validators), `REJOIN_BOOT_S` (180), `REJOIN_SYNC_S` (60),
 `REJOIN_ROUND_S` (3 x `CONSENSUS_TIME`), `REJOIN_TIMEOUT` (300), `MAX_GAP_S`
 (2 x `CONSENSUS_TIME` + 90), see [30 validators](#30-validators).
 
