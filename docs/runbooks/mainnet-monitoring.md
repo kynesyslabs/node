@@ -79,8 +79,14 @@ do not depend on the working directory.
    Before Slack and paging exist, a Telegram receiver can stand in: the
    commented `telegram` receiver at the end of
    `monitoring/alertmanager/alertmanager.yml` reads the bot token from a file
-   (`bot_token_file`); render the chat id into a deployment copy of that file,
-   point the routes at it, and send the same `amtool` test alerts (step 4).
+   (`bot_token_file`). Put the bot token alone in
+   `monitoring/secrets/telegram_bot_token` (gitignored, `chmod 644` like the
+   webhooks), declare it in `monitoring/docker-compose.yml` as a top-level
+   secret (`telegram_bot_token: {file: ./secrets/telegram_bot_token}`) and add
+   `telegram_bot_token` to the `alertmanager` service's `secrets:` list, so it is
+   mounted at `/run/secrets/telegram_bot_token`. Render the chat id into a
+   deployment copy of `alertmanager.yml`, point the routes at `telegram`, recreate
+   Alertmanager (step 5) and send the same `amtool` test alerts (step 4).
    Check delivery with `alertmanager_notifications_total{integration="telegram"}`
    and `alertmanager_notifications_failed_total` on Alertmanager's `/metrics`.
 3. Set a strong `GRAFANA_ADMIN_PASSWORD` in `monitoring/.env` (for example
