@@ -10,7 +10,8 @@
  * block is left for a resync instead.
  */
 
-import { beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { QueryFailedError } from "typeorm"
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -31,7 +32,9 @@ const { default: Datasource } = await import("@/model/datasource")
 const { default: Mempool } = await import("../mempool")
 const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
 const { getSharedState } = await import("@/utilities/sharedState")
-const { assertNoUnreconciledGcrState, rollbackOrphanedGcrState } = await import("./Sync")
+const { default: logger } = await import("src/utilities/logger")
+const { assertNoUnreconciledGcrState, rollbackOrphanedGcrState, unreconciledGcrBlockNumber } =
+    await import("./Sync")
 
 const TIP = 20
 const ORPHAN = TIP + 1
@@ -165,6 +168,64 @@ describe("rolling back orphaned GCR state", () => {
         expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
         expect(applyTransactions).not.toHaveBeenCalled()
         expect(log).toEqual([])
+    })
+})
+
+/** The drift probe's query failing the way TypeORM reports a Postgres error. */
+function queryFailed(code: string, message: string) {
+    const driverError = Object.assign(new Error(message), { code })
+    return new QueryFailedError("SELECT MAX(\"a\".\"block_number\") AS \"max\"", [], driverError)
+}
+
+// Before the suite below, which latches the node. Orphaned state is stamped
+// throughout, so a probe read as "no drift" would let the caller apply.
+describe("a drift probe that cannot run", () => {
+    let getRawOne: any
+
+    beforeEach(() => {
+        getRawOne = spyOn(queryBuilder, "getRawOne")
+        ;(logger.warning as any).mockClear()
+        applyTransactions.mockResolvedValue({
+            successfulTxs: ORPHANS.map(o => o.hash),
+            failedTxs: [],
+            skippedTxs: [],
+            pending,
+        } as any)
+    })
+
+    afterEach(() => {
+        getRawOne.mockRestore()
+    })
+
+    it("reads a missing table as no drift", async () => {
+        getRawOne.mockRejectedValueOnce(
+            queryFailed("42P01", "relation \"gcr_assigned_txs\" does not exist"),
+        )
+
+        await assertNoUnreconciledGcrState()
+
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(logger.warning).not.toHaveBeenCalled()
+    })
+
+    it.each([
+        ["a statement timeout", queryFailed("57014", "canceling statement due to statement timeout")],
+        ["a lost connection", new Error("Connection terminated unexpectedly")],
+        ["an exhausted pool", new Error("timeout exceeded when trying to connect")],
+    ])("refuses to apply after %s, and probes again on the next call", async (_, error) => {
+        getRawOne.mockRejectedValueOnce(error)
+
+        await expect(assertNoUnreconciledGcrState()).rejects.toThrow(/orphaned GCR state/)
+        expect(logger.warning).toHaveBeenCalled()
+        expect(applyTransactions).not.toHaveBeenCalled()
+        // The drift is unknown, not proven: nothing is latched.
+        expect(unreconciledGcrBlockNumber()).toBeNull()
+
+        await assertNoUnreconciledGcrState()
+
+        expect(getRawOne).toHaveBeenCalledTimes(2)
+        expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(log).toEqual(["begin", "write", "delete 21", "delete 22", "commit", "afterCommit"])
     })
 })
 
