@@ -700,6 +700,26 @@ this restart is a fallback there.
     under the L1 nonce could settle again. Start it from a fresh genesis.
     The launch rehearsal restarts from a fresh genesis on this release;
     mainnet starts with it at block 0.
+  - HTTP peer requests also sign the node they are sent to, as Omni
+    requests do: that node's public key is part of the signed message and
+    is sent in an `audience` header. `hello_peer`, `mempool` and
+    `consensus_routine` are refused without it (HTTP 401), and a node
+    refuses a request that names another node (`Invalid signature: Request
+    is for another node`). When that is all that is wrong with a request
+    (its signature verifies and its timestamp is in the accepted window),
+    the refusal does not count towards the limit on failed signature
+    checks, for its signer or for the address it came from; it counts as
+    one request from that address. A validator's request over
+    `RPC_MAX_BODY_BYTES` is taken, up to `RPC_PEER_MAX_BODY_BYTES`, only
+    when it names this node. Every node of a network must be upgraded
+    together: a node on this release refuses those three methods from an
+    older node, and an older node accepts this release's requests only
+    while they are dated no more than 5 s ahead of its clock. A peer-list
+    entry whose public key is not the key of the node at its URL no longer
+    connects; correct the key.
+  - A call that names this node and is signed by another key than the sudo
+    key may be dated up to 5 minutes ahead of this node's clock, like any
+    other signed call (was 5 s). Sudo calls keep the 5 s limit.
 
 ## Known limits
 

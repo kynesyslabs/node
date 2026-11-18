@@ -880,9 +880,18 @@ export class RateLimiter {
                     )
                     // Verification is the costly part of a request, so a
                     // failed one is counted rather than answered for free.
-                    if (failureBucket) {
+                    // A sound request that names another node is no failure
+                    // of its signer: it draws on the request limit of the
+                    // address it came from, as an unsigned request does.
+                    const requestBucket = whitelistedIP
+                        ? null
+                        : this.bucketFor(this.getMethodFromRequest(req))
+                    const counted = verifyResult.forAnotherNode
+                        ? requestBucket
+                        : failureBucket
+                    if (counted) {
                         const limited = this.consume(
-                            failureBucket,
+                            counted,
                             clientIP,
                             Date.now(),
                         )

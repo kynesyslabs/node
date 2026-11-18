@@ -32,7 +32,8 @@ export const SUDO_METHODS: ReadonlySet<string> = new Set([
  * Methods where the sender identity decides what the request may do: peer
  * methods and the sudo methods. They refuse the older form: its signature
  * leaves the body free, so captured headers could carry any body for that
- * identity.
+ * identity. They must also name the node they are for: a node serves them
+ * only when the signature names it.
  */
 export const BODY_BOUND_METHODS: ReadonlySet<string> = new Set([
     "hello_peer",
@@ -83,7 +84,7 @@ export async function bodyBoundAuthHeaders(params: {
     body: string
     sign: (message: Uint8Array) => Promise<Uint8Array>
     timestamp?: number
-    /** The receiving node's public key hex; required by sudo methods. */
+    /** The receiving node's public key hex; required by peer and sudo methods. */
     audience?: string
 }): Promise<Record<string, string>> {
     const timestamp = params.timestamp ?? nextAuthTimestamp()

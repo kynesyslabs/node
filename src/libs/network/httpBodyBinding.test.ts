@@ -1,11 +1,13 @@
 /**
  * A peer's HTTP auth headers sign the request body, so a captured request
  * cannot be replayed with another body. The signature also names the
- * network (genesis hash), so a request from another network is refused. Runs the real sender (Peer.httpCall),
- * the real auth middleware and the real RPC route.
+ * network (genesis hash), so a request from another network is refused, and
+ * the node it is for, so a request sent to one node is refused by the others.
+ * Runs the real sender (Peer.httpCall), the real auth middleware and the real
+ * RPC route.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, setSystemTime, spyOn } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, jest, setSystemTime, spyOn } from "bun:test"
 import forge from "node-forge"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -18,12 +20,15 @@ const SENDER = "0x" + PUBKEY
 const IDENTITY = "ed25519:" + SENDER
 const OUR_GENESIS = "d5".repeat(32)
 const OTHER_GENESIS = "e7".repeat(32)
+// The node under test, and another node a request can be signed for.
+const OUR_NODE = "07".repeat(32)
+const OTHER_NODE = "0x" + "EE".repeat(32)
 
 const sharedState: Record<string, any> = {
     signingAlgorithm: "ed25519",
     lastBlockNumber: 10,
     keypair: { publicKey: new Uint8Array(32).fill(7) },
-    publicKeyHex: "07".repeat(32),
+    publicKeyHex: OUR_NODE,
     SUDO_PUBKEY: "",
     connectionString: "http://us:53550",
     genesisBlockHash: OUR_GENESIS,
@@ -82,10 +87,12 @@ jest.mock("@kynesyslabs/demosdk/encryption", () => ({
 }))
 const forks = await import("src/forks")
 jest.mock("src/forks", () => ({ ...forks, isForkActive: () => true }))
+// The validators at the head: none, until a test stakes the sender.
+const staked = new Set<string>()
 jest.mock("src/libs/consensus/stakedSet", () => ({
-    getStakedSet: async () => new Set<string>(),
+    getStakedSet: async () => staked,
     getStakedSetHeight: () => 0,
-    isStaked: async () => false,
+    isStaked: async (key: string) => staked.has(key.toLowerCase()),
     isSelfStaked: async () => false,
     onSelfStakeChange: () => () => undefined,
     invalidateStakedSet: () => undefined,
@@ -120,12 +127,22 @@ const Hashing = (await import("src/libs/crypto/hashing")).default
 const { bodyBoundAuthHeaders } = await import("./peerHttpAuth")
 const { PROCESS_START_MONO_MS, PROCESS_START_MS, seenAuthMessages } = await import("./verifySignature")
 const { sudoFloorPath } = await import("./sudoReplayFloor")
+const { RateLimiter: rateLimiter } = await import("./middleware/rateLimiter")
+const { RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS, RATE_LIMIT_AUTH_FAILURE_WINDOW_MS } = await import(
+    "src/utilities/constants"
+)
+const { Config: config } = await import("src/config")
+const PUBLIC_BODY_LIMIT = config.getInstance().server.rpcMaxBodyBytes
 
 const server: any = await serverRpcBun()
-const fakeServer = { requestIP: () => ({ address: "198.51.100.7" }) }
+// The address a request arrives from: the sender's, unless a test says otherwise.
+const SENDER_ADDRESS = "198.51.100.7"
+let arrivesFrom = SENDER_ADDRESS
+const fakeServer = { requestIP: () => ({ address: arrivesFrom }) }
 server.server = fakeServer
 
-async function deliver(body: string, headers: Record<string, string>) {
+async function deliver(body: string, headers: Record<string, string>, from = SENDER_ADDRESS) {
+    arrivesFrom = from
     const req = new Request("http://node/", {
         method: "POST",
         body,
@@ -138,9 +155,10 @@ async function deliver(body: string, headers: Record<string, string>) {
     return (server as any).handleRequest(req, fakeServer) as Promise<Response>
 }
 
-async function capture(request: any) {
+/** What Peer.httpCall sends to the node holding `recipient`: by default, us. */
+async function capture(request: any, recipient = OUR_NODE) {
     captured = null
-    const peer = new Peer("http://peer.example:53550", "0x" + "ee".repeat(32))
+    const peer = new Peer("http://peer.example:53550", recipient)
     await peer.httpCall(request, true)
     if (!captured) throw new Error("nothing sent")
     const body = typeof captured.data === "string" ? captured.data : JSON.stringify(captured.data)
@@ -151,6 +169,9 @@ const hello = (url: string) => ({
     method: "hello_peer",
     params: [{ url, publicKey: PUBKEY }],
 })
+
+const signAsSender = async (message: Uint8Array) =>
+    new Uint8Array(forge.pki.ed25519.sign({ message: Buffer.from(message), privateKey: pair.privateKey }))
 
 beforeEach(() => {
     dispatched.length = 0
@@ -236,6 +257,65 @@ describe("peer HTTP auth", () => {
         expect(dispatched).toHaveLength(1)
     })
 
+    it("names the node it is for, and only that node takes it", async () => {
+        const { body, headers } = await capture(hello("http://me.example:53550"), OTHER_NODE)
+        expect(headers.audience).toBe("ee".repeat(32))
+        const res = await deliver(body, headers)
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("is not taken by another node when the header naming its node is left out", async () => {
+        const { body, headers } = await capture(hello("http://me.example:53550"), OTHER_NODE)
+        const unnamed = Object.fromEntries(Object.entries(headers).filter(([name]) => name !== "audience"))
+        const res = await deliver(body, unnamed)
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    for (const method of ["hello_peer", "mempool", "consensus_routine"]) {
+        it(`refuses ${method} signed over its body but for no node in particular`, async () => {
+            const body = JSON.stringify({ method, params: [{ url: "http://me.example:53550", publicKey: PUBKEY }] })
+            const headers = await bodyBoundAuthHeaders({
+                genesisHash: OUR_GENESIS,
+                identity: IDENTITY,
+                body,
+                sign: signAsSender,
+            })
+            const res = await deliver(body, headers)
+            expect(res.status).toBe(401)
+            expect(dispatched).toEqual([])
+        })
+    }
+
+    it("still takes a client method signed over its body for no node in particular", async () => {
+        const body = JSON.stringify({ method: "nodeCall", params: [{ message: "getLastBlockNumber" }] })
+        const headers = await bodyBoundAuthHeaders({
+            genesisHash: OUR_GENESIS,
+            identity: IDENTITY,
+            body,
+            sign: signAsSender,
+        })
+        const res = await deliver(body, headers)
+        expect(res.status).toBe(200)
+        expect(dispatched).toHaveLength(1)
+    })
+
+    it("takes a peer request dated further ahead than a sudo call may be", async () => {
+        const body = JSON.stringify(hello("http://me.example:53550"))
+        const headers = await bodyBoundAuthHeaders({
+            genesisHash: OUR_GENESIS,
+            identity: IDENTITY,
+            body,
+            sign: signAsSender,
+            audience: OUR_NODE,
+            timestamp: Date.now() + 30_000,
+        })
+        const res = await deliver(body, headers)
+        expect(res.status).toBe(200)
+        expect(dispatched).toHaveLength(1)
+    })
+
     it("signs two identical requests sent in the same millisecond apart", async () => {
         const now = Date.now
         Date.now = () => 1_700_000_000_000 + (now() % 1)
@@ -247,6 +327,177 @@ describe("peer HTTP auth", () => {
             Date.now = now
         }
     })
+})
+
+describe("the larger body limit for validators", () => {
+    // Just over the public limit, and well within the validators' one.
+    const padding = "0".repeat(PUBLIC_BODY_LIMIT)
+    const merge = JSON.stringify({ method: "mempool", params: [{ data: padding }] })
+    const headersFor = (body: string, audience?: string) =>
+        bodyBoundAuthHeaders({
+            genesisHash: OUR_GENESIS,
+            identity: IDENTITY,
+            body,
+            sign: signAsSender,
+            audience,
+        })
+
+    beforeEach(() => {
+        staked.add(SENDER)
+    })
+    afterAll(() => {
+        staked.delete(SENDER)
+    })
+
+    it("covers a validator's request that names this node", async () => {
+        const res = await deliver(merge, await headersFor(merge, OUR_NODE))
+        expect(res.status).toBe(200)
+        expect(dispatched.map(d => [d.method, d.sender])).toEqual([["mempool", SENDER]])
+    })
+
+    it("does not cover a validator's request that names no node", async () => {
+        const call = JSON.stringify({
+            method: "nodeCall",
+            params: [{ message: "getLastBlockNumber", data: padding }],
+        })
+        const res = await deliver(call, await headersFor(call))
+        expect(res.status).toBe(413)
+        expect(dispatched).toEqual([])
+    })
+
+    it("does not cover a request that names this node from a key that is not a validator's", async () => {
+        staked.delete(SENDER)
+        const res = await deliver(merge, await headersFor(merge, OUR_NODE))
+        expect(res.status).toBe(413)
+        expect(dispatched).toEqual([])
+    })
+})
+
+describe("the count of refused signatures", () => {
+    const limiter = rateLimiter.getInstance()
+    // An address other than the signer's that holds requests the signer sent.
+    const ELSEWHERE = "203.0.113.9"
+    const LIMIT = RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS
+    const request = JSON.stringify(hello("http://me.example:53550"))
+    const signed = (options: { audience?: string; timestamp?: number } = {}) =>
+        bodyBoundAuthHeaders({
+            genesisHash: OUR_GENESIS,
+            identity: IDENTITY,
+            body: request,
+            sign: signAsSender,
+            audience: OUR_NODE,
+            ...options,
+        })
+    /** How many of `count` requests got each status, each with headers of its own. */
+    const statuses = async (
+        count: number,
+        headers: () => Promise<Record<string, string>>,
+        from = SENDER_ADDRESS,
+    ) => {
+        const seen: Record<number, number> = {}
+        for (let i = 0; i < count; i++) {
+            const { status } = await deliver(request, await headers(), from)
+            seen[status] = (seen[status] ?? 0) + 1
+        }
+        return seen
+    }
+    /** What Peer.httpCall sends for a hello to the node holding `recipient`. */
+    const sent = async (recipient?: string) => (await capture(hello("http://me.example:53550"), recipient)).headers
+    const useLimits = (limits: Record<string, { maxRequests: number; windowMs: number }>) => {
+        sharedState.rateLimitConfig.methodLimits = limits
+    }
+    const failureLimit = {
+        "auth-failure": { maxRequests: LIMIT, windowMs: RATE_LIMIT_AUTH_FAILURE_WINDOW_MS },
+    }
+
+    for (const signer of ["a validator", "a key that is not a validator's"]) {
+        describe(`for ${signer}`, () => {
+            beforeEach(() => {
+                useLimits(failureLimit)
+                limiter.ipRequests.clear()
+                if (signer === "a validator") staked.add(SENDER)
+                // The limiter reads an empty validator set again only after a
+                // few seconds; these tests change the set between requests.
+                ;(limiter as any).validatorSetRetryAt = 0
+            })
+            afterEach(() => {
+                staked.delete(SENDER)
+                ;(limiter as any).validatorSetRetryAt = 0
+            })
+            afterAll(() => {
+                useLimits({})
+                limiter.ipRequests.clear()
+            })
+
+            it("leaves out requests the signer addressed to another node, and still serves its requests to this node", async () => {
+                expect((await deliver(request, await sent())).status).toBe(200)
+                expect(await statuses(LIMIT + 2, () => sent(OTHER_NODE))).toEqual({ 401: LIMIT + 2 })
+                expect((await deliver(request, await sent())).status).toBe(200)
+                expect(dispatched.map(d => d.sender)).toEqual([SENDER, SENDER])
+            })
+
+            it("leaves out such a request sent again from another address, however often", async () => {
+                const toAnother = await sent(OTHER_NODE)
+                expect(await statuses(LIMIT + 2, async () => toAnother, ELSEWHERE)).toEqual({ 401: LIMIT + 2 })
+                expect((await deliver(request, await sent())).status).toBe(200)
+                expect((await deliver(request, await sent(), ELSEWHERE)).status).toBe(200)
+                expect(dispatched.map(d => d.sender)).toEqual([SENDER, SENDER])
+            })
+
+            it("leaves out such requests signed anew and sent from another address", async () => {
+                expect(await statuses(LIMIT + 2, () => sent(OTHER_NODE), ELSEWHERE)).toEqual({ 401: LIMIT + 2 })
+                expect((await deliver(request, await sent())).status).toBe(200)
+                expect((await deliver(request, await sent(), ELSEWHERE)).status).toBe(200)
+            })
+
+            it("refuses a request addressed to another node with the same answer, and keeps it out of the replay memory", async () => {
+                const before = seenAuthMessages.size
+                const res = await deliver(request, await sent(OTHER_NODE))
+                expect(res.status).toBe(401)
+                expect(await res.json()).toEqual({
+                    error: "Invalid signature",
+                    details: "Request is for another node",
+                })
+                expect(seenAuthMessages.size).toBe(before)
+            })
+
+            for (const [named, audience] of [
+                ["this node", OUR_NODE],
+                ["another node", OTHER_NODE],
+            ]) {
+                it(`counts a signature that does not verify, on a request that names ${named}`, async () => {
+                    const badSignature = async () => ({ ...(await signed({ audience })), signature: "5a".repeat(64) })
+                    expect(await statuses(LIMIT + 2, badSignature)).toEqual({ 401: LIMIT, 429: 2 })
+                    expect((await deliver(request, await sent())).status).toBe(429)
+                    expect(dispatched).toEqual([])
+                })
+
+                it(`counts a timestamp outside its window, on a request that names ${named}`, async () => {
+                    const stale = () => signed({ audience, timestamp: Date.now() - 6 * 60_000 })
+                    expect(await statuses(LIMIT + 2, stale)).toEqual({ 401: LIMIT, 429: 2 })
+                    expect((await deliver(request, await sent())).status).toBe(429)
+                    expect(dispatched).toEqual([])
+                })
+            }
+
+            it("counts a request that names a node but is not signed over its body", async () => {
+                const unbound = async () => {
+                    const { "body-hash": _hash, ...headers } = await signed({ audience: OTHER_NODE })
+                    return headers
+                }
+                expect(await statuses(LIMIT + 2, unbound)).toEqual({ 401: LIMIT, 429: 2 })
+            })
+
+            it("holds requests addressed to another node to the limit of the address they come from", async () => {
+                useLimits({ ...failureLimit, POST: { maxRequests: 3, windowMs: 60_000 } })
+                expect(await statuses(5, () => sent(OTHER_NODE))).toEqual({ 401: 3, 429: 2 })
+                // That limit is on the address, as for any request it sends.
+                const served = signer === "a validator" ? 200 : 429
+                expect((await deliver(request, await sent())).status).toBe(served)
+                expect((await deliver(request, await sent(), ELSEWHERE)).status).toBe(200)
+            })
+        })
+    }
 })
 
 describe("sudo methods", () => {
