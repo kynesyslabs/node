@@ -150,7 +150,7 @@ column says how often a share of the set turns into seats.
 | ≥ 1/2 of the staked set | Make honest nodes abstain by reporting another fork schedule or treasury inside an urgent window, which halts the chain (liveness only) | Change the schedule others run | — |
 | ≥ 7 seats (≥ 2/3 + 1 of a committee) | **Sign any block alone**: choose and order transactions, censor any transaction (no forced inclusion), pick timestamps within the bounds, and commit a peerlist of only its own validators, keeping every later committee (*reading*). Stall at will. Submit L2PS settlement batches (a batch must be signed by a staked validator, `src/libs/l2ps/settlement/admission.ts:35`) | See the next section | 7 of 40: 1 in 155,000 blocks; 13 of 40: 1 in ~150 blocks; 20 of 40: 1 in 7 blocks |
 | A whole committee | Same as ≥ 7 seats | Same | — |
-| ≥ 2/3 of stake (once `networkGovernance` is on) | Pass a parameter proposal alone: minimum stake, fees, fee split, feature flags. ≥ 1/3 of stake vetoes any proposal | Change `shardSize` or the fork schedule | Off at launch |
+| ≥ 2/3 of stake (once `networkGovernance` is on) | Pass a parameter proposal alone: minimum stake, fees, fee split, feature flags. More than 1/3 of stake vetoes any proposal (approval needs `ceil(2W/3)`, so exactly 1/3 cannot block) | Change `shardSize` or the fork schedule | Off at launch |
 
 The frequencies are the hypergeometric chance that a uniform draw of 10
 from 40 gives the party that many seats. Secretary timestamp choice and

@@ -768,6 +768,17 @@ describe("checkLaunch", () => {
             expect(d.reasons.join("\n")).toContain("owner buyer runs 4 of 10 launch validators; the cap is 3")
         })
 
+        it("counts owners named like Object members", () => {
+            for (const name of ["constructor", "__proto__", "tostring"]) {
+                const operators = Object.fromEntries(
+                    launch.map((v, i) => [v, { owner: i < 4 ? name : `owner-${i}`, operator: `op-${i}`, provider: `cloud-${i}` }]),
+                )
+                const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain(`owner ${name} runs 4 of 10 launch validators; the cap is 3`)
+            }
+        })
+
         it("is NO-GO when one owner holds a third of block 0's stake", () => {
             const staked = rows.map((r, i) => ({ ...r, staked_amount: i === 0 ? "5000" : "1000" }))
             const d = checkLaunch({ ...base, genesis: genesisFile(staked), blockZero: blockZero(staked) })

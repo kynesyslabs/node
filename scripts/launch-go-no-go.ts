@@ -456,8 +456,8 @@ export function ownerRequiredReasons(genesis: { properties?: unknown } | null, t
 /**
  * NO-GO reasons for one owner, operator, provider or region holding a
  * third or more of block 0's stake. Stake weighs no consensus vote, but it
- * weighs the governance tally once networkGovernance is on, where a third
- * is a veto and two thirds pass a proposal alone.
+ * weighs the governance tally once networkGovernance is on, where more
+ * than a third is a veto and two thirds pass a proposal alone.
  */
 export function stakeShareReasons(rows: ValidatorRow[], entries: Map<string, OperatorEntry>): string[] {
     const reasons: string[] = []
@@ -536,7 +536,9 @@ export function firstCommitteePins(genesis: { forks?: unknown } | null): readonl
 }
 
 function countBy(ids: string[], key: (id: string) => string | null): Record<string, number> {
-    const counts: Record<string, number> = {}
+    // Names come from operator input: a plain object would read "constructor"
+    // or "__proto__" as inherited members and miscount them
+    const counts: Record<string, number> = Object.create(null)
     for (const id of ids) {
         const k = key(id)
         if (k === null) continue

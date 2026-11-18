@@ -57,8 +57,8 @@ missing committee members and stops at the 4th.
    the set in one region is one outage away from a stall.
 8. No owner, operator, provider or region holds a third or more of block
    0's stake (`staked_amount`). Stake weighs no block vote; it weighs the
-   governance tally once `networkGovernance` is scheduled, where a third is
-   a veto and two thirds pass a proposal alone.
+   governance tally once `networkGovernance` is scheduled, where more than
+   a third is a veto and two thirds pass a proposal alone.
 
 ## Check it
 
