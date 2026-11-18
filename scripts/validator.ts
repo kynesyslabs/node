@@ -1,9 +1,18 @@
 /* eslint-disable no-console */
 import { existsSync, readFileSync } from "node:fs"
+import { resolve } from "node:path"
 
 import { demToOs } from "@kynesyslabs/demosdk/utils"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import * as dotenv from "dotenv"
 import { parseNodeUrl } from "../src/config/nodeUrl"
+
+// Only IDENTITY_FILE is read from .env; the file is not loaded into
+// process.env, so its other keys (proxy, TLS) do not reach the RPC client.
+const EXPORTED_IDENTITY_FILE = process.env.IDENTITY_FILE
+const DOTENV = dotenv.config({ processEnv: {}, quiet: true })
+// A missing .env (ENOENT) is no .env; any other read error is refused.
+const DOTENV_ERROR = DOTENV.error as NodeJS.ErrnoException | undefined
 
 const DEFAULT_AMOUNT_DEM = "1_000"
 const PEERLIST_FILE = "demos_peerlist.json"
@@ -104,6 +113,41 @@ function firstPeerlistRpc(): string {
         return url
     }
     exitWith(`${PEERLIST_FILE} has no usable entries. Pass --rpc <url>.`)
+}
+
+/**
+ * --identity, else an exported IDENTITY_FILE, else .demos_identity.
+ * An IDENTITY_FILE naming another file in .env alone is refused, whatever
+ * files exist: `./run` without -i exports it empty, so the node runs as
+ * .demos_identity, while docker compose passes .env's value. An exported
+ * value equal to .env's counts as .env's. Under Bun, which loads .env into
+ * the environment (and .env.local, with variable expansion), a non-default
+ * value needs --identity, exported or not.
+ */
+function pickIdentity(
+    flag: string | undefined,
+    underBun = Boolean(process.versions.bun),
+): string {
+    if (flag !== undefined) return flag
+    if (DOTENV_ERROR && DOTENV_ERROR.code !== "ENOENT") {
+        exitWith(
+            `.env could not be read (${DOTENV_ERROR.message}); ` +
+                "pass --identity <file>",
+        )
+    }
+    const fromEnv = DOTENV.parsed?.IDENTITY_FILE
+    const exported = EXPORTED_IDENTITY_FILE
+    if (!underBun && exported && exported !== fromEnv) return exported
+    const named = [fromEnv, underBun ? exported : undefined].find(
+        v => v && resolve(v) !== resolve(DEFAULT_IDENTITY_FILE),
+    )
+    if (!named) return DEFAULT_IDENTITY_FILE
+    const source = named === fromEnv ? ".env" : "the environment"
+    exitWith(
+        `${source} sets IDENTITY_FILE=${named}; the node uses that file or ` +
+            `${DEFAULT_IDENTITY_FILE} depending on how it is started; ` +
+            "pass --identity <file> with the file the node runs as.",
+    )
 }
 
 function loadMnemonic(file: string): string {
@@ -255,7 +299,7 @@ async function main(): Promise<void> {
     const command = positionals[0]
 
     globalThis.validatorCtx = {
-        identity: flags.identity ?? DEFAULT_IDENTITY_FILE,
+        identity: pickIdentity(flags.identity),
         rpc: flags.rpc ?? firstPeerlistRpc(),
         amountDem: flags.amount ?? DEFAULT_AMOUNT_DEM,
     }

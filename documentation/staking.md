@@ -103,6 +103,8 @@ You can customize the amount (in DEM) using the `--amount` flag:
 bun run validator:stake --amount 1200
 ```
 
+`validator:stake`, `validator:unstake` and `validator:exit` sign with the identity file named by `--identity <file>`, else by an `IDENTITY_FILE` exported in your shell, else `.demos_identity`. If `.env` sets `IDENTITY_FILE` to a file other than `.demos_identity` and neither `--identity` nor an exported `IDENTITY_FILE` (with a different value from `.env`'s) chooses one, the commands stop without sending anything, whichever files exist, because the node runs as one or the other depending on how it is started: bare-metal `./run` (without `--docker`) and without `-i` uses `.demos_identity`; `./run --docker` and docker compose use `.env`'s value. Pass `--identity <file>` with the file your node runs as. Run directly with `bun scripts/validator.ts`, any `IDENTITY_FILE` other than `.demos_identity` needs `--identity`, because Bun loads `.env` into the environment. The commands read only `IDENTITY_FILE` from `.env`. Only `.env` is read. An `IDENTITY_FILE` set in `.env.local` or `.env.<NODE_ENV>` is not, so pass `--identity` if you set it there. If `.env` exists but cannot be read (for example, it is owned by root with mode 600), the commands stop and ask for `--identity <file>`. The file name is printed as `Identity:` before any transaction is submitted (the RPC connection may come first).
+
 To run the node later on without deleting the database:
 
 ```sh
