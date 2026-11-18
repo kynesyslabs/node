@@ -434,6 +434,8 @@ The genesis hash leaves out the validators' `connection_url` and the order of th
 
 On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet, with the `docker-compose.override.yml` of step 3 of [Run a released image](#run-a-released-image-validators). Use the files exactly as published and check them against the announcement; never edit them ([docs/mainnet/genesis.md](docs/mainnet/genesis.md)).
 
+The genesis owners run the [plan check, including the bot allowlist review](docs/mainnet/genesis.md#bot-authorization-launch-decision-and-gate), on the published file before launch; mount exactly that file at `/app/data/genesis.json`. Every bot must have a raw genesis allocation of at least `1_000_000_000_000`; current or snapshot balances do not qualify. Preserve that genesis file on upgrades: bot authorization is reloaded from it at every boot.
+
 The node also remembers the fork schedule it last ran with. A restart whose `data/genesis.json` adds, moves or removes a fork at or below the current height plus 50 blocks is refused, and the refusal names the change. If every operator agreed to that exact schedule, restart once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints. See `docs/design/genesis-enforcement.md`.
 
 With all three in place, start the node. A validator runs `./scripts/node-doctor --production` first and starts only when it passes (steps 7 and 8 of the release-image install above); a source build starts with `./run --docker -d`.

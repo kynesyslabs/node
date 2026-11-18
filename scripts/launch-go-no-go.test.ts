@@ -557,13 +557,14 @@ const mainnetForks = () =>
     Object.fromEntries(KNOWN_FORKS.map(name => [name, MAINNET_FORKS.includes(name) ? atZero(name) : { activationHeight: null }]))
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
-    return { properties: { id: 7, shardSize: 10 }, forks, validators: rows }
+    return { properties: { id: 7, shardSize: 10 }, forks, validators: rows, balances: [] }
 }
 
 describe("checkLaunch", () => {
     const launch = launchSet(10)
     const rows: Array<{ address: string; status: string; valid_at: number | null }> = launch.map(address => ({ address, status: "2", valid_at: 0 }))
     const base = {
+        botAllowlist: [],
         shardSize: 10,
         probes: launch.map(v => online(v)),
         operators: spread(launch),

@@ -14,6 +14,7 @@ SUITE_FILES=(
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/launch-go-no-go.plan.test.ts
+    scripts/launch-go-no-go.bots.test.ts
     scripts/launch-go-no-go.prover.test.ts
     scripts/launch-height1-check.test.ts
     scripts/node-doctor.test.ts

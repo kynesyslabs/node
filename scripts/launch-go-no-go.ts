@@ -18,18 +18,20 @@
  * See docs/runbooks/launch-go-no-go.md.
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
- *       --operators operators.json --snapshot data/snapshot \
+ *       --operators operators.json --snapshot data/snapshot --bots mainnet/bots.json \
  *       --genesis-hash BLOCK_HASH --commit SHA --expected-treasury ADDRESS \
  *       --expected-notary-keys ID:HEX[,ID:HEX...] \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
  * operators.json maps each validator identity to { owner, operator,
- * provider, region }; owner is required on the mainnet chain id. Before any validator is up, --plan checks the genesis file and
- * that table alone, with no network:
+ * provider, region }; owner is required on the mainnet chain id. Before any
+ * validator is up, --plan checks the genesis file and that table and the
+ * reviewed bot inventory, with no network:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
  *       --snapshot mainnet/snapshot --operators operators.json \
- *       --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]
+ *       --bots mainnet/bots.json --expected-treasury ADDRESS \
+ *       --expected-notary-keys ID:HEX[,ID:HEX...]
  *
  * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
@@ -49,6 +51,7 @@ import {
 import { treasuryAddressProblem } from "src/forks/treasuryAddress"
 import { notaryKeyProblems, tlsnVerifiedProblems } from "src/forks/tlsnVerifiedPayload"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import { botAllowlistReasons } from "./launch-bot-allowlist"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
     type BlockZeroValidators,
@@ -1121,7 +1124,9 @@ export async function launchGenesisExpectations(
 
 export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" | "committee"> {
     /** The parsed genesis file, or null when only endpoints were given. */
-    genesis: { forks?: unknown; validators?: unknown; properties?: unknown } | null
+    genesis: { forks?: unknown; validators?: unknown; properties?: unknown; balances?: unknown } | null
+    /** Reviewed bot addresses from --bots, including [] for a launch without bots. */
+    botAllowlist?: unknown
     /** Block 0's validators as the node seeds them; required with a genesis. */
     blockZero: BlockZeroValidators | null
     /** The launch set when there is no genesis (peerlist or --rpc). */
@@ -1144,6 +1149,7 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const {
         genesis,
+        botAllowlist,
         blockZero,
         launchValidators,
         genesisFileBlockHash,
@@ -1168,6 +1174,7 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
         ...mainnetGenesisReasons(genesis),
         ...treasuryReasons(genesis, expectedTreasury),
         ...notaryKeysReasons(genesis, expectedNotaryKeys),
+        ...botAllowlistReasons(genesis, botAllowlist),
     )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
@@ -1195,7 +1202,8 @@ export interface PlanCheck {
 }
 
 export interface LaunchPlanInput {
-    genesis: { forks?: unknown; properties?: unknown } | null
+    genesis: { forks?: unknown; properties?: unknown; balances?: unknown } | null
+    botAllowlist?: unknown
     blockZero: BlockZeroValidators | null
     shardSize: number
     operators: Record<string, unknown> | null
@@ -1249,6 +1257,7 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
             "genesis file",
             (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),
         ),
+        check("bot allowlist", botAllowlistReasons(input.genesis, input.botAllowlist)),
         check("block 0 validator set", input.blockZero ? input.blockZero.reasons : ["no block 0 validator set"]),
         check(
             "launch validators",
@@ -1276,6 +1285,7 @@ interface CliArgs {
     snapshot: string | null
     peerlist: string | null
     operators: string | null
+    bots: string | null
     rpc: string[]
     shardSize: number | null
     genesisHash: string | null
@@ -1289,11 +1299,11 @@ interface CliArgs {
 
 function usage(): string {
     return [
-        "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
+        "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE --bots FILE [options]",
         "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
-        "           --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
-        "  --plan               check the genesis file and the launch validator table only, with no",
-        "                       network: one PASS/FAIL line per check, exit 0 when all pass",
+        "           --bots FILE --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
+        "  --plan               check the genesis file, launch validator table and reviewed bot inventory",
+        "                       with no network: one PASS/FAIL line per check, exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
         "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",
@@ -1306,6 +1316,8 @@ function usage(): string {
         "                       equal the genesis properties.shardSize or the run is refused",
         "  --operators FILE     identity -> { owner, operator, provider, region }; owner (the",
         "                       beneficial owner) is required on the mainnet chain id",
+        "  --bots FILE          required for GO and --plan: reviewed JSON array of bot addresses;",
+        "                       must exactly match raw genesis balances >= 1000000000000; [] means no bots",
         "  --genesis-hash HASH  required for GO: the agreed block 0 hash, the genesis block hash",
         "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
         "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
@@ -1336,6 +1348,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         snapshot: null,
         peerlist: null,
         operators: null,
+        bots: null,
         rpc: [],
         shardSize: null,
         genesisHash: null,
@@ -1358,6 +1371,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--snapshot": args.snapshot = value(); break
             case "--peerlist": args.peerlist = value(); break
             case "--operators": args.operators = value(); break
+            case "--bots": args.bots = value(); break
             case "--rpc": args.rpc.push(...value().split(",").map(s => s.trim()).filter(Boolean)); break
             case "--shard-size": args.shardSize = Number(value()); break
             case "--genesis-hash": args.genesisHash = value(); break
@@ -1573,6 +1587,7 @@ async function runPlan(
     operators: Record<string, unknown> | null,
     manifestSha256: string | null,
     snapshotForkState: ForkStateEntry[] | null,
+    botAllowlist: unknown,
 ): Promise<number> {
     if (!args.genesis || !args.snapshot || !args.operators) {
         console.error(`--plan needs --genesis, --snapshot and --operators\n${usage()}`)
@@ -1587,6 +1602,7 @@ async function runPlan(
     }
     const checks = launchPlanChecks({
         genesis,
+        botAllowlist,
         blockZero,
         shardSize,
         operators,
@@ -1726,8 +1742,17 @@ async function main(): Promise<number> {
         return 2
     }
     const operators = operatorsRaw as Record<string, unknown> | null
+    let botAllowlist: unknown
+    if (args.bots) {
+        try {
+            botAllowlist = readJson(args.bots)
+        } catch (e) {
+            console.error(`--bots: ${(e as Error).message}`)
+            return 2
+        }
+    }
 
-    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState)
+    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState, botAllowlist)
 
     let expectations = {}
     if (genesis) {
@@ -1771,6 +1796,7 @@ async function main(): Promise<number> {
     const decision = checkLaunch({
         shardSize,
         genesis,
+        botAllowlist,
         blockZero,
         launchValidators: launch,
         probes: [...merged.values()],

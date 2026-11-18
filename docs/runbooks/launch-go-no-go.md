@@ -104,19 +104,27 @@ genesis file, the snapshot and the table exist, with no node running:
 ```bash
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json --snapshot mainnet/snapshot \
+  --bots mainnet/bots.json \
   --operators mainnet/launch-validators.json \
   --expected-treasury <agreed treasury address> \
   --expected-notary-keys <id:hex,id:hex from the notary key ceremony> [--json]
 ```
 
 One `PASS`/`FAIL` line per check: genesis forks, treasury, notary keys, chain id, shard size,
-genesis values (no template `FILL` left), genesis file (a node would load it), block 0 validator set, launch
+genesis values (no template `FILL` left), genesis file (a node would load it), bot allowlist, block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
 provider and region for each), operator and provider cap, voting power per
 operator and provider, pinned identities. Exit 0 when all pass, 1
-otherwise, 2 when any of the three inputs is missing. Filling the genesis
-is in `docs/mainnet/genesis.md`, the table in
+otherwise, 2 when any of the genesis, snapshot and operators inputs is
+missing. Filling the genesis is in `docs/mainnet/genesis.md`, the table in
 `docs/mainnet/launch-validators.md`.
+
+The genesis owners also supply `--bots` as a reviewed JSON array of bot
+addresses (or `[]` for no bots). It must exactly match the addresses with
+raw genesis allocations at least `1_000_000_000_000`; see the
+[authorization rule and operator paths](../mainnet/genesis.md#bot-authorization-launch-decision-and-gate).
+An omitted inventory is NO-GO (exit 1); a missing file or invalid JSON is
+bad input (exit 2). The inventory is required in both plan and live mode.
 
 ## Go/no-go check
 
@@ -144,6 +152,7 @@ a false NO-GO. Collect each validator's `EXPOSED_URL` with its T-24h post.
 bun scripts/launch-go-no-go.ts \
   --genesis data/genesis.json \
   --snapshot data/snapshot \
+  --bots mainnet/bots.json \
   --operators launch-operators.json \
   --genesis-hash <agreed genesis block hash> \
   --commit <release commit SHA> \
@@ -153,7 +162,7 @@ bun scripts/launch-go-no-go.ts \
   [--json]
 ```
 
-`--genesis-hash`, `--commit` and `--snapshot` are required for GO; without
+`--genesis-hash`, `--commit`, `--snapshot` and `--bots` are required for GO; without
 any of them the result is NO-GO and says which one is missing. On the
 mainnet chain id (any `properties.id` other than testnet `1` and devnet
 `1337`) `--expected-treasury` and `--expected-notary-keys` are required as
@@ -211,7 +220,9 @@ and its commit (`/info` `commitHash`; the image digest itself is not
 exposed by the node, so it comes from the T-24h posts). Then:
 
 - `GO` (exit 0): `--genesis-hash` and `--commit` were given and the genesis
-  file builds that block 0; at least `q` members of the first committee
+  file builds that block 0; the addresses with raw genesis `balances` of at
+  least `1_000_000_000_000` are exactly the `--bots` inventory; at least `q`
+  members of the first committee
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a

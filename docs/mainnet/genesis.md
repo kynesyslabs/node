@@ -54,6 +54,50 @@ them equal.
 | `timestamp` | the launch time in seconds as a positive integer string. Block 0 is built from it, so the block 0 hash is known only once it is fixed |
 | `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount`, `first_seen` `0`, `valid_at` `0`. `staked_amount` is in OS units (1 DEM = 10^9 OS): the node seeds this list after block 0 applies `osDenomination` and stores each stake as written. When the snapshot carries `validators.jsonl`, the node seeds from that file instead. Under `identityCarryover` the launch snapshot is built from this list (`bun run snapshot:carryover --validators mainnet/genesis.json`), and block 0 refuses a snapshot whose `validators.jsonl` differs from it |
 
+### Bot authorization: launch decision and gate
+
+The existing rule authorizes **every address with any `balances` entry
+whose raw integer amount is at least `1_000_000_000_000`**, inclusive.
+The 1e12 threshold is in the units written in the file: 1000 DEM when
+the file uses OS, and 1e12 DEM when the file uses DEM.
+`loadGenesisIdentities.ts` reads the genesis file at each boot; social-bot
+attestations in `src/libs/abstraction/index.ts` require membership in that
+set. Addresses match exactly, including case.
+
+This threshold applies to the amount written in the file, before
+`osDenomination` or snapshot restore. Snapshot balances, current balances,
+validator stakes and later transfers do not qualify an address. An empty
+`balances` array authorizes no bots; the bundled `data/genesis.json` has
+that empty array. Every large allocation also grants bot authorization,
+whether its owner operates a bot or not.
+
+Before publishing genesis, its owners must approve the full resulting
+allowlist and ensure each intended bot has a qualifying allocation. Create
+`mainnet/bots.json` as a JSON array of the approved lowercase, `0x`-prefixed
+64-hex public keys, for example `["0x<64 lowercase hex characters>"]`.
+Use `[]` only for an explicit decision to authorize no bots. This is a
+review inventory supplied to the launch tool through `--bots FILE`, never
+an input to the node or an alternative authorization source.
+
+Both the offline plan and live go/no-go checks require that inventory and
+compare it with the complete derived set. Missing or underfunded intended
+bots, unreviewed qualifying allocations, invalid inventory entries and a
+missing inventory are NO-GO. Publish the reviewed inventory alongside the
+genesis; genesis owners supply the actual keys, which this template cannot
+choose. If this funding rule is unsuitable, stop launch and agree a
+separately fork-gated authorization change before proceeding. Do not
+silently add a new genesis field or environment override to grant access.
+
+Operator paths use the same rule:
+
+| Setup | File to check and operational action |
+|---|---|
+| Docker Compose | Run the plan against the published host file, then mount that exact file read-only at `/app/data/genesis.json`, as in `INSTALL.md`. If `DEMOS_GENESIS_FILE` is set, it names a path **inside** the container and must resolve to that same mounted file. Mount the inventory as well if running the launch tool inside the container. |
+| Bare metal / `./run` | Run the plan from the repository root using Bun 1.4.4; `--genesis` must name the same file as `DEMOS_GENESIS_FILE`, or `data/genesis.json` when unset. |
+| Bun only / `bun run start:bun` | Use the same working directory and genesis path as the launch check; no new environment setting or Node runtime is required. |
+| Fresh install | Check allocations and inventory before publication, pinning hashes or writing block 0. Regenerate the published hashes if allocations change before launch. |
+| Upgrade / restart | Keep the original published genesis file and allocations: the loader rereads that file even with an existing database. Run the check against it; do not edit it, reset the chain or top up an account to change authorization. The launch check changes no node behavior. |
+
 ### Forks this build does not know yet
 
 The template declares exactly the forks this build knows, and go/no-go
@@ -75,6 +119,7 @@ launch snapshot and the validator table
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
+  --bots mainnet/bots.json \
   --operators mainnet/launch-validators.json \
   --expected-treasury <agreed treasury address> \
   --expected-notary-keys <id:hex,id:hex from the notary key ceremony>
@@ -84,7 +129,7 @@ It prints one `PASS` or `FAIL` line per check (genesis forks, the
 treasury against `--expected-treasury`, the `tlsnVerified` notary keys
 against `--expected-notary-keys`, chain id,
 shard size, genesis values (no template `FILL` left), whether a node
-would load the file, block 0 validator set,
+would load the file, bot allowlist, block 0 validator set,
 launch validators against the quorum, the validator table, the operator
 and provider cap, voting power per operator and provider, the beneficial
 owner cap, region share, stake share, pinned identities) and exits 0 only
