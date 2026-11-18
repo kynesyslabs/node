@@ -679,6 +679,27 @@ this restart is a fallback there.
     and keeps serving `requestTLSNproxy`, and `/health` no longer reports
     the `tlsnotary` subsystem as failed. With `TLSNOTARY_FATAL=true` it
     still exits.
+  - Private L2PS transfers settle against a per-subnet L2PS nonce, kept on
+    the account row (`gcr_main.l2psNonces`), and never against the L1
+    nonce: an L1 transaction sent right after a private transfer no longer
+    waits for its batch. Clients read the nonce with the nodeCall
+    `getL2PSNonce { l2psUid, address }`; the SDK release that ships with
+    this one uses it by default, and an older SDK signs private transfers
+    with the L1 nonce, which the node now refuses once the two differ.
+  - The settlement proof no longer binds balances (Interface v1.2): the
+    circuit, the proving key and the verification key are new. The
+    committed key's digest is
+    `ac5dd4d2a719fd3d44f91e8940f4006bdee30e1e8a268ddbc36550bee23e581e`;
+    rebuild the keys with `bun run setup --only zk --zk --zk-generate` (the
+    setup refuses a build whose key differs from the committed one). Block
+    apply checks in public that each account covers its net change.
+  - New migration `AddL2PSNonces1794355200000`: run `bun run migration:run`
+    before starting the node; it refuses to boot with the migration pending.
+  - A chain on which private transfers have settled must not be upgraded in
+    place: its accounts start with no L2PS nonce, so a transfer settled
+    under the L1 nonce could settle again. Start it from a fresh genesis.
+    The launch rehearsal restarts from a fresh genesis on this release;
+    mainnet starts with it at block 0.
 
 ## Known limits
 
