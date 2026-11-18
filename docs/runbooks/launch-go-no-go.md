@@ -215,7 +215,11 @@ exposed by the node, so it comes from the T-24h posts). Then:
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
-  third of the first committee's votes; the genesis schedules
+  third of the first committee's votes; on the mainnet chain id every entry
+  names its beneficial `owner`, and no owner runs more than that same cap; no
+  region hosts a third or more of the launch validators, and no owner,
+  operator, provider or region holds a third or more of block 0's stake
+  (`docs/mainnet/validator-concentration.md`); the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
   `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
   `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
