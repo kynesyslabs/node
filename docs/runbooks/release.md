@@ -700,6 +700,21 @@ this restart is a fallback there.
     under the L1 nonce could settle again. Start it from a fresh genesis.
     The launch rehearsal restarts from a fresh genesis on this release;
     mainnet starts with it at block 0.
+  - The web2 (DAHR) proxy caps its sessions. A `web2ProxyRequest` create
+    keeps only the request's action, method and URL (when short), and the
+    create reply echoes only those. Of a start a session keeps only the
+    URL, once the start is admitted; a start whose URL is longer than 4096
+    characters once normalized (percent-encoded) gets result `400`. One
+    caller holds at most 16 sessions: its next create closes its least
+    recently used one. The node holds at most 1024: over it a create gets
+    result `429` `WEB2_FETCH_LIMITED` with reason `node-sessions` and
+    `retryAfterSeconds`. Set with `WEB2_MAX_SESSIONS_PER_CALLER` and
+    `WEB2_MAX_SESSIONS_TOTAL` (positive integers, or the node does not
+    start); local to the node, no effect on blocks or state. For an RPC
+    client the per-caller cap is counted per source address as the node
+    sees it: behind a reverse proxy that is not listed in
+    `TRUSTED_PROXIES` every client shares one cap (a proxy on the same
+    host is loopback and skips it).
 
 ## Known limits
 

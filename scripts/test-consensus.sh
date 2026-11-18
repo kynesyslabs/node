@@ -23,6 +23,7 @@ SUITE_FILES=(
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
     src/config/loader.logsDir.test.ts
+    src/config/loader.outbound.test.ts
     src/config/loader.rapidApi.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
@@ -148,6 +149,7 @@ SUITE_FILES=(
     testing/genesis/normalizeGenesisForHash.test.ts
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
+    tests/web2/dahrSessionCap.test.ts
     src/libs/abstraction/web2/githubToken.test.ts
     scripts/test-consensus.registration.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)

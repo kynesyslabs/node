@@ -585,6 +585,14 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.WEB2_MAX_INFLIGHT_TOTAL,
                 d.outbound.web2MaxInflightTotal,
             ),
+            web2MaxSessionsPerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_SESSIONS_PER_CALLER,
+                d.outbound.web2MaxSessionsPerCaller,
+            ),
+            web2MaxSessionsTotal: envStrictInt(
+                EnvKey.WEB2_MAX_SESSIONS_TOTAL,
+                d.outbound.web2MaxSessionsTotal,
+            ),
             tlsnotaryAllowedPorts: envList(
                 EnvKey.TLSNOTARY_ALLOWED_PORTS,
                 d.outbound.tlsnotaryAllowedPorts.map(String),
@@ -683,8 +691,8 @@ function assertConsensusTimingSane(config: AppConfig): void {
 
 /**
  * A cap or lifetime of 0 or less would refuse every web2 response or expire
- * every session at once, and a fetch cap of 0 would refuse every web2 fetch;
- * a bad port would silently allow nothing. Skipping certificate checks is a
+ * every session at once, a fetch cap of 0 would refuse every web2 fetch and a
+ * session cap of 0 every web2 create; a bad port would silently allow nothing. Skipping certificate checks is a
  * dev setting and must not reach a production node.
  */
 function assertOutboundSane(config: AppConfig): void {
@@ -711,6 +719,8 @@ function assertOutboundSane(config: AppConfig): void {
             o.web2MaxBytesPerHourPerCaller,
         ],
         [EnvKey.WEB2_MAX_INFLIGHT_TOTAL, o.web2MaxInflightTotal],
+        [EnvKey.WEB2_MAX_SESSIONS_PER_CALLER, o.web2MaxSessionsPerCaller],
+        [EnvKey.WEB2_MAX_SESSIONS_TOTAL, o.web2MaxSessionsTotal],
     ]
     for (const [key, value] of web2Caps) {
         if (!Number.isSafeInteger(value) || value <= 0) {
