@@ -13,6 +13,7 @@ import {
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import {
+    HELLO_PEERLIST_SAMPLE_SIZE,
     helloOmniAdvertMessage,
     helloResponseMessage,
     standbyKeepsKnownUrl,
@@ -23,8 +24,6 @@ import { parseNodeUrl } from "src/config"
 import { reportTwin } from "../peer/identityLiveness"
 import { corroborateSyncData } from "../peer/syncClaims"
 import { signingStopState } from "../identity/signingRecord"
-
-const HELLO_PEERLIST_SAMPLE_SIZE = 32
 
 export interface HelloPeerRequest {
     url: string

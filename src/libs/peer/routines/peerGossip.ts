@@ -168,7 +168,7 @@ async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
 
     const mergedPeerlist = Array.from(peerMap.values())
     mergedPeerlist.sort((a, b) => a.identity.localeCompare(b.identity))
-    PeerManager.getInstance().setPeers(mergedPeerlist)
+    await PeerManager.getInstance().setPeers(mergedPeerlist)
     return true
 }
 
