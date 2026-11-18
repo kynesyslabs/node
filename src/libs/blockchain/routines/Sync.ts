@@ -1070,6 +1070,10 @@ export function unreconciledGcrBlockNumber(): number | null {
  * still holds the orphaned edits. So we also check durable state — GCR edits
  * are stamped with the block that produced them, and an assignment above the
  * chain tip can only mean its block never landed.
+ *
+ * @throws when state has drifted and cannot be rolled back, or when the
+ *   drift check cannot run (database error). In the second case the drift
+ *   is unknown, so nothing is latched and the next call checks again.
  */
 export async function assertNoUnreconciledGcrState(): Promise<void> {
     if (unreconciledGcrBlock !== null) {
