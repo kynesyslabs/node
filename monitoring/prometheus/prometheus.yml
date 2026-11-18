@@ -93,3 +93,22 @@ scrape_configs:
 #           - targets: ['<VALIDATOR_1_PRIVATE_ADDR>:9100']
 #             labels: {instance: validator-1, environment: mainnet}
 #           (same for validator-2, validator-3)
+#
+# Validators whose metrics port is bound to loopback and that have no private network to the
+# monitoring host: put a TLS reverse proxy on each validator host that serves only /metrics,
+# allows only the monitoring host's address and requires basic auth (or the node's
+# METRICS_BEARER_TOKEN), and scrape it over https. `__metrics_path__` per target lets one
+# proxy hostname front several validators on the same host. Placeholders as above:
+#
+#     - job_name: demos-node
+#       scheme: https
+#       basic_auth:
+#           username: prometheus
+#           password_file: /etc/prometheus/secrets/metrics_basic_auth_password
+#       static_configs:
+#           - targets: ['<METRICS_PROXY_HOST>:443']
+#             labels: {instance: validator-1, environment: mainnet, __metrics_path__: /v1/metrics}
+#           - targets: ['<METRICS_PROXY_HOST>:443']
+#             labels: {instance: validator-2, environment: mainnet, __metrics_path__: /v2/metrics}
+#
+# Mount the password file read-only into the prometheus service (owned by uid 65534, mode 400).

@@ -45,6 +45,16 @@ itself binds `METRICS_HOST`, which defaults to `127.0.0.1`. Set
 `METRICS_HOST` to the private interface's address in its `.env` so the
 monitoring host can scrape it; until then `NodeDown` fires for that node.
 
+Without a private network between the hosts, keep `METRICS_BIND` on loopback and
+put a TLS reverse proxy on the validator host instead: it serves only the metrics
+path, accepts only the monitoring host's address and requires basic auth (or
+forwards `METRICS_BEARER_TOKEN`). Prometheus then scrapes it with `scheme: https`
+and `basic_auth.password_file`; the commented example at the end of
+`monitoring/prometheus/prometheus.yml` shows the job, including
+`__metrics_path__` per target when one proxy fronts several validators on one
+host. Test from another address that the proxy answers 403, and from the
+monitoring host without credentials that it answers 401.
+
 ## Setup on the monitoring host
 
 Run every command in this runbook from the repository root (the directory that
@@ -66,6 +76,19 @@ do not depend on the working directory.
    (gitignored; see `monitoring/secrets/README.md`). `chmod 644` them so the
    container user can read them. Compose mounts them at `/run/secrets/` and
    Alertmanager reads them through `api_url_file` / `url_file`.
+   Before Slack and paging exist, a Telegram receiver can stand in: the
+   commented `telegram` receiver at the end of
+   `monitoring/alertmanager/alertmanager.yml` reads the bot token from a file
+   (`bot_token_file`). Put the bot token alone in
+   `monitoring/secrets/telegram_bot_token` (gitignored, `chmod 644` like the
+   webhooks), declare it in `monitoring/docker-compose.yml` as a top-level
+   secret (`telegram_bot_token: {file: ./secrets/telegram_bot_token}`) and add
+   `telegram_bot_token` to the `alertmanager` service's `secrets:` list, so it is
+   mounted at `/run/secrets/telegram_bot_token`. Render the chat id into a
+   deployment copy of `alertmanager.yml`, point the routes at `telegram`, recreate
+   Alertmanager (step 5) and send the same `amtool` test alerts (step 4).
+   Check delivery with `alertmanager_notifications_total{integration="telegram"}`
+   and `alertmanager_notifications_failed_total` on Alertmanager's `/metrics`.
 3. Set a strong `GRAFANA_ADMIN_PASSWORD` in `monitoring/.env` (for example
    `echo "GRAFANA_ADMIN_PASSWORD=<a strong password>" >> monitoring/.env`) or in
    the environment of the shell that runs `up`. It is required: without it
