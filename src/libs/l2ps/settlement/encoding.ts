@@ -2,7 +2,7 @@
  * L2PS settlement v1 encoding, shared by the circuit input builder, the
  * aggregator and block validation. The SDK mirrors commitment and message
  * byte for byte; `__fixtures__/settlementVectors.json` pins both sides.
- * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1" and "Interface v1.1".
+ * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1" and "Interface v1.2".
  */
 import * as poseidon from "poseidon-lite"
 
@@ -16,7 +16,7 @@ export const SETTLEMENT_ACCOUNTS = 2 * SETTLEMENT_TRANSFERS
 export const SETTLEMENT_VERSION = 1
 export const SETTLEMENT_SIGNATURE_DOMAIN = "l2ps-settlement:v1:"
 
-/** Amounts, fees, balances and net change magnitudes stay below this. */
+/** Amounts, fees and net change magnitudes stay below this. */
 export const AMOUNT_LIMIT = 1n << 128n
 export const NONCE_LIMIT = 1n << 64n
 /**
@@ -165,8 +165,6 @@ export interface PublicTransfer {
 
 export interface PublicAccount {
     account: string
-    /** From the validator's own working state, never from the transaction. */
-    balanceBefore: bigint
     delta: bigint
 }
 
@@ -174,9 +172,10 @@ export interface PublicAccount {
  * The circuit's public signals, in its declared order:
  *   commitmentsHash,
  *   transferActive[N], signerHi[N], signerLo[N], nonce[N], fee[N],
- *   accountActive[M], accountHi[M], accountLo[M], balanceBefore[M],
+ *   accountActive[M], accountHi[M], accountLo[M],
  *   deltaNegative[M], deltaMagnitude[M]
- * Active slots first; inactive slots are all zero.
+ * Active slots first; inactive slots are all zero. No balance: the statement
+ * depends on the transaction alone.
  */
 export function settlementPublicSignals(
     transfers: PublicTransfer[],
@@ -199,9 +198,6 @@ export function settlementPublicSignals(
     const signerLimbs = transfers.map(t => accountLimbs(t.signer))
     const accountLimbList = accounts.map(a => accountLimbs(a.account))
     for (const a of accounts) {
-        if (a.balanceBefore < 0n || a.balanceBefore >= AMOUNT_LIMIT) {
-            throw new SettlementEncodingError("balance is out of range")
-        }
         if ((a.delta < 0n ? -a.delta : a.delta) >= AMOUNT_LIMIT) {
             throw new SettlementEncodingError("delta is out of range")
         }
@@ -224,28 +220,27 @@ export function settlementPublicSignals(
         ...pad(accounts.map(() => 1n), M),
         ...pad(accountLimbList.map(l => l[0]), M),
         ...pad(accountLimbList.map(l => l[1]), M),
-        ...pad(accounts.map(a => a.balanceBefore), M),
         ...pad(accounts.map(a => (a.delta < 0n ? 1n : 0n)), M),
         ...pad(accounts.map(a => (a.delta < 0n ? -a.delta : a.delta)), M),
     ]
 }
 
-/** Count of public signals: 1 + 5N + 6M. */
-export const SETTLEMENT_PUBLIC_SIGNALS = 1 + 5 * SETTLEMENT_TRANSFERS + 6 * SETTLEMENT_ACCOUNTS
+/** Count of public signals: 1 + 5N + 5M. */
+export const SETTLEMENT_PUBLIC_SIGNALS = 1 + 5 * SETTLEMENT_TRANSFERS + 5 * SETTLEMENT_ACCOUNTS
 
 const HASH_CHUNK = 7
 const SIGNER_INDEX_SHIFT = 192n
 const TRANSFER_ACTIVE_SHIFT = 200n
 
 /**
- * Interface v1.1: the circuit's only public input, a Poseidon sponge over the
+ * Interface v1.2: the circuit's only public input, a Poseidon sponge over the
  * public signals of settlementPublicSignals. Each verifier computes it from
  * its own signals, so it binds exactly the values Interface v1 exposed.
  *
- * The signals are packed into 2 + N + 4M field elements:
+ * The signals are packed into 2 + N + 3M field elements:
  *   commitmentsHash,
  *   per transfer: fee + nonce * 2^128 + senderIndex * 2^192 + transferActive * 2^200,
- *   per account: hi, lo, balanceBefore, deltaMagnitude,
+ *   per account: hi, lo, deltaMagnitude,
  *   sum over accounts j of accountActive * 4^j + deltaNegative * 2 * 4^j,
  * where senderIndex is the slot of the active account whose limbs are the
  * signer's (0 for an idle transfer). They are absorbed 7 at a time,
@@ -282,7 +277,6 @@ export function settlementPublicHash(signals: readonly bigint[]): bigint {
     const accountActive = take(M, 2n)
     const accountHi = take(M, AMOUNT_LIMIT)
     const accountLo = take(M, AMOUNT_LIMIT)
-    const balanceBefore = take(M, AMOUNT_LIMIT)
     const deltaNegative = take(M, 2n)
     const deltaMagnitude = take(M, AMOUNT_LIMIT)
 
@@ -308,7 +302,7 @@ export function settlementPublicHash(signals: readonly bigint[]): bigint {
     }
     let flags = 0n
     for (let j = 0; j < M; j++) {
-        elements.push(accountHi[j], accountLo[j], balanceBefore[j], deltaMagnitude[j])
+        elements.push(accountHi[j], accountLo[j], deltaMagnitude[j])
         flags += (accountActive[j] << BigInt(2 * j)) + (deltaNegative[j] << BigInt(2 * j + 1))
     }
     elements.push(flags)

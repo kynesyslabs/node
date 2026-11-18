@@ -148,6 +148,15 @@ table):
 | Proof | 33-40 s per batch in the prover subprocess (Bun, one core), whatever the number of transfers; peak 1.0 GB (1.3 GB without the GC hint the pool sets) |
 | Verify | 16 ms median, 17 ms worst of 20 warm runs; the first call also builds the curve once per process |
 
+Interface v1.2 (no balances in the statement, 2026-11-19, same host, load
+average 21-26 during the run): R1CS 15,186 non-linear + 15,590 linear
+constraints, 30,601 wires, 1 public input; 55,994 PLONK constraints in the
+same 2^16 domain (9,542 rows to spare); 101 MB zkey (101,055,060 bytes,
+byte-identical across two builds), 4.0 MB wasm; PLONK setup 4.1 s and
+3.3 GB; proof 45.6-47.7 s per batch in the prover subprocess under that
+load; verify 15 ms. Dropping the balances removed the 2M balance range
+checks and the running balances, about 9,400 rows.
+
 Batch size options, measured the same way (time per proof in the Bun
 prover subprocess, one core):
 
@@ -485,7 +494,7 @@ one of the 136 signals in turn and check that the proof fails or the
 statement is refused.
 
 Why packed Poseidon8 rather than one element per signal: absorbing the 154
-signals one by one costs about 45,000 PLONK rows with Poseidon8 (294 per
+signals of Interface v1.1 one by one costs about 45,000 PLONK rows with Poseidon8 (294 per
 element) or 54,000 with Poseidon16 (328 per element, 15 per chunk), which
 would put N = 9 at 2^17 and double its proving time. Packed, the hash costs about 24,700 rows
 for N = 9. One public input instead of 154 shrinks the proving key from
@@ -494,8 +503,8 @@ the prover's memory from 4 GB to 1 GB.
 
 Example (pinned in `encoding.test.ts`): transfers A -> B (10, fee 1, nonce
 3, salt 9) and C -> A (4, fee 2, nonce 7, salt 8), A = 0x11..11, B =
-0x22..22, C = 0x33..33, balances before A 100, B 0, C 50, deltas -7, +10,
--6: `publicHash = 0x06e69393040f0b0be0b77a589cb51dc8d89beb42f28b4a26eec431cb8b544c27`.
+0x22..22, C = 0x33..33, deltas -7, +10, -6:
+`publicHash = 0x2d3b8bd8d256f550cdc426a00feea2a30188cf9811599fe1f973f6b09000e8f5`.
 
 ## Launch stance
 

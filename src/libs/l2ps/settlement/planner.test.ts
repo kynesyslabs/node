@@ -36,17 +36,14 @@ describe("planSettlement", () => {
             { account: A, delta: -103n },
             { account: B, delta: 100n },
         ])
-        expect(plan.balancesBefore).toEqual(new Map([[A, 1_000n], [B, 0n]]))
     })
 
-    it("names every touched account, sorted, with the balance before for each", () => {
+    it("names every touched account, sorted", () => {
         const { transfers, balances, nonces } = mixedTransfers()
         const plan = planSettlement(transfers, balances, nonces)
         expect(plan.transfers.length).toBe(SETTLEMENT_TRANSFERS)
         const accounts = plan.changes.map(c => c.account)
         expect(accounts).toEqual([...new Set(transfers.flatMap(t => [t.from, t.to]))].sort())
-        expect([...plan.balancesBefore.keys()]).toEqual(accounts)
-        for (const a of accounts) expect(plan.balancesBefore.get(a)).toBe(balances.get(a) ?? 0n)
     })
 
     it("keeps sum(delta) = -sum(fee)", () => {
@@ -206,7 +203,6 @@ describe("planSettlement", () => {
         const plan = planSettlement([transfer(A, B, 5n, 1n, 1n)], new Map(), new Map())
         expect(plan.transfers).toEqual([])
         expect(plan.changes).toEqual([])
-        expect(plan.balancesBefore.size).toBe(0)
     })
 })
 
@@ -224,11 +220,7 @@ describe("buildSettlementCircuitInput", () => {
             expect(input.signerLo).toBeUndefined()
             const expected = settlementPublicSignals(
                 plan.transfers.map(t => ({ commitment: t.commitment, signer: t.from, nonce: t.nonce, fee: t.fee })),
-                plan.changes.map(c => ({
-                    account: c.account,
-                    balanceBefore: plan.balancesBefore.get(c.account) as bigint,
-                    delta: c.delta,
-                })),
+                plan.changes.map(c => ({ account: c.account, delta: c.delta })),
             )
             expect(publicSignals).toEqual(expected)
             for (const key of ["toHi", "toLo", "amount", "salt", "senderIndex", "receiverIndex"]) {
@@ -263,11 +255,6 @@ describe("buildSettlementCircuitInput", () => {
         const p = plan()
         refuses({ ...p, changes: [p.changes[0], p.changes[0], p.changes[1]] }, /sorted/)
     })
-    it("refuses a missing balance", () => {
-        const p = plan()
-        p.balancesBefore.delete(p.changes[1].account)
-        refuses(p, /no balance before/)
-    })
     it("refuses a wrong delta", () => {
         const p = plan()
         refuses({ ...p, changes: [p.changes[0], { ...p.changes[1], delta: p.changes[1].delta + 1n }] }, /delta/)
@@ -275,17 +262,11 @@ describe("buildSettlementCircuitInput", () => {
     it("refuses an account no transfer touches", () => {
         const p = plan()
         const extra = { account: acct(0xee), delta: 0n }
-        p.balancesBefore.set(extra.account, 0n)
         refuses({ ...p, changes: [...p.changes, extra] }, /not touched/)
     })
     it("refuses a transfer touching an account outside the changes", () => {
         const p = plan()
         refuses({ ...p, changes: [p.changes[0]] }, /missing from the changes/)
-    })
-    it("refuses an overdraft", () => {
-        const p = plan()
-        p.balancesBefore.set(p.transfers[0].from, 0n)
-        refuses(p, /overdraws/)
     })
     it("refuses a commitment that does not open", () => {
         const p = plan()
