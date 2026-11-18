@@ -24,8 +24,21 @@ jobs:
       - run: bun run test:release
 
   consensus-tests:
-    name: Consensus Tests
+    # 265 test files, one process each, run in series on a 2-vCPU runner: ~16
+    # minutes of latency-bound work and the single longest job in this repo.
+    # Sharding splits that across runners. The suite total is divided
+    # round-robin over the sorted file list, so every file lands in exactly one
+    # shard -- no duplicates, no gaps -- and the split is even to within one file.
+    #
+    # 4 shards is deliberately conservative: the slowest single file sets the
+    # floor, so more shards stop paying once a shard is down to a few files each.
+    # Raise this after looking at per-shard timings on a few real runs.
+    name: Consensus Tests (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -39,7 +52,9 @@ jobs:
       - run: bash scripts/launcher-external-db.test.sh
       # ./run exits with the node's status (a crash or refusal is non-zero)
       - run: bash scripts/launcher-run-exit.test.sh
-      - run: bun run test:consensus
+      # Test files are partitioned; the three shell guards above are not, and are
+      # cheap enough that repeating them per shard is the honest trade.
+      - run: bash scripts/test-consensus.sh --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
   rehearsal-drill:
     # Unit tests for the quorum-loss drills' pass criteria and inputs, the
