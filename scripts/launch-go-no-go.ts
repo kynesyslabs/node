@@ -23,8 +23,8 @@
  *       --expected-notary-keys ID:HEX[,ID:HEX...] \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
- * operators.json maps each validator identity to { operator, provider,
- * region }. Before any validator is up, --plan checks the genesis file and
+ * operators.json maps each validator identity to { owner, operator,
+ * provider, region }; owner is required on the mainnet chain id. Before any validator is up, --plan checks the genesis file and
  * that table alone, with no network:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
@@ -61,6 +61,12 @@ import {
 export interface OperatorEntry {
     operator: string
     provider: string
+    /**
+     * The beneficial owner: whoever holds the node and can direct its key,
+     * whichever operator runs it. Required on the mainnet chain id, since
+     * one buyer can spread its nodes over several operators and providers.
+     */
+    owner?: string
     /** Cloud region or data centre; required by the launch table check (--plan). */
     region?: string
 }
@@ -153,6 +159,9 @@ export interface GoNoGoDecision {
     }>
     operatorCounts: Record<string, number>
     providerCounts: Record<string, number>
+    /** Launch validators per beneficial owner, for the entries that name one. */
+    ownerCounts: Record<string, number>
+    regionCounts: Record<string, number>
     /** Most validators any single operator or provider may hold: the committee seats q can spare. */
     groupCap: number
 }
@@ -288,9 +297,17 @@ export interface ValidatorTable {
     reasons: string[]
     /** Launch validators whose entry has no region: a NO-GO only for the --plan check. */
     missingRegion: string[]
+    /** Launch validators whose entry names no owner: a NO-GO on the mainnet chain id (ownerReasons). */
+    missingOwner: string[]
+    /** The owner cap and vote-share reasons, also listed in reasons. */
+    ownerReasons: string[]
+    /** The region share reasons, also listed in reasons. */
+    regionReasons: string[]
     warnings: string[]
     operatorCounts: Record<string, number>
     providerCounts: Record<string, number>
+    ownerCounts: Record<string, number>
+    regionCounts: Record<string, number>
     /** Most validators any single operator or provider may hold: the committee seats q can spare. */
     groupCap: number
     /** Seats of the first committee: min(launch validators, shardSize). */
@@ -299,8 +316,9 @@ export interface ValidatorTable {
 
 /**
  * The launch validator table rules: every launch validator has an operator
- * and a provider, no operator or provider runs more than the committee can
- * lose with q still signing, and none holds more than a third of the votes.
+ * and a provider, no operator, provider or beneficial owner runs more than
+ * the committee can lose with q still signing, none holds more than a third
+ * of the votes, and no region holds a third of the launch validators.
  */
 export function validatorTable(
     launchIds: string[],
@@ -316,7 +334,13 @@ export function validatorTable(
     for (const [id, entry] of Object.entries(operatorsMap ?? {})) {
         if (isOperatorEntry(entry)) {
             const region = typeof entry.region === "string" && entry.region.trim() ? entry.region.trim() : undefined
-            entries.set(norm(id), { operator: groupName(entry.operator), provider: groupName(entry.provider), region })
+            const owner = typeof entry.owner === "string" && entry.owner.trim() ? groupName(entry.owner) : undefined
+            entries.set(norm(id), {
+                operator: groupName(entry.operator),
+                provider: groupName(entry.provider),
+                region,
+                ...(owner === undefined ? {} : { owner }),
+            })
         } else {
             incomplete.add(norm(id))
         }
@@ -346,15 +370,27 @@ export function validatorTable(
     if (operatorsMap !== null && missingRegion.length > 0) {
         warnings.push(`${missingRegion.length} launch validators have no region in the operator map: ${missingRegion.join(", ")}`)
     }
+    const missingOwner = launch.filter(id => entries.has(id) && entries.get(id).owner === undefined)
     const operatorCounts = countBy(launch, id => entries.get(id)?.operator ?? null)
     const providerCounts = countBy(launch, id => entries.get(id)?.provider ?? null)
+    // An entry without an owner is left out rather than counted under its
+    // operator: the operator cap already covers it, and on mainnet the
+    // missing owner is a NO-GO of its own
+    const ownerCounts = countBy(launch, id => entries.get(id)?.owner ?? null)
+    const regionCounts = countBy(launch, id => {
+        const region = entries.get(id)?.region
+        return region === undefined ? null : groupName(region)
+    })
+    const ownerReasons: string[] = []
     for (const [kind, counts] of [
         ["operator", operatorCounts],
         ["provider", providerCounts],
+        ["owner", ownerCounts],
     ] as const) {
+        const out = kind === "owner" ? ownerReasons : reasons
         for (const [name, n] of Object.entries(counts)) {
             if (n > groupCap) {
-                reasons.push(
+                out.push(
                     `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
                         `(shardSize ${shardSize} - quorum ${quorum})`,
                 )
@@ -364,14 +400,104 @@ export function validatorTable(
             // change to either rule cannot loosen the other
             const seats = Math.min(n, committeeSeats)
             if (committeeSeats > 0 && seats * 3 > committeeSeats) {
-                reasons.push(
+                out.push(
                     `${kind} ${name} can hold ${seats} of the ${committeeSeats} first-committee votes, ` +
                         "more than a third of the voting power",
                 )
             }
         }
     }
-    return { entries, reasons, missingRegion, warnings, operatorCounts, providerCounts, groupCap, committeeSeats }
+    // A region is not one party, so it is not held to the committee cap; a
+    // third of the set in one region is still one outage from a stall
+    const regionReasons: string[] = []
+    for (const [name, n] of Object.entries(regionCounts)) {
+        if (launch.length > 0 && n * 3 >= launch.length) {
+            regionReasons.push(`region ${name} hosts ${n} of ${launch.length} launch validators, a third or more of the set`)
+        }
+    }
+    reasons.push(...ownerReasons, ...regionReasons)
+    return {
+        entries,
+        reasons,
+        missingRegion,
+        missingOwner,
+        ownerReasons,
+        regionReasons,
+        warnings,
+        operatorCounts,
+        providerCounts,
+        ownerCounts,
+        regionCounts,
+        groupCap,
+        committeeSeats,
+    }
+}
+
+/** Whether a genesis is held to the mainnet rules: any chain id but the testnet's and the devnets'. */
+function onMainnetChainId(genesis: { properties?: unknown } | null): boolean {
+    if (!genesis) return false
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    return !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+}
+
+/**
+ * NO-GO reasons for launch validators whose table entry names no
+ * beneficial owner, on the mainnet chain id. The operator column alone
+ * cannot show one buyer behind several operators.
+ */
+export function ownerRequiredReasons(genesis: { properties?: unknown } | null, table: ValidatorTable): string[] {
+    if (!onMainnetChainId(genesis) || table.missingOwner.length === 0) return []
+    return [
+        `${table.missingOwner.length} launch validators have no owner in the operator map, which the mainnet ` +
+            `chain id requires: ${table.missingOwner.join(", ")}`,
+    ]
+}
+
+/**
+ * NO-GO reasons for one owner, operator, provider or region holding a
+ * third or more of block 0's stake. Stake weighs no consensus vote, but it
+ * weighs the governance tally once networkGovernance is on, where more
+ * than a third is a veto and two thirds pass a proposal alone.
+ */
+export function stakeShareReasons(rows: ValidatorRow[], entries: Map<string, OperatorEntry>): string[] {
+    const reasons: string[] = []
+    const stakeOf = new Map<string, bigint>()
+    for (const row of activeAtBlockZero(rows)) {
+        const id = norm(String(row.address))
+        const raw = (row as Record<string, unknown>).staked_amount
+        if (raw === undefined || raw === null) {
+            stakeOf.set(id, 0n)
+        } else if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+            stakeOf.set(id, BigInt(raw.trim()))
+        } else {
+            reasons.push(`launch validator ${id} has staked_amount ${JSON.stringify(raw)}, not a decimal integer`)
+        }
+    }
+    if (reasons.length > 0) return reasons
+    const total = [...stakeOf.values()].reduce((a, b) => a + b, 0n)
+    if (total === 0n) return []
+    const dimensions: Array<[string, (e: OperatorEntry) => string | undefined]> = [
+        ["owner", e => e.owner],
+        ["operator", e => e.operator],
+        ["provider", e => e.provider],
+        ["region", e => (e.region === undefined ? undefined : groupName(e.region))],
+    ]
+    for (const [kind, key] of dimensions) {
+        const sums = new Map<string, bigint>()
+        for (const [id, stake] of stakeOf) {
+            const entry = entries.get(id)
+            const name = entry ? key(entry) : undefined
+            if (name === undefined) continue
+            sums.set(name, (sums.get(name) ?? 0n) + stake)
+        }
+        for (const [name, sum] of sums) {
+            if (sum * 3n >= total) {
+                const percent = Number((sum * 10000n) / total) / 100
+                reasons.push(`${kind} ${name} holds ${sum} of the ${total} block 0 stake (${percent}%), a third or more`)
+            }
+        }
+    }
+    return reasons
 }
 
 /**
@@ -410,7 +536,9 @@ export function firstCommitteePins(genesis: { forks?: unknown } | null): readonl
 }
 
 function countBy(ids: string[], key: (id: string) => string | null): Record<string, number> {
-    const counts: Record<string, number> = {}
+    // Names come from operator input: a plain object would read "constructor"
+    // or "__proto__" as inherited members and miscount them
+    const counts: Record<string, number> = Object.create(null)
     for (const id of ids) {
         const k = key(id)
         if (k === null) continue
@@ -610,7 +738,7 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 
     reasons.push(...table.reasons)
     warnings.push(...table.warnings)
-    const { operatorCounts, providerCounts, groupCap } = table
+    const { operatorCounts, providerCounts, ownerCounts, regionCounts, groupCap } = table
 
     // A pinned identity takes a committee seat on any network whose pool
     // holds it, ahead of the draw
@@ -632,6 +760,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         validators,
         operatorCounts,
         providerCounts,
+        ownerCounts,
+        regionCounts,
         groupCap,
     }
 }
@@ -991,7 +1121,7 @@ export async function launchGenesisExpectations(
 
 export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" | "committee"> {
     /** The parsed genesis file, or null when only endpoints were given. */
-    genesis: { forks?: unknown; validators?: unknown } | null
+    genesis: { forks?: unknown; validators?: unknown; properties?: unknown } | null
     /** Block 0's validators as the node seeds them; required with a genesis. */
     blockZero: BlockZeroValidators | null
     /** The launch set when there is no genesis (peerlist or --rpc). */
@@ -1030,7 +1160,10 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const agreedHash = decideGoNoGo(base).genesisHash
     const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize, firstCommitteePins(genesis)) : null
     const decision = decideGoNoGo({ ...base, committee })
+    const table = validatorTable(base.launchValidators, input.operators, input.shardSize)
     decision.reasons.push(
+        ...ownerRequiredReasons(genesis, table),
+        ...(rows ? stakeShareReasons(rows, table.entries) : []),
         ...(blockZero?.reasons ?? []),
         ...mainnetGenesisReasons(genesis),
         ...treasuryReasons(genesis, expectedTreasury),
@@ -1086,9 +1219,11 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
     const quorum = quorumThreshold(input.shardSize)
     const genesisReasons = mainnetGenesisReasons(input.genesis)
     const forkReasons = mainnetForkReasons(input.genesis)
-    const capReasons = table.reasons.filter(r => / runs \d+ of \d+ launch validators; the cap is /.test(r))
-    const powerReasons = table.reasons.filter(r => r.includes("of the voting power"))
-    const entryReasons = table.reasons.filter(r => !capReasons.includes(r) && !powerReasons.includes(r))
+    const ownedOrRegional = new Set([...table.ownerReasons, ...table.regionReasons])
+    const groupReasons = table.reasons.filter(r => !ownedOrRegional.has(r))
+    const capReasons = groupReasons.filter(r => / runs \d+ of \d+ launch validators; the cap is /.test(r))
+    const powerReasons = groupReasons.filter(r => r.includes("of the voting power"))
+    const entryReasons = groupReasons.filter(r => !capReasons.includes(r) && !powerReasons.includes(r))
     if (table.missingRegion.length > 0) {
         entryReasons.push(`${table.missingRegion.length} launch validators have no region: ${table.missingRegion.join(", ")}`)
     }
@@ -1124,6 +1259,9 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
         check("validator table", entryReasons),
         check("operator and provider cap", capReasons),
         check("voting power per operator and provider", powerReasons),
+        check("beneficial owner cap", [...ownerRequiredReasons(input.genesis, table), ...table.ownerReasons]),
+        check("region share", table.regionReasons),
+        check("stake share", input.blockZero ? stakeShareReasons(input.blockZero.rows, table.entries) : []),
         check(
             "pinned identities",
             launch.filter(v => pinned.has(v)).map(v => `launch validator is a pinned committee identity: ${v}`),
@@ -1166,7 +1304,8 @@ function usage(): string {
         "                       a fresh nonce; without --genesis they define the launch set",
         "  --shard-size N       shardSize when no genesis file is given; with --genesis it must",
         "                       equal the genesis properties.shardSize or the run is refused",
-        "  --operators FILE     identity -> { operator, provider, region }",
+        "  --operators FILE     identity -> { owner, operator, provider, region }; owner (the",
+        "                       beneficial owner) is required on the mainnet chain id",
         "  --genesis-hash HASH  required for GO: the agreed block 0 hash, the genesis block hash",
         "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
         "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
@@ -1457,13 +1596,28 @@ async function runPlan(
     })
     const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
     if (args.json) {
-        console.log(JSON.stringify({ pass: checks.every(c => c.ok), checks, operatorCounts: table.operatorCounts, providerCounts: table.providerCounts, groupCap: table.groupCap }, null, 2))
+        console.log(
+            JSON.stringify(
+                {
+                    pass: checks.every(c => c.ok),
+                    checks,
+                    operatorCounts: table.operatorCounts,
+                    providerCounts: table.providerCounts,
+                    ownerCounts: table.ownerCounts,
+                    regionCounts: table.regionCounts,
+                    groupCap: table.groupCap,
+                },
+                null,
+                2,
+            ),
+        )
     } else {
         for (const c of checks) {
             console.log(`${c.ok ? "PASS" : "FAIL"} ${c.name}${c.ok ? "" : `: ${c.details.join("; ")}`}`)
         }
         console.log(
             `operators: ${JSON.stringify(table.operatorCounts)} providers: ${JSON.stringify(table.providerCounts)} ` +
+                `owners: ${JSON.stringify(table.ownerCounts)} regions: ${JSON.stringify(table.regionCounts)} ` +
                 `cap ${table.groupCap} of ${table.committeeSeats} first-committee seats`,
         )
     }
@@ -1645,7 +1799,10 @@ async function main(): Promise<number> {
                     (p?.error ? `  (${p.error})` : ""),
             )
         }
-        console.log(`operators: ${JSON.stringify(decision.operatorCounts)} providers: ${JSON.stringify(decision.providerCounts)} cap ${decision.groupCap}`)
+        console.log(
+            `operators: ${JSON.stringify(decision.operatorCounts)} providers: ${JSON.stringify(decision.providerCounts)} ` +
+                `owners: ${JSON.stringify(decision.ownerCounts)} regions: ${JSON.stringify(decision.regionCounts)} cap ${decision.groupCap}`,
+        )
         for (const w of decision.warnings) console.log(`warning: ${w}`)
         if (decision.go) {
             console.log(

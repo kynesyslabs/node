@@ -52,10 +52,10 @@ function online(identity: string, overrides: Partial<ValidatorProbe> = {}): Vali
     }
 }
 
-/** Ten launch validators spread over operators/providers three or fewer each. */
-function spread(ids: string[]) {
+/** Ten launch validators spread over owners/operators/providers three or fewer each. */
+function spread(ids: string[]): Record<string, { owner?: string; operator: string; provider: string }> {
     return Object.fromEntries(
-        ids.map((v, i) => [v, { operator: `op-${i % 4}`, provider: `cloud-${i % 4}` }]),
+        ids.map((v, i) => [v, { owner: `owner-${i % 4}`, operator: `op-${i % 4}`, provider: `cloud-${i % 4}` }]),
     )
 }
 
@@ -737,6 +737,53 @@ describe("checkLaunch", () => {
                 expect(() => parseExpectedNotaryKeys(raw)).toThrow(why)
                 expect(notaryKeysReasons(genesisFile(rows), raw).join("\n")).toContain(raw === "" ? "no --expected-notary-keys given" : why)
             }
+        })
+    })
+
+    describe("validator concentration", () => {
+        it("is NO-GO on the mainnet chain id when a launch validator names no owner", () => {
+            const operators = spread(launch)
+            delete (operators[launch[2]] as Record<string, string>).owner
+            const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons).toEqual([
+                `1 launch validators have no owner in the operator map, which the mainnet chain id requires: ${launch[2]}`,
+            ])
+        })
+
+        it("does not need owners on the testnet chain id", () => {
+            const operators = Object.fromEntries(launch.map((v, i) => [v, { operator: `op-${i % 4}`, provider: `cloud-${i % 4}` }]))
+            const genesis = { ...genesisFile(rows), properties: { id: NON_MAINNET_CHAIN_IDS[0], shardSize: 10 } }
+            const d = checkLaunch({ ...base, operators, genesis, blockZero: blockZero(rows) })
+            expect(d.reasons.join("\n")).not.toContain("no owner")
+        })
+
+        it("is NO-GO when one owner runs four validators through four operators", () => {
+            const operators = Object.fromEntries(
+                launch.map((v, i) => [v, { owner: i < 4 ? "buyer" : `owner-${i}`, operator: `op-${i}`, provider: `cloud-${i}` }]),
+            )
+            const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.ownerCounts.buyer).toBe(4)
+            expect(d.reasons.join("\n")).toContain("owner buyer runs 4 of 10 launch validators; the cap is 3")
+        })
+
+        it("counts owners named like Object members", () => {
+            for (const name of ["constructor", "__proto__", "tostring"]) {
+                const operators = Object.fromEntries(
+                    launch.map((v, i) => [v, { owner: i < 4 ? name : `owner-${i}`, operator: `op-${i}`, provider: `cloud-${i}` }]),
+                )
+                const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain(`owner ${name} runs 4 of 10 launch validators; the cap is 3`)
+            }
+        })
+
+        it("is NO-GO when one owner holds a third of block 0's stake", () => {
+            const staked = rows.map((r, i) => ({ ...r, staked_amount: i === 0 ? "5000" : "1000" }))
+            const d = checkLaunch({ ...base, genesis: genesisFile(staked), blockZero: blockZero(staked) })
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("owner owner-0 holds 7000 of the 14000 block 0 stake (50%), a third or more")
         })
     })
 

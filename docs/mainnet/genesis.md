@@ -86,8 +86,9 @@ against `--expected-notary-keys`, chain id,
 shard size, genesis values (no template `FILL` left), whether a node
 would load the file, block 0 validator set,
 launch validators against the quorum, the validator table, the operator
-and provider cap, voting power per operator and provider, pinned
-identities) and exits 0 only when all pass.
+and provider cap, voting power per operator and provider, the beneficial
+owner cap, region share, stake share, pinned identities) and exits 0 only
+when all pass.
 
 Then print the values to publish:
 
