@@ -111,6 +111,7 @@ esac
 EOF
 chmod +x "${WORK}/remote/bin/docker"
 mh_load_map
+IMAGE=ghcr.io/o/n@sha256:abc
 REGISTRY_TOKEN=s3cret-token REGISTRY_USER=ci mh_pull 1 ghcr.io/o/n@sha256:abc > /dev/null 2>&1
 REGISTRY_TOKEN=s3cret-token REGISTRY_USER=ci mh_pull 2 ghcr.io/o/n@sha256:abc > /dev/null 2>&1
 check "host 1 has the image: no login, no pull" test "$(grep -c '^h1 docker \(login\|pull\)' "${WORK}/pulls")" = 0
@@ -124,6 +125,10 @@ check "the throwaway config is gone after the pull" \
 mh_pull 2 ghcr.io/o/n@sha256:abc > /dev/null 2>&1
 check "without REGISTRY_TOKEN: a plain pull, no login" \
     test "$(cut -d' ' -f1-4 "${WORK}/pulls" | tr '\n' '|')" = "h2 docker image inspect|h2 docker pull -q|"
+: > "${WORK}/pulls"
+REGISTRY_TOKEN=s3cret-token mh_pull 2 postgres:16-alpine > /dev/null 2>&1
+check "an image of another registry (postgres): a plain pull, the token not sent" \
+    test "$(cut -d' ' -f1-5 "${WORK}/pulls" | tr '\n' '|')" = "h2 docker image inspect postgres:16-alpine|h2 docker pull -q postgres:16-alpine|"
 
 echo
 if [ "${fails}" = 0 ]; then echo "multihost stub tests: all passed"; else echo "multihost stub tests: ${fails} FAILED"; exit 1; fi

@@ -28,7 +28,9 @@
 #
 # Environment: REGISTRY_TOKEN [REGISTRY_USER] for a private registry (HOSTS.md);
 # QDRILL_SSH_IDENTITY, QDRILL_SSH_KNOWN_HOSTS, QDRILL_SSH_ACCEPT_NEW; CAMPAIGNS_DIR;
-# CLOCK_MAX_MS (500); HEADROOM_MB (1536: hosts run nothing else) and every other
+# CLOCK_MAX_MS (500); HEADROOM_MB (1536: hosts run nothing else); BIND_HOST_IP
+# (0; 1 publishes the node ports on the inventory address only, for hosts that
+# have that address on an interface, not behind 1:1 NAT) and every other
 # run.sh variable (LOAD_TPS, CONSENSUS_TIME, ...), passed through; RUN_SH, the
 # run.sh to call (the stub tests replace it).
 # Exit codes: 0 every scenario passed, 1 one failed, 2 one could not run, the
@@ -49,9 +51,9 @@ NETEM=""
 DRY_RUN=0
 CLOCK_MAX_MS="${CLOCK_MAX_MS:-500}"
 export HEADROOM_MB="${HEADROOM_MB:-1536}"
-export BIND_HOST_IP="${BIND_HOST_IP:-1}"
+export BIND_HOST_IP="${BIND_HOST_IP:-0}"
 
-usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -165,7 +167,8 @@ if [ "${PREPARE}" = 1 ]; then
     say "prepare: prepare-host.sh on ${HOST_COUNT} hosts, node ports open to ${ALLOW_FROM}"
     pids=()
     for i in "${!HOST_LINES[@]}"; do
-        hssh "${i}" "sudo -n bash -s -- --user $(mh_q "$(host_user "${i}")") --nodes ${N} $(mh_q "${allow_args[@]}")" \
+        read -r _ sp _ <<< "${HOST_LINES[i]}"
+        hssh "${i}" "sudo -n bash -s -- --user $(mh_q "$(host_user "${i}")") --nodes ${N} --ssh-port ${sp} $(mh_q "${allow_args[@]}")" \
             < "${HERE}/prepare-host.sh" > "${CAMPAIGN}/prepare-$((i + 1)).log" 2>&1 &
         pids+=("$!")
     done

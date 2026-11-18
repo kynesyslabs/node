@@ -10,7 +10,8 @@ the whole campaign: see README.md, [Cloud drill](README.md#cloud-drill), and
 
 ## Inventory (cloud-drill.sh)
 
-One host per line, `address ssh_user ssh_port validators` (`inventory.example`).
+One host per line, `address ssh_user ssh_port validators` (`inventory.example`),
+`address` an IPv4 address (the firewall rules take no host names).
 `validators` is exact: the host runs that many. `drill_inputs.py inventory`
 turns it into the hosts file below.
 
@@ -87,7 +88,8 @@ ssh root@203.0.113.10 'bash prepare-host.sh --user demos --nodes 30 --allow-from
 
 `--nodes` is the highest node index the host may run (it sizes the ufw
 rules); `--allow-from` (repeatable) is a controller or peer host address the
-ports are opened to. Without `--allow-from` the firewall is left as it is.
+ports are opened to; `--ssh-port` (22) is the port ufw keeps open for ssh.
+Without `--allow-from` the firewall is left as it is.
 
 ## Controller
 

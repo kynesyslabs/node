@@ -190,8 +190,8 @@ def parse_inventory(text):
 
     One host per line, `address ssh_user ssh_port validators`, whitespace
     separated; blank lines and `#` comments are skipped. `address` is what the
-    controller and the other hosts reach the host at (it goes into every node
-    URL), `validators` the exact number of validators the host runs. This is
+    controller and the other hosts reach the host at, as an IPv4 address (it
+    goes into every node URL and the firewall rules), `validators` the exact number of validators the host runs. This is
     the only provider-specific input of cloud-drill.sh: everything else is
     derived from it.
     """
@@ -205,8 +205,10 @@ def parse_inventory(text):
         if len(parts) != 4:
             raise ValueError(f"{where}: expected `address ssh_user ssh_port validators`, got {raw.strip()!r}")
         addr, user, port, count = parts
-        if not re.fullmatch(_ADDR_RE, addr):
-            raise ValueError(f"{where}: address must be an IPv4 address or a host name, got {addr!r}")
+        # An address, not a name: it is what the firewall rules (ufw, iptables
+        # -s) and BIND_HOST_IP publish on, and neither takes a host name
+        if not re.fullmatch(r"(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}", addr):
+            raise ValueError(f"{where}: address must be an IPv4 address, got {addr!r}")
         if not re.fullmatch(_USER_RE, user):
             raise ValueError(f"{where}: unexpected characters in the ssh user {user!r}")
         if not re.fullmatch(r"[1-9][0-9]*", count) or int(count) > MAX_NODES:
@@ -483,8 +485,10 @@ def summarize_resources(text):
     Each line: epoch seconds, container name, CPU % (of one core), memory
     "used / limit", network "rx / tx" and block I/O "read / write", tab
     separated, as `docker stats --no-stream` reports them. Network and block
-    I/O are counters since the container started, so the last sample is the
-    total and its rate is taken between the first and the last sample. A line
+    I/O are counters since the container started, and start again from 0 when
+    it restarts (the restart drills): the totals add up each sample's increase
+    over the one before, a drop counting as a restart from 0, and the rate is
+    that sum over the sampled span. A line
     that does not parse (docker prints "--" for a container stopping while it
     is sampled) is skipped and counted in "skipped".
     """
@@ -507,11 +511,19 @@ def summarize_resources(text):
             skipped += 1
             continue
         per.setdefault(name, []).append((t, c, used, rx, tx, br, bw))
+    def grown(rows, col):
+        """Increase of a counter over the samples, through restarts."""
+        total = 0.0
+        for prev, cur in zip(rows, rows[1:]):
+            total += cur[col] - prev[col] if cur[col] >= prev[col] else cur[col]
+        return total
+
     containers = {}
     for name, rows in sorted(per.items()):
         rows.sort()
         first, last = rows[0], rows[-1]
         span_h = (last[0] - first[0]) / 3600
+        rx, tx, br, bw = (first[c] + grown(rows, c) for c in (3, 4, 5, 6))
         containers[name] = {
             "role": container_role(name),
             "samples": len(rows),
@@ -519,11 +531,11 @@ def summarize_resources(text):
             "memPeakMiB": round(max(r[2] for r in rows) / 1024**2, 1),
             "cpuMeanPct": round(sum(r[1] for r in rows) / len(rows), 1),
             "cpuPeakPct": round(max(r[1] for r in rows), 1),
-            "netRxMB": round(last[3] / 1e6, 2),
-            "netTxMB": round(last[4] / 1e6, 2),
-            "netMBPerHour": round(((last[3] - first[3]) + (last[4] - first[4])) / 1e6 / span_h, 1) if span_h > 0 else None,
-            "blockReadMB": round(last[5] / 1e6, 2),
-            "blockWriteMB": round(last[6] / 1e6, 2),
+            "netRxMB": round(rx / 1e6, 2),
+            "netTxMB": round(tx / 1e6, 2),
+            "netMBPerHour": round((grown(rows, 3) + grown(rows, 4)) / 1e6 / span_h, 1) if span_h > 0 else None,
+            "blockReadMB": round(br / 1e6, 2),
+            "blockWriteMB": round(bw / 1e6, 2),
         }
     roles = {}
     for role in ("node", "postgres"):

@@ -2,11 +2,13 @@
 # Prepares a fresh Ubuntu 24.04 host for multi-host quorum drills (HOSTS.md).
 # Idempotent: a second run changes nothing. Run as root on the host.
 #
-#   prepare-host.sh --user USER [--nodes N] [--allow-from ADDR]...
+#   prepare-host.sh --user USER [--nodes N] [--ssh-port PORT] [--allow-from ADDR]...
 #
 #   --user USER        the account run.sh connects as; added to the docker group
 #   --nodes N          highest node index this host may run (default 30): sizes
 #                      the firewall rules
+#   --ssh-port PORT    the port sshd listens on (default 22), kept open when
+#                      ufw is enabled
 #   --allow-from ADDR  a controller or peer host address (or CIDR) the node ports
 #                      are opened to with ufw, and the only sources Docker's
 #                      DOCKER-USER chain lets reach the published node ports
@@ -16,13 +18,15 @@ set -euo pipefail
 
 USER_NAME=""
 NODES=30
+SSH_PORT=22
 ALLOW=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --user) USER_NAME="$2"; shift 2 ;;
         --nodes) NODES="$2"; shift 2 ;;
+        --ssh-port) SSH_PORT="$2"; shift 2 ;;
         --allow-from) ALLOW+=("$2"); shift 2 ;;
-        -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -30,6 +34,7 @@ done
 [ -n "${USER_NAME}" ] || { echo "--user is required" >&2; exit 2; }
 id "${USER_NAME}" >/dev/null 2>&1 || { echo "no such user: ${USER_NAME}" >&2; exit 2; }
 [[ "${NODES}" =~ ^[1-9][0-9]*$ ]] && [ "${NODES}" -le 400 ] || { echo "--nodes must be 1..400" >&2; exit 2; }
+[[ "${SSH_PORT}" =~ ^[1-9][0-9]*$ ]] && [ "${SSH_PORT}" -le 65535 ] || { echo "--ssh-port must be 1..65535" >&2; exit 2; }
 . /etc/os-release
 [ "${ID}" = ubuntu ] && [ "${VERSION_ID}" = 24.04 ] || echo "WARNING: written for Ubuntu 24.04, this is ${PRETTY_NAME}" >&2
 
@@ -119,7 +124,8 @@ fi
 # ── firewall ────────────────────────────────────────────────────────────
 if [ "${#ALLOW[@]}" -gt 0 ]; then
     command -v ufw >/dev/null 2>&1 || apt-get install -y -q ufw
-    ufw allow OpenSSH >/dev/null
+    # The port the controller is connected on, which is not always OpenSSH's 22
+    ufw allow proto tcp to any port "${SSH_PORT}" >/dev/null
     rpc_range="53551:$((53549 + 2 * NODES + 1))"
     gossip_range="54550:$((54549 + NODES))"
     for a in "${ALLOW[@]}"; do

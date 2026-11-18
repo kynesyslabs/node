@@ -137,8 +137,24 @@ async function send(w: Wallet, idx: number, txs: LoadTx[], errors: Map<string, n
     } catch (e) {
         rec.error = `threw: ${brief(String(e))}`
     }
-    if (rec.error) errors.set(rec.error, (errors.get(rec.error) ?? 0) + 1)
+    if (rec.error) {
+        errors.set(rec.error, (errors.get(rec.error) ?? 0) + 1)
+        // A send that threw or was refused may still have landed (a timeout
+        // after the node took it): take the chain's nonce when it is ahead,
+        // or the wallet would resend a used nonce from then on
+        await resyncNonce(w)
+    }
     w.busy = false
+}
+
+async function resyncNonce(w: Wallet): Promise<void> {
+    try {
+        const info = await nodeCall(w.url, "getAddressInfo", { address: w.address })
+        const chain = info?.result === 200 && info.response ? Number(info.response.nonce ?? 0) : NaN
+        if (Number.isSafeInteger(chain) && chain + 1 > w.nextNonce) w.nextNonce = chain + 1
+    } catch {
+        // Tried again after the next failed send
+    }
 }
 
 /** One pass over the accepted, not yet included transfers; returns how many are still open. */

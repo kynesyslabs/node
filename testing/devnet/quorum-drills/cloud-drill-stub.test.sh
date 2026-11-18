@@ -125,7 +125,7 @@ cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios "restart halt loa
 C=$(last_campaign full)
 check "a failed scenario: exit 1" [ "${rc}" = 1 ]
 check "run.sh ran once per scenario, in order" diff <(cut -d' ' -f5 "${WORK}/run-calls") <(printf '%s\n' restart-n6s6 halt-n6s6 load-n6s6)
-check "run.sh got HEADROOM_MB=1536 and BIND_HOST_IP=1" bash -c "grep -qx HEADROOM_MB=1536 '${WORK}/run-env' && grep -qx BIND_HOST_IP=1 '${WORK}/run-env'"
+check "run.sh got HEADROOM_MB=1536 and BIND_HOST_IP=0" bash -c "grep -qx HEADROOM_MB=1536 '${WORK}/run-env' && grep -qx BIND_HOST_IP=0 '${WORK}/run-env'"
 check "hosts.tsv: both hosts with their facts and a small offset" \
     bash -c "awk -F'\t' 'NR > 1 && \$8 == \"27.3.1\" && \$9 == \"yes\" && (\$10 < 500 && \$10 > -500)' '${C}/hosts.tsv' | wc -l | grep -qx 2"
 check "ping matrix: 2 x 2 at 12.500 ms" bash -c "grep -c $'\t12.500\t12.500$' '${C}/ping-matrix.tsv' | grep -qx 2"
@@ -155,7 +155,7 @@ check "a host 4 s off: exit 2" [ "${rc}" = 2 ]
 check "a host 4 s off: says so, no scenario run" bash -c "grep -q 'clock offset above 500ms' '${WORK}/out' && ! grep -q skew '${WORK}/run-calls'"
 
 echo "prepare"
-inv "10.0.0.1 drill 22 3" "10.0.0.2 drill 22 3"
+inv "10.0.0.1 drill 22 3" "10.0.0.2 drill 2222 3"
 cat > "${WORK}/remote/bin/sudo" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = -n ] && shift
@@ -166,8 +166,9 @@ chmod +x "${WORK}/remote/bin/sudo"
 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 --prepare --allow-from 10.0.0.0/24,192.0.2.7 prep; rc=$?
 check "prepare: exit 0" [ "${rc}" = 0 ]
 check "prepare: prepare-host.sh fed to every host" bash -c "cmp -s '${HERE}/prepare-host.sh' '${WORK}/hosts/10.0.0.1/prepare-script' && cmp -s '${HERE}/prepare-host.sh' '${WORK}/hosts/10.0.0.2/prepare-script'"
-check "prepare: with the user, the node count and each allowed address" \
-    grep -qx "bash -s -- --user drill --nodes 6 --allow-from 10.0.0.0/24 --allow-from 192.0.2.7" "${WORK}/hosts/10.0.0.1/prepare-args"
+check "prepare: with the user, the node count, its ssh port and each allowed address" \
+    grep -qx "bash -s -- --user drill --nodes 6 --ssh-port 22 --allow-from 10.0.0.0/24 --allow-from 192.0.2.7" "${WORK}/hosts/10.0.0.1/prepare-args"
+check "prepare: a host on ssh port 2222 keeps 2222 open" grep -q -- "--ssh-port 2222 " "${WORK}/hosts/10.0.0.2/prepare-args"
 
 echo
 if [ "${fails}" = 0 ]; then echo "cloud-drill stub tests: all passed"; else echo "cloud-drill stub tests: ${fails} FAILED"; exit 1; fi

@@ -210,7 +210,7 @@ INVENTORY = """
 # address user port validators
 203.0.113.11 drill 22 3
 198.51.100.21 ubuntu 2222 3
-node-c.example.net drill 22 4
+192.0.2.40 drill 22 4
 """
 
 
@@ -229,7 +229,8 @@ class Inventory(unittest.TestCase):
 
     def test_parse_errors(self):
         for bad in ("1.2.3.4 u 22\n", "1.2.3.4 u 22 0\n", "1.2.3.4 u 70000 3\n", "1.2.3.4 u;x 22 3\n",
-                    "1.2.3.4 u 22 3\n1.2.3.4 v 22 3\n", "# nothing\n", "1.2.3.4 u 22 401\n"):
+                    "1.2.3.4 u 22 3\n1.2.3.4 v 22 3\n", "# nothing\n", "1.2.3.4 u 22 401\n",
+                    "node-a.example.net u 22 3\n", "1.2.3.256 u 22 3\n"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     parse_inventory(bad)
@@ -360,6 +361,15 @@ class Resources(unittest.TestCase):
         self.assertEqual(s["roles"]["node"]["containers"], 1)
         self.assertEqual(s["roles"]["postgres"]["memPeakMiBMax"], 140.0)
         self.assertIsNone(s["containers"]["h1:qdrill-x-postgres-1"]["netMBPerHour"])
+
+    def test_counters_through_a_restart(self):
+        # rx 5 MB, then 1 MB after a restart, then 3 MB: 5 + 1 + 2 = 8 MB in all
+        rows = "\n".join(f"{t}\th1:qdrill-x-node-2-1\t10%\t500MiB / 1GiB\t{rx}MB / 0B\t0B / 0B"
+                         for t, rx in ((0, 5), (60, 1), (120, 3)))
+        n = summarize_resources(rows)["containers"]["h1:qdrill-x-node-2-1"]
+        self.assertEqual(n["netRxMB"], 8.0)
+        # 3 MB grown in the 2 minutes sampled
+        self.assertEqual(n["netMBPerHour"], 90.0)
 
 
 class CampaignSummary(unittest.TestCase):

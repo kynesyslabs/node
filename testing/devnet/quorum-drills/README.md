@@ -309,8 +309,10 @@ testing/devnet/quorum-drills/cloud-drill.sh --inventory inventory.txt \
    ping matrix goes to `ping-matrix.tsv`.
 4. One `run.sh --hosts` per scenario of `--scenarios` (default
    `restart third hostloss halt load`), each as `<kind>-n<N>s<S>`, with
-   `HEADROOM_MB=1536` (the hosts run nothing else) and `BIND_HOST_IP=1` (ports
-   published on the inventory address only). `hostloss` is skipped when the
+   `HEADROOM_MB=1536` (the hosts run nothing else). Ports are published on
+   every address and fenced by `--prepare`'s `DOCKER-USER` rules;
+   `BIND_HOST_IP=1` publishes them on the inventory address only, for hosts
+   that have their public address on an interface (not behind 1:1 NAT). `hostloss` is skipped when the
    last host runs more validators than the committee tolerates. Each run
    generates its own genesis (every fork of the launch template at 0 as the
    release does, chain id 1337, rehearsal notary keys), pulls the image by

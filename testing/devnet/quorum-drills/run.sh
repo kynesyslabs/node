@@ -213,11 +213,11 @@ if [ -n "${HOSTS_FILE}" ]; then
     [ -z "${SRC_TREE}" ] || { echo "--src cannot be used with --hosts: the source tree is not copied to the hosts" >&2; exit 2; }
     case "${SCENARIO}" in partition|fallback|listed-stall)
         echo "${SCENARIO} cannot run with --hosts (it needs one docker host)" >&2; exit 2 ;; esac
-elif [ "${SCENARIO%%-*}" = hostloss ]; then
-    echo "${SCENARIO} needs --hosts: it stops every validator of one host" >&2; exit 2
     # Every host must run the same bytes: pulled by digest, never by tag
     [[ "${IMAGE}" =~ ^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$ ]] ||
         { echo "--hosts needs --image REF@sha256:<digest> (a registry reference by digest), got ${IMAGE}" >&2; exit 2; }
+elif [ "${SCENARIO%%-*}" = hostloss ]; then
+    echo "${SCENARIO} needs --hosts: it stops every validator of one host" >&2; exit 2
 fi
 [ "${BIND_HOST_IP}" = 0 ] || [ -n "${HOSTS_FILE}" ] || { echo "BIND_HOST_IP=1 needs --hosts" >&2; exit 2; }
 if [ -n "${NETEM}" ]; then

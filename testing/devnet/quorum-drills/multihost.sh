@@ -71,11 +71,14 @@ mh_registry_of() {
 mh_pull() {
     local k="$1" img="$2" reg
     mh_ssh "${k}" -n "docker image inspect $(mh_q "${img}") >/dev/null 2>&1" && { echo "host ${k}: ${img} already present"; return 0; }
-    if [ -z "${REGISTRY_TOKEN:-}" ]; then
+    reg=$(mh_registry_of "${img}")
+    # The token is for the drill image's registry: any other image (postgres
+    # from Docker Hub) is pulled without it, so the token never reaches a
+    # registry it was not issued for
+    if [ -z "${REGISTRY_TOKEN:-}" ] || [ "${reg}" != "$(mh_registry_of "${IMAGE:-}")" ]; then
         mh_ssh "${k}" -n "docker pull -q $(mh_q "${img}")"
         return
     fi
-    reg=$(mh_registry_of "${img}")
     printf '%s\n' "${REGISTRY_TOKEN}" | mh_ssh "${k}" "d=\$(mktemp -d) || exit 1
         trap 'rm -rf \"\$d\"' EXIT
         DOCKER_CONFIG=\"\$d\" docker login $(mh_q "${reg}") -u $(mh_q "${REGISTRY_USER:-token}") --password-stdin >/dev/null &&
