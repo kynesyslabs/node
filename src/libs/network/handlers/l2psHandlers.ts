@@ -9,6 +9,7 @@ import { resolveHistoryEntry, subnetDecryptor } from "@/libs/l2ps/historyPayload
 import { historyAuthMessageV2, readPageValue, type HistoryPageParams } from "@/libs/l2ps/historyAuth"
 import { isRefusal, parseHistoryRequest } from "@/libs/l2ps/historyRequest"
 import { L2PS_GATE_REFUSAL, l2psOff } from "@/forks/l2psGate"
+import { L2PS_UID_MAX_LENGTH } from "@/libs/l2ps/settlement/encoding"
 
 const historyAuthHint = (data: any) => ({
     messageV2:
@@ -128,8 +129,8 @@ function historyRow(
     }
 }
 
-/** Longest subnet uid getL2PSNonce reads: far past any configured uid, short enough to bound the query. */
-const MAX_L2PS_UID_LENGTH = 128
+/** A settlement cannot name a longer uid, so no L2PS nonce is stored under one. */
+const MAX_L2PS_UID_LENGTH = L2PS_UID_MAX_LENGTH
 const ACCOUNT_HEX = /^(0x)?[0-9a-fA-F]{64}$/
 
 const handlers: Record<string, NodeCallHandler> = {

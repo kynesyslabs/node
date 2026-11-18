@@ -16,6 +16,23 @@ export const SETTLEMENT_ACCOUNTS = 2 * SETTLEMENT_TRANSFERS
 export const SETTLEMENT_VERSION = 1
 export const SETTLEMENT_SIGNATURE_DOMAIN = "l2ps-settlement:v2:"
 
+/**
+ * Longest subnet uid a settlement may name. The uid becomes a key in every
+ * signer's stored L2PS nonces and is read back through getL2PSNonce, so
+ * consensus bounds it; configured uids are far shorter.
+ */
+export const L2PS_UID_MAX_LENGTH = 128
+
+/** A uid a settlement can bind: non-empty, bounded, and without the message separator. */
+export function isSettlementL2psUid(l2psUid: unknown): l2psUid is string {
+    return (
+        typeof l2psUid === "string" &&
+        l2psUid.length > 0 &&
+        l2psUid.length <= L2PS_UID_MAX_LENGTH &&
+        !l2psUid.includes(":")
+    )
+}
+
 /** Amounts, fees and net change magnitudes stay below this. */
 export const AMOUNT_LIMIT = 1n << 128n
 export const NONCE_LIMIT = 1n << 64n
@@ -138,7 +155,7 @@ export function settlementSignatureMessage(
     if (!Number.isSafeInteger(chainId) || chainId < 0) {
         throw new SettlementEncodingError(`invalid chain id ${chainId}`)
     }
-    if (typeof l2psUid !== "string" || l2psUid.length === 0 || l2psUid.includes(":")) {
+    if (!isSettlementL2psUid(l2psUid)) {
         throw new SettlementEncodingError("invalid L2PS uid")
     }
     return new TextEncoder().encode(

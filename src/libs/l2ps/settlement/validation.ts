@@ -22,6 +22,7 @@ import {
     SETTLEMENT_VERSION,
     compareAccounts,
     hexToField,
+    isSettlementL2psUid,
     parseDelta,
     parseUnsigned,
     settlementPublicSignals,
@@ -108,7 +109,7 @@ export function parseSettlement(tx: {
     const payload = data[1]
     if (!isPlainObject(payload)) return refuse("l2psBatch payload is not an object")
     const l2psUid = payload.l2ps_uid
-    if (typeof l2psUid !== "string" || l2psUid.length === 0 || l2psUid.includes(":")) {
+    if (!isSettlementL2psUid(l2psUid)) {
         return refuse("l2psBatch payload has no valid l2ps_uid")
     }
     const record = payload.settlement

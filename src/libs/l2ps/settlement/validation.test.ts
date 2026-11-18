@@ -100,6 +100,16 @@ describe("parseSettlement", () => {
         expect(parseSettlement(batchTx(record))).toMatchObject({ ok: false, reason: "unsupported settlement version 2" })
     })
 
+    it("refuses a subnet uid past 128 characters, which would become a stored nonce key", () => {
+        const record = recordOf([t1])
+        expect(parseSettlement(batchTx(record, { l2psUid: "u".repeat(129) }))).toMatchObject({
+            ok: false,
+            reason: "l2psBatch payload has no valid l2ps_uid",
+        })
+        const atLimit = parseSettlement(batchTx(record, { l2psUid: "u".repeat(128) }))
+        expect(atLimit.ok === false ? atLimit.reason : "").not.toBe("l2psBatch payload has no valid l2ps_uid")
+    })
+
     it("refuses a version no string can be made of, instead of throwing", () => {
         const record = recordOf([t1]) as any
         record.version = JSON.parse('{"toString": null}')
