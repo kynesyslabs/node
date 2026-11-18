@@ -1,0 +1,7 @@
+[package]
+name = "web-time"
+version = "0.2.4"
+edition = "2021"
+publish = false
+description = "Replaces web-time 0.2 with std::time so the wasm verifier links no JS clock; any SystemTime::now() call in the verify path traps."
+license = "MIT"

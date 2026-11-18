@@ -334,6 +334,7 @@ describe("the repository's own .env.example", () => {
         fs.writeFileSync(envPath(), original)
         writeZkBatch(root, 5)
         writeZkBatch(root, 10)
+        writeZkBatch(root, "settlement")
         const { code } = await setup(
             ["--yes", "--l2ps-uid", "ex", "--history-retention-days", "30", "--history-store-plaintext", "--history-require-v2", "--messaging", "--messaging-port", "3100", "--zk", "--force"],
         )

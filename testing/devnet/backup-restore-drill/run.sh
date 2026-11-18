@@ -535,6 +535,15 @@ start_node() { # $1 name
     refresh_cid "$1"
     wait_serve "$1" "${SERVE_TIMEOUT}"
 }
+# A container's start time and restart count, from one docker inspect; fails when the read
+# fails, or does not give both (it prints then what the read gave). A restart in place keeps
+# the container id, not these
+run_of() { # $1 container -> "started <time>, restart count <n>"
+    local r
+    r="$(docker inspect -f '{{.State.StartedAt}} {{.RestartCount}}' "$1")" || return 1
+    [[ "${r}" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[^[:space:]]+)[[:space:]]([0-9]+)$ ]] || { echo "${r}"; return 1; }
+    echo "started ${BASH_REMATCH[1]}, restart count ${BASH_REMATCH[2]}"
+}
 
 # Counts of every public table plus the head, sorted "name|count" lines
 STATS_SQL="${IN}/stats.sql"
@@ -921,13 +930,21 @@ while IFS=$'\t' read -r kind src path svc; do
     fi
 done < "${OUT_DIR}/writable-mounts.tsv"
 # What the image itself declares as volumes, and its working directory (the node
-# writes there too: gossip key, logs): not mounted by compose, docker makes them
-img_dirs="$({
-    docker image inspect "${NODE_IMAGE}" --format '{{json .Config.Volumes}}' | jq -r '(. // {}) | keys[]'
-    docker image inspect "${NODE_IMAGE}" --format '{{.Config.WorkingDir}}'
-} | grep . | sort -u)" || abort_pre "cannot read the declared volumes and the working directory of ${NODE_IMAGE} to probe them"
+# writes there too: gossip key, logs): not mounted by compose, docker makes them.
+# Each is read on its own, and a read that fails or gives nothing stops the run, so
+# no path the image would have given goes unprobed
+img_vols_json="$(docker image inspect "${NODE_IMAGE}" --format '{{json .Config.Volumes}}')" \
+    || abort_pre "cannot read the volumes ${NODE_IMAGE} declares (docker image inspect .Config.Volumes) to probe them"
+# One JSON object, or null (an image without VOLUME); empty output or anything else is no declaration
+img_vols="$(jq -rs 'if length == 1 and (.[0] | type == "object" or type == "null") then .[0] // {} | keys[] else error("no volume declaration") end' \
+    <<< "${img_vols_json}" 2> /dev/null)" \
+    || abort_pre "the volumes ${NODE_IMAGE} declares (docker image inspect .Config.Volumes) are not one JSON object or null: '${img_vols_json}'"
+img_wd="$(docker image inspect "${NODE_IMAGE}" --format '{{.Config.WorkingDir}}')" && [ -n "${img_wd}" ] \
+    || abort_pre "cannot read the working directory of ${NODE_IMAGE} (docker image inspect .Config.WorkingDir), or it is empty, to probe it"
+img_dirs="$(printf '%s\n' "${img_vols}" "${img_wd}" | grep . | sort -u)"
 img_probed=()
-for d in ${img_dirs}; do
+# One path per line: a path with a space or a glob character is probed as it is
+while IFS= read -r d; do
     case "${mounted_paths}" in *" ${d} "*) continue ;; esac
     if probe_write "${d}" >> "${STEP_LOG}" 2>&1; then
         say "uid 1000 can write: ${d} (from the image)"
@@ -936,15 +953,15 @@ for d in ${img_dirs}; do
         say "uid 1000 CANNOT write: ${d} (from the image)"
         unwritable+=("${d} in the image (not a mount of this compose file: it is the image's own directory or declared volume)")
     fi
-done
+done <<< "${img_dirs}"
 if [ "${#unwritable[@]}" -gt 0 ]; then
     tail -n 6 "${STEP_LOG}" >&2
     abort_pre "the node image user (uid 1000) cannot write to: $(printf '%s; ' "${unwritable[@]}")the node would fail with 'Permission denied' as soon as it writes its state. Nothing was changed. Set FIX_OWNERSHIP=1 to chown 1000:1000 this drill's own volumes (${PROJECT}_*), or fix the owner of the directory in the image (see 02b-node-checks.log)"
 fi
 if [ "${#fixed[@]}" -gt 0 ]; then META[ownership_fixed]="${fixed[*]} (FIX_OWNERSHIP=1)"; fi
-# What was probed, not a claim that the node can write all it writes: a path not listed
-# (one the image declares but its read did not give, say) was not probed
-check "uid 1000 write probe of the node state" INFO "not a check: uid 1000 created and deleted a file in each of the $(wc -l < "${OUT_DIR}/writable-mounts.tsv") read-write mounts of the node services and in these image directories: ${img_probed[*]:-none}; a path not listed was not probed${fixed[0]:+; chowned: ${fixed[*]}}"
+# Every read-write mount of the node services, and every directory the image declares or
+# works in that they do not mount, was written by uid 1000 (a probe or read that failed stopped the run)
+check "node state is writable by uid 1000" PASS "uid 1000 created and deleted a file in each of the $(wc -l < "${OUT_DIR}/writable-mounts.tsv") read-write mounts of the node services and in these image directories they do not mount (its working directory and declared volumes): ${img_probed[*]:-none}${fixed[0]:+; chowned: ${fixed[*]}}"
 
 # ═════════════════════════════════════════════════════════════════════════
 # SMOKE=1: the startup check, then out
@@ -1027,6 +1044,11 @@ done
 for i in $(seq 1 "${N}"); do
     start_node "${i}" || die "node-${i} did not serve within ${SERVE_TIMEOUT}s (see node logs; with migrationsRun false the migrations above must have worked)"
     say "node-${i} serving"
+    # The baseline of "node X never stopped or restarted" in the isolated drill, as soon as
+    # node X serves: a restart while the nodes after it are brought up must not be in it
+    if [ "${VARIANT}" = isolated ] && [ "${i}" = "${X_NODE}" ]; then
+        X_RUN0="$(run_of "${CID[${X_NODE}]}")" || die "cannot read node-${X_NODE}'s start time and restart count at bring-up (docker inspect gave '${X_RUN0}')"
+    fi
     # One node at a time: a simultaneous join races the committee freeze
     if [ "${i}" -lt "${N}" ]; then sleep 4; fi
 done
@@ -1493,9 +1515,14 @@ else
     else
         check "node ${X_NODE}'s key is held by only the one container on its state volume" FAIL "node-${X_NODE} containers: ${x_svc:-none }; on its state volume: ${x_holders:-none }; started at bring-up: ${x_cid:-?}"
     fi
-    # A restart in place (restart: unless-stopped) keeps the container id: the id shows
-    # nothing about whether node X stopped during the drill, so this is information only
-    check "whether node ${X_NODE} stopped or restarted during the isolated drill" INFO "not shown: a restart in place keeps the container id; node-${X_NODE} running at the end: ${x_svc:-none }; started at bring-up: ${x_cid:-?}"
+    # A restart in place (restart: unless-stopped) keeps the container id, so node X's running
+    # container must also have the start time and restart count it had at bring-up
+    x_run="$(run_of "${CID[${X_NODE}]}")" || x_run="unreadable (${x_run:-nothing})"
+    if [ -n "${x_cid}" ] && [ "${x_svc}" = "${x_cid} " ] && [ "${x_run}" = "${X_RUN0}" ]; then
+        check "node ${X_NODE} never stopped or restarted during the isolated drill" PASS "the running node-${X_NODE} container is the one started at bring-up (${x_cid}), ${x_run} as then"
+    else
+        check "node ${X_NODE} never stopped or restarted during the isolated drill" FAIL "node-${X_NODE} running at the end: ${x_svc:-none }; started at bring-up: ${x_cid:-?}; at bring-up ${X_RUN0}, at the end ${x_run}"
+    fi
 fi
 
 # ═════════════════════════════════════════════════════════════════════════

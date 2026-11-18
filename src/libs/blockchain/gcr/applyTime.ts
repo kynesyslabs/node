@@ -36,3 +36,13 @@ export function applyTime(): Date {
     const ms = blockTime.getStore()
     return new Date(ms ?? Date.now())
 }
+
+/**
+ * The applied block's timestamp in seconds, or undefined outside block
+ * apply. For rules that must judge against the block and may not fall back
+ * to the wall clock the way applyTime does.
+ */
+export function blockTimeSec(): number | undefined {
+    const ms = blockTime.getStore()
+    return ms === undefined ? undefined : Math.floor(ms / 1000)
+}

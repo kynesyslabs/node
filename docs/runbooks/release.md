@@ -39,11 +39,19 @@ key in the OpenSSH allowed-signers format:
 release@kynesyslabs.com namespaces="git" ssh-ed25519 AAAA...
 ```
 
-A signer configures git once:
+A signer configures git in the checkout used to tag. The first two lines are
+needed once; run the last four again before each tag, because the signer
+file is a copy of the list at that moment and goes stale when a signer is
+added or removed. The copy goes into the clone's own `.git`, as in
+`INSTALL.md` step 1:
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS"
 ```
 
 Keep the private key off the validators and out of CI. How a holder
@@ -132,6 +140,42 @@ INSTALL.md, "After the genesis is reissued".
 
 ## What a validator runs
 
+Before changing `IMAGE_TAG`, verify and check out the release tag, so the
+compose file, scripts and parameter sheet match the image. The signer list
+goes into the clone's own `.git`, as in `INSTALL.md` step 1:
+
+```bash
+TAG=v1.0.0-rc.1
+
+OLD_HEAD="$(git rev-parse HEAD)" &&
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
+git merge-base --is-ancestor "$TAG" origin/stabilisation &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+The first line records the commit the checkout is at now. If this chain
+stops, do not continue the upgrade. A good signature from a key you cannot
+match is a failure: the email `git verify-tag` prints must be a signer the
+announcement names, and the `SHA256:` fingerprint the one that signer
+published outside GitHub (see `INSTALL.md` step 1). The chain has already
+checked out the new tag by then, so before anything else go back to the
+commit the first line recorded, in the same shell: `git checkout "$OLD_HEAD"`.
+Then do not continue the upgrade.
+
+Run the chain once; to read the signature again, run `git verify-tag "$TAG"`,
+which moves nothing. If the shell is gone or the chain ran twice, `OLD_HEAD`
+is empty or holds the new tag's commit. Go back instead to the release named
+by `IMAGE_TAG` in `.env`, the part before `@` (`git checkout vX.Y.Z` for
+`IMAGE_TAG=vX.Y.Z@sha256:<digest>`): it still names the release the node
+runs, because this chain runs before `IMAGE_TAG` changes. If `IMAGE_TAG` is
+still `local` (an image built from this checkout), find the way back in
+`git reflog`: the oldest `checkout: moving from <place> to <tag>` line of
+this upgrade names the commit or branch to check out.
+
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
 `docs/mainnet/parameters.env`, the announcement says so and every validator
@@ -182,8 +226,8 @@ the same for every release. A node started with migrations still pending
 refuses to boot and names the command.
 Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
-A bare-metal validator (`./run`) checks out the tag instead and verifies it
-locally before starting:
+A bare-metal validator (`./run`) runs the same verify-and-checkout chain, then
+starts `./run`:
 
 ```bash
 git fetch --tags origin stabilisation &&
@@ -220,6 +264,26 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show   # from the node che
 # launcher options; -d must name the port just migrated:
 PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> <other launcher options>
 ```
+
+## Rolling upgrades
+
+On a running network, validators upgrade one at a time, whatever the number
+of validators:
+
+1. Upgrade one validator with the blocks above.
+2. Wait until it is back in the committee: healthy, at the network head, and
+   signing blocks. The check is in
+   [chain-halt-recovery.md](chain-halt-recovery.md), "Restart and upgrade
+   rule". Post its running digest on the release thread.
+3. Only then start the next one.
+
+Each stop costs the committees it sits in one vote, and a restarted node sits
+out rounds until its restart signing floor passes, so two validators down at
+once can stop a committee that holds both. If a just-restarted validator
+logs `Timeout waiting for green light` for the same block twice, restart it
+once more (`docker compose restart node`). From `v1.0.0-rc.13` the validator
+leaves a round the secretary abandoned and joins the newer one on its own, so
+this restart is a fallback there.
 
 ## Upgrade notes
 
@@ -372,11 +436,254 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     deadline and when its caller leaves early, not only the caller's side.
   - `launch-go-no-go --plan` refuses a mainnet genesis that schedules
     `atomicWork`.
+- From `v1.0.0-rc.11`:
+  - The web2 (DAHR) proxy caps its outbound fetches. Per caller: 2 running
+    at once, 10 started per minute, 100 MiB of origin response per hour
+    (charged with the bytes read, a refused or cut response included). Per
+    node: 32 running at once. A caller is the client address of a
+    `web2ProxyRequest` (one IPv6 /64 is one address) and the sender of a
+    `web2Request` or DemosWork tx. Over a cap the caller gets result `429`
+    `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and
+    `WHITELISTED_IPS` skip the per-caller caps. Set with
+    `WEB2_MAX_INFLIGHT_PER_CALLER`, `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER`,
+    `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` and `WEB2_MAX_INFLIGHT_TOTAL`
+    (positive integers, or the node does not start); local to the node,
+    no effect on blocks or state. Behind a reverse proxy, `TRUSTED_PROXIES`
+    must name it: otherwise every client counts as the proxy, which shares
+    one cap, or, for a proxy on the same host, is loopback and skips the
+    per-caller caps (only the node-wide cap applies).
+  - Rolling restart finding (U-1): a validator restarted while its
+    committee was in a round could stay out of every later round at that
+    height. On the 3-validator rehearsal this halted the chain for about
+    10 minutes until a second restart of that validator. Apply the restart
+    rule in [Rolling upgrades](#rolling-upgrades).
+- From `v1.0.0-rc.13`:
+  - A chain started from an rc.12-or-earlier genesis on a mainnet chain id
+    refuses to boot on rc.13: `[GENESIS] Refusing to boot: the genesis does
+    not declare l2psSettlement, tlsnVerified`. rc.13 knows these two forks,
+    and on a mainnet chain id every fork the build knows must be declared in
+    the genesis file. The node stops before it writes anything. This does
+    not need a new chain: before the upgrade, the genesis owner publishes
+    the network's genesis file with
+    `"l2psSettlement": { "activationHeight": null }` and
+    `"tlsnVerified": { "activationHeight": null }` added to `forks` and
+    nothing else changed, and every validator mounts that file as it
+    upgrades. The restart check allows a file that differs from block 0
+    only in the fork schedule (`docs/design/genesis-enforcement.md`,
+    "Restart"), so `EXPECTED_GENESIS_HASH` and `EXPECTED_GENESIS_BLOCK_HASH`
+    stay the same, and `null` entries leave the fork schedule digest as it
+    was. Scheduling either fork at a height later is a schedule change (a
+    height above the tip + 50, and `tlsnVerified` with its full payload).
+    A reissued genesis (new hashes, see INSTALL.md "After the genesis is
+    reissued") starts a new chain and is needed only to start over. The
+    rc.13 `genesis-hash.ts` and `node-doctor --production` do not report
+    this refusal; from the first release after rc.13 both do (below).
+  - A validator restarted in the middle of a round rejoins the committee
+    within a round on its own. The secretary releases a late phase report
+    it already released the group from, and a validator that sees the
+    secretary open a newer round at the same height leaves its attempt
+    without signing and joins that round. Before, it could wait out its
+    green light while the round timed out, and only a second restart
+    brought it back. No setting; no effect on blocks or state.
+  - Genesis balances and validator stakes are read as decimal digits only.
+    A genesis with an amount written as `""`, with spaces, a sign, a
+    `0x`/`0b` prefix, or a JSON number above 2^53 is refused at boot
+    instead of read. Every published genesis already uses decimal strings.
+  - Launch tooling: `genesis-hash --snapshot` runs the carry-over import
+    check a node runs at boot; `launch-go-no-go` refuses a test-genesis
+    treasury on the mainnet chain id; the carry-over builder takes
+    `--zero-points`, `--drop-storage` and `--empty-storage` lists.
+  - A node on the mainnet chain id refuses to boot with
+    `XFF_MODE=legacy`. Remove the setting or set `XFF_MODE=strict` with
+    `TRUSTED_PROXIES` before upgrading.
+  - Docker validators write logs to the `node_logs` volume instead of the
+    container layer. Bare-metal `./run -e` keeps the operator's `PG_PORT`
+    instead of forcing 5332.
+  - While `editBinding` is active, a transaction the admission rules refuse
+    at RPC validation gets `GCREdit mismatch: <reason>`. Before, it got the
+    bare `GCREdit mismatch`. A reason the node does not list as public still
+    gets the bare text, and the node log has it. Launch-gate refusals keep
+    their own text, with no prefix.
+  - An empty `RAPID_API_HOST` passes `node-doctor --production` and uses the
+    Twitter API45 default.
+  - Each RapidAPI (Twitter) provider read is capped at 4.5 s (was 30 s) and
+    at most 4 MiB, or `WEB2_MAX_RESPONSE_BYTES` if that is smaller (was
+    `WEB2_MAX_RESPONSE_BYTES` alone).
+  - A missing `RAPID_API_KEY` is now refused before any request is sent.
+    Before, the request went out without a key and RapidAPI refused it.
+    Either way the Twitter check fails.
+  - L2PS and TLSNotary are on at launch. The mainnet set schedules
+    `l2psSettlement` and `tlsnVerified` at height 0 and leaves `l2psGate`
+    and `tlsnDisabled` unscheduled (`null`): they are kill switches a running
+    chain can schedule later. The set still has 29 forks at 0. `atomicWork`,
+    `networkGovernance`, `tokenStaking`, `l2psGate` and `tlsnDisabled` stay
+    `null`, and `launch-go-no-go` is NO-GO when any of them is scheduled.
+  - `tlsnVerified` carries values every validator must agree on: the
+    trusted notary keys (1 to 8 compressed secp256k1 keys), the sha256 of
+    the verifier wasm, and the presentation size, freshness and clock-skew
+    limits. They are part of the fork schedule digest, so a peer that pins
+    other keys is a schedule mismatch. In the mainnet template the notary
+    keys and the wasm sha256 are still `FILL` placeholders, and
+    `launch-go-no-go` stays NO-GO until the notary key ceremony fills the
+    keys and the release owner fills the wasm sha256. It also refuses the
+    known devnet and test notary keys.
+  - L2PS settlement (`l2psSettlement`): an L2PS transfer changes L1
+    balances only through an `l2psBatch` of up to 9 transfers with a PLONK
+    proof that every validator checks before it applies the same balance
+    changes. Before, only the node that took the transfer applied its
+    balance edits, so state could differ between nodes without any error. A
+    batch that fails its checks is included as failed with no changes.
+    Transfers in the old format are refused; L2PS clients need
+    `@kynesyslabs/demosdk` 4.0.21.
+  - Validators that are not subnet members set nothing: they verify with
+    the settlement key in the release. With `l2psSettlement` scheduled, a
+    node refuses to boot without that key, and a member also refuses to
+    boot when its proving key, circuit or first prover fails. These checks
+    run before the node serves, syncs or joins consensus. The image ships
+    the keys. A bare-metal member builds them with
+    `bun scripts/build-l2ps-zk-keys.ts`, which checks the result against the
+    committed verification key.
+  - `L2PS_SETTLEMENT_PROVERS` (default 1) sets how many settlement proofs a
+    member runs at once. Each takes one core and about 1 GB for about 40 s.
+    A value above 16 stops the node at start; a value below 1 counts as 1.
+    `L2PS_ZK_ENABLED` and the old batch proof keys are obsolete under the
+    fork; the node ignores the flag and says so at start.
+  - Under `tlsnVerified` every validator verifies TLSNotary presentations
+    itself, with a verifier compiled to wasm, shipped in the image and
+    pinned by the fork's wasm sha256. It runs in a fresh instance per call,
+    with a 64 MiB memory cap and a 1 MiB input cap. Validators still run no
+    notary: keep `TLSNOTARY_ENABLED=false` and leave out the `tlsnotary`
+    profile, as in INSTALL.
+  - When the verifier cannot run while a block applies (a wasm that does
+    not match the pin, or an instance that fails), the node throws
+    `TlsnVerifierUnavailableAtApplyError` and does not apply the block. It
+    gives no verdict, so it never fails a transaction that other nodes
+    accept. Check that the node runs the release image by digest, then
+    restart it. At RPC validation the same fault refuses the transaction
+    with a reason to retry.
+  - A `tlsn_request` now writes a token on chain: its id is the request
+    transaction hash, its owner the sender, its domain the host of the
+    URL, and it expires after 500 blocks. A `tlsn_store` and a TLSN
+    identity link each need an unused, unexpired token of their sender for
+    the attested server, and use it up. A store must be `onchain` (`ipfs`
+    is refused), within the fork's size limit, attested by a listed notary
+    key within the freshness window, with no Authorization, Cookie,
+    Proxy-Authorization or Set-Cookie value revealed, and must carry the
+    `X-Demos-Bind` header for its token. Nodes derive these edits at
+    apply; a client cannot send them.
+  - New migration `TlsnOnChainTokens1794268800000` on `gcr_tlsnotary`. Run
+    it as in [database-migrations.md](database-migrations.md) before
+    starting the new image.
+  - TLSNotary clients need the next `@kynesyslabs/demosdk` release. The node
+    opens a proxy only for a `requestTLSNproxy` sent over the HTTP RPC,
+    signed over its body with this node's public key as the audience, by
+    the sender of a confirmed, unexpired `tlsn_request` for the same host,
+    with the request hash as the token id. Other calls get 401, and
+    OmniProtocol refuses the call. The SDK the node pins, 4.0.21, still
+    sends the unsigned call.
+  - A load balancer that spreads one RPC name over several nodes without
+    sticky sessions breaks the proxy. The signed call names one node, so
+    another node answers it with 401, and the relay session lives only on
+    the node that opened it. Send TLSNotary clients to one node, with
+    sticky sessions or a per-node URL.
+  - The `wstcp` proxy is gone, and bare metal no longer needs `cargo`. Each
+    proxy session is a relay inside the node on one port of
+    `TLSNOTARY_PROXY_PORT_MIN`-`MAX`, reached through the reverse proxy's
+    `/tlsn/<port>/` route. A session admits one websocket that carries its
+    secret session id. It ends 5 minutes after it was granted, after 60 s
+    without traffic, at its byte caps, or when either side closes. Per
+    node: 3 sessions per token with one live, 2 live per owner, 4 live per
+    address, and 6 calls a minute per owner and 20 per address. These
+    limits are local to the node and do not affect blocks. The proxy
+    answers only with `TLSNOTARY_ENABLED=true`, and with
+    `503 PROXY_DISABLED` otherwise.
+  - `WSTCP_BIND_HOST` defaults to `127.0.0.1` (was `0.0.0.0`).
+    `docker-compose.yml` sets `0.0.0.0` inside the container and publishes
+    the window on loopback only. A bare-metal node that served the window
+    on a public address needs a reverse proxy on the same host.
+    `tlsnotary.getInfo` still advertises `TLSNOTARY_PROXY_PORT` (55688) for
+    older clients, but nothing listens on it, and compose now publishes it
+    on loopback only. Drop it from firewall rules.
+  - Whoever runs the stock notary (`notary-server` v0.1.0-alpha.12) should
+    give it 3 GiB. It peaks near 1 GiB per session and keeps a few hundred
+    MiB after each one; with 1.5 GiB the third session of a test run was
+    killed for memory.
+  - A `tlsn_identity_remove` or `web2_identity_remove` with an unknown
+    context, or a name such as `constructor` or `__proto__`, is refused at
+    RPC validation with `Unsupported <web2|TLSN> context: <name>`. Before,
+    the client was told the identity was removed, and the transaction then
+    failed in the block and paid its fee. The undo of a TLSN link or unlink
+    puts back exactly the link it took, and TLSN identity links accept the
+    absolute request target (`GET https://api.github.com/user`) that tlsn-js
+    sends.
+  - A node on the mainnet chain id refuses to boot without
+    `DEMOS_REQUIRE_VALIDATORS=true`, on a fresh start and on a restart. The
+    parameter sheet already lists it. A snapshot restore checks each file's
+    sha256 as it reads it, and a mismatch rolls back the genesis import.
+  - `docs/mainnet/parameters.env` adds `SIGNALING_ENABLED=false`. Copy it
+    into `.env`: `node-doctor --production` fails while it is unset or
+    different.
+  - With gossip on, the RPC refuses a transaction whose envelope is over
+    262,144 bytes (`result: 400`, the reason in `extra.error`). Before, the
+    node answered `published: true`, but peers never received it. One
+    storage program create or whole-data write now carries at most about
+    127 KiB of `json` data or about 95 KiB of `binary` data. Granular writes
+    can still grow a program to 1 MiB.
+  - Every loopback source address (all of `127.0.0.0/8` and `::1`) now skips
+    the HTTP RPC's per-address limits, not only `127.0.0.1`. A reverse proxy
+    or sidecar on the same host must be in `TRUSTED_PROXIES` and set
+    `X-Forwarded-For` or `X-Real-IP`; one that sets neither makes every
+    client it relays local. In strict mode a loopback value in a proxy
+    header is skipped, and only the last 16 `X-Forwarded-For` entries are
+    read.
+  - When GitHub rejects the node's `GITHUB_TOKEN`, a GitHub link is refused
+    with `this node's GitHub token was rejected by GitHub (expired or
+    revoked); the node operator must renew GITHUB_TOKEN`, and
+    `node-doctor --production` checks the token with one request to
+    api.github.com. After renewing it, run `docker compose up -d node`:
+    `docker compose restart` keeps the old value.
+  - `demos_peerlist.json.example` now holds a placeholder that gives no
+    peers. At bootstrap the node skips a peer-list entry with its own key,
+    and its own URL when that URL names its RPC listener. A seed that
+    answers as this node is refused, and the log names the entry to
+    remove. The validator CLI reads `{ "url": ... }` entries and skips
+    unusable ones. `show:pubkey` treats any whitespace as a word separator
+    when it looks for the old hex format.
+  - Test tooling: the quorum drills add 30-validator scenarios (shard size
+    10) and a multi-host mode; 30 validators on one host need about 51 GB
+    of memory. The backup and restore drill fails when node state is not
+    writable by uid 1000 or when node X restarted.
+  - New runbooks: [chain-halt-recovery.md](chain-halt-recovery.md),
+    [genesis-key-custody.md](genesis-key-custody.md) and
+    [exchange-integration.md](../mainnet/exchange-integration.md).
+- From the first release after `v1.0.0-rc.13`:
+  - `genesis-hash.ts` and `node-doctor --production` run the fork schedule
+    check the node runs at boot (`genesisScheduleProblems`) and fail with
+    the node's own reason, such as `the genesis does not declare
+    l2psSettlement, tlsnVerified`. Run them before the node is stopped for
+    an upgrade. `node-doctor` runs the check in the node image under
+    compose (`docker compose run --rm --no-deps node bun
+    scripts/genesis-schedule-check.ts`) and with Bun on a bare-metal host.
+  - `launch-go-no-go` needs `--expected-notary-keys id:hex[,id:hex...]`
+    (or `DEMOS_EXPECTED_NOTARY_KEYS`) on a mainnet chain id, for GO and for
+    `--plan`, and is NO-GO when the genesis `tlsnVerified.notaryKeys` are
+    not exactly those keys. Before, any well-formed key that was not one of
+    this repository's test keys passed.
+  - `launch-height1-check` defaults to `--timeout 20000` and
+    `--max-scan 1000` (were 5000 and 20), and stops reading blocks at the
+    first one that carries a transaction. Run from outside the validators'
+    network, the old defaults timed a probe out and reported INCONCLUSIVE
+    once the head was past block 20.
+  - A node with `TLSNOTARY_ENABLED=true` and no notary answering at
+    `TLSNOTARY_HOST:TLSNOTARY_PORT` runs as a relay only: it logs a warning
+    and keeps serving `requestTLSNproxy`, and `/health` no longer reports
+    the `tlsnotary` subsystem as failed. With `TLSNOTARY_FATAL=true` it
+    still exits.
 
 ## Known limits
 
 - Debian packages installed with `apt-get` (curl, ca-certificates, xz)
-  and the `wstcp` crate's dependencies are resolved at build time. The two CI builds run minutes
+  are resolved at build time. The two CI builds run minutes
   apart and resolve the same versions; a rebuild weeks later may not.
   Pinning them to a snapshot is the next step if a later rebuild has to
   match byte for byte.

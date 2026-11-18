@@ -1,0 +1,203 @@
+# TLSNotary end-to-end stack: postgres, 4 validators and 3 stock notaries,
+# driven only by run.sh, which sets every ${VAR} below through a per-run env
+# file.
+#
+# notary-1 and notary-2 hold the keys the run's genesis trusts under
+# tlsnVerified; notary-3 holds a key nobody trusts. Every key is generated
+# for the run and deleted with it. Built for a shared host, after
+# ../l2ps-settlement-e2e:
+#   - no container_name and a per-run compose project, so teardown
+#     (`down -v`) touches only this stack;
+#   - postgres data and each node's state dir on tmpfs, no named volumes;
+#   - memory caps on every container;
+#   - every port published on 127.0.0.1 only. Each node's relay window is
+#     published 1:1, because the session URL a node hands out names its own
+#     port; the harness stands in for the operator's reverse proxy.
+
+x-node-env: &node-env
+  NODE_ENV: development
+  LOG_LEVEL: info
+  PG_HOST: postgres
+  PG_PORT: "5432"
+  PG_USER: demosuser
+  PG_PASSWORD: demospass
+  CONSENSUS_TIME: "${CONSENSUS_TIME}"
+  TLSNOTARY_ENABLED: "true"
+  TLSNOTARY_MODE: docker
+  TLSNOTARY_PORT: "7047"
+  # The relay listens on loopback by default; inside a container that is
+  # unreachable through the published window.
+  WSTCP_BIND_HOST: 0.0.0.0
+  L2PS_MESSAGING_ENABLED: "false"
+  L2PS_ZK_ENABLED: "false"
+  IDENTITY_FILE: /app/state/node.identity
+
+x-node: &node
+  image: ${E2E_IMAGE}
+  # The identity is copied into a tmpfs state dir so the node's identity lock
+  # and signing record stay inside the container and nothing root-owned is
+  # left in the run dir. A readable stdin keeps the node from exiting at boot.
+  entrypoint:
+    - bash
+    - -lc
+    - mkdir -p /app/state && cp /app/keys/node.identity /app/state/node.identity && exec ./testing/devnet/run-devnet < /dev/null
+  # A node that cannot pair with the anchor at a cold boot exits with code 0;
+  # it is restarted until the mesh forms. `down -v` stops it regardless.
+  restart: unless-stopped
+  mem_limit: ${NODE_MEM}
+  memswap_limit: ${NODE_MEM}
+  tmpfs:
+    - /app/state
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - e2enet
+
+x-notary: &notary
+  image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12@sha256:a0c3b6196a39b0fecb0b0296fe4359bf6a1e95cd9fff617cabe4009ed749d378
+  # MPC preprocessing for a 16 KiB session peaks near 1 GiB, and the server
+  # keeps a few hundred MiB after each session: at 1.5 GiB the third session
+  # of a run was OOM-killed.
+  mem_limit: 3g
+  memswap_limit: 3g
+  restart: "no"
+  environment:
+    NS_NOTARIZATION__PRIVATE_KEY_PATH: /keys/notary.key
+    # The SDK prover asks for 16 KiB sent / 16 KiB received; the server's
+    # 4 KiB default refuses every SDK session.
+    NS_NOTARIZATION__MAX_SENT_DATA: "32768"
+    NS_NOTARIZATION__MAX_RECV_DATA: "65536"
+  networks:
+    - e2enet
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: "no"
+    environment:
+      POSTGRES_USER: demosuser
+      POSTGRES_PASSWORD: demospass
+      POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ../devnet/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U demosuser -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks:
+      - e2enet
+
+  notary-1:
+    <<: *notary
+    ports:
+      - "127.0.0.1:${NOTARY_PORT_1}:7047"
+    volumes:
+      - ${RUN_DIR}/inputs/notary-1:/keys:ro
+
+  notary-2:
+    <<: *notary
+    ports:
+      - "127.0.0.1:${NOTARY_PORT_2}:7047"
+    volumes:
+      - ${RUN_DIR}/inputs/notary-2:/keys:ro
+
+  notary-3:
+    <<: *notary
+    ports:
+      - "127.0.0.1:${NOTARY_PORT_3}:7047"
+    volumes:
+      - ${RUN_DIR}/inputs/notary-3:/keys:ro
+
+  node-1:
+    <<: *node
+    hostname: node1-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node1_db
+      PORT: "53551"
+      OMNI_PORT: "53552"
+      EXPOSED_URL: http://node-1:53551
+      TLSNOTARY_HOST: notary-1
+      TLSNOTARY_PROXY_PORT_MIN: "${RELAY_MIN_1}"
+      TLSNOTARY_PROXY_PORT_MAX: "${RELAY_MAX_1}"
+    ports:
+      - "127.0.0.1:${RPC_PORT_1}:53551"
+      - "127.0.0.1:${RELAY_MIN_1}-${RELAY_MAX_1}:${RELAY_MIN_1}-${RELAY_MAX_1}"
+    volumes:
+      - ${RUN_DIR}/inputs/node1.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+
+  node-2:
+    <<: *node
+    hostname: node2-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node2_db
+      PORT: "53553"
+      OMNI_PORT: "53554"
+      EXPOSED_URL: http://node-2:53553
+      TLSNOTARY_HOST: notary-1
+      TLSNOTARY_PROXY_PORT_MIN: "${RELAY_MIN_2}"
+      TLSNOTARY_PROXY_PORT_MAX: "${RELAY_MAX_2}"
+    ports:
+      - "127.0.0.1:${RPC_PORT_2}:53553"
+      - "127.0.0.1:${RELAY_MIN_2}-${RELAY_MAX_2}:${RELAY_MIN_2}-${RELAY_MAX_2}"
+    volumes:
+      - ${RUN_DIR}/inputs/node2.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+
+  node-3:
+    <<: *node
+    hostname: node3-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node3_db
+      PORT: "53555"
+      OMNI_PORT: "53556"
+      EXPOSED_URL: http://node-3:53555
+      TLSNOTARY_HOST: notary-2
+      TLSNOTARY_PROXY_PORT_MIN: "${RELAY_MIN_3}"
+      TLSNOTARY_PROXY_PORT_MAX: "${RELAY_MAX_3}"
+    ports:
+      - "127.0.0.1:${RPC_PORT_3}:53555"
+      - "127.0.0.1:${RELAY_MIN_3}-${RELAY_MAX_3}:${RELAY_MIN_3}-${RELAY_MAX_3}"
+    volumes:
+      - ${RUN_DIR}/inputs/node3.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+
+  node-4:
+    <<: *node
+    hostname: node4-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node4_db
+      PORT: "53557"
+      OMNI_PORT: "53558"
+      EXPOSED_URL: http://node-4:53557
+      TLSNOTARY_HOST: notary-2
+      TLSNOTARY_PROXY_PORT_MIN: "${RELAY_MIN_4}"
+      TLSNOTARY_PROXY_PORT_MAX: "${RELAY_MAX_4}"
+    ports:
+      - "127.0.0.1:${RPC_PORT_4}:53557"
+      - "127.0.0.1:${RELAY_MIN_4}-${RELAY_MAX_4}:${RELAY_MIN_4}-${RELAY_MAX_4}"
+    volumes:
+      - ${RUN_DIR}/inputs/node4.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+
+networks:
+  e2enet:
+    driver: bridge

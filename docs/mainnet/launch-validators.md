@@ -56,7 +56,8 @@ bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
   --operators mainnet/launch-validators.json \
-  --expected-treasury <agreed treasury address>
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony>
 ```
 
 Each rule prints one `PASS` or `FAIL` line, followed by the counts per

@@ -10,17 +10,23 @@
  *
  *   bun testing/forks/rehearsal/lib/judgeHaltDrill.ts <input.json> [--out <verdict.json>]
  *
- * Exit codes: 0 pass, 1 fail, 2 the input could not be read or is malformed
- * (no verdict). Prints one line per phase, the timings and a `DRILL_TIMINGS`
- * JSON line, as scenario 12 does.
+ * Exit codes: 0 pass, 1 fail, 2 the input could not be read or is malformed,
+ * or its genesis did not have quorumParity, committeeBinding and commitLock
+ * active at block 0 (no verdict). Prints one line per phase, the timings and
+ * a `DRILL_TIMINGS` JSON line, as scenario 12 does.
  *
- * Two modes:
+ * Three modes:
  *  - `halt`: P1 baseline, P2 settle, P3 halt, P4 halt agreement, P5 recovery
  *    and P6 no crash, as in scenario 12.
  *  - `ride`: P1 baseline, R2 ride (the survivors keep forging, every block
  *    carries >= q signatures and one hash) and P6 no crash. Only valid for a
  *    stop count the committee code guarantees the chain tolerates
  *    (`guaranteedTolerance`).
+ *  - `safe` (`third-*`): at most a third stopped, beyond that guarantee, so
+ *    the chain may forge or pause depending on the draws. P1 baseline, S2 the
+ *    survivors keep answering and no head goes back, S3 every block forged
+ *    meanwhile has >= q signatures and one hash on every survivor, P5
+ *    recovery from the survivors' common height, P6 no crash.
  */
 
 import { readFileSync, writeFileSync } from "fs"
@@ -41,7 +47,7 @@ import {
     signatureQuorum,
 } from "./haltDrill"
 
-export type DrillMode = "halt" | "ride"
+export type DrillMode = "halt" | "ride" | "safe"
 
 export interface DrillInput {
     scenario: string
@@ -65,8 +71,11 @@ export interface DrillInput {
     /** Identities in the peerlist committed in the pre-stop block. */
     preStopPeerlist: number
     restartCounts: { before: Record<number, number>; after: Record<number, number> }
-    /** Halt mode; null when the run ended before that phase. */
-    settle: { heads: Record<number, number>; rows: BlockRow[] } | null
+    /**
+     * Halt and safe modes; null when the run ended before that phase. In safe
+     * mode `height` is the survivors' common height (one hash there).
+     */
+    settle: { heads: Record<number, number>; rows: BlockRow[]; height?: number } | null
     hold: { samples: HeightSample[] } | null
     recovery: { blocks: number; heads: Record<number, number>; rows: BlockRow[] } | null
     /** Ride mode; null when the run ended before that phase. */
@@ -176,6 +185,16 @@ function readMarks(v: unknown, path: string, problems: Problems): DrillMarks {
     return marks
 }
 
+/**
+ * Forks the pass criteria rest on: the bound committee and the lock on top of
+ * it (DRILL_REQUIRED_FORKS in testing/devnet/quorum-drills/drill_inputs.py).
+ * run.sh and drill_inputs.py refuse a fork set without them before the drill
+ * starts; the judge checks again, since without them a pass or a fail would
+ * judge other rules: an input whose genesis does not have each one active at
+ * block 0 gets no verdict (exit 2).
+ */
+export const DRILL_REQUIRED_FORKS = ["quorumParity", "committeeBinding", "commitLock"] as const
+
 function readForks(v: unknown, path: string, problems: Problems): Record<string, number | null> {
     const out: Record<string, number | null> = {}
     if (!isRecord(v)) {
@@ -184,6 +203,11 @@ function readForks(v: unknown, path: string, problems: Problems): Record<string,
     }
     for (const [name, h] of Object.entries(v)) {
         out[name] = h === null ? null : readInt(h, `${path}.${name}`, problems)
+    }
+    for (const name of DRILL_REQUIRED_FORKS) {
+        if (name in v && v[name] === 0) continue
+        const got = name in v ? JSON.stringify(v[name]) : "no entry"
+        problems.push(`${path}.${name}: the drill needs ${name} active at block 0, got ${got}`)
     }
     return out
 }
@@ -223,8 +247,8 @@ export function parseDrillInput(raw: unknown): DrillInput {
     if (!isRecord(raw)) throw new DrillInputError(["the input is not a JSON object"])
 
     const mode = raw.mode
-    if (mode !== "halt" && mode !== "ride") {
-        problems.push(`mode: expected "halt" or "ride", got ${JSON.stringify(mode)}`)
+    if (mode !== "halt" && mode !== "ride" && mode !== "safe") {
+        problems.push(`mode: expected "halt", "ride" or "safe", got ${JSON.stringify(mode)}`)
     }
     const validators = readInt(raw.validators, "validators", problems, 1)
     const stopped = readIntList(raw.stopped, "stopped", problems)
@@ -241,7 +265,7 @@ export function parseDrillInput(raw: unknown): DrillInput {
 
     const input: DrillInput = {
         scenario: readString(raw.scenario, "scenario", problems),
-        mode: mode === "ride" ? "ride" : "halt",
+        mode: mode === "ride" || mode === "safe" ? mode : "halt",
         validators,
         shardSize: readInt(raw.shardSize, "shardSize", problems, 1),
         stopped,
@@ -265,6 +289,7 @@ export function parseDrillInput(raw: unknown): DrillInput {
         settle: readPhase(raw.settle, "settle", problems, o => ({
             heads: readHeads(o.heads, "settle.heads", problems),
             rows: readRows(o.rows, "settle.rows", problems),
+            ...(o.height === undefined ? {} : { height: readInt(o.height, "settle.height", problems) }),
         })),
         hold: readPhase(raw.hold, "hold", problems, o => ({
             samples: readSamples(o.samples, "hold.samples", problems),
@@ -325,6 +350,50 @@ export function ridePreconditionError(
     return null
 }
 
+/** Null when the safe drill is meaningful, otherwise why not. */
+export function safePreconditionError(validators: number, shardSize: number, stopped: number): string | null {
+    if (stopped * 3 > validators) {
+        return `${stopped} stopped is more than a third of ${validators}: that is the halt drill, not the safe one`
+    }
+    const quorum = signatureQuorum(shardSize, validators)
+    if (validators - stopped < quorum) {
+        return `${validators - stopped} survivors are fewer than the quorum ${quorum}: they could never sign a block`
+    }
+    return null
+}
+
+/**
+ * S2 for the safe drill: every survivor answered in every sample and no head
+ * went below the pre-stop height or below its own previous sample.
+ */
+export function evaluateSafeHold(
+    survivors: number[],
+    preStopHeight: number,
+    samples: HeightSample[],
+    minSamples: number,
+): { pass: boolean; reasons: string[] } {
+    const reasons: string[] = []
+    if (samples.length < minSamples) {
+        reasons.push(`${samples.length} hold samples < required ${minSamples}`)
+    }
+    const last: Record<number, number> = {}
+    for (const [k, s] of samples.entries()) {
+        for (const id of survivors) {
+            const h = s.heights[id]
+            if (h === undefined || h < 0) {
+                reasons.push(`sample ${k + 1}: survivor node-${id} did not answer`)
+                continue
+            }
+            if (h < preStopHeight) reasons.push(`sample ${k + 1}: node-${id} head ${h} < pre-stop ${preStopHeight}`)
+            if (last[id] !== undefined && h < last[id]) {
+                reasons.push(`sample ${k + 1}: node-${id} head went back ${last[id]} -> ${h}`)
+            }
+            last[id] = h
+        }
+    }
+    return { pass: reasons.length === 0, reasons }
+}
+
 export interface PhaseResult {
     id: string
     name: string
@@ -378,6 +447,30 @@ function agreementAt(
     return evaluateRecovery(nodes, height, height, heads, rows, quorum).reasons
 }
 
+/**
+ * The recovery read alone cannot see a block rewritten after the settle read:
+ * every node may agree on the new hash. A height in both reads must keep the
+ * hash the survivors settled on.
+ */
+function rewrittenSinceSettle(settleRows: BlockRow[], recoveryRows: BlockRow[]): string[] {
+    const settled = new Map<number, Set<string>>()
+    for (const r of settleRows) {
+        const s = settled.get(r.number) ?? new Set<string>()
+        s.add(r.hash)
+        settled.set(r.number, s)
+    }
+    const reasons: string[] = []
+    for (const r of recoveryRows) {
+        const s = settled.get(r.number)
+        if (s !== undefined && !s.has(r.hash)) {
+            reasons.push(
+                `height ${r.number}: node-${r.node} holds ${r.hash} at recovery, settled as ${[...s].join(" / ")}`,
+            )
+        }
+    }
+    return reasons
+}
+
 function span(from: number | null, to: number | null): number | null {
     return from === null || to === null ? null : to - from
 }
@@ -398,7 +491,7 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
         const pass = phases.every(p => p.pass)
         const summary =
             `pre=${input.preStopHeight} ` +
-            (heights.haltHeight !== null ? `halt=${heights.haltHeight} ` : "") +
+            (heights.haltHeight !== null ? `${input.mode === "safe" ? "common" : "halt"}=${heights.haltHeight} ` : "") +
             (heights.targetHeight !== null ? `target=${heights.targetHeight} ` : "") +
             phases.map(p => `${p.id}=${p.pass ? "ok" : "FAIL"}`).join(" ")
         return {
@@ -426,7 +519,9 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
     const precondition =
         input.mode === "halt"
             ? drillPreconditionError(input.shardSize, input.validators, survivors.length)
-            : ridePreconditionError(
+            : input.mode === "safe"
+              ? safePreconditionError(input.validators, input.shardSize, input.stopped.length)
+              : ridePreconditionError(
                   input.shardSize,
                   input.validators,
                   input.stopped.length,
@@ -476,6 +571,58 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
                 quorum,
             )
             phases.push(phase("R2", "ride", withinDeadline(r.reasons, input.marks.t_converged)))
+        }
+        crash()
+        return verdict()
+    }
+
+    if (input.mode === "safe") {
+        // S2 survivors keep answering, heads never go back
+        if (input.hold === null) {
+            phases.push(phase("S2", "survivors live", [NOT_REACHED]))
+        } else {
+            phases.push(
+                phase(
+                    "S2",
+                    "survivors live",
+                    evaluateSafeHold(survivors, input.preStopHeight, input.hold.samples, input.holdRounds).reasons,
+                ),
+            )
+        }
+        // S3 every block forged while a third was down is a quorum block on one chain
+        const settle = input.settle
+        if (settle === null) {
+            phases.push(phase("S3", "no fork", [NOT_REACHED]))
+        } else {
+            const common = settle.height ?? agreedHeight(survivors, settle.heads)
+            if (common === null || common === undefined) {
+                phases.push(phase("S3", "no fork", [`no common survivor height: ${JSON.stringify(settle.heads)}`]))
+            } else {
+                heights.haltHeight = common
+                heights.settleBlocks = common - input.preStopHeight
+                const reasons = evaluateSettle(survivors, input.preStopHeight, common, settle.rows, quorum).reasons
+                for (const id of survivors) {
+                    const h = settle.heads[id]
+                    if (h === undefined || h < common) reasons.push(`node-${id} head ${h ?? "none"} < common height ${common}`)
+                }
+                phases.push(phase("S3", "no fork", reasons))
+            }
+        }
+        // P5 recovery from the common height
+        if (heights.haltHeight === null || input.recovery === null) {
+            phases.push(phase("P5", "recovery", [heights.haltHeight === null ? "no common height" : NOT_REACHED]))
+        } else {
+            heights.targetHeight = heights.haltHeight + input.recovery.blocks
+            const r = evaluateRecovery(
+                nodes,
+                input.preStopHeight,
+                heights.targetHeight,
+                input.recovery.heads,
+                input.recovery.rows,
+                quorum,
+            )
+            const reasons = [...r.reasons, ...(settle === null ? [] : rewrittenSinceSettle(settle.rows, input.recovery.rows))]
+            phases.push(phase("P5", "recovery", withinDeadline(reasons, input.marks.t_converged)))
         }
         crash()
         return verdict()
@@ -546,7 +693,8 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
             input.recovery.rows,
             quorum,
         )
-        phases.push(phase("P5", "recovery", withinDeadline(r.reasons, input.marks.t_converged)))
+        const reasons = [...r.reasons, ...(settle === null ? [] : rewrittenSinceSettle(settle.rows, input.recovery.rows))]
+        phases.push(phase("P5", "recovery", withinDeadline(reasons, input.marks.t_converged)))
     }
 
     crash()
@@ -593,8 +741,11 @@ export function formatReport(input: DrillInput, verdict: DrillVerdict): string[]
         )
     } else {
         lines.push(
-            `timing: stop to halt confirmed ${formatSeconds(d.stopToHaltConfirmedMs)}`,
-            `timing: halt hold ${formatSeconds(d.haltHoldMs)}`,
+            // Safe mode marks the hold from the stop (t_halt_confirmed is its start)
+            input.mode === "safe"
+                ? `timing: hold with a third down ${formatSeconds(d.haltHoldMs)}`
+                : `timing: stop to halt confirmed ${formatSeconds(d.stopToHaltConfirmedMs)}`,
+            ...(input.mode === "safe" ? [] : [`timing: halt hold ${formatSeconds(d.haltHoldMs)}`]),
             `timing: restart to first new block ${formatSeconds(d.restartToFirstNewBlockMs)}`,
             `timing: restart to all ${input.validators} converged ${formatSeconds(d.restartToConvergedMs)}`,
         )

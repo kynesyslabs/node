@@ -432,6 +432,20 @@ export type TelegramSenderBindingConfig = BaseForkConfig
 export type XmRemoveCanonicalConfig = BaseForkConfig
 
 /**
+ * `l2psSettlement` fork: an `l2psBatch` moves L1 balances on every node, in
+ * the block that carries it, through a settlement record (net change per
+ * account, the senders' signed transfer commitments and a PLONK proof that
+ * ties them together). Spec: docs/design/l2ps-zk-settlement.md, "Interface v1".
+ *
+ * Before it, only the entry node applied a batch's edits, from its local
+ * `l2ps_proofs` rows, so every other node's balances diverged (DEM-816).
+ * Active, that local path is off, a batch without a valid settlement fails
+ * with no edits, and members refuse old-format L2PS transfers. Dormant by
+ * default; a mainnet genesis sets 0. No payload beyond the base.
+ */
+export type L2psSettlementConfig = BaseForkConfig
+
+/**
  * `l2psGate` fork: L2PS is off. The four L2PS transaction types
  * (`l2psEncryptedTx`, `l2psBatch`, `l2ps_hash_update`, `subnet`) are refused
  * at RPC intake, pool admission, the consensus merge and apply; the L2PS
@@ -454,6 +468,42 @@ export type L2psGateConfig = BaseForkConfig
  * No payload beyond the base.
  */
 export type TlsnDisabledConfig = BaseForkConfig
+
+/** A notary signing key, in the form the verifier reports `verifyingKey`. */
+export interface TlsnNotaryKey {
+    /** Operator label; names the key in refusals and logs. */
+    id: string
+    alg: "k256"
+    /** 33-byte SEC1 compressed secp256k1 public key, lowercase hex (66 chars). */
+    hex: string
+}
+
+/** The `tlsnVerified` payload, complete once the loader has accepted it. */
+export interface TlsnVerifiedParams {
+    /** The notaries whose attestations the node accepts. */
+    notaryKeys: readonly TlsnNotaryKey[]
+    /** sha256 of the verifier wasm this chain verifies with. */
+    verifierWasmSha256: string
+    /** Largest presentation, in bytes, the node verifies or stores. */
+    maxPresentationBytes: number
+    /** How old, in seconds before the block time, an attested connection may be. */
+    freshnessWindowSec: number
+    /** How far, in seconds, an attested time may lie after the block time. */
+    futureSkewSec: number
+}
+
+/**
+ * `tlsnVerified` fork: the node verifies a TLSNotary presentation itself, in
+ * the pinned wasm verifier, against the notary keys listed here, instead of
+ * checking its structure only. Keys rotate through a release that schedules a
+ * new payload, since governance is dormant at launch. `tlsnDisabled`, once
+ * scheduled, still refuses every TLSNotary transaction. Dormant by default;
+ * a mainnet genesis sets 0 with the keys from the notary key ceremony.
+ *
+ * The payload may be absent only while the fork is unscheduled (the code
+ * default); the loader refuses a scheduled entry without it.
+ */
+export interface TlsnVerifiedConfig extends BaseForkConfig, Partial<TlsnVerifiedParams> {}
 
 /**
  * `storageFeeSettlement` fork: the storage fee of a Storage Program create or
@@ -611,8 +661,10 @@ export type ForkConfig =
     | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
+    | L2psSettlementConfig
     | L2psGateConfig
     | TlsnDisabledConfig
+    | TlsnVerifiedConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -648,10 +700,12 @@ export type ForkName =
     | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
+    | "l2psSettlement"
     | "l2psGate"
     | "tlsnDisabled"
     | "storageFeeSettlement"
     | "referenceBlockRoom10"
+    | "tlsnVerified"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -686,10 +740,12 @@ export interface ForkConfigByName {
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
+    l2psSettlement: L2psSettlementConfig
     l2psGate: L2psGateConfig
     tlsnDisabled: TlsnDisabledConfig
     storageFeeSettlement: StorageFeeSettlementConfig
     referenceBlockRoom10: ReferenceBlockRoom10Config
+    tlsnVerified: TlsnVerifiedConfig
 }
 
 /**
@@ -993,6 +1049,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "An xm identity remove finds the stored entry by the chain's canonical " +
             "address form, as admission compares them.",
     },
+    l2psSettlement: {
+        // Dormant by default: it changes the balances an l2psBatch moves, and
+        // a missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An l2psBatch settles on every node through a proven net-change record; " +
+            "the entry node's local L2PS proof path is off.",
+    },
     l2psGate: {
         // Dormant by default: it refuses traffic a running chain accepts, and
         // a missing genesis entry hydrates from here. A mainnet genesis that
@@ -1027,6 +1091,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         description:
             "A transaction's reference block may be up to 10 blocks behind the head " +
             "(deep window 50) instead of 1 (deep window 5).",
+    },
+    tlsnVerified: {
+        // Dormant by default and without keys: a node cannot verify a
+        // presentation without the notary keys the chain agreed on, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0
+        // with its payload.
+        activationHeight: null,
+        description:
+            "TLSNotary presentations are verified by the node in the pinned wasm verifier " +
+            "against the notary keys of the fork payload.",
     },
 }
 
@@ -1066,9 +1140,11 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
+        l2psSettlement: { ...DEFAULT_FORK_CONFIG.l2psSettlement },
         l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
         tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
         storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
         referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
+        tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
     }
 }

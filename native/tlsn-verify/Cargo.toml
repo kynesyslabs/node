@@ -1,0 +1,47 @@
+[package]
+name = "demos-tlsn-verify"
+version = "1.0.0"
+edition = "2021"
+publish = false
+description = "Deterministic verify-only TLSNotary presentation checker (tlsn v0.1.0-alpha.12) for the Demos node, built to wasm32 with no host imports."
+license = "MIT"
+
+# Standalone: never pulled into another cargo workspace by accident.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# tlsn v0.1.0-alpha.12. A rev, not the tag, so a moved tag cannot change the
+# build; the prover (tlsn-js) and the notary image must be the same release.
+tlsn-core = { git = "https://github.com/tlsnotary/tlsn", rev = "f2ff4ba79245ea641c485ce11efb2cb574292abb" }
+tlsn-tls-core = { git = "https://github.com/tlsnotary/tlsn", rev = "f2ff4ba79245ea641c485ce11efb2cb574292abb" }
+bincode = "=1.3.3"
+hex = "=0.4.3"
+serde_json = "=1.0.140"
+# The root store is consensus data: a different set can flip a verdict.
+# 0.26.11 only re-exports 1.0.0, so both are pinned exactly; any change is a
+# new verifier version behind a fork.
+webpki-roots = "=0.26.11"
+webpki-roots-data = { package = "webpki-roots", version = "=1.0.0" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom02 = { package = "getrandom", version = "=0.2.16", features = ["custom"] }
+getrandom03 = { package = "getrandom", version = "=0.3.3" }
+
+[[bin]]
+name = "tlsn-verify-native"
+path = "src/bin/tlsn-verify-native.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true
+
+[profile.release.package.demos-tlsn-verify]
+opt-level = "s"
+
+[patch.crates-io]
+web-time = { path = "shims/web-time" }

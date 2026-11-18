@@ -21,6 +21,8 @@ import manageBridges from "./manageBridge"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import { RateLimiter } from "./middleware/rateLimiter"
+import { rateLimitSubject } from "./middleware/rateLimitSubject"
+import type { Web2FetchCaller } from "@/features/web2/web2FetchLimiter"
 import { SUDO_METHODS } from "./peerHttpAuth"
 import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
@@ -56,6 +58,19 @@ export function isRPCRequest(obj: any): obj is RPCRequest {
         "params" in obj &&
         Array.isArray(obj.params)
     )
+}
+
+/**
+ * The caller a web2 fetch from an RPC client is counted against: its address
+ * as the rate limiter resolved it (proxy headers only from trusted proxies),
+ * grouped the same way, so every address of one IPv6 /64 shares a budget.
+ */
+function web2CallerForClient(clientIP: string | undefined): Web2FetchCaller {
+    const ip = clientIP || "unknown"
+    return {
+        key: `ip:${rateLimitSubject(ip)}`,
+        exempt: RateLimiter.getInstance().isWhitelistedIP(ip),
+    }
 }
 
 export async function processPayload(
@@ -113,7 +128,15 @@ export async function processPayload(
                 payload.params,
                 sender,
             )
-            log.info(`[RPC Call] Merged mempool from: ${sender}`)
+            // Hashes only: the full response carries every mempool tx, and an
+            // L2PS entry node must not write tx payloads to INFO logs.
+            const merged = (res?.response as { txs?: { hash?: string }[] } | undefined)?.txs
+            log.info(
+                `[RPC Call] Merged mempool from: ${sender} (result ${res?.result}, ${Array.isArray(merged) ? merged.length : 0} txs)`,
+            )
+            if (Array.isArray(merged) && merged.length > 0) {
+                log.debug(`[RPC Call] Mempool merge tx hashes: ${merged.map(tx => tx?.hash).join(",")}`)
+            }
             return res
         }
         case "peerlist":
@@ -125,6 +148,7 @@ export async function processPayload(
                 return await manageNodeCall(
                     payload.params[0] as NodeCall,
                     sender,
+                    clientIP,
                 )
             } catch (error) {
                 log.error(`[RPC Call] Error in nodeCall: ${error}`)
@@ -157,7 +181,10 @@ export async function processPayload(
 
         case "web2ProxyRequest": {
             const params = parseWeb2ProxyRequest(payload.params[0])
-            return await handleWeb2ProxyRequest(params)
+            return await handleWeb2ProxyRequest(
+                params,
+                web2CallerForClient(clientIP),
+            )
         }
 
         case "rate-limit/unblock": {

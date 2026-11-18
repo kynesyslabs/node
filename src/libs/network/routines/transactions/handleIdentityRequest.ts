@@ -18,11 +18,9 @@ import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
 import Datasource from "@/model/datasource"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { attestationContextError } from "@/features/zk/proof/publicSignals"
+import { TLSN_CONTEXTS, WEB2_CONTEXTS } from "@/libs/identity/web2Contexts"
 
-interface IdentityResponse {
-    success: boolean
-    message: string
-}
+import type { IdentityResponse } from "./identityReply"
 
 /**
  * Verifies the signature in the identity payload using the appropriate handler
@@ -132,8 +130,9 @@ export default async function handleIdentityRequest(
                 sender,
             )
         case "tlsn_identity_assign":
-            // TLSNotary identity verification - verify proof structure
-            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
+            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload, {
+                sender,
+            })
         case "zk_commitmentadd": {
             const commitments = payload.payload as IdentityCommitmentPayload[]
             if (!Array.isArray(commitments) || commitments.length === 0) {
@@ -177,14 +176,31 @@ export default async function handleIdentityRequest(
                 message: result.reason ?? (result.valid ? "ZK attestation verified" : "Invalid ZK attestation"),
             }
         }
+        case "web2_identity_remove":
+        case "tlsn_identity_remove": {
+            // No link is stored under another context, so the remove could
+            // only fail in its block (an inherited name such as constructor
+            // used to throw there); the client is told now instead.
+            const web2 = payload.method === "web2_identity_remove"
+            const context = (payload.payload as { context?: unknown }).context
+            const known = web2 ? WEB2_CONTEXTS : TLSN_CONTEXTS
+            if (typeof context !== "string" || !known.has(context)) {
+                return {
+                    success: false,
+                    message: `Unsupported ${web2 ? "web2" : "TLSN"} context: ${String(context)}`,
+                }
+            }
+            return {
+                success: true,
+                message: "Identity removed",
+            }
+        }
         case "xm_identity_remove":
         case "pqc_identity_remove":
-        case "web2_identity_remove":
         case "nomis_identity_remove":
         case "ethos_identity_remove":
         case "ud_identity_remove":
         case "humanpassport_identity_remove":
-        case "tlsn_identity_remove":
             return {
                 success: true,
                 message: "Identity removed",

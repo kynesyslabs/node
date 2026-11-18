@@ -20,6 +20,7 @@
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
  *       --operators operators.json --snapshot data/snapshot \
  *       --genesis-hash BLOCK_HASH --commit SHA --expected-treasury ADDRESS \
+ *       --expected-notary-keys ID:HEX[,ID:HEX...] \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
  * operators.json maps each validator identity to { operator, provider,
@@ -28,7 +29,7 @@
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
  *       --snapshot mainnet/snapshot --operators operators.json \
- *       --expected-treasury ADDRESS
+ *       --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]
  *
  * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
@@ -46,6 +47,7 @@ import {
     type ForkName,
 } from "src/forks/forkConfig"
 import { treasuryAddressProblem } from "src/forks/treasuryAddress"
+import { notaryKeyProblems, tlsnVerifiedProblems } from "src/forks/tlsnVerifiedPayload"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -187,18 +189,27 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
-    "l2psGate",
-    "tlsnDisabled",
     "xmProofBinding",
     "storageFeeSettlement",
     "referenceBlockRoom10",
+    "l2psSettlement",
+    "tlsnVerified",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
+ * l2psGate and tlsnDisabled are the L2PS and TLSNotary kill switches: both
+ * features run from block 0 and a switch is scheduled only if its feature
+ * has to be stopped.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["atomicWork", "networkGovernance", "tokenStaking"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
+    "atomicWork",
+    "networkGovernance",
+    "tokenStaking",
+    "l2psGate",
+    "tlsnDisabled",
+]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a
@@ -628,8 +639,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 /**
  * NO-GO reasons for a genesis whose fork block is not mainnet's: a mainnet
  * fork not at block 0, a launch-dormant fork scheduled, a fork this build
- * knows left undeclared, or a scheduled gasFeeSeparation without its own
- * treasury.
+ * knows left undeclared, a scheduled gasFeeSeparation without its own
+ * treasury, or a scheduled tlsnVerified without real notary keys.
  */
 export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
     if (!genesis) {
@@ -660,6 +671,7 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
                 "or null, or it takes the code default (see docs/mainnet/genesis.md)",
         )
     }
+    reasons.push(...tlsnNotaryReasons(forks.tlsnVerified))
     const gas = forks.gasFeeSeparation
     if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
         if (typeof gas.treasuryAddress !== "string") {
@@ -668,6 +680,94 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
             const problem = treasuryAddressProblem(gas.treasuryAddress)
             if (problem) reasons.push(`fork gasFeeSeparation is scheduled with a treasuryAddress the node refuses: ${problem}`)
         }
+    }
+    return reasons
+}
+
+/**
+ * Notary keys of the devnet genesis and of the TLSNotary spike and its test
+ * vectors (testing/tlsn-vectors). None comes from the notary key ceremony: their
+ * private halves are test material nobody guards, so whoever holds one could
+ * attest anything on mainnet.
+ */
+export const KNOWN_TEST_NOTARY_KEYS: readonly string[] = [
+    // testing/devnet/genesis.devnet.json
+    "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e",
+    "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870",
+    // spike-notary-k and the stock notary's ephemeral key in the test vectors
+    "031b38ff37bef18876d8196c53461c59f7ac587b239fb88380b4c2af2d3f0feb8e",
+    "03371c811e56a2b3472038341ab5a7f4c447504c05003ac0536db236c0c731b9e0",
+    // the same two keys from the W1a spike run, which earlier vectors carried
+    "03d60e95452b0bef1253df2dc6bbc3c955b0e1511d0ce37a0543d888a6430b580c",
+    "0297a6f938678de7b1ed4d1b8b9ce5bdded7e6e5dfe6ef42a08a4d0a6d1a188596",
+]
+
+/** The committed sha256 file of the verifier wasm this build ships. */
+export const TLSN_VERIFIER_SHA256_FILE = path.join(
+    import.meta.dir,
+    "../native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256",
+)
+
+/** The sha256 the committed file names, or null when it cannot be read. */
+export function committedVerifierSha256(file = TLSN_VERIFIER_SHA256_FILE): string | null {
+    try {
+        const first = fs.readFileSync(file, "utf8").trim().split(/\s+/)[0]
+        return /^[0-9a-f]{64}$/.test(first) ? first : null
+    } catch {
+        return null
+    }
+}
+
+/**
+ * NO-GO reasons for the tlsnVerified entry of a mainnet genesis: unset
+ * (template FILL) or malformed notary keys and verifier pin, as the node
+ * would refuse them, keys whose private half is test material, and a
+ * verifier pin other than the wasm this build ships: every node would then
+ * refuse to judge any TLSNotary presentation. The keys come from the notary
+ * key ceremony, never from this repository.
+ */
+export function tlsnNotaryReasons(
+    entry: Record<string, unknown> | undefined,
+    shippedVerifierSha256: string | null = committedVerifierSha256(),
+): string[] {
+    if (!entry || entry.activationHeight === null || entry.activationHeight === undefined) return []
+    const reasons: string[] = []
+    const keys = Array.isArray(entry.notaryKeys) ? entry.notaryKeys : []
+    const unset = keys.filter(k => {
+        const hex = (k as { hex?: unknown } | null)?.hex
+        return typeof hex !== "string" || hex.startsWith("FILL")
+    })
+    if (keys.length === 0 || unset.length > 0) {
+        reasons.push(
+            "fork tlsnVerified is scheduled with placeholder or unset notary keys; " +
+                "fill notaryKeys with the public keys from the notary key ceremony",
+        )
+    }
+    const problems = tlsnVerifiedProblems(entry, true)
+    if (problems.length > 0) {
+        reasons.push(`fork tlsnVerified is scheduled with a payload the node refuses: ${problems.join("; ")}`)
+    }
+    const pin = entry.verifierWasmSha256
+    if (typeof pin === "string" && !pin.startsWith("FILL")) {
+        if (shippedVerifierSha256 === null) {
+            reasons.push(
+                "the TLSNotary verifier pin cannot be checked: native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256 is missing or malformed",
+            )
+        } else if (pin !== shippedVerifierSha256) {
+            reasons.push(
+                `fork tlsnVerified pins verifier ${pin}, but this build ships ${shippedVerifierSha256} ` +
+                    "(native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256); no node could judge a TLSNotary presentation",
+            )
+        }
+    }
+    const test = keys
+        .map(k => (k as { hex?: unknown } | null)?.hex)
+        .filter((hex): hex is string => typeof hex === "string" && KNOWN_TEST_NOTARY_KEYS.includes(hex.toLowerCase()))
+    if (test.length > 0) {
+        reasons.push(
+            `fork tlsnVerified lists the test notary key ${test.join(", ")}; ` +
+                "it is test material of this repository, so mainnet needs keys from the notary key ceremony",
+        )
     }
     return reasons
 }
@@ -725,6 +825,20 @@ export function treasuryReasons(
     const expected = typeof expectedTreasury === "string" && expectedTreasury.trim() ? normTreasury(expectedTreasury) : null
     const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
     const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (mainnet) {
+        const named = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+            ?.treasuryAddress
+        const test = [named, expected]
+            .filter((a): a is string => typeof a === "string")
+            .map(normTreasury)
+            .filter(a => KNOWN_TEST_TREASURIES.includes(a))
+        if (test.length > 0) {
+            return [
+                `the treasury ${test[0]} is the treasury of a test genesis in this repository; ` +
+                    "its key is not held by the owners alone, so the mainnet treasury needs a key generated for it",
+            ]
+        }
+    }
     if (expected === null) {
         return mainnet
             ? [
@@ -743,6 +857,92 @@ export function treasuryReasons(
     }
     return []
 }
+
+/** One agreed TLSNotary notary key, as --expected-notary-keys names it. */
+export interface ExpectedNotaryKey {
+    id: string
+    hex: string
+}
+
+/**
+ * The agreed notary keys of --expected-notary-keys: comma-separated `id:hex`
+ * entries, each held to the rules the node applies to a genesis notary key.
+ * Throws on an entry that breaks them, or on a repeated id or key.
+ */
+export function parseExpectedNotaryKeys(raw: string): ExpectedNotaryKey[] {
+    const entries = raw.split(",").map(e => e.trim()).filter(Boolean)
+    if (entries.length === 0) throw new Error("--expected-notary-keys names no key")
+    const keys = entries.map((entry, i) => {
+        const at = entry.indexOf(":")
+        if (at <= 0) throw new Error(`--expected-notary-keys entry ${i + 1} is not id:hex, got ${JSON.stringify(entry)}`)
+        const key = { id: entry.slice(0, at).trim(), hex: entry.slice(at + 1).trim().toLowerCase() }
+        const problems = notaryKeyProblems({ ...key, alg: "k256" }, `--expected-notary-keys entry ${i + 1}`)
+        if (problems.length > 0) throw new Error(problems.join("; "))
+        return key
+    })
+    for (const field of ["id", "hex"] as const) {
+        const seen = keys.map(k => k[field])
+        const repeated = seen.filter((v, i) => seen.indexOf(v) !== i)
+        if (repeated.length > 0) throw new Error(`--expected-notary-keys repeats ${field} ${[...new Set(repeated)].join(", ")}`)
+    }
+    return keys
+}
+
+/**
+ * NO-GO reasons for a genesis whose notary keys are not the ones the notary
+ * key ceremony produced: the payload checks accept any well-formed key, and a
+ * wrong one lets whoever holds its private half attest anything from block 0.
+ * On the mainnet chain id the agreed keys must be given; on the testnet and
+ * devnets they are checked only when given.
+ */
+export function notaryKeysReasons(
+    genesis: { forks?: unknown; properties?: unknown } | null,
+    expectedNotaryKeys: string | null | undefined,
+): string[] {
+    if (!genesis) return []
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {
+        return mainnet
+            ? [
+                  "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                      "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+              ]
+            : []
+    }
+    let expected: string[]
+    try {
+        expected = parseExpectedNotaryKeys(expectedNotaryKeys).map(k => `${k.id}:${k.hex}`)
+    } catch (e) {
+        return [(e as Error).message]
+    }
+    const entry = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).tlsnVerified
+    if (!Array.isArray(entry?.notaryKeys) || entry.notaryKeys.length === 0) {
+        return [`the genesis tlsnVerified has no notaryKeys; the agreed notary keys are ${expected.join(", ")}`]
+    }
+    const actual = (entry.notaryKeys as unknown[]).map(k => {
+        const { id, hex } = (k ?? {}) as { id?: unknown; hex?: unknown }
+        return `${String(id)}:${typeof hex === "string" ? hex.toLowerCase() : String(hex)}`
+    })
+    const same =
+        actual.length === expected.length &&
+        actual.every(k => expected.includes(k)) &&
+        expected.every(k => actual.includes(k))
+    if (!same) {
+        return [`the genesis tlsnVerified notaryKeys ${actual.join(", ")} are not the agreed notary keys ${expected.join(", ")}`]
+    }
+    return []
+}
+
+/**
+ * Treasuries of the devnet, rehearsal and fixture genesis files in this
+ * repository. Their keys come from shared test mnemonics, so one copied into
+ * the mainnet genesis would hand the fees to anyone holding those.
+ */
+export const KNOWN_TEST_TREASURIES: readonly string[] = [
+    "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23",
+    "0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface",
+]
 
 function normTreasury(address: string): string {
     return address.trim().toLowerCase()
@@ -802,6 +1002,8 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
     genesisFileProblems?: string[]
     /** The agreed gasFeeSeparation treasury (--expected-treasury). */
     expectedTreasury?: string | null
+    /** The agreed tlsnVerified notary keys (--expected-notary-keys), id:hex comma-separated. */
+    expectedNotaryKeys?: string | null
 }
 
 /**
@@ -810,7 +1012,16 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
  * the genesis hash the probes agree on (or the expected one).
  */
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
-    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, expectedTreasury, ...rest } = input
+    const {
+        genesis,
+        blockZero,
+        launchValidators,
+        genesisFileBlockHash,
+        genesisFileProblems,
+        expectedTreasury,
+        expectedNotaryKeys,
+        ...rest
+    } = input
     const rows = genesis && blockZero ? blockZero.rows : null
     const base: GoNoGoInput = {
         ...rest,
@@ -823,6 +1034,7 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
         ...(blockZero?.reasons ?? []),
         ...mainnetGenesisReasons(genesis),
         ...treasuryReasons(genesis, expectedTreasury),
+        ...notaryKeysReasons(genesis, expectedNotaryKeys),
     )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
@@ -858,6 +1070,8 @@ export interface LaunchPlanInput {
     genesisFileProblems?: string[]
     /** The agreed gasFeeSeparation treasury (--expected-treasury). */
     expectedTreasury?: string | null
+    /** The agreed tlsnVerified notary keys (--expected-notary-keys), id:hex comma-separated. */
+    expectedNotaryKeys?: string | null
 }
 
 /**
@@ -882,6 +1096,7 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
     return [
         check("genesis forks", forkReasons),
         check("treasury", treasuryReasons(input.genesis, input.expectedTreasury)),
+        check("notary keys", notaryKeysReasons(input.genesis, input.expectedNotaryKeys)),
         check("chain id", genesisReasons.filter(r => r.startsWith("genesis properties.id"))),
         check("shard size", genesisReasons.filter(r => r.startsWith("genesis properties.shardSize"))),
         // Whatever mainnetGenesisReasons adds beyond the checks above, so a
@@ -928,6 +1143,7 @@ interface CliArgs {
     genesisHash: string | null
     commit: string | null
     expectedTreasury: string | null
+    expectedNotaryKeys: string | null
     json: boolean
     plan: boolean
     timeoutMs: number
@@ -937,7 +1153,7 @@ function usage(): string {
     return [
         "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
         "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
-        "           --expected-treasury ADDRESS",
+        "           --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
         "  --plan               check the genesis file and the launch validator table only, with no",
         "                       network: one PASS/FAIL line per check, exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
@@ -959,6 +1175,10 @@ function usage(): string {
         "                       required for GO and --plan on the mainnet chain id: the agreed",
         "                       gasFeeSeparation treasury; the genesis must name it (default:",
         "                       DEMOS_EXPECTED_TREASURY)",
+        "  --expected-notary-keys ID:HEX[,ID:HEX...]",
+        "                       required for GO and --plan on the mainnet chain id: the tlsnVerified",
+        "                       notary keys from the notary key ceremony; the genesis must list",
+        "                       exactly these (default: DEMOS_EXPECTED_NOTARY_KEYS)",
         "  --timeout MS         per-request timeout (default 5000)",
         "  --json               machine-readable output",
     ].join("\n")
@@ -982,6 +1202,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         genesisHash: null,
         commit: null,
         expectedTreasury: null,
+        expectedNotaryKeys: null,
         json: false,
         plan: false,
         timeoutMs: 5000,
@@ -1003,6 +1224,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--genesis-hash": args.genesisHash = value(); break
             case "--commit": args.commit = value(); break
             case "--expected-treasury": args.expectedTreasury = value(); break
+            case "--expected-notary-keys": args.expectedNotaryKeys = value(); break
             case "--timeout": args.timeoutMs = Number(value()); break
             case "--json": args.json = true; break
             case "--plan": args.plan = true; break
@@ -1020,6 +1242,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         if (args.genesis !== null) args.snapshot = fromEnv("DEMOS_SNAPSHOT_DIR")
     }
     if (args.expectedTreasury === null) args.expectedTreasury = fromEnv("DEMOS_EXPECTED_TREASURY")
+    if (args.expectedNotaryKeys === null) args.expectedNotaryKeys = fromEnv("DEMOS_EXPECTED_NOTARY_KEYS")
     return args
 }
 
@@ -1230,6 +1453,7 @@ async function runPlan(
         operators,
         genesisFileProblems,
         expectedTreasury: args.expectedTreasury,
+        expectedNotaryKeys: args.expectedNotaryKeys,
     })
     const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
     if (args.json) {
@@ -1274,6 +1498,14 @@ async function main(): Promise<number> {
     if (args.expectedTreasury !== null && !/^0x[0-9a-f]{64}$/.test(args.expectedTreasury.trim().toLowerCase())) {
         console.error(`--expected-treasury must be 0x and 64 hex characters, got ${JSON.stringify(args.expectedTreasury)}`)
         return 2
+    }
+    if (args.expectedNotaryKeys !== null) {
+        try {
+            parseExpectedNotaryKeys(args.expectedNotaryKeys)
+        } catch (e) {
+            console.error((e as Error).message)
+            return 2
+        }
     }
 
     let shardSize = args.shardSize
@@ -1393,6 +1625,7 @@ async function main(): Promise<number> {
         ...expectations,
         expectedCommit: args.commit,
         expectedTreasury: args.expectedTreasury,
+        expectedNotaryKeys: args.expectedNotaryKeys,
     })
 
     if (args.json) {

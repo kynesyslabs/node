@@ -449,3 +449,66 @@ describe("sudo methods", () => {
         expect(dispatched).toHaveLength(1)
     })
 })
+
+describe("calls that hand the signer a TLSNotary proxy session", () => {
+    const OUR_KEY = "07".repeat(32)
+    const proxyCall = (tokenId: string) => ({
+        method: "nodeCall",
+        params: [{ message: "requestTLSNproxy", data: { tokenId, targetUrl: "https://example.com/" } }],
+    })
+    const sign = async (message: Uint8Array) =>
+        new Uint8Array(forge.pki.ed25519.sign({ message: Buffer.from(message), privateKey: pair.privateKey }))
+    const clientHeaders = (body: string, audience: string | null = OUR_KEY) =>
+        bodyBoundAuthHeaders({
+            genesisHash: OUR_GENESIS,
+            identity: IDENTITY,
+            body,
+            sign,
+            audience: audience ?? undefined,
+            // The signing sequence ran ahead under the sudo tests' frozen
+            // clock; a client signs at its own clock.
+            timestamp: Date.now(),
+        })
+
+    it("delivers one signed over its body and naming this node", async () => {
+        const body = JSON.stringify(proxyCall("ef".repeat(32)))
+        const res = await deliver(body, await clientHeaders(body))
+        expect(res.status).toBe(200)
+        expect(dispatched).toEqual([{ method: "nodeCall", sender: SENDER, params: proxyCall("ef".repeat(32)).params }])
+    })
+
+    it("refuses one signed in the old form, which leaves the body unsigned", async () => {
+        const timestamp = String(Date.now())
+        const signature = Buffer.from(
+            forge.pki.ed25519.sign({
+                message: Buffer.from(Hashing.sha256(`${IDENTITY}:${timestamp}`)),
+                privateKey: pair.privateKey,
+            }),
+        ).toString("hex")
+        const body = JSON.stringify(proxyCall("ab".repeat(32)))
+        const res = await deliver(body, { identity: IDENTITY, signature, timestamp })
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses one that names no node or another node", async () => {
+        const body = JSON.stringify(proxyCall("ab".repeat(32)))
+        expect((await deliver(body, await clientHeaders(body, null))).status).toBe(401)
+        expect((await deliver(body, await clientHeaders(body, "08".repeat(32)))).status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses captured headers on another body", async () => {
+        const headers = await clientHeaders(JSON.stringify(proxyCall("ab".repeat(32))))
+        expect((await deliver(JSON.stringify(proxyCall("cd".repeat(32))), headers)).status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses an exact replay", async () => {
+        const body = JSON.stringify(proxyCall("12".repeat(32)))
+        const headers = await clientHeaders(body)
+        expect((await deliver(body, headers)).status).toBe(200)
+        expect((await deliver(body, headers)).status).toBe(401)
+        expect(dispatched).toHaveLength(1)
+    })
+})

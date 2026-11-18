@@ -125,6 +125,7 @@ To avoid common failures:
 3. Send `revealedRecv` in payload and ensure wallet-extension forwards it unchanged.
 4. Keep `username`/`userId` from the same revealed response that produced `recvHash`.
 5. Keep reveal ranges large enough to include required JSON fields (`id`, `login`/`username`).
+6. Submit the link right after attesting. On a `tlsnVerified` network the node refuses a presentation attested more than `freshnessWindowSec` (3600 s on mainnet) before the time of the block the transaction lands in, even though the `tlsn_request` token lives 500 blocks (about 83 min at 10 s blocks). The deadline is one hour from the attestation or the token's expiry, whichever comes first. The SDK exports the value as `TLSN_ATTESTATION_MAX_AGE_SECONDS`.
 
 ## 7. Security Notes
 
@@ -145,3 +146,5 @@ Common errors and meaning:
   - Disclosed bytes do not contain parseable fields for that context.
 - `Username mismatch` / `UserId mismatch`
   - Claimed values do not match extracted values from disclosed bytes.
+- `attestation is stale: attested at <t>, more than 3600s before the block time <T>`
+  - The link landed more than `freshnessWindowSec` after the attestation (checklist item 6). Attest again and submit at once.

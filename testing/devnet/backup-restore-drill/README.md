@@ -19,8 +19,10 @@ Before anything timed starts the script checks that:
   refused unless `ALLOW_GOSSIP_OFF=1` (a validator with gossip off never
   catches up after a restart, so the timings would mean nothing);
 - the image user (uid 1000) can read the inputs, and can write each read-write
-  volume and tmpfs of the node services and the image directories it probes (an
-  INFO row lists them; a path not listed was not probed). A root-owned volume
+  volume and tmpfs of the node services and the image's working directory and
+  declared volumes (check "node state is writable by uid 1000"; a read of the
+  image's working directory or declared volumes that fails or gives nothing
+  stops the run). A root-owned volume
   stops the run with a message; `FIX_OWNERSHIP=1` chowns `1000:1000` only this
   drill's own volumes instead.
 

@@ -152,6 +152,7 @@ describe("GitHub gist lookup", () => {
 describe("RapidAPI (Twitter) lookup", () => {
     const twitter = () => {
         const t = new Twitter()
+        t.api_key = "test-key"
         t.setLimits(LIMITS)
         return t
     }

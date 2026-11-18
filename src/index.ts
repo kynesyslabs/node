@@ -25,6 +25,13 @@ import {
     onSelfStakeChange,
 } from "./libs/consensus/stakedSet"
 import { syncL2PSServices } from "./libs/l2ps/roleServices"
+import {
+    settlementProverProblem,
+    settlementScheduled,
+    settlementVerifierProblem,
+} from "./libs/l2ps/settlement/bootCheck"
+import { loadSettlementVerificationKey, settlementProverPool } from "./libs/l2ps/settlement/prover"
+import { isSettlementBuilt } from "./libs/l2ps/zk/settlementArtifacts"
 import { l2psOff } from "./forks/l2psGate"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
@@ -532,6 +539,41 @@ async function startInboundServers() {
 
 // ANCHOR Preparing the main loop
 // ! Simplify this too
+/**
+ * Loads the joined L2PS networks and, for a settlement member, checks that
+ * it can prove. Runs before the node serves or joins consensus: a member
+ * that cannot prove would admit transfers it never settles, and one that
+ * exits only after joining has already been counted in the validator set.
+ */
+async function loadL2PSNetworks() {
+    const bootTracker = getSharedState.bootTracker
+    bootTracker.start("l2ps.networks")
+    try {
+        await ParallelNetworks.getInstance().loadAllL2PS()
+        bootTracker.ready("l2ps.networks")
+        log.info(
+            `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
+        )
+    } catch (error) {
+        handleError(error, "CORE", {
+            source: ErrorSource.L2PS_NETWORK_LOADING,
+        })
+        bootTracker.fail("l2ps.networks", error)
+        subsystemError(getSharedState.subsystems, "l2ps", error)
+    }
+
+    const proverProblem = await settlementProverProblem({
+        scheduled: settlementScheduled(),
+        member: (getSharedState.l2psJoinedUids?.length ?? 0) > 0,
+        built: () => isSettlementBuilt(),
+        probe: () => settlementProverPool().probe(),
+    })
+    if (proverProblem) {
+        log.error(`[BOOT] Refusing to start: ${proverProblem}`)
+        process.exit(1)
+    }
+}
+
 async function preMainLoop() {
     // NOTE Overriding if necessary
     if (indexState.OVERRIDE_PORT) {
@@ -624,6 +666,14 @@ async function preMainLoop() {
     // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
 
+    // The fork schedule is known from here; the key is otherwise read at the
+    // first settlement batch, where a missing one halts block apply.
+    const verifierProblem = settlementVerifierProblem(settlementScheduled(), () => loadSettlementVerificationKey())
+    if (verifierProblem) {
+        log.error(`[BOOT] Refusing to start: ${verifierProblem}`)
+        process.exit(1)
+    }
+
     // INFO: Set initial last block data before the first hello goes out, so
     // the sync data we advertise carries the real tip and genesis hash
     const lastBlock = await Chain.getLastBlock()
@@ -638,6 +688,13 @@ async function preMainLoop() {
     // Prime the node's own role before anything role-gated starts.
     invalidateStakedSet()
     await getStakedSet()
+
+    // After the first stake notice, which saw no joined network yet, so the
+    // L2PS services still start only once the node has synced. Under
+    // l2psGate no network is loaded, so l2psJoinedUids stays empty.
+    if (!l2psOff()) {
+        await loadL2PSNetworks()
+    }
 
     await startInboundServers()
 
@@ -1161,20 +1218,35 @@ async function main() {
                     log.warning(msg)
                 }
             } catch (error) {
-                log.error(
-                    "[TLSNotary] Failed to start TLSNotary service: " + error,
-                )
-                bootTracker.fail("tlsnotary", error)
-                subsystemError(getSharedState.subsystems, "tlsnotary", error)
-                const { isTLSNotaryFatal } =
-                    await import("./features/tlsnotary")
-                if (isTLSNotaryFatal()) {
-                    log.error(
-                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                const tlsnotary = await import("./features/tlsnotary")
+                if (error instanceof tlsnotary.NotaryUnreachableError) {
+                    // requestTLSNproxy needs only TLSNOTARY_ENABLED: a node
+                    // that relays for the network's notary hosts none itself
+                    log.warning(
+                        `[TLSNotary] Relay only: ${error.message}. This node serves requestTLSNproxy ` +
+                            "sessions; provers notarize at the network's notary. To host a notary on this " +
+                            "node, start it (docker compose profile tlsnotary); TLSNOTARY_FATAL=true " +
+                            "makes a missing notary stop the node.",
                     )
-                    process.exit(1)
+                    bootTracker.ready("tlsnotary")
+                    markSubsystem(getSharedState.subsystems, "tlsnotary", "ready", {
+                        enabled: true,
+                        extra: { mode: "relay-only", notary: error.message },
+                    })
+                } else {
+                    log.error(
+                        "[TLSNotary] Failed to start TLSNotary service: " + error,
+                    )
+                    bootTracker.fail("tlsnotary", error)
+                    subsystemError(getSharedState.subsystems, "tlsnotary", error)
+                    if (tlsnotary.isTLSNotaryFatal()) {
+                        log.error(
+                            "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                        )
+                        process.exit(1)
+                    }
+                    // Continue without TLSNotary (failsafe)
                 }
-                // Continue without TLSNotary (failsafe)
             }
         } else {
             log.info(
@@ -1357,23 +1429,8 @@ async function main() {
             bootTracker.skip("l2ps.networks", "fork l2psGate")
             bootTracker.skip("l2ps.services", "fork l2psGate")
         } else {
-            // Load L2PS networks configuration
-            bootTracker.start("l2ps.networks")
-            try {
-                await ParallelNetworks.getInstance().loadAllL2PS()
-                bootTracker.ready("l2ps.networks")
-                log.info(
-                    `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
-                )
-            } catch (error) {
-                handleError(error, "CORE", {
-                    source: ErrorSource.L2PS_NETWORK_LOADING,
-                })
-                bootTracker.fail("l2ps.networks", error)
-                subsystemError(getSharedState.subsystems, "l2ps", error)
-            }
-
-            // Start L2PS hash generation service (for L2PS participating nodes)
+            // Networks were loaded in preMainLoop, before the node joined
+            // consensus. Start L2PS hash generation service (for L2PS participating nodes)
             // Note: l2psJoinedUids is populated during ParallelNetworks initialization
             if (
                 getSharedState.l2psJoinedUids &&

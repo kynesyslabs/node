@@ -10,11 +10,14 @@ import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { isSystemRelayTx, verifySystemRelayTx } from "./validation/systemRelayTx"
+import type { TxValidationResult } from "./validation/types"
 import { chunkedInsert } from "./chainDb"
 import {
     admissionReads,
     expectsNonceEdit,
     loadAdmissionReads,
+    settlementBatchRefusal,
     verifyAdmissionEdits,
 } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
@@ -32,6 +35,7 @@ import {
 } from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
@@ -80,8 +84,8 @@ const SIGNED_TS_SQL =
 type PoolTx = Transaction & { reference_block: number }
 
 /**
- * Where a tx entered from. Only an RPC submit may displace other txs at a
- * full pool; see `checkAdmission`.
+ * Where a tx entered from. Only an RPC submit or a gossiped tx may displace
+ * other txs at a full pool; see `checkAdmission`.
  */
 export type AdmissionOrigin = "rpc" | "gossip" | "internal"
 
@@ -99,6 +103,11 @@ export interface ReceiveOptions {
 }
 
 const AGE_SWEEP_MIN_INTERVAL_MS = 2_000
+
+// At a full pool, a gossiped tx may try to evict at most once per interval.
+// A try reads every held tx under the mempool lock, and gossip brings every
+// peer's submissions here; the others are refused as full, as before.
+const MEMPOOL_GOSSIP_EVICT_INTERVAL_MS = 1_000
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -335,6 +344,14 @@ export default class Mempool {
         return oversizeTxRefusal(tx, isForkActive("osDenomination", pendingHeight()))
     }
 
+    /**
+     * Why the pool would refuse this transaction whatever it holds and
+     * however often it is offered: unstorable, or larger than a block.
+     */
+    public static permanentRefusal(tx: Transaction): string | null {
+        return admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
+    }
+
     /** Every row's eviction ranking inputs. Only read when the pool is full. */
     public static async listEvictionCandidates(): Promise<EvictionCandidate[]> {
         const rows = await this.repo.query(
@@ -352,6 +369,7 @@ export default class Mempool {
     }
 
     private static lastAgeSweep = 0
+    private static lastGossipEvictAttempt = 0
 
     /**
      * Drops txs whose signed timestamp is past the pool lifetime, or is not
@@ -386,12 +404,16 @@ export default class Mempool {
      * and the pool-wide count and byte caps, and decides, without changing
      * anything, which held txs would have to go to make room.
      *
-     * Only an RPC submit may displace held txs, and only when the sender can
-     * pay the fee it offers: a tx that pays nothing it can lose must not be
-     * able to push out others. Gossip and internal txs are turned away at a
-     * full pool instead. The caller deletes the returned victims in the same
-     * database transaction as the insert, after its own nonce and duplicate
-     * checks, so a tx that then fails never costs anyone their place.
+     * Only an RPC submit or a gossiped tx may displace held txs, and only when
+     * the sender can pay the fee it offers: a tx that pays nothing it can lose
+     * must not be able to push out others. A gossiped tx is judged by the
+     * same fee rule as an RPC one, but only the first gossiped tx to get here
+     * in each MEMPOOL_GOSSIP_EVICT_INTERVAL_MS is considered; the rest are
+     * refused as full. RPC is not limited. Internal txs are turned away at a
+     * full pool instead.
+     * The caller deletes the returned victims in the same database
+     * transaction as the insert, after its own nonce and duplicate checks, so
+     * a tx that then fails never costs anyone their place.
      *
      * The peer merge does not come through here: every committee member
      * must end it with the same pool, so it is not subject to caps or
@@ -447,8 +469,20 @@ export default class Mempool {
         // Deleting a held tx while a round runs would change the pool the
         // committee is exchanging: members that already received it keep it,
         // and this node's final read would not.
-        if (origin !== "rpc" || sender === null || getSharedState.inConsensusLoop) {
+        if (origin === "internal" || sender === null || getSharedState.inConsensusLoop) {
             return refuse(full)
+        }
+        // A try counts from here, refused or failed, timed when it gets here:
+        // the queries above can be slow. Gossip only comes in under
+        // Mempool.lock (addTransactionWithLock), so no other lock. A clock
+        // stepped back behind the last try counts as a lapsed interval.
+        if (origin === "gossip") {
+            const at = Date.now()
+            const last = this.lastGossipEvictAttempt
+            if (at >= last && at - last < MEMPOOL_GOSSIP_EVICT_INTERVAL_MS) {
+                return refuse(full)
+            }
+            this.lastGossipEvictAttempt = at
         }
 
         // One balance read, and only at a full pool.
@@ -602,6 +636,17 @@ export default class Mempool {
         return { accepted: true, confirmationBlock }
     }
 
+    /**
+     * The block a transaction admitted now is queued for: the next block,
+     * or, while a consensus round runs, the one after the block it forges.
+     */
+    public static nextBlockRef(): number {
+        if (getSharedState.inConsensusLoop) {
+            return SecretaryManager.lastBlockRef + 1
+        }
+        return getSharedState.lastBlockNumber + 1
+    }
+
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
@@ -625,6 +670,19 @@ export default class Mempool {
         if (oversize !== null) {
             return { confirmationBlock: null, error: oversize }
         }
+        // The producer pools its batch on the verdict the merge gives it on
+        // every peer: one only its producer holds keeps blocks from agreeing.
+        if ((transaction.content?.type as string) === "l2psBatch" && l2psSettlementActive()) {
+            let refusal: string | null
+            try {
+                refusal = await settlementBatchRefusal(transaction)
+            } catch (error) {
+                refusal = `settlement batch could not be checked: ${error instanceof Error ? error.message : String(error)}`
+            }
+            if (refusal !== null) {
+                return { confirmationBlock: null, error: refusal }
+            }
+        }
 
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -643,11 +701,7 @@ export default class Mempool {
         }
 
         if (blockRef === undefined) {
-            blockRef = getSharedState.lastBlockNumber + 1
-
-            if (getSharedState.inConsensusLoop) {
-                blockRef = SecretaryManager.lastBlockRef + 1
-            }
+            blockRef = this.nextBlockRef()
         }
 
         // Audit-sweep batch C PR 4 — re-check the nonce at the insert
@@ -704,8 +758,8 @@ export default class Mempool {
         // The exemption is gated on the tx originating from THIS node's
         // OWN identity. The aggregator only ever submits batch txs from
         // the node's own keypair, via a direct local addTransaction call;
-        // legitimate batch txs reach other nodes inside a block, not via
-        // mempool admission. Gating on own-identity means an arbitrary
+        // legitimate batch txs reach other nodes through the consensus
+        // merge (Mempool.receive), not this RPC admission. Gating on own-identity means an arbitrary
         // signer (or a remote peer) cannot self-label a tx `l2psBatch`
         // to skip the per-account nonce throttle and flood the mempool —
         // their `from` won't match this node's identity and they stay on
@@ -1079,7 +1133,7 @@ export default class Mempool {
         // first, since the chain lookup below queries by the hash.
         const unseenCandidates = incoming.filter(tx => {
             if (existingHashes[tx.hash]) return false
-            const unstorable = admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
+            const unstorable = this.permanentRefusal(tx)
             if (unstorable !== null) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${String(tx?.hash).slice(0, 80)}: ${unstorable}`,
@@ -1111,10 +1165,10 @@ export default class Mempool {
                 )
                 return false
             }
-            if (!isWithinDeepWindow(tx.reference_block, lastBlock)) {
+            if (!isWithinDeepWindow(peerColumns.reference_block, lastBlock)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
-                        `${tx.reference_block} outside the allowed window at block ${lastBlock}`,
+                        `${peerColumns.reference_block} outside the allowed window at block ${lastBlock}`,
                 )
                 return false
             }
@@ -1164,11 +1218,25 @@ export default class Mempool {
         // Same story for the signature preimage: resolved here, where the
         // fork config and the chain tip live, and threaded into the workers.
         const signatureDomain = pendingTxSignatureContext()
-        const results = await TxValidatorPool.getInstance().validate(
-            unseenTransactions,
+        // A relay tx is hashed and signed by its producer's rule, which the
+        // standard check never accepts. Judged here by the rule block and
+        // sync verification apply, every member pools a peer's batch; refused,
+        // only its producer forms a block with it and no block is agreed on.
+        // Not behind l2psSettlement: what a member pools is no apply rule,
+        // and block and Sync verification judge relay txs this way on both
+        // sides of the fork, so the old refusal stalled pre-fork batches too.
+        const standardTxs = unseenTransactions.filter(tx => !isSystemRelayTx(tx))
+        const standardResults = await TxValidatorPool.getInstance().validate(
+            standardTxs,
             coherenceIsPostFork,
             signatureDomain,
         )
+        const verdictByTx = new Map<Transaction, TxValidationResult>()
+        standardTxs.forEach((tx, i) => verdictByTx.set(tx, standardResults[i]))
+        for (const tx of unseenTransactions) {
+            if (isSystemRelayTx(tx)) verdictByTx.set(tx, await verifySystemRelayTx(tx))
+        }
+        const results = unseenTransactions.map(tx => verdictByTx.get(tx)!)
         const end = Date.now()
         log.only(
             `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${unseenTransactions.length} transactions`,

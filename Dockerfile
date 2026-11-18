@@ -74,7 +74,8 @@ COPY package.json bun.lock ./
 # with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
 
-# L2PS batch proving keys (about 90 MB). Not committed: they derive
+# L2PS batch and settlement proving keys (about 190 MB, 100 MB of it the
+# settlement zkey that subnet members prove with). Not committed: they derive
 # deterministically from the public Hermez Powers of Tau, and the build fails
 # unless the derived verification keys equal the committed ones, so a swapped
 # or corrupted download cannot produce keys peers would reject. The Powers of
@@ -86,7 +87,7 @@ RUN bun install --frozen-lockfile
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
 COPY src/libs/l2ps/zk/circuits/ ./src/libs/l2ps/zk/circuits/
 COPY src/libs/l2ps/zk/keys/ ./src/libs/l2ps/zk/keys/
-COPY src/libs/l2ps/zk/batchArtifacts.ts ./src/libs/l2ps/zk/
+COPY src/libs/l2ps/zk/batchArtifacts.ts src/libs/l2ps/zk/settlementArtifacts.ts ./src/libs/l2ps/zk/
 COPY src/cli/setup/ ./src/cli/setup/
 COPY scripts/build-l2ps-zk-keys.ts ./scripts/
 RUN bun scripts/build-l2ps-zk-keys.ts && rm -rf src/libs/l2ps/zk/ptau
@@ -99,6 +100,9 @@ COPY scripts/     ./scripts/
 COPY data/        ./data/
 COPY sdk/         ./sdk/
 COPY libs/        ./libs/
+# Only the pinned TLSN verifier wasm; its Rust sources are rebuilt and
+# compared in CI (native/tlsn-verify/README.md), never in this image.
+COPY native/tlsn-verify/dist/ ./native/tlsn-verify/dist/
 COPY sidecar/     ./sidecar/
 COPY tsconfig.json bunfig.toml ormconfig.json ./
 
@@ -191,28 +195,12 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # Stage 2: runtime
 # Minimal image with only what the node needs at run time. Runs as non-root.
 # =============================================================================
-# ── wstcp (TLSNotary websocket↔TCP proxy) ─────────────────────────────
-# The TLSNotary flow spawns `wstcp` on demand to relay the browser's
-# WebSocket to the target TLS server (see proxyManager.ts). The runtime
-# image ships no Rust toolchain, so the on-demand `cargo install wstcp`
-# fallback in ensureWstcp() cannot run — bake the binary in instead.
-# Without it the proxy never binds its port and every verification fails
-# with an nginx 502 / CloseEvent 1006 on the prover.
-FROM rust:1.99.1-slim@sha256:e6cd1d294a300601eaaa4a294b337e5f0826f427fb2d481e9f76e69e7981e244 AS wstcp
-# Pin the version so an upstream wstcp release can't silently change
-# behaviour or break the build; scripts/install-deps.sh and ensureWstcp()
-# install the same version. `--locked` is intentionally omitted: the
-# crate's bundled Cargo.lock pins time 0.3.25, which does not compile on
-# Rust 1.80 or later, so we let cargo resolve compatible deps for this
-# exact wstcp version.
-RUN cargo install wstcp --version 0.2.1 --root /wstcp
-
 # ── provenance check ─────────────────────────────────────────────────
 # A node started with PROD=true refuses to boot without a commit, so the
 # image must carry the real one. The check lives in its own small stage
 # that the runtime stage mounts: BuildKit starts it alongside the builder
-# and wstcp stages, so a missing commit fails the build in seconds rather
-# than after the dependency install and the Rust compile.
+# stage, so a missing commit fails the build in seconds rather than after
+# the dependency install.
 # Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
 # git history.
 FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS provenance
@@ -265,11 +253,6 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
     && chown demos:demos /app /app/data /app/logs /app/state \
     && chmod 0755 /app /app/data /app/logs /app/state
 
-# TLSNotary proxy binary, baked in so the on-demand proxy can spawn
-# without a Rust toolchain. Lands at $HOME/.cargo/bin/wstcp (HOME=/app) —
-# the exact path proxyManager.ts::ensureWstcp() probes via `test -x`.
-COPY --from=wstcp --chown=demos:demos /wstcp/bin/wstcp /app/.cargo/bin/wstcp
-
 # Build-time provenance. These ARGs are populated by the build driver
 # (./run --docker exports `git rev-parse HEAD` + `git rev-parse
 # --abbrev-ref HEAD` + a dirty flag + an ISO timestamp; compose forwards
@@ -285,8 +268,9 @@ ARG BUILT_AT=
 # its check passing. The mount adds nothing to the image.
 RUN --mount=type=bind,from=provenance,target=/mnt true
 
-# Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
-# IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
+# Sensible image-level defaults. Anything else (PG_HOST, PG_PORT, PG_USER,
+# PG_PASSWORD, PG_DATABASE, EXPOSED_URL, IDENTITY_FILE, PEER_LIST_FILE, etc.)
+# must be supplied at runtime.
 ENV NODE_ENV=production \
     RPC_PORT=53550 \
     METRICS_HOST=0.0.0.0 \
