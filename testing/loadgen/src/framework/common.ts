@@ -172,7 +172,7 @@ function previewString(text: string): string {
 // types show their type.
 function previewValue(value: unknown): string {
   if (typeof value === "string") return previewString(value)
-  if (value === null || value === undefined) return String(value)
+  if (value === null || value === undefined) return value === null ? "null" : "undefined"
   if (typeof value === "number" || typeof value === "boolean") return String(value)
   return previewType(value)
 }
