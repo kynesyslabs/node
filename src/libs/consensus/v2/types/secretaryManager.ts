@@ -116,6 +116,11 @@ export default class SecretaryManager {
     private releasedPhase = 0
     /** Member only: a newer round of the secretary for this height, once seen. */
     public supersededBy: number | null = null
+    /**
+     * Member only: secretaries this attempt replaced because they did not
+     * serve the round, without asking them for a ping.
+     */
+    public passedOverSecretaries = new Set<string>()
 
     constructor() {}
 
@@ -244,6 +249,7 @@ export default class SecretaryManager {
         }
         this.unresponsiveMembers = new Set<string>()
         this.behindMembers = new Set<string>()
+        this.passedOverSecretaries = new Set<string>()
         this.blockTimestamp = null
         this.mergedPeerlist = null
         this.releasedPhase = 0
@@ -615,13 +621,18 @@ export default class SecretaryManager {
     }
 
     /**
-     * Handles the secretary going offline
+     * Handles a secretary that stopped serving the round
      *
-     * Ping the secretary to check if it's still online
-     * If it's not, we elect the next member as the new secretary and
-     * drop the dead one from the shard for this round.
+     * An unreachable secretary (two failed pings) is replaced by the next
+     * member and dropped from the shard for this round.
+     *
+     * With `notServing` the caller saw it miss the release deadline, or fail
+     * the phase report through every retry. It is then replaced the same way
+     * without the ping, and recorded in `passedOverSecretaries`. Two bounds:
+     * never ourselves, and only while the shard without it still holds a
+     * quorum. Outside those bounds the ping decides.
      */
-    public async handleSecretaryGoneOffline() {
+    public async handleSecretaryGoneOffline(notServing = false) {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
         if (!this.secretary) {
             log.error(
@@ -632,19 +643,26 @@ export default class SecretaryManager {
             )
         }
 
-        const isOnline = await this.secretary.connect()
-        log.debug(`Secretary is online: ${isOnline}`)
+        const passOver =
+            notServing &&
+            !this.checkIfWeAreSecretary() &&
+            this.shard.members.length > getCommitteeFloor()
 
-        if (isOnline) {
-            log.debug("Secretary is online, nothing to do")
-            return
-        }
+        if (!passOver) {
+            const isOnline = await this.secretary.connect()
+            log.debug(`Secretary is online: ${isOnline}`)
 
-        // INFO: ping for false negatives
-        const isStillOnline = await this.secretary.connect()
-        if (isStillOnline) {
-            log.debug("Secretary is still online, nothing to do")
-            return
+            if (isOnline) {
+                log.debug("Secretary is online, nothing to do")
+                return
+            }
+
+            // INFO: ping for false negatives
+            const isStillOnline = await this.secretary.connect()
+            if (isStillOnline) {
+                log.debug("Secretary is still online, nothing to do")
+                return
+            }
         }
 
         if (this.shard.members.length < 2) {
@@ -661,6 +679,12 @@ export default class SecretaryManager {
         const rest = this.shard.members.filter(m => m.identity !== exSecretary)
         this.shard.secretaryKey = (rest.find(m => this.canLead(m)) ?? rest[0])
             .identity
+        if (passOver) {
+            this.passedOverSecretaries.add(exSecretary)
+            log.warning(
+                `[SECRETARY] Secretary ${exSecretary} is not serving block ${this.shard.blockRef} (no release by the deadline, or its phase reports kept failing): replaced for the rest of this attempt, ${this.shard.secretaryKey} leads`,
+            )
+        }
         // remove secretary from the list of members
         this.shard.members = this.shard.members.filter(
             m => m.identity !== exSecretary,
@@ -1239,7 +1263,9 @@ export default class SecretaryManager {
      * Sends our local validator phase to the secretary and waits for the green light
      * If resolved, returns the secretary block timestamp
      */
-    public async sendOurValidatorPhaseToSecretary(retries = 3) {
+    public async sendOurValidatorPhaseToSecretary(
+        retries = 3,
+    ): Promise<number | typeof SUPERSEDED_ROUND | null> {
         log.debug("Sending our validator phase to the secretary")
         log.debug(`Our phase: ${this.ourValidatorPhase.currentPhase}`)
         log.debug(`Shard block ref: ${this.shard.blockRef}`)
@@ -1367,7 +1393,9 @@ export default class SecretaryManager {
                     "[SEND OUR VALIDATOR PHASE] Secretary unreachable, checking if it went offline",
                 )
                 const previousSecretary = this.shard.secretaryKey
-                await this.handleSecretaryGoneOffline()
+                // The report failed through every retry: whatever a ping
+                // says, this secretary is not taking phase reports.
+                await this.handleSecretaryGoneOffline(true)
 
                 if (
                     this.shard.secretaryKey !== previousSecretary &&
@@ -1477,7 +1505,28 @@ export default class SecretaryManager {
                 return null
             }
 
-            await this.handleSecretaryGoneOffline()
+            // The attempt ended while it waited: nothing is left to recover,
+            // and the waiter key may already belong to the next attempt.
+            if (this.ended) {
+                return null
+            }
+
+            // The deadline passed without a release. A secretary that runs
+            // the round releases on its own timeout well inside it, so this
+            // one is not serving the phase, whether or not it answers ping.
+            const previousSecretary = this.shard.secretaryKey
+            await this.handleSecretaryGoneOffline(true)
+
+            if (this.shard.secretaryKey !== previousSecretary && !this.ended) {
+                // Report to the new secretary and wait for its release of
+                // this phase: it carries the round's timestamp and, at the
+                // peerlist phase, the merged peerlist no block is forged
+                // without. As at phase 1, it may still be starting its
+                // routine, hence the longer retry budget.
+                return await this.sendOurValidatorPhaseToSecretary(
+                    Math.max(retries, 5),
+                )
+            }
 
             // INFO: Resend the request and handle the response
             const res = await sendStatus()
