@@ -297,8 +297,9 @@ export class SettlementAggregator {
         this.cycles++
         const order = [...subnets.slice(first), ...subnets.slice(0, first)]
 
-        // A proof binds the tip balances of its accounts, so no two batches
-        // waiting to land may share one, whichever subnet planned them.
+        // A batch is planned on the tip's nonces and balances of its
+        // accounts, which a batch still waiting to land would change, so no
+        // two such batches may share one, whichever subnet planned them.
         const claimed = this.lockedAccounts()
         const slots = Math.max(1, Math.floor(this.limits.provers))
         const planned: PlannedBatch[] = []
@@ -352,6 +353,9 @@ export class SettlementAggregator {
     }
 
     private async prove(batch: PlannedBatch): Promise<ProveOutcome> {
+        // With the "Proved" line, brackets the window in which an L1 move on
+        // one of its accounts lands while the batch is not yet sent.
+        log.info(`[L2PS Settlement] Proving a ${batch.plan.transfers.length}-transfer batch for ${batch.l2psUid}`)
         const since = this.deps.now()
         try {
             const proof = await this.deps.prove(batch.plan)
