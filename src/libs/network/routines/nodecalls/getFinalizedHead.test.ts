@@ -211,6 +211,47 @@ describe("getFinalizedHead", () => {
         expect(reply.response.signatures).toEqual({})
     })
 
+    describe("a head stored with one signer under two cases of its key", () => {
+        const stored = { "0xaa": "sig-a", "0xAA": "sig-a-upper", "0xbb": "sig-b", "0xBB": "sig-b-upper", "0xCC": "sig-c" }
+
+        it("counts and serves one signature per signer under canonicalSigners, the first spelling in map order", async () => {
+            sharedState.forkConfig = {
+                finalityProofs: { activationHeight: 0 },
+                canonicalSigners: { activationHeight: 0 },
+            }
+            getLastBlock.mockResolvedValue(block({ validation_data: { signatures: stored } }))
+            const reply = await getFinalizedHead()
+            expect(reply.response.signatureCount).toBe(3)
+            expect(reply.response.signatures).toEqual({ "0xaa": "sig-a", "0xbb": "sig-b", "0xCC": "sig-c" })
+        })
+
+        it("applies the rule from the fork's height on", async () => {
+            sharedState.forkConfig = {
+                finalityProofs: { activationHeight: 0 },
+                canonicalSigners: { activationHeight: 4243 },
+            }
+            getLastBlock.mockResolvedValue(block({ validation_data: { signatures: stored } }))
+            const before = await getFinalizedHead()
+            expect(before.response.signatureCount).toBe(5)
+            expect(before.response.signatures).toEqual(stored)
+
+            getLastBlock.mockResolvedValue(block({ number: 4243, hash: "0f", validation_data: { signatures: stored } }))
+            expect((await getFinalizedHead()).response.signatureCount).toBe(3)
+        })
+
+        it("does not let an own __proto__ key of the stored map reach the served one", async () => {
+            sharedState.forkConfig = {
+                finalityProofs: { activationHeight: 0 },
+                canonicalSigners: { activationHeight: 0 },
+            }
+            const signatures = JSON.parse('{"__proto__": "sig-p", "0xaa": "sig-a"}')
+            getLastBlock.mockResolvedValue(block({ validation_data: { signatures } }))
+            const reply = await getFinalizedHead()
+            expect(reply.response.signatureCount).toBe(2)
+            expect(Object.getPrototypeOf(reply.response.signatures)).toBe(Object.prototype)
+        })
+    })
+
     it("reports the timestamp in seconds when the stored value is a bigint", async () => {
         getLastBlock.mockResolvedValue(block({ content: { timestamp: 1_800_000_000n } }))
         const reply = await getFinalizedHead()

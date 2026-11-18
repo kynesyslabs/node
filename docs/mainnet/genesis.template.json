@@ -123,6 +123,9 @@
     "atomicWork": {
       "activationHeight": null
     },
+    "canonicalSigners": {
+      "activationHeight": null
+    },
     "networkGovernance": {
       "activationHeight": null
     },
