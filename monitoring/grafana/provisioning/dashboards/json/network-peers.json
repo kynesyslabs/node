@@ -910,7 +910,7 @@
     "timepicker": {},
     "timezone": "browser",
     "title": "Demos - Network & Peers",
-    "uid": "demos-network",
+    "uid": "demos-network-peers",
     "version": 1,
     "weekStart": ""
 }
