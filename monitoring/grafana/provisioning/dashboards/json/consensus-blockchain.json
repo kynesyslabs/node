@@ -263,7 +263,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "demos_last_block_timestamp",
+                    "expr": "demos_last_block_timestamp * 1000",
                     "refId": "A"
                 }
             ],
