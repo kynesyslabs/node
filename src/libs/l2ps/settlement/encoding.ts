@@ -14,7 +14,7 @@ export const SETTLEMENT_TRANSFERS = 9
 /** Account slots per batch proof: a sender and a receiver per transfer. */
 export const SETTLEMENT_ACCOUNTS = 2 * SETTLEMENT_TRANSFERS
 export const SETTLEMENT_VERSION = 1
-export const SETTLEMENT_SIGNATURE_DOMAIN = "l2ps-settlement:v1:"
+export const SETTLEMENT_SIGNATURE_DOMAIN = "l2ps-settlement:v2:"
 
 /** Amounts, fees and net change magnitudes stay below this. */
 export const AMOUNT_LIMIT = 1n << 128n

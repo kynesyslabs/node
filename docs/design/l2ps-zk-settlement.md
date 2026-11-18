@@ -241,7 +241,7 @@ the L1 nonce, so an L1 transaction sent right after a private transfer is
 not held behind the transfer's settlement.
 
 Replay across subnets stays impossible: the signed message names the
-subnet (`l2ps-settlement:v1:<chainId>:<l2psUid>:<c>`), so a commitment
+subnet (`l2ps-settlement:v2:<chainId>:<l2psUid>:<c>`), so a commitment
 signed for one subnet's nonce verifies in no other subnet.
 
 Clients read it with the `getL2PSNonce` nodeCall
@@ -370,9 +370,12 @@ tests the same file.
 - Commitment: `c = Poseidon8(from_hi, from_lo, to_hi, to_lo, amount, fee,
   nonce, salt)`, circomlib Poseidon (poseidon-lite on both sides).
 - Signed message: UTF-8 of
-  `l2ps-settlement:v1:<chainId>:<l2psUid>:<c as 0x + 64 hex>`, ed25519 by
+  `l2ps-settlement:v2:<chainId>:<l2psUid>:<c as 0x + 64 hex>`, ed25519 by
   the sender's account key. It cannot be read as a transaction preimage
   (`demos-tx:v1:`) or a personal message.
+  v2 marks the switch from the L1 nonce to the L2PS nonce: a transfer
+  signed under v1 carried an L1 nonce, and on a chain where the L2PS nonce
+  starts at 0 it could otherwise be settled a second time.
 - Commitments hash: `Poseidon_N(c_0 .. c_(N-1))` (Poseidon9 for N = 9),
   inactive slots 0.
 - Nonce: the sender's L2PS nonce in the transfer's subnet ("L2PS nonce"
