@@ -45,6 +45,27 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile --ignore-scripts
+      # The stub guards are partitioned into their own job below rather than
+      # repeated here: launcher-wipe-guard measures ~40s, so running it in all
+      # four shards cost ~160s of duplicated wall clock per run.
+      # Test files are partitioned; the split is by measured duration when
+      # scripts/consensus-weights.tsv covers the suite.
+      - run: bash scripts/test-consensus.sh --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # The shell guards are not test files and are not sharded. launcher-wipe-guard
+  # alone measured 40s per shard, so running them in all four cost ~160s of
+  # duplicated wall clock per run -- more than sharding saved. They run once,
+  # in parallel with the shards. Kept in the same workflow so a guard failure
+  # still fails CI.
+  launcher-guards:
+    name: Launcher Guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile --ignore-scripts
       # Stub-based (no Docker, no Postgres): the launchers never migrate a
       # database they did not just empty
       - run: bash scripts/launcher-wipe-guard.test.sh
@@ -52,9 +73,7 @@ jobs:
       - run: bash scripts/launcher-external-db.test.sh
       # ./run exits with the node's status (a crash or refusal is non-zero)
       - run: bash scripts/launcher-run-exit.test.sh
-      # Test files are partitioned; the three shell guards above are not, and are
-      # cheap enough that repeating them per shard is the honest trade.
-      - run: bash scripts/test-consensus.sh --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
 
   rehearsal-drill:
     # Unit tests for the quorum-loss drills' pass criteria and inputs, the
