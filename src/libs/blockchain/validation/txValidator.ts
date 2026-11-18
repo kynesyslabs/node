@@ -175,6 +175,10 @@ export async function validateTxSignature(
  * The U+0000 check covers only the columns of the transaction's own row: a
  * block carrying one there never committed, so rejecting it cannot reject
  * history. The rest of the body is refused at admission, not here.
+ *
+ * Never throws: each transaction gets its own verdict. One that cannot be
+ * judged is returned as `undecided`, which says nothing about any other
+ * transaction.
  */
 export async function validateTx(
     tx: Transaction,
@@ -182,11 +186,29 @@ export async function validateTx(
     isPostFork: boolean,
     domain: TxSignatureDomain = LEGACY_DOMAIN,
 ): Promise<TxValidationResult> {
-    const unstorable = transactionRowRefusal(tx)
-    if (unstorable !== null) {
-        return { hash: tx?.hash, valid: false, reason: unstorable }
+    try {
+        const unstorable = transactionRowRefusal(tx)
+        if (unstorable !== null) {
+            return { hash: tx?.hash, valid: false, reason: unstorable }
+        }
+        // The row check passes a null signature, which the insert stores as
+        // "null"; no signature check can read one.
+        if (tx.signature === null) {
+            return {
+                hash: tx.hash,
+                valid: false,
+                reason: "Transaction signature is null",
+            }
+        }
+        const coherence = validateTxCoherence(tx, isPostFork)
+        if (!coherence.valid) return coherence
+        return await validateTxSignature(tx, hint, domain)
+    } catch (e) {
+        return {
+            hash: tx?.hash,
+            valid: false,
+            undecided: true,
+            reason: `Transaction could not be judged: ${e instanceof Error ? e.message : String(e)}`,
+        }
     }
-    const coherence = validateTxCoherence(tx, isPostFork)
-    if (!coherence.valid) return coherence
-    return await validateTxSignature(tx, hint, domain)
 }
