@@ -42,6 +42,8 @@ export class FrameTooLargeError extends Error {
  */
 export class MessageFramer {
     private buffer: Buffer = Buffer.alloc(0)
+    /** Storage with spare room that `buffer` is a view of while a frame is partial. */
+    private store: Buffer = Buffer.alloc(0)
 
     /** Minimum header size in bytes */
     private static readonly HEADER_SIZE = 12
@@ -71,7 +73,23 @@ export class MessageFramer {
      * @param chunk Raw data from socket
      */
     addData(chunk: Buffer): void {
-        this.buffer = Buffer.concat([this.buffer, chunk])
+        const live = this.buffer.length
+        const needed = live + chunk.length
+        // Where the buffered bytes sit in the storage, or -1 when they are not in it.
+        let start =
+            live > 0 && this.buffer.buffer === this.store.buffer
+                ? this.buffer.byteOffset - this.store.byteOffset
+                : -1
+        if (start < 0 || start + needed > this.store.length) {
+            // Doubles while a frame is partial, so a frame is copied a bounded number of times.
+            const store = Buffer.allocUnsafeSlow(live > 0 ? needed * 2 : needed)
+            store.set(this.buffer, 0)
+            this.store = store
+            start = 0
+        }
+        // Only ever writes past the buffered bytes: messages already returned are views of this storage.
+        this.store.set(chunk, start + live)
+        this.buffer = this.store.subarray(start, start + needed)
     }
 
     /**
@@ -95,9 +113,9 @@ export class MessageFramer {
         // Check if auth block is present (Flags bit 0)
         let auth: AuthBlock | null = null
         if (this.isAuthRequired(header)) {
-            // Need to peek at auth block to know its size
-            if (this.buffer.length < offset + 12) {
-                return null // Need at least auth header
+            // A partial auth block waits for more data.
+            if (!AuthBlockParser.isComplete(this.buffer, offset)) {
+                return null
             }
 
             try {
@@ -246,6 +264,7 @@ export class MessageFramer {
         if (payloadLength > this.maxPayloadSize) {
             // Drop buffered data so we don't retain attacker-controlled bytes in memory
             this.buffer = Buffer.alloc(0)
+            this.store = Buffer.alloc(0)
             throw new FrameTooLargeError(payloadLength, this.maxPayloadSize)
         }
 
@@ -305,6 +324,7 @@ export class MessageFramer {
      */
     clear(): void {
         this.buffer = Buffer.alloc(0)
+        this.store = Buffer.alloc(0)
     }
 
     /**

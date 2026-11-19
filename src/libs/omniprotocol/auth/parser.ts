@@ -2,6 +2,20 @@ import { PrimitiveDecoder, PrimitiveEncoder } from "../serialization/primitives"
 import { AuthBlock, SignatureAlgorithm, SignatureMode } from "./types"
 
 export class AuthBlockParser {
+    /** True when the buffer holds the whole auth block that starts at `offset`. */
+    static isComplete(buffer: Buffer, offset: number): boolean {
+        // Algorithm, mode and timestamp take 10 bytes; each length field takes 2.
+        const identityLengthAt = offset + 10
+        if (buffer.length < identityLengthAt + 2) return false
+        const signatureLengthAt =
+            identityLengthAt + 2 + buffer.readUInt16BE(identityLengthAt)
+        if (buffer.length < signatureLengthAt + 2) return false
+        return (
+            buffer.length >=
+            signatureLengthAt + 2 + buffer.readUInt16BE(signatureLengthAt)
+        )
+    }
+
     /**
      * Parse authentication block from buffer
      * @param buffer Message buffer starting at auth block
