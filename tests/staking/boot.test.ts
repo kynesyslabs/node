@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals"
 
+const warning = jest.fn()
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
-    default: { info: jest.fn(), debug: jest.fn(), warning: jest.fn(), error: jest.fn() },
+    default: { info: jest.fn(), debug: jest.fn(), warning, error: jest.fn() },
 }))
 
-const identity = { heliusApiKey: "" }
-jest.mock("src/config", () => ({
+let scheduled = true
+jest.mock("@/forks/nftValidatorGatingGate", () => ({
     __esModule: true,
-    Config: { getInstance: () => ({ identity }) },
+    nftGatingScheduled: () => scheduled,
 }))
 
 const loadNftAllowlist = jest.fn()
@@ -18,9 +19,10 @@ jest.mock("@/features/staking/nftAllowlist", () => ({
 }))
 
 const probes: { url: string; ok: boolean }[] = []
+const probeSolanaEndpoints = jest.fn(async () => probes)
 jest.mock("@/features/staking/solanaRpc", () => ({
     __esModule: true,
-    probeSolanaEndpoints: jest.fn(async () => probes),
+    probeSolanaEndpoints,
 }))
 
 import { ensureNftGatingReady } from "@/features/staking/boot"
@@ -28,23 +30,36 @@ import { ensureNftGatingReady } from "@/features/staking/boot"
 describe("ensureNftGatingReady", () => {
     beforeEach(() => {
         jest.clearAllMocks()
-        identity.heliusApiKey = "key"
-        probes.splice(0, probes.length, { url: "https://mainnet.helius-rpc.com", ok: true })
+        scheduled = true
+        loadNftAllowlist.mockImplementation(() => undefined)
+        probes.splice(0, probes.length, { url: "https://api.mainnet-beta.solana.com", ok: true })
     })
 
-    it("refuses to start without a Helius key", async () => {
-        identity.heliusApiKey = "  "
-        await expect(ensureNftGatingReady()).rejects.toThrow("HELIUS_API_KEY is not set")
+    it("checks nothing on a network that does not schedule NFT gating", async () => {
+        scheduled = false
+        await expect(ensureNftGatingReady()).resolves.toBeUndefined()
         expect(loadNftAllowlist).not.toHaveBeenCalled()
+        expect(probeSolanaEndpoints).not.toHaveBeenCalled()
     })
 
-    it("starts with a key, a readable allowlist and an answering endpoint", async () => {
+    it("starts with a readable allowlist and an answering endpoint", async () => {
         await expect(ensureNftGatingReady()).resolves.toBeUndefined()
         expect(loadNftAllowlist).toHaveBeenCalledTimes(1)
+        expect(warning).not.toHaveBeenCalled()
     })
 
-    it("refuses when no endpoint answers", async () => {
-        probes.splice(0, probes.length, { url: "https://mainnet.helius-rpc.com", ok: false })
-        await expect(ensureNftGatingReady()).rejects.toThrow("no Solana endpoint answers")
+    it("starts and warns when no endpoint answers", async () => {
+        probes.splice(0, probes.length, { url: "https://api.mainnet-beta.solana.com", ok: false })
+        await expect(ensureNftGatingReady()).resolves.toBeUndefined()
+        expect(warning.mock.calls.map(call => String(call[0])).join("\n")).toContain(
+            "no Solana endpoint answers",
+        )
+    })
+
+    it("refuses to start when the allowlist does not match its pin", async () => {
+        loadNftAllowlist.mockImplementation(() => {
+            throw new Error("NFT allowlist digest mismatch")
+        })
+        await expect(ensureNftGatingReady()).rejects.toThrow("digest mismatch")
     })
 })

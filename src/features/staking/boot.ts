@@ -1,19 +1,20 @@
-import { Config } from "src/config"
+import { nftGatingScheduled } from "@/forks/nftValidatorGatingGate"
 import log from "src/utilities/logger"
 import { loadNftAllowlist } from "./nftAllowlist"
 import { probeSolanaEndpoints } from "./solanaRpc"
 
 /**
- * Boot check for NFT gating: a Helius key is set, the allowlist reads and
- * hashes as configured, and at least one Solana endpoint answers. A node
- * that cannot verify proofs refuses to start rather than vote blind.
+ * Boot check for NFT gating, run only on a network that schedules
+ * `nftValidatorGating`: the allowlist reads and hashes as pinned, and the
+ * configured Solana endpoints are probed. No key is required and an
+ * endpoint that does not answer is only reported: Solana is read at
+ * admission alone, where a node that cannot reach it leaves seat
+ * transactions out of its blocks, so starting without it costs that node
+ * its say on seats, not the chain's safety. A bad allowlist does refuse the
+ * start, since apply judges every seat against it.
  */
 export async function ensureNftGatingReady(): Promise<void> {
-    if (Config.getInstance().identity.heliusApiKey.trim() === "") {
-        throw new Error(
-            "[BOOT] HELIUS_API_KEY is not set; validator NFT gating needs a Helius key for proof checks and the staking page",
-        )
-    }
+    if (!nftGatingScheduled()) return
     loadNftAllowlist()
     const probes = await probeSolanaEndpoints()
     for (const probe of probes) {
@@ -24,8 +25,9 @@ export async function ensureNftGatingReady(): Promise<void> {
         }
     }
     if (!probes.some(probe => probe.ok)) {
-        throw new Error(
-            "[BOOT] no Solana endpoint answers; set SOLANA_RPC or HELIUS_API_KEY",
+        log.warning(
+            "[BOOT] no Solana endpoint answers; this node cannot judge validator NFT proofs " +
+                "and leaves seat transactions out until one does (set VALIDATOR_SOLANA_RPCS)",
         )
     }
 }

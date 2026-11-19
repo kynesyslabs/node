@@ -510,6 +510,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.identity.rapidApiHost,
             ),
             solanaRpc: envStr(EnvKey.SOLANA_RPC, d.identity.solanaRpc),
+            validatorSolanaRpcs: envStr(
+                EnvKey.VALIDATOR_SOLANA_RPCS,
+                d.identity.validatorSolanaRpcs,
+            ),
             zkAttestationPoints: envInt(
                 EnvKey.ZK_ATTESTATION_POINTS,
                 d.identity.zkAttestationPoints,

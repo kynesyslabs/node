@@ -1,5 +1,5 @@
 // Wires the staking page routes into the RPC server with the node's real
-// dependencies: identity, config, allowlist, anchor and Helius endpoint.
+// dependencies: identity, config, allowlist, anchor and Solana endpoint.
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -34,16 +34,21 @@ function ownAddress(): string {
     return normalized
 }
 
-/** The keyed Helius endpoint, the only one the page relay uses. */
-function heliusUrl(): string | null {
-    return resolveSolanaEndpoints().find(url => url.includes("helius-rpc.com")) ?? null
+/**
+ * The endpoint the page relay reads through: the keyed Helius one when a key
+ * is set, else the first configured or public endpoint, so the page works
+ * on a node with no key.
+ */
+function relayUrl(): string | null {
+    const endpoints = resolveSolanaEndpoints()
+    return endpoints.find(url => url.includes("helius-rpc.com")) ?? endpoints[0] ?? null
 }
 
 export function registerStakingValidationRoutes(server: BunServer): void {
     const handlers = createValidationHandlers({
         pageHtml,
         ownAddress,
-        solanaRpcUrl: heliusUrl,
+        solanaRpcUrl: relayUrl,
         budget: new HourlyBudget(STAKING_PAGE_RPC_PER_HOUR),
         nodeHoldsSeat: () => nodeHoldsSeat(ownAddress()),
         mintHolder,

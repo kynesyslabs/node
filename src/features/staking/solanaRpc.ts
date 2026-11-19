@@ -4,11 +4,18 @@ import log from "src/utilities/logger"
 
 /**
  * Solana reads for validator gating, asked of every configured endpoint at
- * once: the SOLANA_RPC list, then Helius when a key is set, then the public
- * mainnet endpoint.
+ * once: SOLANA_RPC and Helius when set, then the VALIDATOR_SOLANA_RPCS list,
+ * or the free public endpoints below when that list is empty. No key is
+ * required: a node with none still reads from the public endpoints.
  */
 
 export const PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
+
+/** Free endpoints that need no key, used when VALIDATOR_SOLANA_RPCS is empty. */
+export const DEFAULT_PUBLIC_SOLANA_RPCS: readonly string[] = [
+    PUBLIC_SOLANA_RPC,
+    "https://solana-rpc.publicnode.com",
+]
 
 /** Per-endpoint timeout for one Solana read. */
 export const SOLANA_RPC_TIMEOUT_MS = 5000
@@ -21,20 +28,25 @@ export class SolanaUnreachableError extends Error {
     }
 }
 
-/** The endpoints to try, in order, without duplicates. */
+function splitList(raw: string): string[] {
+    return raw
+        .split(",")
+        .map(url => url.trim())
+        .filter(url => url !== "")
+}
+
+/** The endpoints to ask, without duplicates. */
 export function resolveSolanaEndpoints(): string[] {
     const identity = Config.getInstance().identity
-    const out: string[] = []
-    for (const url of identity.solanaRpc.split(",")) {
-        const trimmed = url.trim()
-        if (trimmed !== "" && !out.includes(trimmed)) out.push(trimmed)
-    }
-    if (identity.heliusApiKey !== "") {
-        const helius = `https://mainnet.helius-rpc.com/?api-key=${identity.heliusApiKey}`
-        if (!out.includes(helius)) out.push(helius)
-    }
-    if (!out.includes(PUBLIC_SOLANA_RPC)) out.push(PUBLIC_SOLANA_RPC)
-    return out
+    const configured = splitList(identity.validatorSolanaRpcs ?? "")
+    const candidates = [
+        ...splitList(identity.solanaRpc ?? ""),
+        ...(identity.heliusApiKey?.trim()
+            ? [`https://mainnet.helius-rpc.com/?api-key=${identity.heliusApiKey.trim()}`]
+            : []),
+        ...(configured.length > 0 ? configured : DEFAULT_PUBLIC_SOLANA_RPCS),
+    ]
+    return [...new Set(candidates)]
 }
 
 /** An endpoint with its key hidden, for logs. */
@@ -89,7 +101,7 @@ export async function withSolana<T>(
 ): Promise<T> {
     const attempts = resolveSolanaEndpoints().map(url =>
         withTimeout(read(connectionFor(url)), SOLANA_RPC_TIMEOUT_MS, what).catch((e: unknown) => {
-            const message = e instanceof Error ? e.message : String(e)
+            const message = describeError(e)
             log.warning(`[SOLANA] ${what} failed at ${describeEndpoint(url)}: ${message}`)
             throw new Error(`${describeEndpoint(url)}: ${message}`)
         }),
@@ -97,24 +109,33 @@ export async function withSolana<T>(
     try {
         return await Promise.any(attempts)
     } catch (e) {
-        const failures = e instanceof AggregateError ? e.errors.map(f => String((f as Error).message)) : [String(e)]
+        const failures =
+            e instanceof AggregateError ? e.errors.map(describeError) : [describeError(e)]
         throw new SolanaUnreachableError(`${what}: ${failures.join("; ")}`)
     }
 }
 
-/** One `getSlot` per endpoint, for the boot check. */
+/** One `getSlot` per endpoint, all at once, for the boot report. */
 export async function probeSolanaEndpoints(): Promise<{ url: string; ok: boolean }[]> {
-    const timeoutMs = SOLANA_RPC_TIMEOUT_MS
-    const results: { url: string; ok: boolean }[] = []
-    for (const url of resolveSolanaEndpoints()) {
-        try {
-            await withTimeout(connectionFor(url).getSlot("finalized"), timeoutMs, "getSlot")
-            results.push({ url: describeEndpoint(url), ok: true })
-        } catch {
-            results.push({ url: describeEndpoint(url), ok: false })
-        }
-    }
-    return results
+    return Promise.all(
+        resolveSolanaEndpoints().map(async url => {
+            try {
+                await withTimeout(
+                    connectionFor(url).getSlot("finalized"),
+                    SOLANA_RPC_TIMEOUT_MS,
+                    "getSlot",
+                )
+                return { url: describeEndpoint(url), ok: true }
+            } catch {
+                return { url: describeEndpoint(url), ok: false }
+            }
+        }),
+    )
+}
+
+function describeError(e: unknown): string {
+    if (e instanceof Error) return e.message
+    return typeof e === "string" ? e : JSON.stringify(e)
 }
 
 /** Drop cached connections, for tests. */

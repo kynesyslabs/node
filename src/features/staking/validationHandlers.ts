@@ -34,7 +34,7 @@ export interface ValidationDeps {
     pageHtml: () => string
     /** This node's Demos address, lowercase with 0x. */
     ownAddress: () => string
-    /** The keyed Solana endpoint reads are relayed to, or null when none is configured. */
+    /** The Solana endpoint reads are relayed to, or null when none is configured. */
     solanaRpcUrl: () => string | null
     budget: HourlyBudget
     /** Whether this node holds a seat, asked of the anchor. Throws AnchorUnreachableError. */
@@ -127,7 +127,7 @@ export function createValidationHandlers(deps: ValidationDeps): ValidationHandle
             const closed = await gate()
             if (closed) return closed
             const upstream = deps.solanaRpcUrl()
-            if (upstream === null) return json({ error: "no keyed Solana endpoint configured" }, 503)
+            if (upstream === null) return json({ error: "no Solana endpoint configured" }, 503)
             const body = await readBody(req, MAX_RELAY_BODY_BYTES)
             if (body.ok === false) return body.response
             let parsed: unknown
