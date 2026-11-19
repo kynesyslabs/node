@@ -10,7 +10,8 @@ jest.mock("src/config", () => ({
     Config: { getInstance: () => ({ core: { validatorNftRequired: true } }) },
 }))
 
-import { allowlistDigest, parseAllowlist } from "@/features/staking/nftAllowlist"
+import { readFileSync } from "node:fs"
+import { NFT_ALLOWLIST_PATH, allowlistDigest, parseAllowlist } from "@/features/staking/nftAllowlist"
 
 const A = "7M7TxyCHoX3jmUNh68QxWWnUSbxJwEUTJoN5dHxTctGH"
 const B = "2edqWDWbFkTjkcTb4zzj3PwQBHJeXbFuiAynm4bj46yP"
@@ -47,8 +48,7 @@ describe("the NFT allowlist file", () => {
     })
 
     it("matches the committed allowlist against its pinned digest", () => {
-        const fs = jest.requireActual("fs") as typeof import("fs")
-        const raw = fs.readFileSync("data/nft-allowlist.json", "utf8")
+        const raw = readFileSync(NFT_ALLOWLIST_PATH, "utf8")
         const mints = parseAllowlist(
             raw,
             "3da7c881016692f1724c34c4d68ce6233e6f34eb3a5cf34323022c8930bab116",

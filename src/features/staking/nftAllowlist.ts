@@ -1,6 +1,6 @@
-import { createHash } from "crypto"
-import fs from "fs"
-import path from "path"
+import { createHash } from "node:crypto"
+import fs from "node:fs"
+import path from "node:path"
 import log from "src/utilities/logger"
 
 /**
@@ -15,10 +15,16 @@ interface AllowlistFile {
 
 let loaded: Set<string> | null = null
 
+/** Code-unit order, so the digest never depends on the runtime's locale. */
+function byCodeUnit(a: string, b: string): number {
+    if (a < b) return -1
+    return a > b ? 1 : 0
+}
+
 /** sha256 of the sorted mints joined by newlines, the hash the file is pinned by. */
 export function allowlistDigest(mints: readonly string[]): string {
     return createHash("sha256")
-        .update([...mints].sort().join("\n"))
+        .update([...mints].sort(byCodeUnit).join("\n"))
         .digest("hex")
 }
 
@@ -54,8 +60,12 @@ export function parseAllowlist(
     return new Set(mints)
 }
 
-/** The allowlist shipped with the node and the digest its sorted mints must hash to. */
-export const NFT_ALLOWLIST_PATH = "data/nft-allowlist.json"
+/**
+ * The allowlist shipped with the node and the digest its sorted mints must
+ * hash to. It sits beside this module, not under data/, which a node keeps
+ * on a volume that hides the files a newer image ships there.
+ */
+export const NFT_ALLOWLIST_PATH = path.join(import.meta.dir, "nft-allowlist.json")
 export const NFT_ALLOWLIST_SHA256 =
     "3da7c881016692f1724c34c4d68ce6233e6f34eb3a5cf34323022c8930bab116"
 
@@ -64,7 +74,7 @@ export const NFT_ALLOWLIST_SHA256 =
  * missing or fails its digest, so a node with a wrong list refuses to boot.
  */
 export function loadNftAllowlist(): Set<string> {
-    const file = path.resolve(NFT_ALLOWLIST_PATH)
+    const file = NFT_ALLOWLIST_PATH
     let raw: string
     try {
         raw = fs.readFileSync(file, "utf8")
