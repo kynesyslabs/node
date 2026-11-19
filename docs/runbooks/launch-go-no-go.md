@@ -182,7 +182,9 @@ well, for GO and for `--plan`.
   `DEMOS_EXPECTED_NOTARY_KEYS`. It is exit 2 when an entry is not `id:hex`,
   an id or key the node would refuse in a genesis, or a repeated id or key.
   On the testnet and devnet chain ids it is optional and checked only when
-  given.
+  given. On every chain id, with or without the flag, the result is NO-GO
+  when a genesis notary key carries `validFrom` or `validUntil`: launch
+  notary keys are trusted from block 0 with no end.
 
 - `--genesis-hash` is the agreed genesis block hash (above). The tool also
   builds block 0 from `--genesis` and is NO-GO when the two differ, so the

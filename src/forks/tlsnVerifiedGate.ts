@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { getSharedState } from "@/utilities/sharedState"
-import type { TlsnVerifiedParams } from "./forkConfig"
+import type { TlsnNotaryKey, TlsnVerifiedParams } from "./forkConfig"
 import { isForkActive } from "./forkGates"
 
 /**
@@ -48,10 +48,23 @@ export function tlsnVerifiedParams(height: number): TlsnVerifiedParams | null {
     return { notaryKeys, verifierWasmSha256, maxPresentationBytes, freshnessWindowSec, futureSkewSec }
 }
 
-/** Whether `alg`/`hex` (a verifier's `verifyingKey`) is a notary key listed at `height`. */
+/** Whether `key` may sign for the block at `blockHeight`: `validFrom` <= height < `validUntil`. */
+export function notaryKeyValidAt(key: TlsnNotaryKey, blockHeight: number): boolean {
+    return (
+        (key.validFrom === undefined || blockHeight >= key.validFrom) &&
+        (key.validUntil === undefined || blockHeight < key.validUntil)
+    )
+}
+
+/**
+ * Whether `alg`/`hex` (a verifier's `verifyingKey`) is a notary key listed for
+ * the block applied on tip `height`. The fork is judged at the tip, as every
+ * fork is; a key's range at the block itself, `height + 1`, which at
+ * admission is the next block this node would produce.
+ */
 export function isTrustedNotaryKey(height: number, alg: string, hex: string): boolean {
     const params = tlsnVerifiedParams(height)
     if (!params) return false
     const wanted = hex.toLowerCase()
-    return params.notaryKeys.some(k => k.alg === alg && k.hex === wanted)
+    return params.notaryKeys.some(k => k.alg === alg && k.hex === wanted && notaryKeyValidAt(k, height + 1))
 }

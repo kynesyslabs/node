@@ -330,14 +330,28 @@ describe("notary keys and time", () => {
             expect(applied.success).toBe(false)
         }
         const { applied } = await judgeBoth({ hex: vector("default-notary-k256").hex, ...claimed(K256()) })
-        expect(applied.message).toContain("not signed by a notary key the chain lists")
+        expect(applied.message).toContain("not signed by a notary key the chain trusts at this height")
     })
 
     it("refuses the trusted key once the fork no longer lists it", async () => {
         forkAt({ notaryKeys: [{ id: "other", alg: "k256", hex: vector("default-notary-k256").output!.verifyingKey.hex }] })
         const { admitted, applied } = await judgeBoth({ hex: K256().hex, ...claimed(K256()) })
         expect(admitted.success).toBe(false)
-        expect(applied.message).toContain("not signed by a notary key the chain lists")
+        expect(applied.message).toContain("not signed by a notary key the chain trusts at this height")
+    })
+
+    it("refuses a listed key outside its range, and names the height rather than the list", async () => {
+        // The tip is 500, so the presentation lands in block 501.
+        for (const range of [{ validUntil: 501 }, { validFrom: 502 }]) {
+            forkAt({ notaryKeys: [{ id: "spike-notary-k", alg: "k256", hex: TRUSTED_K256, ...range }] })
+            const { admitted, applied } = await judgeBoth({ hex: K256().hex, ...claimed(K256()) })
+            expect(admitted.success).toBe(false)
+            expect(applied.success).toBe(false)
+            expect(applied.message).toContain("not signed by a notary key the chain trusts at this height")
+        }
+        // The same key in range verifies.
+        forkAt({ notaryKeys: [{ id: "spike-notary-k", alg: "k256", hex: TRUSTED_K256, validFrom: 501, validUntil: 502 }] })
+        expect((await judgeBoth({ hex: K256().hex, ...claimed(K256()) })).applied.success).toBe(true)
     })
 
     it("refuses a stale attestation, judged by the block time", async () => {

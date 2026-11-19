@@ -711,6 +711,46 @@ describe("checkLaunch", () => {
             expect(d.go).toBe(true)
         })
 
+        it("is NO-GO when an agreed genesis key carries validFrom or validUntil, and GO without them", () => {
+            const plain = checkLaunch({ ...base, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+            expect(plain.reasons).toEqual([])
+            expect(plain.go).toBe(true)
+            for (const range of [{ validUntil: 10 }, { validFrom: 0 }, { validFrom: 5, validUntil: 10 }]) {
+                const payload = tlsnVerifiedPayload()
+                const keys = payload.notaryKeys as Array<Record<string, unknown>>
+                payload.notaryKeys = keys.map(k => ({ ...k, ...range }))
+                const forks = { ...mainnetForks(), tlsnVerified: { activationHeight: 0, ...payload } }
+                const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons).toEqual([
+                    "the genesis tlsnVerified notaryKeys demos-notary-1, demos-notary-standby carry validFrom or validUntil: " +
+                        "launch notary keys must not carry a range",
+                ])
+            }
+        })
+
+        it("is NO-GO on a ranged genesis key whether or not the agreed keys are given, on every chain id", () => {
+            const range = "the genesis tlsnVerified notaryKeys demos-notary-1 carry validFrom or validUntil: " +
+                "launch notary keys must not carry a range"
+            const noKeys = "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them"
+            const payload = tlsnVerifiedPayload()
+            const keys = payload.notaryKeys as Array<Record<string, unknown>>
+            payload.notaryKeys = keys.map(k => (k.id === "demos-notary-1" ? { ...k, validUntil: 10 } : k))
+            const ranged = genesisFile(rows, { ...mainnetForks(), tlsnVerified: { activationHeight: 0, ...payload } })
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const g = { ...ranged, properties: { id: chainId, shardSize: 10 } }
+                for (const none of [null, undefined, " "]) expect(notaryKeysReasons(g, none)).toEqual([range])
+                expect(notaryKeysReasons(g, NOTARY_KEYS)).toEqual([range])
+                expect(notaryKeysReasons(g, "not-a-key")).toEqual([`--expected-notary-keys entry 1 is not id:hex, got ${JSON.stringify("not-a-key")}`, range])
+                expect(notaryKeysReasons({ ...genesisFile(rows), properties: g.properties }, null)).toEqual([])
+            }
+            expect(notaryKeysReasons(ranged, null)).toEqual([noKeys, range])
+            const d = checkLaunch({ ...base, expectedNotaryKeys: null, genesis: ranged, blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons).toEqual([noKeys, range])
+        })
+
         it("checks given keys on the testnet and devnet chain ids, and needs none there", () => {
             for (const chainId of NON_MAINNET_CHAIN_IDS) {
                 const g = { ...genesisFile(rows), properties: { id: chainId, shardSize: 10 } }

@@ -1022,6 +1022,8 @@ export function parseExpectedNotaryKeys(raw: string): ExpectedNotaryKey[] {
  * NO-GO reasons for a genesis whose notary keys are not the ones the notary
  * key ceremony produced: the payload checks accept any well-formed key, and a
  * wrong one lets whoever holds its private half attest anything from block 0.
+ * Also NO-GO, on every chain id and whether or not the agreed keys are given,
+ * when a genesis notary key carries a validFrom / validUntil range.
  * On the mainnet chain id the agreed keys must be given; on the testnet and
  * devnets they are checked only when given.
  */
@@ -1032,21 +1034,34 @@ export function notaryKeysReasons(
     if (!genesis) return []
     const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
     const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
-    if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {
-        return mainnet
-            ? [
-                  "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
-                      "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+    const entry = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).tlsnVerified
+    const ranged = (Array.isArray(entry?.notaryKeys) ? (entry.notaryKeys as unknown[]) : []).filter(
+        k => typeof k === "object" && k !== null && ("validFrom" in k || "validUntil" in k),
+    )
+    const rangeReasons =
+        ranged.length === 0
+            ? []
+            : [
+                  `the genesis tlsnVerified notaryKeys ${ranged.map(k => String((k as { id?: unknown }).id)).join(", ")} ` +
+                      "carry validFrom or validUntil: launch notary keys must not carry a range",
               ]
-            : []
+    if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {
+        return [
+            ...(mainnet
+                ? [
+                      "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                          "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+                  ]
+                : []),
+            ...rangeReasons,
+        ]
     }
     let expected: string[]
     try {
         expected = parseExpectedNotaryKeys(expectedNotaryKeys).map(k => `${k.id}:${k.hex}`)
     } catch (e) {
-        return [(e as Error).message]
+        return [(e as Error).message, ...rangeReasons]
     }
-    const entry = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).tlsnVerified
     if (!Array.isArray(entry?.notaryKeys) || entry.notaryKeys.length === 0) {
         return [`the genesis tlsnVerified has no notaryKeys; the agreed notary keys are ${expected.join(", ")}`]
     }
@@ -1058,10 +1073,10 @@ export function notaryKeysReasons(
         actual.length === expected.length &&
         actual.every(k => expected.includes(k)) &&
         expected.every(k => actual.includes(k))
-    if (!same) {
-        return [`the genesis tlsnVerified notaryKeys ${actual.join(", ")} are not the agreed notary keys ${expected.join(", ")}`]
-    }
-    return []
+    const reasons = same
+        ? []
+        : [`the genesis tlsnVerified notaryKeys ${actual.join(", ")} are not the agreed notary keys ${expected.join(", ")}`]
+    return [...reasons, ...rangeReasons]
 }
 
 /**

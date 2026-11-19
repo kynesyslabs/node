@@ -295,16 +295,54 @@ The `tlsnVerified` payload holds one key list from its activation height.
 Every validator judges a presentation against that list, at admission and
 again whenever a block is applied, a resync from block 0 included.
 
+Each `notaryKeys` entry may carry a block range, `validFrom` and
+`validUntil`: block N accepts a presentation signed by the key when
+`validFrom <= N < validUntil`. Either end may be left out; an entry with
+neither is valid at every height the fork is active, as every entry was
+before these fields existed. Pool admission judges for the next block, the
+tip plus one. The loader refuses an end that is not an integer, an end below
+the fork's `activationHeight`, and `validFrom` above `validUntil`.
+
+A release that changes an already-active `tlsnVerified` or `tlsnDisabled`
+entry (a key added, a range set, `reenableAt` set) changes the fork schedule
+digest, and a node refuses to boot on it. Each validator restarts once with
+`DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints,
+after the operators have agreed on that digest, and removes the variable
+once the node runs. It is the existing one-start override, not a new `.env`
+key ([INSTALL.md](../../INSTALL.md), "Joining the network — required steps
+before real-world use", fork schedule paragraph).
+
+The fork schedule watch's 50-block pre-activation window and its `abstain`
+policy act on `activationHeight` only
+([fork-schedule-policy.md](fork-schedule-policy.md)), not on `validFrom`,
+`validUntil` or `reenableAt`. Before the chain reaches any of these heights,
+confirm that no validator reports a fork schedule mismatch:
+`demos_fork_schedule_mismatch` is 0 on every validator, the
+`ForkScheduleMismatch` alert is silent, and no `[FORK SCHEDULE] MISMATCH
+with` line is logged. A validator still on the old file applies different
+rules from that height.
+
+**Never move `validFrom`, `validUntil` or `reenableAt` across a height the
+chain has already passed, in either direction.** A block already applied
+would verify differently on resync, exactly as if the key were removed. A
+left-out end counts as open (`validFrom` at the fork's activation,
+`validUntil` never), so setting one on a listed key moves it too. Set each
+height above the tip when the release ships, and keep it unchanged once the
+chain has reached it.
+
 - **Adding a key is replay-safe**: nothing on chain was signed by it. It
   ships in a release that adds the entry to `notaryKeys` in every
-  validator's genesis and to the SDK pins. Never sign with it before every
-  validator runs that release: a validator without it would refuse what the
-  others accept.
-- **Removing a key is not replay-safe today.** A node resyncing from block 0
-  would refuse the presentations that key signed and leave the chain.
-  Removal needs a height-scoped key list (a key valid until height H), which
-  the current payload does not have. Until it does, a retired key stays
-  listed; its private copies are destroyed if it was not compromised.
+  validator's genesis and to the SDK pins. Give it a `validFrom` after the
+  release deadline, so it is refused until every validator runs the release:
+  a validator without it would refuse what the others accept.
+- **Never remove a key; close it with `validUntil`.** A node resyncing from
+  block 0 would refuse the presentations a removed key signed and leave the
+  chain. A closed key stays listed: blocks below `validUntil` verify as they
+  did, and from the block at `validUntil` on its presentations are refused.
+  Set `validUntil` to a height the chain has not reached when the release
+  ships, and never move it once the chain has passed it (above). Closed keys
+  still count toward the cap of 8 entries. Destroy a retired key's private
+  copies.
 
 Planned rotation to the standby (no release needed, the standby is already
 pinned):
@@ -344,17 +382,62 @@ holder machine with the age key on it.
    so new links stop once the requests made before H have expired: a
    request lives 500 blocks (`TLSN_REQUEST_TTL_BLOCKS`), about an hour at
    the 7 s block target. Links made with the key in that window are
-   recorded in step 3.
+   recorded in step 3. The same release can also close the compromised key
+   with `validUntil` H + 1 (section 6): from block H + 1 no presentation
+   signed by it is accepted. Once an earlier `reenableAt` has passed, the
+   switch cannot be scheduled again on that chain, since its heights must not
+   move (section 6); close the compromised key with `validUntil` instead.
 2. **Stop both notaries** (`systemctl stop tlsn-notary`) if the key they run
    is the compromised one, and destroy its plain copies.
 3. **Record** the height H, the key id and every link made with the key
    since the suspected time (`attestationId` of each), for the owners to
    decide on.
-4. **Re-enable.** The kill switch has no lifting fork today, and the
-   compromised key cannot be removed from the list (section 6), so turning
-   TLSNotary back on after a compromise is a node change: a release that
-   ends `tlsnDisabled` and scopes the old key to heights below H. Plan it
-   before re-enabling.
+4. **Re-enable.** A release sets `reenableAt` on `tlsnDisabled`, closes the
+   compromised key with `validUntil` and lists the new ceremony key with
+   `validFrom` (section 6). `activationHeight`, as for every fork, is
+   compared with the tip a block is applied on, so the switch at H refuses
+   from block H + 1; `reenableAt` R is a block height like the key ends, so
+   blocks H + 1 to R - 1 refuse and block R accepts TLSNotary again, judged
+   with the keys valid at R. `reenableAt` must be at least H + 2, so that
+   the window refuses block H + 1 at least; the loader refuses a lower value.
+   Without it the switch stays on. If step 1 already closed the old key, keep
+   its `validUntil` unchanged. Otherwise close it at a height the chain has
+   not reached when the release ships and never above R (R itself is
+   simplest). Above the tip, every block applied with the key verifies the
+   same on resync; at or below R, the key is refused from R on, while a key
+   closed above R is trusted again from R until its `validUntil`. For
+   H = 1250000 and R = 1300000:
+
+   ```jsonc
+   "tlsnDisabled": { "activationHeight": 1250000, "reenableAt": 1300000 },
+   "tlsnVerified": {
+     "activationHeight": 0,
+     "notaryKeys": [
+       // This validUntil only if step 1 did not close the key; else keep step 1's.
+       { "id": "demos-notary-1", "alg": "k256", "hex": "<unchanged>", "validUntil": 1300000 },
+       { "id": "demos-notary-standby", "alg": "k256", "hex": "<unchanged>" },
+       { "id": "demos-notary-2", "alg": "k256", "hex": "<new ceremony key>", "validFrom": 1300000 }
+     ]
+     // verifierWasmSha256 and the limits: unchanged
+   }
+   ```
+
+   This release edits two active entries, so a node refuses to boot on it
+   until it restarts once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the
+   agreed digest the refusal prints; remove the variable once the node runs
+   (section 6). Every validator must run the release before R. The fork
+   schedule watch does not abstain ahead of R or the key ends, only ahead of
+   an `activationHeight`, so before R confirm that
+   `demos_fork_schedule_mismatch` is 0 on every validator and no
+   `[FORK SCHEDULE] MISMATCH with` line is logged (section 6). A build
+   older than these fields refuses to boot on the key ranges; one given only
+   `reenableAt` boots, keeps the switch on after R, and stops following the
+   chain at the first block from R that carries a TLSNotary transaction.
+   Upgraded peers report it as a fork schedule mismatch, because
+   `reenableAt` and the key ranges are part of the schedule digest.
+   `getNetworkInfo` keeps reporting `tlsnDisabled` as `activated` after R,
+   because that field compares only `activationHeight` with the tip; the end
+   of the switch is the `reenableAt` value in the genesis file.
 
 A notary that only misbehaves (wrong key served, crash loop) is not a
 compromise: stop it, fix it, and the other instance keeps serving.
