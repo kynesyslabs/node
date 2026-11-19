@@ -1,6 +1,6 @@
 {
   "properties": {
-    "id": "FILL: mainnet chain id, an integer no other Demos network uses (testnet 1 and devnet 1337 are refused)",
+    "id": 8587492,
     "name": "FILL: network name (testnet: DEMOS)",
     "currency": "FILL: currency symbol (testnet: DEM)",
     "shardSize": 10,
@@ -40,30 +40,103 @@
     "identityCarryover": {
       "activationHeight": 0
     },
+    "stakeApplyChecks": {
+      "activationHeight": 0
+    },
+    "txTypeAllowList": {
+      "activationHeight": 0
+    },
+    "instantMessagingBinding": {
+      "activationHeight": 0
+    },
+    "nativeSendBinding": {
+      "activationHeight": 0
+    },
+    "canonicalAddresses": {
+      "activationHeight": 0
+    },
+    "feeBinding": {
+      "activationHeight": 0
+    },
+    "blockCaps": {
+      "activationHeight": 0
+    },
+    "unpinnedCommittee": {
+      "activationHeight": 0
+    },
+    "telegramSenderBinding": {
+      "activationHeight": 0
+    },
+    "xmRemoveCanonical": {
+      "activationHeight": 0
+    },
+    "tokenStakingGate": {
+      "activationHeight": 0
+    },
+    "l2psSettlement": {
+      "activationHeight": 0
+    },
     "gasFeeSeparation": {
-      "activationHeight": "FILL: 0 or null",
-      "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account, required whether the height is 0 or null"
+      "activationHeight": 0,
+      "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"
     },
     "web2ProofBinding": {
-      "activationHeight": "FILL: 0 or null"
+      "activationHeight": 0
     },
     "tlsnProofEnforcement": {
-      "activationHeight": "FILL: 0 or null"
+      "activationHeight": 0
+    },
+    "l2psGate": {
+      "activationHeight": null
+    },
+    "tlsnDisabled": {
+      "activationHeight": null
+    },
+    "nftValidatorGating": {
+      "activationHeight": null
+    },
+    "tlsnVerified": {
+      "activationHeight": 0,
+      "notaryKeys": [
+        {
+          "id": "demos-notary-1",
+          "alg": "k256",
+          "hex": "FILL: primary notary public key from the notary key ceremony, 33-byte compressed secp256k1, lowercase 02 or 03 + 64 hex"
+        },
+        {
+          "id": "demos-notary-standby",
+          "alg": "k256",
+          "hex": "FILL: cold standby notary public key from the notary key ceremony, 33-byte compressed secp256k1, lowercase 02 or 03 + 64 hex"
+        }
+      ],
+      "verifierWasmSha256": "FILL: sha256 of native/tlsn-verify/dist/demos_tlsn_verify.wasm in the launch release, 64 lowercase hex",
+      "maxPresentationBytes": 65536,
+      "freshnessWindowSec": 3600,
+      "futureSkewSec": 60
     },
     "xmProofBinding": {
-      "activationHeight": null
+      "activationHeight": 0
+    },
+    "storageFeeSettlement": {
+      "activationHeight": 0
+    },
+    "referenceBlockRoom10": {
+      "activationHeight": 0
     },
     "atomicWork": {
       "activationHeight": null
     },
     "networkGovernance": {
       "activationHeight": null
+    },
+    "tokenStaking": {
+      "activationHeight": null
     }
   },
   "snapshot": {
     "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
   },
-  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, in the snapshot's unit (DEM over a DEM snapshot, OS over a migrated one; see genesis.md)",
+  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, whole starting balances in OS (1 DEM = 10^9 OS; see genesis.md)",
   "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
   "status": "confirmed",
   "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\", \"first_seen\": 0, \"valid_at\": 0}"

@@ -38,8 +38,15 @@ import {
 } from "src/libs/blockchain/genesis/loadSnapshot"
 import Datasource from "src/model/datasource"
 import { Validators } from "src/model/entities/Validators"
+import { decimalBigInt } from "src/libs/blockchain/genesis/decimalAmount"
 import log from "src/utilities/logger"
-import { nftExemptSeeds, seededNftReasons, type SeededValidatorNft } from "src/features/staking/seedNft"
+import {
+    nftExemptSeeds,
+    seededNftReasons,
+    type SeededValidatorNft,
+    type SeedNftOptions,
+} from "src/features/staking/seedNft"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 
 export interface GenesisValidatorSeed {
     address: string
@@ -118,7 +125,7 @@ export async function ensureValidatorSeed(
     // genesis because they capture post-genesis staking events.
     const snapshotSeeds = await loadSnapshotValidators()
     if (snapshotSeeds.length > 0) {
-        refuseOnNftReasons(snapshotSeeds, "validators.jsonl")
+        refuseOnNftReasons(snapshotSeeds, "validators.jsonl", { fromChain: true })
         log.warning(
             `[BOOT] validators table empty; re-seeding ${snapshotSeeds.length} entries from data/snapshot/validators.jsonl`,
         )
@@ -153,10 +160,13 @@ export async function ensureValidatorSeed(
         )
     }
 
-    seed.forEach(validateSeedEntry)
+    const nftSeats = nftGatingActiveAtGenesis()
+    seed.forEach((entry, i) => validateSeedEntry(entry, i, nftSeats))
     refuseOnNftReasons(seed, "genesis.validators")
-    for (const address of nftExemptSeeds(seed)) {
-        log.warning(`[BOOT] ${address} is seated without an NFT (nft_exempt); test networks only`)
+    if (nftSeats) {
+        for (const address of nftExemptSeeds(seed)) {
+            log.warning(`[BOOT] ${address} is seated without an NFT (nft_exempt); test networks only`)
+        }
     }
     log.warning(
         `[BOOT] validators table empty at block 0; re-seeding ${seed.length} entries from data/genesis.json`,
@@ -165,12 +175,17 @@ export async function ensureValidatorSeed(
     return await assertSeededAndReturn("genesis")
 }
 
-/** Stop the boot when a seeded set breaks the NFT rules. */
+/**
+ * Stop the boot when a seeded set breaks the NFT rules; only on a chain
+ * that seated its validators under `nftValidatorGating`.
+ */
 function refuseOnNftReasons(
     rows: readonly SeededValidatorNft[],
     label: string,
+    options: SeedNftOptions = {},
 ): void {
-    const reasons = seededNftReasons(rows, label)
+    if (!nftGatingActiveAtGenesis()) return
+    const reasons = seededNftReasons(rows, label, options)
     if (reasons.length > 0) {
         throw new ConsensusInvariantError(`[BOOT] ${reasons.join("; ")}`)
     }
@@ -282,7 +297,7 @@ function extractGenesisSeed(genesisData: unknown): GenesisValidatorSeed[] {
  * enforces the wider schema (status / first_seen / valid_at may be
  * null) so re-validating here would reject legitimate snapshot input.
  */
-function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
+function validateSeedEntry(seed: GenesisValidatorSeed, index: number, nftSeats: boolean): void {
     // Guard the whole row first so a `null` / non-object element in
     // genesis.json (e.g. an editor accidentally writes `[null, {...}]`)
     // surfaces as a ConsensusInvariantError with the offending index,
@@ -307,17 +322,17 @@ function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
     // Split the BigInt() parse from the positivity check so the
     // operator sees a distinct, actionable message for each failure
     // mode — matches `seedValidators.ts::validateSeed` exactly.
-    let stake: bigint
-    try {
-        stake = BigInt(seed.staked_amount)
-    } catch {
+    const stake = decimalBigInt(seed.staked_amount)
+    if (stake === null) {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
+            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}" (decimal digits only)`,
         )
     }
-    if (stake < 0n) {
+    if (nftSeats ? stake < 0n : stake <= 0n) {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`,
+            nftSeats
+                ? `[BOOT] genesis.validators[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`
+                : `[BOOT] genesis.validators[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
         )
     }
     if (seed.connection_url !== null) {

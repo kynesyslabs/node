@@ -1,9 +1,9 @@
-import Hashing from "src/libs/crypto/hashing"
+import { randomBytes } from "node:crypto"
 
+/**
+ * 256 random bits as 64 hex characters. Callers use it as a bearer name (a
+ * DAHR session id), so it must not be derivable from the clock.
+ */
 export function generateUniqueId(): string {
-    const timestamp = Date.now().toString()
-    const random = Math.random().toString()
-    const data = timestamp + random
-
-    return Hashing.sha256(data)
+    return randomBytes(32).toString("hex")
 }

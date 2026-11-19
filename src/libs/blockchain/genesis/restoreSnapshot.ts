@@ -19,6 +19,7 @@
  */
 
 import { verifySeededNfts } from "src/features/staking/seedNft"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
@@ -431,18 +432,23 @@ export async function restoreSnapshot(
 
 /**
  * Pass validator rows through to the insert and, once the file is read,
- * refuse the restore when the set breaks the NFT rules. The insert runs in
- * the genesis transaction, so the throw rolls every row back.
+ * refuse the restore when the set breaks the NFT rules, on a genesis that
+ * seats its validators under `nftValidatorGating`. The insert runs in the
+ * genesis transaction, so the throw rolls every row back.
  */
 async function* nftCheckedValidators(
     rows: AsyncIterable<ValidatorSeed>,
 ): AsyncIterable<ValidatorSeed> {
+    if (!nftGatingActiveAtGenesis()) {
+        yield* rows
+        return
+    }
     const seen: ValidatorSeed[] = []
     for await (const row of rows) {
         seen.push(row)
         yield row
     }
-    const reasons = await verifySeededNfts(seen, "validators.jsonl")
+    const reasons = await verifySeededNfts(seen, "validators.jsonl", { fromChain: true })
     if (reasons.length > 0) {
         throw new Error(`[GENESIS][SNAPSHOT] ${reasons.join("; ")}`)
     }

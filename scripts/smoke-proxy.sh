@@ -190,7 +190,7 @@ case "$mode" in
 esac
 
 # 10. Spoofed XFF should not 429 or affect status
-spoofed=$(http_status "$BASE/health" --header "X-Forwarded-For: 6.6.6.6")
+spoofed=$(http_status "$BASE/health/live" --header "X-Forwarded-For: 6.6.6.6")
 if [[ "$spoofed" == "200" ]]; then
     ok "Spoofed XFF accepted at edge (Caddy strips before forwarding)"
 else

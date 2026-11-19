@@ -8,6 +8,7 @@
  */
 
 import { Server } from "bun"
+import { createHash, timingSafeEqual } from "crypto"
 import log from "@/utilities/logger"
 import { MetricsService } from "./MetricsService"
 import type { MetricsServerConfig } from "./types"
@@ -64,7 +65,8 @@ export class MetricsServer {
         })
 
         log.info(
-            `[METRICS SERVER] Started on http://${this.config.hostname}:${this.config.port}/metrics`,
+            `[METRICS SERVER] Started on http://${this.config.hostname}:${this.config.port}/metrics` +
+                (this.config.bearerToken ? " (bearer token required)" : ""),
         )
     }
 
@@ -80,6 +82,14 @@ export class MetricsServer {
             return new Response(JSON.stringify({ status: "ok" }), {
                 status: 200,
                 headers: { "Content-Type": "application/json" },
+            })
+        }
+
+        // /health stays open for liveness probes; it reveals nothing.
+        if (!this.authorized(req)) {
+            return new Response("Unauthorized", {
+                status: 401,
+                headers: { "WWW-Authenticate": 'Bearer realm="metrics"' },
             })
         }
 
@@ -119,6 +129,18 @@ export class MetricsServer {
 
         // Not found
         return new Response("Not Found", { status: 404 })
+    }
+
+    private authorized(req: Request): boolean {
+        const token = this.config.bearerToken
+        if (!token) return true
+        const header = req.headers.get("authorization") ?? ""
+        const match = /^Bearer\s+(.+)$/i.exec(header)
+        if (!match) return false
+        // Equal-length digests, so the comparison time says nothing about the token.
+        const digest = (value: string) =>
+            createHash("sha256").update(value).digest()
+        return timingSafeEqual(digest(match[1].trim()), digest(token))
     }
 
     /**

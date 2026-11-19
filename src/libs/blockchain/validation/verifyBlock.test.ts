@@ -2,6 +2,7 @@ import {
     checkTimestampAgainstParent,
     checkTimestampNotAhead,
     verifyBlock,
+    verifyBlockCertificate,
 } from "./verifyBlock"
 import { getSharedState } from "src/utilities/sharedState"
 
@@ -487,5 +488,24 @@ describe("checkTimestampNotAhead", () => {
         networkNow = 7000
         expect(checkTimestampNotAhead(7060).valid).toBe(true)
         expect(checkTimestampNotAhead(7061).valid).toBe(false)
+    })
+})
+
+describe("verifyBlockCertificate", () => {
+    it("accepts a quorum-signed block whatever parent it names", async () => {
+        const block = makeBlock({ content: { previousHash: "not-our-chain" } })
+        expect((await verifyBlockCertificate(block)).valid).toBe(true)
+    })
+
+    it("rejects a block whose hash does not match its content", async () => {
+        const result = await verifyBlockCertificate(makeBlock({ hash: "tampered-hash" }))
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("hash mismatch")
+    })
+
+    it("rejects a block without the quorum, and a malformed one without throwing", async () => {
+        const unsigned = makeBlock({ validation_data: { signatures: { [A]: "s1" } } })
+        expect((await verifyBlockCertificate(unsigned)).valid).toBe(false)
+        expect((await verifyBlockCertificate({ number: 10, hash: "x" } as any)).valid).toBe(false)
     })
 })

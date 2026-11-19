@@ -13,6 +13,7 @@ import { chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
+import dropPreGovernanceRows from "./routines/dropPreGovernanceRows"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"
 import { getStakedSet } from "src/libs/consensus/stakedSet"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
@@ -28,11 +29,16 @@ import {
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import { BlockInvalidError } from "@/errors"
+import {
+    BlockCommitUnknownError,
+    CommittedBlockFollowUpError,
+} from "./committedBlockError"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
 import type { PendingGCRWrite } from "./gcr/handleGCR"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { countIncludedTransactions } from "@/features/metrics/consensusMetrics"
 import {
     blockRowRefusal,
     withStorableText,
@@ -41,6 +47,8 @@ import {
     pruneValidatorSetSnapshots,
     recordValidatorSetSnapshot,
 } from "./finality/validatorSet"
+import { withBlockTime } from "./gcr/applyTime"
+import { l2psOffAt } from "@/forks/l2psGate"
 import { pruneStorageHistory, resetStorageHistory } from "./finality/storageHistory"
 
 export function isGenesis(block: Block): boolean {
@@ -343,7 +351,7 @@ export async function insertBlock(
             )
         }
 
-        const status = new Set([
+        const status = new Set<string>([
             TRANSACTION_STATUS.CONFIRMED,
             TRANSACTION_STATUS.FAILED,
         ])
@@ -421,9 +429,11 @@ export async function insertBlock(
                     log.info(
                         `[forks][osDenomination] activation hook firing at block ${block.number}`,
                     )
-                    await runOsDenominationMigration(
-                        transactionalEntityManager,
-                        block.number,
+                    await withBlockTime(block.content?.timestamp, () =>
+                        runOsDenominationMigration(
+                            transactionalEntityManager,
+                            block.number,
+                        ),
                     )
                 }
 
@@ -447,11 +457,13 @@ export async function insertBlock(
                     log.info(
                         `[forks][gasFeeSeparation] activation hook firing at block ${block.number}`,
                     )
-                    await runGasFeeSeparationMigration(
-                        transactionalEntityManager,
-                        block.number,
-                        getSharedState.forkConfig.gasFeeSeparation
-                            .treasuryAddress,
+                    await withBlockTime(block.content?.timestamp, () =>
+                        runGasFeeSeparationMigration(
+                            transactionalEntityManager,
+                            block.number,
+                            getSharedState.forkConfig.gasFeeSeparation
+                                .treasuryAddress,
+                        ),
                     )
                 }
 
@@ -483,9 +495,13 @@ export async function insertBlock(
                         )
                     }
 
-                    const l2psTxs = transactionEntities.filter(
-                        tx => tx.content?.type === "l2ps_hash_update",
-                    )
+                    // Under l2psGate apply refuses every hash update, so none
+                    // may leave a row either. Block N is applied on tip N - 1.
+                    const l2psTxs = l2psOffAt(block.number - 1)
+                        ? []
+                        : transactionEntities.filter(
+                              tx => tx.content?.type === "l2ps_hash_update",
+                          )
                     for (const tx of l2psTxs) {
                         await persistConfirmedTransactionProjection(
                             tx,
@@ -539,16 +555,33 @@ export async function insertBlock(
                 // Governance hooks scoped to the block transaction so they
                 // commit/rollback atomically with it. sharedState refresh
                 // is deferred to post-commit (below) — RAM never ahead of DB.
-                const govProposalRepo =
-                    transactionalEntityManager.getRepository(NetworkUpgrade)
-                const govVoteRepo =
-                    transactionalEntityManager.getRepository(NetworkUpgradeVote)
-                await tallyUpgradeVotes(
-                    block.number,
-                    govProposalRepo,
-                    govVoteRepo,
-                )
-                await applyNetworkUpgrade(block.number, govProposalRepo)
+                // While governance is dormant no proposal applies, so any row
+                // here was left by an older binary: acting on it would move
+                // only the nodes that kept it. The block at the activation
+                // height drops such rows, so the first block that admits
+                // governance edits reads the same, empty, set on every node.
+                if (
+                    isForkActive("networkGovernance", block.number) &&
+                    !isForkActive("networkGovernance", block.number - 1)
+                ) {
+                    await dropPreGovernanceRows(
+                        block.number,
+                        transactionalEntityManager.getRepository(NetworkUpgrade),
+                        transactionalEntityManager.getRepository(NetworkUpgradeVote),
+                    )
+                }
+                if (isForkActive("networkGovernance", block.number - 1)) {
+                    const govProposalRepo =
+                        transactionalEntityManager.getRepository(NetworkUpgrade)
+                    const govVoteRepo =
+                        transactionalEntityManager.getRepository(NetworkUpgradeVote)
+                    await tallyUpgradeVotes(
+                        block.number,
+                        govProposalRepo,
+                        govVoteRepo,
+                    )
+                    await applyNetworkUpgrade(block.number, govProposalRepo)
+                }
 
                 // After every hook that can move a stake. Block 0's set is
                 // recorded at boot, once the validator seed is in place.
@@ -563,13 +596,21 @@ export async function insertBlock(
             },
         )
         // State writers are serialised; a block carrying state is one.
-        const result = pendingGCR
-            ? await gcrWriteMutex.runExclusive(commit)
-            : await commit()
+        const result = await (
+            pendingGCR ? gcrWriteMutex.runExclusive(commit) : commit()
+        ).catch(async error => {
+            throw await commitFailure(block, error)
+        })
 
         if (pendingGCR) {
-            await pendingGCR.afterCommit()
+            try {
+                await pendingGCR.afterCommit()
+            } catch (error) {
+                throw new CommittedBlockFollowUpError(block.number, error)
+            }
         }
+
+        countIncludedTransactions(transactionEntities)
 
         if (block.number > getSharedState.lastBlockNumber) {
             getSharedState.lastBlockNumber = block.number
@@ -628,6 +669,23 @@ export async function insertBlock(
             `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
         )
         throw error
+    }
+}
+
+/**
+ * A COMMIT whose reply is lost rejects although the block is on disk. Memory
+ * then trails disk and sync skips a stored block, so only a restart brings
+ * them together again; a block that is not on disk failed like any other.
+ */
+async function commitFailure(block: Block, error: unknown): Promise<unknown> {
+    try {
+        const stored = await getBlocksRepo().findOneBy({ hash: block.hash })
+        return stored ? new BlockCommitUnknownError(block.number, error) : error
+    } catch (lookupError) {
+        log.error(
+            `[ChainDB] could not tell whether block ${block.number} committed: ${lookupError}`,
+        )
+        return new BlockCommitUnknownError(block.number, error)
     }
 }
 

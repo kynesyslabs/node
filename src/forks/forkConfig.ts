@@ -255,6 +255,19 @@ export type CommitLockConfig = BaseForkConfig
 export type FinalityProofsConfig = BaseForkConfig
 
 /**
+ * `unpinnedCommittee` fork: no identity is guaranteed a committee seat. The
+ * three validator keys in `PINNED_SHARD_IDENTITIES` stop being moved to the
+ * front of the committee (and so to the secretary seat) whenever they are
+ * eligible; every member is drawn by the seed alone.
+ *
+ * Activation at H applies to the committee of block H and later. Dormant by
+ * default (`activationHeight: null`): the testnet's committees, and so its
+ * signatures, depend on the pins. A chain launched from genesis with this
+ * build sets 0. No payload beyond the base.
+ */
+export type UnpinnedCommitteeConfig = BaseForkConfig
+
+/**
  * `identityCarryover` fork: a chain whose genesis carries user data over
  * from another network (identities, points, referrals) without its money.
  *
@@ -277,6 +290,282 @@ export type FinalityProofsConfig = BaseForkConfig
 export type IdentityCarryoverConfig = BaseForkConfig
 
 /**
+ * `stakeApplyChecks` fork: the staking rules hold where the stake is
+ * applied, not only at the node that took the transaction in.
+ *
+ * At apply, from the activation height:
+ *  - a stake is taken from the sender's balance (refused when the balance
+ *    does not cover it) and recorded as bonded; exit pays the bonded amount
+ *    back, once, so a stake that was never debited is never paid out;
+ *  - entering the validator set, as a new validator or one that exited,
+ *    takes at least the minimum stake and a connection URL;
+ *  - an unstake must come from an active validator with no unstake under
+ *    way, and is refused when it would leave fewer active validators than
+ *    the committee floor, below which no block is forged.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type StakeApplyChecksConfig = BaseForkConfig
+
+/**
+ * `tokenStakingGate` fork: the validator set is the genesis list until
+ * `tokenStaking` opens token staking. A `validatorStake` or
+ * `validatorUnstake` transaction, and a `validatorStake` edit that stakes,
+ * unstakes or is an exit flagged `isRollback` in a transaction of any type,
+ * is refused at RPC intake, at pool admission and at apply.
+ *
+ * It refuses what a chain without it accepts, so it is the fork that is
+ * scheduled, not the one that opens staking: a genesis that leaves it out
+ * keeps staking open, and a build that does not know it refuses to boot on
+ * a genesis that schedules it instead of applying stakes its peers refuse.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type TokenStakingGateConfig = BaseForkConfig
+
+/**
+ * `tokenStaking` fork: token staking opens by network upgrade. From its
+ * activation height a stake or unstake is judged by the staking rules again,
+ * as on a chain without `tokenStakingGate`; without that gate it changes
+ * nothing.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`) and at launch: a
+ * mainnet genesis leaves it null, and a later height-pinned activation turns
+ * token staking on. No payload beyond the base.
+ */
+export type TokenStakingConfig = BaseForkConfig
+
+/**
+ * `nftValidatorGating` fork: a validator seat is backed by a Solana node NFT
+ * instead of a DEM stake.
+ *
+ * From the activation height:
+ *  - a `validatorStake` that enters the validator set carries an NFT proof
+ *    (a finalized Solana transaction, signed by the wallet holding an
+ *    allowlisted mint, whose memo names the validator) and stakes 0 DEM; a
+ *    stake of any other amount is refused. The pool and the consensus merge
+ *    check the proof on Solana; apply checks the allowlist and evicts any
+ *    other seat the same mint backs;
+ *  - a `validatorChallenge` closes a seat whose NFT a later finalized Solana
+ *    transfer moved out of the recorded wallet;
+ *  - the four seat transactions pay no gas;
+ *  - an unstake lock is `NFT_UNSTAKE_LOCK_BLOCKS` blocks;
+ *  - a governance vote and the snapshot weight count one per seat.
+ *
+ * Seats taken before the activation keep their rows and stay seated without
+ * an NFT. Scheduled at 0, block 0 seats only genesis validators whose NFT
+ * proofs check out on Solana (or that are `nft_exempt`, test networks only).
+ * Seat transactions stay subject to `tokenStakingGate`, so on a chain with
+ * the gate no new seat is taken before `tokenStaking` opens.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`) and at launch. No
+ * payload beyond the base.
+ */
+export type NftValidatorGatingConfig = BaseForkConfig
+
+/**
+ * `nativeSendBinding` fork: a native send pays the recipient and the amount
+ * its signed body names. The payment is applied from the native payload's
+ * args, while explorers, receipts and the RPC balance check read
+ * `content.to` and `content.amount`; nothing compared them, so a sender
+ * could sign a receipt for one payee and pay another.
+ *
+ * At admission (gossip ingest, consensus merge) and at apply, from the
+ * activation height, a native send is refused unless `args[0]` is
+ * `content.to` and `args[1]` pays what `content.amount` names. Amounts are
+ * compared in ledger units: args are paid as written, while a body number is
+ * DEM after osDenomination, as the signature hash reads it.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type NativeSendBindingConfig = BaseForkConfig
+
+/**
+ * `canonicalAddresses` fork: account keys are lowercase hex. The ledger keys
+ * an account by the exact string, so `0xAB…` and `0xab…` are two accounts,
+ * and a transfer to an upper-case spelling lands in one no wallet reads.
+ *
+ * At admission and at apply, from the activation height, a transaction is
+ * refused when its sender, the recipient of a native send, or the account of
+ * any balance edit it carries is a hex address with an upper-case digit.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type CanonicalAddressesConfig = BaseForkConfig
+
+/**
+ * `feeBinding` fork: the fee a native transaction carries is the one the
+ * network charges. Apply derives the fee edits from the shipped
+ * `transaction_fee`, which only the RPC confirm step compared with the
+ * network's fee, so a transaction gossiped or merged straight into a pool
+ * could pay less, or route the rpc share to an account of its choosing.
+ *
+ * At admission and at apply, from the activation height, and while
+ * `gasFeeSeparation` is active, a native transaction is refused unless each
+ * shipped fee component charges what the network computes and it names no
+ * `rpc_address`. Compared on what apply deducts: apply charges a component
+ * in ledger units as written, so after osDenomination a DEM number would pay
+ * a billionth of the fee its hash commits to.
+ *
+ * From the same height, apply leaves out of a native transaction the flat gas
+ * edit the SDK still ships: the fee edits are its whole fee, and the gas, a
+ * debit nothing credits, charged it twice and burned 1 DEM of supply per
+ * transaction.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type FeeBindingConfig = BaseForkConfig
+
+/**
+ * `telegramSenderBinding` fork: a Telegram identity attestation must have
+ * been made for the account that submits it. The user's challenge
+ * signature inside the attestation (`payload.public_key`) has to be the
+ * transaction sender's key.
+ *
+ * Before it, any account could submit an attestation the bot issued to
+ * someone else (they are public once linked) and link that Telegram
+ * account to itself. Judged when the proof is verified, both at
+ * admission and at apply, at the tip, so a block applied on tip H or later
+ * refuses a foreign attestation. Dormant by default; a mainnet genesis sets
+ * 0. No payload beyond the base.
+ */
+export type TelegramSenderBindingConfig = BaseForkConfig
+
+/**
+ * `xmRemoveCanonical` fork: removing a cross-chain (xm) identity finds the
+ * stored entry by the chain's canonical address form, the same comparison
+ * admission uses for duplicates, instead of the client's `isEVM` flag and
+ * the raw `targetAddress`.
+ *
+ * Before it, a remove compared the raw address unless the request said
+ * isEVM, so it missed an entry stored lower-cased or under its
+ * displayAddress, and a request claiming isEVM on a case-sensitive chain
+ * lower-cased both sides and could take an entry that differs from the
+ * named one only in case. An apply-time rule, judged at the tip.
+ * Dormant by default; a mainnet genesis sets 0. No payload beyond the base.
+ */
+export type XmRemoveCanonicalConfig = BaseForkConfig
+
+/**
+ * `l2psSettlement` fork: an `l2psBatch` moves L1 balances on every node, in
+ * the block that carries it, through a settlement record (net change per
+ * account, the senders' signed transfer commitments and a PLONK proof that
+ * ties them together). Spec: docs/design/l2ps-zk-settlement.md, "Interface v1".
+ *
+ * Before it, only the entry node applied a batch's edits, from its local
+ * `l2ps_proofs` rows, so every other node's balances diverged (DEM-816).
+ * Active, that local path is off, a batch without a valid settlement fails
+ * with no edits, and members refuse old-format L2PS transfers. Dormant by
+ * default; a mainnet genesis sets 0. No payload beyond the base.
+ */
+export type L2psSettlementConfig = BaseForkConfig
+
+/**
+ * `l2psGate` fork: L2PS is off. The four L2PS transaction types
+ * (`l2psEncryptedTx`, `l2psBatch`, `l2ps_hash_update`, `subnet`) are refused
+ * at RPC intake, pool admission, the consensus merge and apply; the L2PS
+ * RPC and peer handlers refuse every request; consensus applies no pending
+ * L2PS proof; and the node starts no L2PS service.
+ *
+ * A pending proof debits the L2 fee from the sender with no credit
+ * anywhere, so applying one breaks supply conservation. A network that
+ * launches without L2PS sets 0 and lifts it with a later fork once
+ * settlement conserves supply. No payload beyond the base.
+ */
+export type L2psGateConfig = BaseForkConfig
+
+/**
+ * `tlsnDisabled` fork: TLSNotary attestation is off. A native `tlsn_request`
+ * or `tlsn_store`, or a transaction carrying a `tlsnotary` edit, is refused
+ * at RPC intake, pool admission, the consensus merge and apply, before any
+ * of its edits run: no fee is charged, nothing is burned and no attestation
+ * token is issued. Judged at the tip like the other apply-time gates.
+ * No payload beyond the base.
+ */
+export type TlsnDisabledConfig = BaseForkConfig
+
+/** A notary signing key, in the form the verifier reports `verifyingKey`. */
+export interface TlsnNotaryKey {
+    /** Operator label; names the key in refusals and logs. */
+    id: string
+    alg: "k256"
+    /** 33-byte SEC1 compressed secp256k1 public key, lowercase hex (66 chars). */
+    hex: string
+}
+
+/** The `tlsnVerified` payload, complete once the loader has accepted it. */
+export interface TlsnVerifiedParams {
+    /** The notaries whose attestations the node accepts. */
+    notaryKeys: readonly TlsnNotaryKey[]
+    /** sha256 of the verifier wasm this chain verifies with. */
+    verifierWasmSha256: string
+    /** Largest presentation, in bytes, the node verifies or stores. */
+    maxPresentationBytes: number
+    /** How old, in seconds before the block time, an attested connection may be. */
+    freshnessWindowSec: number
+    /** How far, in seconds, an attested time may lie after the block time. */
+    futureSkewSec: number
+}
+
+/**
+ * `tlsnVerified` fork: the node verifies a TLSNotary presentation itself, in
+ * the pinned wasm verifier, against the notary keys listed here, instead of
+ * checking its structure only. Keys rotate through a release that schedules a
+ * new payload, since governance is dormant at launch. `tlsnDisabled`, once
+ * scheduled, still refuses every TLSNotary transaction. Dormant by default;
+ * a mainnet genesis sets 0 with the keys from the notary key ceremony.
+ *
+ * The payload may be absent only while the fork is unscheduled (the code
+ * default); the loader refuses a scheduled entry without it.
+ */
+export interface TlsnVerifiedConfig extends BaseForkConfig, Partial<TlsnVerifiedParams> {}
+
+/**
+ * `storageFeeSettlement` fork: the storage fee of a Storage Program create or
+ * write is credited like a network fee, split between burn and treasury.
+ * The SDK builds that fee as a sender debit no edit credits, so each such
+ * transaction took the fee out of the total supply while every other fee is
+ * credited. The sender still pays it as signed, so the signed edits and
+ * their binding are unchanged; only the applied copy gains the credits.
+ * Credited where the gas of a non-native transaction is (`gasFeeSeparation`
+ * and `feeBinding`), judged at the tip like the other apply-time rules.
+ * Dormant by default, so an existing chain replays as applied; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type StorageFeeSettlementConfig = BaseForkConfig
+
+/**
+ * `referenceBlockRoom10` fork: a transaction's reference block may be up to
+ * 10 blocks behind the head instead of 1, and the deep window it can still
+ * be included as failed in is 50 blocks instead of 5.
+ *
+ * With a room of 1 a transaction confirmed at head N had to land in block
+ * N + 1 or N + 2, so under load (or a user who takes a few seconds to
+ * approve the fee) a large share failed with an expired reference. The room
+ * is a consensus rule: the forger's mempool filter, sync verification, the
+ * broadcast check and mempool cleanup all read it. Each judges a block on
+ * the rule of its own tip, so a block applied on a tip below the activation
+ * height verifies with room 1. Replay is refused by the nonce and the
+ * signature domain, not by the window. Dormant by default; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type ReferenceBlockRoom10Config = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -287,11 +576,66 @@ export type IdentityCarryoverConfig = BaseForkConfig
  * validator that cast it and a proposal for the validator that made it.
  *
  * Activation at H binds from the block applied on tip H, which is block
- * H + 1. Dormant by default (`activationHeight: null`) and at launch: the
+ * H + 1. Block H deletes the proposals and votes recorded before H, which
+ * only nodes that ran an older binary hold. Dormant by default
+ * (`activationHeight: null`) and at launch: the
  * vote weights and quorum rules are not ready for a live network, so a
  * later height-pinned activation turns it on. No payload beyond the base.
  */
 export type NetworkGovernanceConfig = BaseForkConfig
+
+/**
+ * `txTypeAllowList` fork: a transaction is admitted to a pool by the
+ * consensus merge and applied by a block only when its type is one the node
+ * implements (`BLOCK_TX_TYPES` in `libs/blockchain/validation/txTypes.ts`).
+ *
+ * Before it, the SDK gave a transaction of any type the universal gas and
+ * nonce edits, so an escrow, contract, token or made-up type was applied as a
+ * fee and a nonce with its own effect silently dropped.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type TxTypeAllowListConfig = BaseForkConfig
+
+/**
+ * `instantMessagingBinding` fork: an `instantMessaging` transaction without
+ * edits, the form the signalling server stores a message in, is merged and
+ * applied only when every signer field names a validator staked at the tip.
+ *
+ * Before it, that form paid no fee and spent no nonce whoever signed it, so
+ * any key could have such transactions merged into blocks and applied for
+ * free. A message that carries the universal gas and nonce edits pays like
+ * any transaction and is not affected.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type InstantMessagingBindingConfig = BaseForkConfig
+
+/**
+ * `blockCaps` fork: bounds what one block takes from the pool and what one
+ * sender holds in it.
+ *
+ *  - A block takes at most BLOCK_MAX_TXS txs and BLOCK_MAX_CONTENT_BYTES of
+ *    canonical tx content, chosen deterministically from the merged pool
+ *    (see selectBlockTransactions); the rest stay pooled for later blocks.
+ *    A rebuilt locked candidate over either cap is not prevoted.
+ *  - The consensus mempool merge holds each sender to the admission cap
+ *    (MEMPOOL_MAX_PENDING_PER_SENDER), keeping the sender's lowest nonces,
+ *    so every member that has seen the same txs keeps the same ones.
+ *
+ * Activation at H applies to block H and later; the merge reads the block
+ * it prepares (tip + 1). Dormant by default (`activationHeight: null`): it
+ * changes which txs a block contains, and a missing genesis entry hydrates
+ * from here. A chain launched from genesis with this build sets 0. No
+ * payload beyond the base.
+ */
+export type BlockCapsConfig = BaseForkConfig
 
 /**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
@@ -333,8 +677,24 @@ export type ForkConfig =
     | CommitteeBindingConfig
     | CommitLockConfig
     | FinalityProofsConfig
+    | UnpinnedCommitteeConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
+    | TxTypeAllowListConfig
+    | InstantMessagingBindingConfig
+    | NativeSendBindingConfig
+    | CanonicalAddressesConfig
+    | FeeBindingConfig
+    | BlockCapsConfig
+    | TokenStakingGateConfig
+    | TokenStakingConfig
+    | NftValidatorGatingConfig
+    | TelegramSenderBindingConfig
+    | XmRemoveCanonicalConfig
+    | L2psSettlementConfig
+    | L2psGateConfig
+    | TlsnDisabledConfig
+    | TlsnVerifiedConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -356,8 +716,27 @@ export type ForkName =
     | "committeeBinding"
     | "commitLock"
     | "finalityProofs"
+    | "unpinnedCommittee"
     | "identityCarryover"
+    | "stakeApplyChecks"
     | "networkGovernance"
+    | "txTypeAllowList"
+    | "instantMessagingBinding"
+    | "nativeSendBinding"
+    | "canonicalAddresses"
+    | "feeBinding"
+    | "blockCaps"
+    | "tokenStakingGate"
+    | "tokenStaking"
+    | "telegramSenderBinding"
+    | "xmRemoveCanonical"
+    | "l2psSettlement"
+    | "l2psGate"
+    | "tlsnDisabled"
+    | "storageFeeSettlement"
+    | "referenceBlockRoom10"
+    | "nftValidatorGating"
+    | "tlsnVerified"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -378,8 +757,27 @@ export interface ForkConfigByName {
     committeeBinding: CommitteeBindingConfig
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
+    unpinnedCommittee: UnpinnedCommitteeConfig
     identityCarryover: IdentityCarryoverConfig
+    stakeApplyChecks: StakeApplyChecksConfig
     networkGovernance: NetworkGovernanceConfig
+    txTypeAllowList: TxTypeAllowListConfig
+    instantMessagingBinding: InstantMessagingBindingConfig
+    nativeSendBinding: NativeSendBindingConfig
+    canonicalAddresses: CanonicalAddressesConfig
+    feeBinding: FeeBindingConfig
+    blockCaps: BlockCapsConfig
+    tokenStakingGate: TokenStakingGateConfig
+    tokenStaking: TokenStakingConfig
+    telegramSenderBinding: TelegramSenderBindingConfig
+    xmRemoveCanonical: XmRemoveCanonicalConfig
+    l2psSettlement: L2psSettlementConfig
+    l2psGate: L2psGateConfig
+    tlsnDisabled: TlsnDisabledConfig
+    storageFeeSettlement: StorageFeeSettlementConfig
+    referenceBlockRoom10: ReferenceBlockRoom10Config
+    nftValidatorGating: NftValidatorGatingConfig
+    tlsnVerified: TlsnVerifiedConfig
 }
 
 /**
@@ -575,6 +973,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Genesis imports user data without balances, imported identities pay no " +
             "first-link award, and a web2 unlink removes one platform account by userId.",
     },
+    stakeApplyChecks: {
+        // Dormant by default: it changes what a stake, unstake and exit do to
+        // balances and validator rows, and a missing genesis entry hydrates
+        // from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Apply debits a stake from the balance and refunds it once at exit, checks the " +
+            "minimum stake on entry, and refuses an unstake below the committee floor.",
+    },
     networkGovernance: {
         // Dormant by default and at launch: a missing genesis entry hydrates
         // from here, so governance stays off until a height is agreed.
@@ -582,6 +989,160 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         description:
             "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
             "governance edit bound to the account that signed it.",
+    },
+    txTypeAllowList: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "Admit and apply only the transaction types the node implements; escrow, " +
+            "contract, token and unknown types are refused instead of applied as a fee.",
+    },
+    instantMessagingBinding: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "A fee-free instantMessaging transaction (no edits) is merged and applied only " +
+            "when a validator staked at the tip signed it.",
+    },
+    nativeSendBinding: {
+        // Dormant by default: it changes which transactions a block applies,
+        // and a missing genesis entry hydrates from here. A mainnet genesis
+        // sets 0.
+        activationHeight: null,
+        description:
+            "A native send pays the recipient and amount its signed body names: its args " +
+            "must equal content.to and content.amount.",
+    },
+    canonicalAddresses: {
+        // Dormant by default, as above. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Accounts are keyed by lowercase hex: a sender, recipient or balance edit " +
+            "account spelled with upper-case digits is refused.",
+    },
+    feeBinding: {
+        // Dormant by default, as above. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A native transaction's shipped fee equals the network fee and names no " +
+            "rpc_address, checked at admission and apply, not only at RPC confirm.",
+    },
+    blockCaps: {
+        // Dormant by default: it changes which txs a block contains, and a
+        // missing genesis entry hydrates from here. A chain launched from
+        // genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "A block takes a bounded, deterministic share of the pool by tx count and " +
+            "content bytes, and the mempool merge holds each sender to the admission cap.",
+    },
+    tokenStakingGate: {
+        // Dormant by default: it refuses stakes a running chain accepts, and a
+        // missing genesis entry hydrates from here, so a running chain keeps
+        // staking open. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Validators come from the genesis list: validatorStake and validatorUnstake " +
+            "are refused until tokenStaking opens token staking.",
+    },
+    tokenStaking: {
+        // Dormant by default and at launch: token staking opens by a later
+        // height-pinned activation. Changes nothing without tokenStakingGate.
+        activationHeight: null,
+        description:
+            "Token staking opens by network upgrade: validatorStake and validatorUnstake " +
+            "are admitted and applied again under tokenStakingGate.",
+    },
+    unpinnedCommittee: {
+        // Dormant by default: a missing genesis entry hydrates from here, and
+        // the testnet's committees still put the pinned identities first. A
+        // chain launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "No identity is guaranteed a committee seat: the pinned validator keys are " +
+            "drawn by the seed like every other member.",
+    },
+    telegramSenderBinding: {
+        // Dormant by default: it changes which identity edits a block
+        // applies, and a missing genesis entry hydrates from here. A mainnet
+        // genesis sets 0.
+        activationHeight: null,
+        description:
+            "A Telegram identity attestation links only to the account whose key " +
+            "signed its challenge, the transaction sender.",
+    },
+    xmRemoveCanonical: {
+        // Dormant by default: it changes which entry an xm remove takes, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An xm identity remove finds the stored entry by the chain's canonical " +
+            "address form, as admission compares them.",
+    },
+    l2psSettlement: {
+        // Dormant by default: it changes the balances an l2psBatch moves, and
+        // a missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An l2psBatch settles on every node through a proven net-change record; " +
+            "the entry node's local L2PS proof path is off.",
+    },
+    l2psGate: {
+        // Dormant by default: it refuses traffic a running chain accepts, and
+        // a missing genesis entry hydrates from here. A mainnet genesis that
+        // launches without L2PS sets 0.
+        activationHeight: null,
+        description:
+            "L2PS is off: its transaction types are refused at every layer, its handlers " +
+            "refuse, no pending proof applies and no L2PS service starts.",
+    },
+    tlsnDisabled: {
+        // Dormant by default, as above. A mainnet genesis that launches
+        // without TLSNotary sets 0.
+        activationHeight: null,
+        description:
+            "TLSNotary is off: tlsn_request and tlsn_store are refused before any edit " +
+            "applies, so no fee is charged and no attestation token is issued.",
+    },
+    storageFeeSettlement: {
+        // Dormant by default: it changes the balances a Storage Program
+        // create or write leaves, and a missing genesis entry hydrates from
+        // here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A Storage Program storage fee is credited like a network fee, split between " +
+            "burn and treasury, so it no longer leaves the total supply.",
+    },
+    referenceBlockRoom10: {
+        // Dormant by default: it changes which transactions a block may hold
+        // as confirmed, and a missing genesis entry hydrates from here. A
+        // mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A transaction's reference block may be up to 10 blocks behind the head " +
+            "(deep window 50) instead of 1 (deep window 5).",
+    },
+    nftValidatorGating: {
+        // Dormant by default and at launch: it changes who may take a seat
+        // and what a seat costs, and a missing genesis entry hydrates from
+        // here, so a running chain keeps its staking rules.
+        activationHeight: null,
+        description:
+            "A validator seat is backed by an allowlisted Solana node NFT: entering takes " +
+            "an NFT proof and 0 DEM, a challenge evicts a seat whose NFT moved, seat " +
+            "transactions pay no gas and a vote counts one per seat.",
+    },
+    tlsnVerified: {
+        // Dormant by default and without keys: a node cannot verify a
+        // presentation without the notary keys the chain agreed on, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0
+        // with its payload.
+        activationHeight: null,
+        description:
+            "TLSNotary presentations are verified by the node in the pinned wasm verifier " +
+            "against the notary keys of the fork payload.",
     },
 }
 
@@ -607,7 +1168,26 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
+        unpinnedCommittee: { ...DEFAULT_FORK_CONFIG.unpinnedCommittee },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
+        stakeApplyChecks: { ...DEFAULT_FORK_CONFIG.stakeApplyChecks },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
+        txTypeAllowList: { ...DEFAULT_FORK_CONFIG.txTypeAllowList },
+        instantMessagingBinding: { ...DEFAULT_FORK_CONFIG.instantMessagingBinding },
+        nativeSendBinding: { ...DEFAULT_FORK_CONFIG.nativeSendBinding },
+        canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
+        feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
+        blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
+        tokenStakingGate: { ...DEFAULT_FORK_CONFIG.tokenStakingGate },
+        tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
+        telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
+        xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
+        l2psSettlement: { ...DEFAULT_FORK_CONFIG.l2psSettlement },
+        l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
+        tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
+        storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
+        referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
+        nftValidatorGating: { ...DEFAULT_FORK_CONFIG.nftValidatorGating },
+        tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
     }
 }

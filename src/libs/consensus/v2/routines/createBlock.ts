@@ -192,12 +192,6 @@ async function prevoteCandidate(
             `no round for the prevote on block ${block.number}; refusing to sign`,
         )
     }
-    const ahead = roundAheadRefusal(round, getNetworkTimestamp())
-    if (ahead) {
-        throw new CommitLockError(
-            `${ahead}; refusing to prevote block ${block.number}`,
-        )
-    }
     if (expectedHash !== undefined && expectedHash !== block.hash) {
         throw new CommitLockError(
             `rebuilt block ${block.number} hashes to ${block.hash}, not the locked ${expectedHash}; refusing to sign`,
@@ -212,9 +206,16 @@ async function prevoteCandidate(
     }
 
     // Under the mutex the precommit decision takes, so a precommit is never
-    // decided between this prevote's record and its opening
+    // decided between this prevote's record and its opening. The clock is
+    // read in there too: it can step back while the mutex is awaited.
     await withLockMutex(async () => {
         assertTimestampSignable(block)
+        const ahead = roundAheadRefusal(round, getNetworkTimestamp())
+        if (ahead) {
+            throw new CommitLockError(
+                `${ahead}; refusing to prevote block ${block.number}`,
+            )
+        }
         recordPrevoteRound(getSharedState.identityFile, {
             genesisHash,
             height: block.number,

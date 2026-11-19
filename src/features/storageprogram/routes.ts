@@ -14,6 +14,7 @@
 
 import type { BunServer } from "@/libs/network/bunServer"
 import { jsonResponse } from "@/libs/network/bunServer"
+import { getAuthContext } from "@/libs/network/authContext"
 import log from "@/utilities/logger"
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
@@ -100,28 +101,17 @@ interface StorageProgramGranularResponse {
 }
 
 /**
- * Extract the requester's address from the `identity` header.
- *
- * Identity can be either a bare address or a `prefix:address` form
- * (e.g. `ed25519:<addr>`). Returns `undefined` when:
- *   - the header is missing or empty
- *   - the post-colon segment is empty (e.g. `"ed25519:"`)
- *
- * Returning `undefined` for an empty post-colon segment is semantically
- * equivalent to anonymous in `checkReadPermission` — every branch either
- * already guards on falsy requesterAddress or compares it against a real
- * value that an empty string can't match. The change ensures consistent
- * behaviour with the SQL ACL filter and other call sites that distinguish
- * `""` from `undefined`.
+ * The requester is the address a verified signature proves. The auth
+ * middleware verifies only when identity and signature headers are both
+ * present, so an `identity` header on its own is just a claim and the
+ * request is anonymous (public programs only).
  */
 function getRequesterAddress(req: Request): string | undefined {
-    const identity = req.headers.get("identity")
-    if (!identity || identity.length === 0) {
+    const auth = getAuthContext(req)
+    if (!auth.verified || !auth.publicKey) {
         return undefined
     }
-    const splits = identity.split(":")
-    const candidate = splits.length > 1 ? splits[1] : identity
-    return candidate && candidate.length > 0 ? candidate : undefined
+    return auth.publicKey
 }
 
 function getValueType(

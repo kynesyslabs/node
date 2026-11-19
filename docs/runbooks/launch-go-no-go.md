@@ -11,6 +11,20 @@ How launch day decides whether the chain starts, and the two tools behind
 that decision. The rule below is **proposed** and becomes binding only once
 it is approved for the launch; until then treat it as the working draft.
 
+## Owner decisions
+
+| Decision | Value |
+|---|---|
+| Rule approved for launch (then `status: approved` above) | TBD (owner) |
+| GO margin: members of block 1's committee that must be proven online | 7 of 10 (the quorum) unless the owner sets 8 or 9: TBD (owner) |
+| Launch time T (unix seconds, at least 24 h after the genesis record is published) | TBD (owner) |
+| Fallback slot after a NO-GO | TBD (owner) |
+| Launch coordinator (collects the T-24h posts and the genesis acknowledgements) | TBD (owner) |
+
+At GO with exactly 7, one more committee member lost stops the chain
+before block 1. A margin of 8 or 9 is checked by people from the tool's
+per-validator output: the tool itself returns GO at `q`.
+
 ## The quorum in one paragraph
 
 A block needs `q = floor(2 * shardSize / 3) + 1` signatures
@@ -25,7 +39,10 @@ chain still makes blocks; a 4th stops it until one comes back.
 
 1. **T-24h:** every launch validator posts its identity, the image digest
    it will run, and a signing proof (below) for the agreed genesis block
-   hash.
+   hash. With them it posts, from its production host, the output of
+   `./scripts/node-doctor --production --env-from compose` (exit 0, no FAIL
+   line) and the INSTALL.md step 10 check that prints `parameters match`,
+   both run against the container it will launch with.
 2. **Operator and provider cap:** no single operator and no single cloud
    provider runs more than `min(launch validators, shardSize) − q` launch
    validators: at most 3 with `shardSize` 10 and 10 or more validators, 2
@@ -37,10 +54,11 @@ chain still makes blocks; a 4th stops it until one comes back.
    bound committee; `q` of `shardSize` 10) are online on the agreed genesis
    block and release commit, each proven to hold its identity key, and the
    cap holds. Online validators outside that committee do not count toward
-   it. Otherwise NO-GO, and retry at the next agreed slot.
+   it, and the GO margin above holds. Otherwise NO-GO, and retry at the
+   fallback slot.
 4. A validator counts only after it has made a signed block on the
    rehearsal network from its production host, key and image. Its first
-   start there and at launch follows `INSTALL.md` step 5, which runs
+   start there and at launch follows `INSTALL.md` step 8, which runs
    `bun run migration:run` with the released image before `up`: the node
    does not create its schema at boot and refuses to start while a
    migration is pending.
@@ -86,10 +104,12 @@ genesis file, the snapshot and the table exist, with no node running:
 ```bash
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json [--json]
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony> [--json]
 ```
 
-One `PASS`/`FAIL` line per check: genesis forks, chain id, shard size,
+One `PASS`/`FAIL` line per check: genesis forks, treasury, notary keys, chain id, shard size,
 genesis values (no template `FILL` left), genesis file (a node would load it), block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
 provider and region for each), operator and provider cap, voting power per
@@ -112,7 +132,13 @@ and an operator map:
 }
 ```
 
-Run it from any machine that can reach the validators' RPC ports:
+Run it from any machine that can reach the validators' RPC ports.
+Each `--rpc` URL, and each peerlist or genesis URL the tool probes, must be
+that node's `EXPOSED_URL`, spelled as the node advertises it (same scheme,
+host and port). A node signs its hello reply over the URL it advertises, so
+the same node reached under another spelling (an IP instead of its DNS name,
+another port) answers but shows as `unproven-identity` and is not counted:
+a false NO-GO. Collect each validator's `EXPOSED_URL` with its T-24h post.
 
 ```bash
 bun scripts/launch-go-no-go.ts \
@@ -121,12 +147,42 @@ bun scripts/launch-go-no-go.ts \
   --operators launch-operators.json \
   --genesis-hash <agreed genesis block hash> \
   --commit <release commit SHA> \
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony> \
   [--peerlist demos_peerlist.json] [--rpc https://v1.example:53550,...] \
   [--json]
 ```
 
 `--genesis-hash`, `--commit` and `--snapshot` are required for GO; without
-any of them the result is NO-GO and says which one is missing.
+any of them the result is NO-GO and says which one is missing. On the
+mainnet chain id (any `properties.id` other than testnet `1` and devnet
+`1337`) `--expected-treasury` and `--expected-notary-keys` are required as
+well, for GO and for `--plan`.
+
+- `--expected-treasury` is the agreed `gasFeeSeparation` treasury address,
+  taken from the owners' sign-off, not from the genesis file being checked.
+  The genesis `forks.gasFeeSeparation.treasuryAddress` must equal it (case
+  and surrounding spaces are ignored), or the result is NO-GO: the node
+  only checks the treasury's shape, so any well-formed address would
+  otherwise receive every fee from block 0. Without the flag the tool reads
+  `DEMOS_EXPECTED_TREASURY`. It is exit 2 when the value is not `0x` and 64
+  hex characters. On the testnet and devnet chain ids it is optional and
+  checked only when given.
+
+- `--expected-notary-keys` is the list of notary public keys the notary key
+  ceremony produced (`docs/runbooks/tlsn-notary.md`, section 3), as
+  comma-separated `id:hex` entries, for example
+  `demos-notary-1:<hex>,demos-notary-standby:<hex>`, taken from the
+  holders' sign-off, not from the genesis file being checked. The genesis
+  `forks.tlsnVerified.notaryKeys` must hold exactly these id and key pairs
+  (order, hex case and surrounding spaces are ignored), or the result is
+  NO-GO: the node only checks that a key is a well-formed secp256k1 point,
+  so any key whose private half someone else holds would otherwise attest
+  identity links from block 0. Without the flag the tool reads
+  `DEMOS_EXPECTED_NOTARY_KEYS`. It is exit 2 when an entry is not `id:hex`,
+  an id or key the node would refuse in a genesis, or a repeated id or key.
+  On the testnet and devnet chain ids it is optional and checked only when
+  given.
 
 - `--genesis-hash` is the agreed genesis block hash (above). The tool also
   builds block 0 from `--genesis` and is NO-GO when the two differ, so the
@@ -159,12 +215,21 @@ exposed by the node, so it comes from the T-24h posts). Then:
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
-  third of the first committee's votes; the genesis schedules
+  third of the first committee's votes; on the mainnet chain id every entry
+  names its beneficial `owner`, and no owner runs more than that same cap; no
+  region hosts a third or more of the launch validators, and no owner,
+  operator, provider or region holds a third or more of block 0's stake
+  (`docs/mainnet/validator-concentration.md`); the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` and `identityCarryover` at
-  `activationHeight` 0, leaves `networkGovernance` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
-  code default), gives a scheduled `gasFeeSeparation` its `treasuryAddress`,
-  uses a chain id other than testnet `1` and devnet `1337`, and sets
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
+  `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking`, `nftValidatorGating` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
+  code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
+  (`--expected-treasury`), gives `tlsnVerified` exactly the notary keys from
+  the notary key ceremony (`--expected-notary-keys`; NO-GO on the template's placeholder keys, on no keys,
+  on a payload the node would refuse and on a devnet, spike or test-vector
+  key, `KNOWN_TEST_NOTARY_KEYS`),
+  uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`
+  (mainnet is `8587492`), and sets
   `shardSize` 10; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
   a seat on any network whose pool holds them; and a node would accept
@@ -178,8 +243,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   block, other genesis data (`getGenesisDataHash`), another fork schedule
   digest, one of the mainnet forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
-- Exit 2: bad input, including a malformed `--genesis-hash` or `--commit`
-  and a `--shard-size` that differs from the genesis.
+- Exit 2: bad input, including a malformed `--genesis-hash`, `--commit`,
+  `--expected-treasury` or `--expected-notary-keys`, and a `--shard-size` that differs from the genesis.
 
 **Identity proof.** `/info` is a claim anyone can make, so an endpoint
 (for example a `--rpc` URL) could otherwise answer for an offline
@@ -281,6 +346,16 @@ Every proof must come from a launch validator, name the agreed genesis
 (and date), and verify; `--require-all` also fails on any launch
 validator without a proof. Always pass `--require-all` for the rule 1
 check: without it a partial set passes. Exit 0 ok, 1 not ok, 2 bad input.
+
+## Restarts on launch day
+
+From T-0 on, restart or upgrade launch validators one at a time, and wait
+until each is back in the committee (signing blocks) before the next. A
+just-restarted validator that logs `Timeout waiting for green light` for the
+same block twice is restarted once more. From `v1.0.0-rc.13` the validator
+leaves a round the secretary abandoned and joins the newer one on its own,
+so this is a fallback there. The rule, the signing check and the recovery
+tiers are in [chain-halt-recovery.md](chain-halt-recovery.md).
 
 ## Failure drills behind the numbers
 

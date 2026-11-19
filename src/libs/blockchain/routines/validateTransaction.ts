@@ -21,13 +21,23 @@ import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { signValidityData } from "../validation/validityData"
 import { checkTxAdmissible } from "../validation/txAdmission"
+import { clientTxTypeRefusal } from "../validation/txTypes"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
-import { expectsNonceEdit } from "../validation/editBinding"
-import { GASLESS_TX_TYPES } from "@kynesyslabs/demosdk/websdk"
+import { expectsNonceEdit, featureGateRefusal } from "../validation/editBinding"
+import { l2psOff } from "@/forks/l2psGate"
+import { tlsnDisabled } from "@/forks/tlsnDisabledGate"
+import {
+    nativeSendRefusal,
+    nonCanonicalAddressRefusal,
+} from "../validation/nativeValueRules"
+import {
+    nftGatingActive,
+    SEAT_TX_TYPES,
+} from "@/forks/nftValidatorGatingGate"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -77,6 +87,30 @@ export async function confirmTransaction(
         return validityData
     }
 
+    const typeRefusal = clientTxTypeRefusal(tx, nftGatingActive(referenceBlock))
+    if (typeRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [TYPE ERROR] " + typeRefusal + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Before the fee is computed or an L2PS payload decrypted: a feature that
+    // is off is refused without quoting a cost for it.
+    const featureRefusal = featureGateRefusal(tx, {
+        l2psOff: l2psOff(),
+        tlsnOff: tlsnDisabled(),
+        nftGating: nftGatingActive(referenceBlock),
+    })
+    if (featureRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [TYPE ERROR] " + featureRefusal + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     // Check if the transaction status is set
     if (tx.status) {
         validityData.data.message =
@@ -85,6 +119,20 @@ export async function confirmTransaction(
             ">" +
             tx.status +
             "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Refused here whatever the forks say: the payment a client is told it
+    // made is the one in content.to and content.amount, and an account keyed
+    // by an upper-case spelling is one no wallet reads.
+    const valueRefusal =
+        nonCanonicalAddressRefusal(tx) ??
+        nativeSendRefusal(tx, isForkActive("osDenomination", referenceBlock))
+    if (valueRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [STRUCTURE ERROR] " + valueRefusal + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
@@ -199,9 +247,12 @@ export async function confirmTransaction(
     // The fee-distribution write MUST happen before
     // `signValidityData(validityData)` so the appended edits are part
     // of the signed hash (peers compute the same hash).
+    //
+    // Seat transactions pay no fee under nftValidatorGating: a new validator
+    // may hold no DEM at all.
     if (
         isForkActive("gasFeeSeparation", referenceBlock) &&
-        !GASLESS_TX_TYPES.has(tx.content.type)
+        !(nftGatingActive(referenceBlock) && SEAT_TX_TYPES.has(tx.content.type))
     ) {
         const feeBoundsResult = await applyGasFeeSeparation(tx)
         if (feeBoundsResult.ok === false) {

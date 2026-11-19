@@ -19,7 +19,7 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: { minValidatorStake: "1000" } },
+    getSharedState: { networkParameters: { minValidatorStake: "1000" }, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 const allowlisted = new Set<string>()
@@ -127,7 +127,7 @@ describe("a stake that takes a seat", () => {
         allowlisted.add(MINT)
     })
 
-    it("evicts the active or unstaking seat the mint backs, including one staged in this block", async () => {
+    it("evicts the active or unstaking seat the mint backs", async () => {
         const closed = { status: VALIDATOR_STATUS_EXITED, staked_amount: "0", unstake_requested_at: null, unstake_available_at: null }
 
         const active = repo([row(B)])
@@ -139,12 +139,18 @@ describe("a stake that takes a seat", () => {
         expect((await Routines.apply(stake(A) as any, unstaking as any, 100)).success).toBe(true)
         expect(unstaking.rows.get(B)).toMatchObject(closed)
 
-        // Two stakes for one mint in one block: the later one reads and evicts the first through the repo.
+    })
+
+    it("keeps the first of two stakes for one mint in a block and refuses the later one", async () => {
         const sameBlock = repo()
         expect((await Routines.apply(stake(B) as any, sameBlock as any, 100)).success).toBe(true)
-        expect((await Routines.apply(stake(A) as any, sameBlock as any, 100)).success).toBe(true)
-        expect(sameBlock.rows.get(B)).toMatchObject(closed)
-        expect(sameBlock.rows.get(A)?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+        const later = await Routines.apply(stake(A) as any, sameBlock as any, 100)
+        expect(later.success).toBe(false)
+        expect(sameBlock.rows.get(B)?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+        expect(sameBlock.rows.has(A)).toBe(false)
+        // In a later block the newer proof takes the seat.
+        expect((await Routines.apply(stake(A) as any, sameBlock as any, 101)).success).toBe(true)
+        expect(sameBlock.rows.get(B)?.status).toBe(VALIDATOR_STATUS_EXITED)
     })
 
     it("refuses before touching any seat when the proof is missing or the mint is unlisted", async () => {

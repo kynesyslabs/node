@@ -17,7 +17,9 @@ import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
 import { Validators } from "src/model/entities/Validators"
+import { decimalBigInt } from "./decimalAmount"
 import { nftExemptSeeds, verifySeededNfts } from "src/features/staking/seedNft"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 
 // Matches `0x` followed by exactly 64 hex characters.
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
@@ -42,7 +44,11 @@ export interface GenesisValidatorSeed {
  * problem. All validators are required to have fully-specified fields;
  * partial rows are rejected to avoid silent misconfiguration.
  */
-function validateSeed(seed: GenesisValidatorSeed, index: number): void {
+/**
+ * `nftSeats`: the genesis seats its validators under `nftValidatorGating`,
+ * where a seat is backed by its NFT and may hold no stake.
+ */
+function validateSeed(seed: GenesisValidatorSeed, index: number, nftSeats: boolean): void {
     if (!ADDRESS_RE.test(seed.address)) {
         throw new Error(
             `[GENESIS][VALIDATORS] seed[${index}].address invalid: expected 0x + 64 hex chars, got "${seed.address}"`,
@@ -55,17 +61,17 @@ function validateSeed(seed: GenesisValidatorSeed, index: number): void {
         )
     }
 
-    let stakeAsBigInt: bigint
-    try {
-        stakeAsBigInt = BigInt(seed.staked_amount)
-    } catch {
+    const stakeAsBigInt = decimalBigInt(seed.staked_amount)
+    if (stakeAsBigInt === null) {
         throw new Error(
-            `[GENESIS][VALIDATORS] seed[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
+            `[GENESIS][VALIDATORS] seed[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}" (decimal digits only)`,
         )
     }
-    if (stakeAsBigInt < 0n) {
+    if (nftSeats ? stakeAsBigInt < 0n : stakeAsBigInt <= 0n) {
         throw new Error(
-            `[GENESIS][VALIDATORS] seed[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`,
+            nftSeats
+                ? `[GENESIS][VALIDATORS] seed[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`
+                : `[GENESIS][VALIDATORS] seed[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
         )
     }
 
@@ -120,13 +126,16 @@ export async function seedValidators(
     }
 
     // Per-row validation — throws immediately on the first offending row.
-    validators.forEach((v, i) => validateSeed(v, i))
-    const nftReasons = await verifySeededNfts(validators, "genesis.validators")
-    if (nftReasons.length > 0) {
-        throw new Error(`[GENESIS][VALIDATORS] ${nftReasons.join("; ")}`)
-    }
-    for (const address of nftExemptSeeds(validators)) {
-        log.warning(`[GENESIS][VALIDATORS] ${address} is seated without an NFT (nft_exempt); test networks only`)
+    const nftSeats = nftGatingActiveAtGenesis()
+    validators.forEach((v, i) => validateSeed(v, i, nftSeats))
+    if (nftSeats) {
+        const nftReasons = await verifySeededNfts(validators, "genesis.validators")
+        if (nftReasons.length > 0) {
+            throw new Error(`[GENESIS][VALIDATORS] ${nftReasons.join("; ")}`)
+        }
+        for (const address of nftExemptSeeds(validators)) {
+            log.warning(`[GENESIS][VALIDATORS] ${address} is seated without an NFT (nft_exempt); test networks only`)
+        }
     }
 
     // Pre-flight: validators table must be empty at seed time.

@@ -1,0 +1,58 @@
+{
+  "id": "N03",
+  "kind": "negative (method not implemented)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01): network identity, genesisHash (FV-4); #994"
+  ],
+  "checked_at_utc": "2026-10-14T03:56:03+00:00",
+  "requests": {
+    "getChainId": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getChainId",
+            "data": {},
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    },
+    "getGenesisHash": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getGenesisHash",
+            "data": {},
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    }
+  },
+  "responses": {
+    "getChainId": {
+      "result": 501,
+      "response_text": "Method not implemented: getChainId"
+    },
+    "getGenesisHash": {
+      "result": 501,
+      "response_text": "Method not implemented: getGenesisHash"
+    }
+  },
+  "capture_form": "status code and error text as recorded by the probe; full envelope not stored",
+  "shows": [
+    "no chain-id or genesis-hash call exists on the deployed gateway; #1059 reports the genesis hash is readable only via getBlockByNumber {\"blockNumber\": \"0\"}"
+  ]
+}

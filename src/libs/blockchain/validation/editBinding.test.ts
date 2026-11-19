@@ -86,6 +86,13 @@ const builders = {
         ),
 }
 
+/** Schedules nftValidatorGating on the fork config `chainIs` set up. */
+function nftGatingFrom(height: number): void {
+    ;(getSharedState.forkConfig as unknown as Record<string, unknown>).nftValidatorGating = {
+        activationHeight: height,
+    }
+}
+
 async function wire(kind: keyof typeof builders): Promise<Transaction> {
     return onTheWire(await builders[kind]())
 }
@@ -184,6 +191,35 @@ describe("a forged edit shipped by a peer that signed the transaction itself", (
         await refusedEverywhere(tx)
     })
 
+    it("a TLSNotary proof store on the sender's own tlsn_store, the only way a proof row could be written", async () => {
+        const { TLSNotaryService: Service } = await import("@kynesyslabs/demosdk/tlsnotary/service")
+        const tx = onTheWire(
+            await (Service.prototype as any).createTlsnStoreTransaction.call(
+                { demos },
+                "token-1",
+                "proof-bytes",
+                "onchain",
+                2n * OS,
+            ),
+        )
+        expect(edits(tx).some(e => e.type === "tlsnotary")).toBe(false)
+        edits(tx).push({
+            type: "tlsnotary",
+            operation: "store",
+            account: SENDER,
+            data: { tokenId: "token-1", domain: "d", proof: "proof-bytes", storageType: "onchain", timestamp: 1 },
+            isRollback: false,
+            txhash: "",
+        })
+        await refusedEverywhere(tx)
+    })
+
+    it("a dropped gas edit on an unstake, which pays gas before nftValidatorGating", async () => {
+        const tx = await wire("unstake")
+        tx.content.gcr_edits = edits(tx).filter(e => e.type !== "balance") as unknown as GCREdit[]
+        await refusedEverywhere(tx)
+    })
+
     it("a dropped gas edit, which would make the transaction free", async () => {
         const tx = await wire("native")
         const gas = edits(tx).filter(e => e.type === "balance" && e.operation === "remove")[1]
@@ -191,12 +227,24 @@ describe("a forged edit shipped by a peer that signed the transaction itself", (
         await refusedEverywhere(tx)
     })
 
-    it("a gas edit on a stake or unstake, which pay none", async () => {
+    it("a gas edit on a stake or unstake, which pay none under nftValidatorGating", async () => {
         for (const kind of ["stake", "unstake"] as const) {
+            // The released SDK still ships gas on seat transactions; the
+            // edits a gating-aware client ships carry none.
             const tx = await wire(kind)
-            expect(edits(tx).some(e => e.type === "balance")).toBe(false)
+            tx.content.gcr_edits = edits(tx).filter(e => e.type !== "balance") as unknown as GCREdit[]
+            for (const post of [true, false]) {
+                chainIs(post)
+                nftGatingFrom(0)
+                expect(await verifyAdmissionEdits(tx)).toEqual({ ok: true })
+            }
             edits(tx).push({ type: "balance", operation: "remove", account: SENDER, amount: String(OS), isRollback: false, txhash: "" })
-            await refusedEverywhere(tx)
+            for (const post of [true, false]) {
+                chainIs(post)
+                nftGatingFrom(0)
+                expect((await verifyAdmissionEdits(tx)).ok).toBe(false)
+                expect((await verifyEditsAtApply(tx)).ok).toBe(false)
+            }
         }
     })
 
@@ -316,9 +364,12 @@ describe("sender binding", () => {
         })
     }
 
-    it("lets a challenge evict another validator: the evidence vouches for it, not the sender", () => {
+    it("lets a challenge evict another validator under nftValidatorGating: the evidence vouches for it", () => {
         const evict = { type: "validatorStake", account: VICTIM, operation: "evict", amount: "0", evidenceTx: "sig", proofTx: "sig" }
-        expect(verifySenderBinding(sender({ type: "validatorChallenge", gcr_edits: [evict] })).ok).toBe(true)
+        const challenge = sender({ type: "validatorChallenge", gcr_edits: [evict] })
+        expect(verifySenderBinding(challenge).ok).toBe(false)
+        nftGatingFrom(0)
+        expect(verifySenderBinding(challenge).ok).toBe(true)
     })
 
     it("leaves balance edits alone: paying another account is what a transfer is", () => {
@@ -620,9 +671,43 @@ describe("the editBinding fork gates admission as well as apply", () => {
         chainIs(true, 0)
         getSharedState.forkConfig.osDenomination.activationHeight = 120
         tip = 119
-        expect(await editBindingState()).toEqual({ active: true, postFork: false, nonceBound: false, governance: true })
+        expect(await editBindingState()).toEqual({
+            active: true,
+            postFork: false,
+            nonceBound: false,
+            governance: true,
+            typeAllowList: false,
+            messageBinding: false,
+            stakeChecks: false,
+            stakingOpen: true,
+            l2psOff: false,
+            tlsnOff: false,
+            nftGating: false,
+            settling: false,
+            sendBound: false,
+            canonical: false,
+            feeBound: false,
+            tip: 119,
+        })
         tip = 120
-        expect(await editBindingState()).toEqual({ active: true, postFork: true, nonceBound: false, governance: true })
+        expect(await editBindingState()).toEqual({
+            active: true,
+            postFork: true,
+            nonceBound: false,
+            governance: true,
+            typeAllowList: false,
+            messageBinding: false,
+            stakeChecks: false,
+            stakingOpen: true,
+            l2psOff: false,
+            tlsnOff: false,
+            nftGating: false,
+            settling: false,
+            sendBound: false,
+            canonical: false,
+            feeBound: false,
+            tip: 120,
+        })
     })
 })
 

@@ -130,7 +130,6 @@ beforeEach(() => {
     hashGCRTables.mockResolvedValue({ native_subnets_txs: "a" })
     getTransactionsFromHashes.mockReset()
     getTransactionsFromHashes.mockResolvedValue([])
-    getSharedState.referenceBlockRoom = 1
 })
 
 describe("verifyBlockTransactions", () => {
@@ -223,6 +222,30 @@ describe("verifyNativeTablesHashes", () => {
         expect(rejection.message).not.toContain("native_tlsnotary")
     })
 
+    it("compares the TLSNotary entry from tlsnVerified on, whose table hash carries no clock", async () => {
+        getSharedState.forkConfig.tlsnVerified.activationHeight = HEIGHT
+        hashGCRTables.mockResolvedValue({ native_subnets_txs: "a", native_tlsnotary: "t" })
+
+        await verifyNativeTablesHashes(makeBlock([], { native_subnets_txs: "a", native_tlsnotary: "t" }))
+
+        const differs = await verifyNativeTablesHashes(
+            makeBlock([], { native_subnets_txs: "a", native_tlsnotary: "u" }),
+        ).catch(e => e)
+        expect(differs).toBeInstanceOf(SyncBlockRejectedError)
+        expect(differs.message).toContain("native_tlsnotary")
+
+        await expect(
+            verifyNativeTablesHashes(makeBlock([], { native_subnets_txs: "a" })),
+        ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+    })
+
+    it("still leaves the TLSNotary entry out of a block before tlsnVerified activates", async () => {
+        getSharedState.forkConfig.tlsnVerified.activationHeight = HEIGHT + 1
+        hashGCRTables.mockResolvedValue({ native_subnets_txs: "a", native_tlsnotary: "t" })
+
+        await verifyNativeTablesHashes(makeBlock([], { native_subnets_txs: "a", native_tlsnotary: "u" }))
+    })
+
     it("rejects a block that carries no table hashes", async () => {
         await expect(verifyNativeTablesHashes(makeBlock([], null))).rejects.toBeInstanceOf(
             SyncBlockRejectedError,
@@ -238,10 +261,12 @@ describe("verifyNativeTablesHashes", () => {
             })
         })
 
-        it("applies a block whose storage root differs, counting and logging the difference", async () => {
-            await verifyNativeTablesHashes(
+        it("refuses a block whose storage root differs, counting the difference", async () => {
+            const rejection = await verifyNativeTablesHashes(
                 makeBlock([], { native_subnets_txs: "a", native_storage_programs: "peer-root" }),
-            )
+            ).catch(e => e)
+            expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
+            expect(rejection.message).toContain("native_storage_programs")
             expect(countStorageRootSyncMismatch).toHaveBeenCalledTimes(1)
         })
 
@@ -252,13 +277,13 @@ describe("verifyNativeTablesHashes", () => {
             expect(countStorageRootSyncMismatch).not.toHaveBeenCalled()
         })
 
-        it("still rejects another table that differs, naming only that table", async () => {
+        it("names every table that differs", async () => {
             const rejection = await verifyNativeTablesHashes(
                 makeBlock([], { native_subnets_txs: "b", native_storage_programs: "peer-root" }),
             ).catch(e => e)
             expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
             expect(rejection.message).toContain("native_subnets_txs")
-            expect(rejection.message).not.toContain("native_storage_programs")
+            expect(rejection.message).toContain("native_storage_programs")
         })
 
         it("rejects a storage root present on one side only: the fork schedules disagree", async () => {
@@ -360,6 +385,63 @@ describe("planBlockOutcome", () => {
         getExistingTransactionHashes.mockResolvedValue(new Set([replay.hash]))
 
         await expect(planBlockOutcome(makeBlock([replay]), [replay])).rejects.toBeInstanceOf(
+            SyncBlockRejectedError,
+        )
+    })
+})
+
+describe("reference block room of the block's own tip", () => {
+    const head = HEIGHT - 1
+    const roomFrom = (height: number | null) => {
+        getSharedState.forkConfig.referenceBlockRoom10 = { activationHeight: height }
+    }
+    const behind = (blocks: number, options: TxOptions = {}) =>
+        makeTx(alice, { ...options, attrs: { ...options.attrs, reference_block: head - blocks } })
+
+    it("applies a transaction 5 blocks behind once referenceBlockRoom10 is active at the tip", async () => {
+        roomFrom(head)
+        const tx = behind(5)
+        const plan = await planBlockOutcome(makeBlock([tx]), [tx])
+        expect(plan.toApply.map(t => t.hash)).toEqual([tx.hash])
+        expect(plan.failedBeforeApply.size).toBe(0)
+    })
+
+    it("fails the same transaction before apply when the block's tip is below the activation height", async () => {
+        roomFrom(head + 1)
+        const failed = behind(5, { status: "failed" })
+        const plan = await planBlockOutcome(makeBlock([failed]), [failed])
+        expect(plan.failedBeforeApply.get(failed.hash)).toBe(
+            "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE",
+        )
+
+        const claimedConfirmed = behind(5)
+        await expect(
+            planBlockOutcome(makeBlock([claimedConfirmed]), [claimedConfirmed]),
+        ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+    })
+
+    it("verifies an old block with the room it was forged under, whatever the local tip", async () => {
+        const lastBlockNumber = getSharedState.lastBlockNumber
+        try {
+            getSharedState.lastBlockNumber = HEIGHT + 100
+            roomFrom(HEIGHT + 50)
+            const claimedConfirmed = behind(5)
+            await expect(
+                planBlockOutcome(makeBlock([claimedConfirmed]), [claimedConfirmed]),
+            ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+        } finally {
+            getSharedState.lastBlockNumber = lastBlockNumber
+        }
+    })
+
+    it("rejects a block holding a transaction past the 50-block deep window", async () => {
+        roomFrom(0)
+        const deep = behind(11, { status: "failed" })
+        const plan = await planBlockOutcome(makeBlock([deep]), [deep])
+        expect(plan.failedBeforeApply.get(deep.hash)).toBe("TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE")
+
+        const ancient = makeTx(alice, { status: "failed", attrs: { reference_block: head - 51 } })
+        await expect(planBlockOutcome(makeBlock([ancient]), [ancient])).rejects.toBeInstanceOf(
             SyncBlockRejectedError,
         )
     })
@@ -587,26 +669,36 @@ describe("results checked against the next block", () => {
         ).resolves.toBeUndefined()
     })
 
-    it("does not judge a next block that is not the one built on this block", async () => {
+    it("has nothing to judge without a next block, or before the fork", async () => {
         const ok = makeTx(alice, { status: "confirmed" })
         const block = makeBlock([ok])
         const wrong = "0".repeat(64)
 
-        // Absent, before the fork, on another parent, or not hashing to itself
-        const unjudged = [
-            undefined,
-            { ...nextBlock(block, wrong), hash: "forged" },
-            nextBlock(block, wrong, { previousHash: "elsewhere" }),
-        ]
-        for (const next of unjudged) {
-            await expect(
-                checkResultsAgainstNextBlock(block, [ok], next),
-            ).resolves.toBeUndefined()
-        }
+        await expect(
+            checkResultsAgainstNextBlock(block, [ok], undefined),
+        ).resolves.toBeUndefined()
         getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 2
         await expect(
             checkResultsAgainstNextBlock(block, [ok], nextBlock(block, wrong)),
         ).resolves.toBeUndefined()
+    })
+
+    it("refuses a next block that is not the one built on this block, instead of skipping the check", async () => {
+        const ok = makeTx(alice, { status: "confirmed" })
+        const block = makeBlock([ok])
+        const wrong = "0".repeat(64)
+
+        // Not hashing to itself, on another parent, or at another height
+        const impostors = [
+            { ...nextBlock(block, wrong), hash: "forged" },
+            nextBlock(block, wrong, { previousHash: "elsewhere" }),
+            { ...nextBlock(block, wrong), number: HEIGHT + 2 },
+        ]
+        for (const next of impostors) {
+            const error = await checkResultsAgainstNextBlock(block, [ok], next).catch(e => e)
+            expect(error).toBeInstanceOf(SyncBlockRejectedError)
+            expect(error.message).toContain(`child of block ${HEIGHT}`)
+        }
     })
 })
 

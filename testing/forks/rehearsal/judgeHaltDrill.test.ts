@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
 import { committeeFloor, drillPreconditionError, signatureQuorum } from "./lib/haltDrill"
 import {
+    DRILL_REQUIRED_FORKS,
     DrillInputError,
     type DrillInput,
     formatReport,
@@ -12,6 +13,8 @@ import {
     main,
     parseDrillInput,
     ridePreconditionError,
+    safePreconditionError,
+    timingsLine,
 } from "./lib/judgeHaltDrill"
 
 const REHEARSAL_DIR = resolve(import.meta.dir)
@@ -102,6 +105,80 @@ describe("input parsing", () => {
         const raw = loadRaw("halt-n10s10.pass")
         delete raw.preStopHeight
         expect(() => parseDrillInput(raw)).toThrow("preStopHeight")
+    })
+})
+
+describe("the forks the pass criteria rest on", () => {
+    const FIXTURE_NAMES = [
+        "halt-n10s10.pass",
+        "halt-n10s10.settle-subquorum",
+        "halt-n10s10.survivor-crash",
+        "halt-n13s10.hold-advance",
+        "halt-n13s10.pass",
+        "halt-n13s10.recovery-fork",
+        "ride-n13s10.pass",
+        "ride-n13s10.stalled",
+    ]
+    it("are the three drill_inputs.py requires, and every fixture has them at 0", () => {
+        expect([...DRILL_REQUIRED_FORKS]).toEqual(["quorumParity", "committeeBinding", "commitLock"])
+        for (const name of FIXTURE_NAMES) {
+            expect(load(name).forks).toMatchObject({ quorumParity: 0, committeeBinding: 0, commitLock: 0 })
+        }
+    })
+    for (const fork of DRILL_REQUIRED_FORKS) {
+        it(`refuses, naming it, a fork set with ${fork} off, at another height or missing`, () => {
+            for (const [value, got] of [[null, "null"], [5, "5"], [undefined, "no entry"]] as const) {
+                const raw = loadRaw("halt-n10s10.pass")
+                if (value === undefined) delete raw.forks[fork]
+                else raw.forks[fork] = value
+                expect(() => parseDrillInput(raw)).toThrow(DrillInputError)
+                expect(() => parseDrillInput(raw)).toThrow(
+                    `forks.${fork}: the drill needs ${fork} active at block 0, got ${got}`,
+                )
+            }
+        })
+    }
+    it("names every one that is not active at 0", () => {
+        const raw = loadRaw("ride-n13s10.pass")
+        raw.forks = { quorumParity: 0, committeeBinding: null }
+        let error: DrillInputError | undefined
+        try {
+            parseDrillInput(raw)
+        } catch (e) {
+            error = e as DrillInputError
+        }
+        expect(error?.problems).toEqual([
+            "forks.committeeBinding: the drill needs committeeBinding active at block 0, got null",
+            "forks.commitLock: the drill needs commitLock active at block 0, got no entry",
+        ])
+    })
+    it("gives no verdict on such a run, pass fixture or not: exit 2 (run.sh's ERROR), the fork named on stderr", () => {
+        const dir = mkdtempSync(join(tmpdir(), "judge-forks-"))
+        const out = join(dir, "verdict.json")
+        const quiet = process.stdout.write
+        const quietErr = process.stderr.write
+        let err = ""
+        process.stdout.write = (() => true) as typeof process.stdout.write
+        process.stderr.write = ((s: string) => {
+            err += s
+            return true
+        }) as typeof process.stderr.write
+        try {
+            for (const name of ["halt-n10s10.pass", "ride-n13s10.pass", "halt-n10s10.settle-subquorum"]) {
+                const raw = loadRaw(name)
+                raw.forks.commitLock = null
+                const file = join(dir, `${name}.json`)
+                writeFileSync(file, JSON.stringify(raw))
+                err = ""
+                expect(main([file, "--out", out])).toBe(2)
+                expect(err).toContain("forks.commitLock: the drill needs commitLock active at block 0, got null")
+            }
+            expect(existsSync(out)).toBe(false)
+        } finally {
+            process.stdout.write = quiet
+            process.stderr.write = quietErr
+            rmSync(dir, { recursive: true, force: true })
+        }
     })
 })
 
@@ -199,6 +276,14 @@ describe("halt drill verdict", () => {
         const input = load("halt-n13s10.recovery-fork")
         expect(failedPhases(input)).toEqual(["P5"])
         expect(reasonsOf(input, "P5")[0]).toContain("height 11: hash divergence")
+    })
+    it("fails recovery when the halt block was rewritten after the settle read", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        const halt = Math.max(...raw.settle.rows.map((r: any) => r.number))
+        for (const r of raw.recovery.rows) if (r.number === halt) r.hash = "0xrewritten"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5").some(r => r.startsWith(`height ${halt}: node-`))).toBe(true)
     })
     it("fails recovery when a restarted validator never reaches the target", () => {
         const raw = loadRaw("halt-n13s10.pass")
@@ -377,6 +462,78 @@ describe("ride drill verdict", () => {
     })
 })
 
+describe("safe drill verdict (a third stopped)", () => {
+    it("passes when the survivors stay live, forge quorum blocks on one chain and all rejoin", () => {
+        const verdict = judgeDrill(load("third-n12s10.pass"))
+        expect(verdict.pass).toBe(true)
+        expect(verdict.phases.map(p => p.id)).toEqual(["P1", "S2", "S3", "P5", "P6"])
+        expect(verdict.haltHeight).toBe(10)
+        expect(verdict.settleBlocks).toBe(2)
+        expect(verdict.targetHeight).toBe(13)
+        expect(verdict.summary).toContain("common=10")
+    })
+    it("passes a chain that paused while a third was down", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const s of raw.hold.samples) for (const k of Object.keys(s.heights)) s.heights[k] = 8
+        raw.settle.height = 8
+        for (const k of Object.keys(raw.settle.heads)) raw.settle.heads[k] = 8
+        raw.settle.rows = raw.settle.rows.filter((r: any) => r.number === 8)
+        raw.recovery.blocks = 5
+        const verdict = judgeDrill(parseDrillInput(raw))
+        expect(verdict.pass).toBe(true)
+        expect(verdict.settleBlocks).toBe(0)
+    })
+    it("fails a fork among the survivors", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.settle.rows.find((r: any) => r.node === 3 && r.number === 9).hash = "0xfork"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["S3"])
+        expect(reasonsOf(input, "S3")[0]).toContain("settle block 9: hash divergence")
+    })
+    it("fails a block forged without quorum signatures", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const r of raw.settle.rows) if (r.number === 10) r.signatures = 6
+        expect(failedPhases(parseDrillInput(raw))).toEqual(["S3"])
+    })
+    it("fails a survivor that stopped answering or whose head went back", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.hold.samples[1].heights["2"] = -1
+        raw.hold.samples[3].heights["5"] = 8
+        const reasons = reasonsOf(parseDrillInput(raw), "S2")
+        expect(reasons).toContain("sample 2: survivor node-2 did not answer")
+        expect(reasons).toContain("sample 4: node-5 head went back 9 -> 8")
+    })
+    it("fails a rejoin that forks or misses the target", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.recovery.rows.find((r: any) => r.node === 12 && r.number === 12).hash = "0xfork"
+        raw.recovery.heads["11"] = 11
+        const reasons = reasonsOf(parseDrillInput(raw), "P5")
+        expect(reasons).toContain("node-11 head 11 < target 13")
+        expect(reasons.some(r => r.includes("height 12: hash divergence"))).toBe(true)
+    })
+    it("fails a block rewritten after the settle read, even when every node agrees on the new hash", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const r of raw.recovery.rows) if (r.number === 10) r.hash = "0xrewritten"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5").some(r => r.startsWith("height 10: node-") && r.includes("0xrewritten"))).toBe(true)
+    })
+    it("refuses more than a third stopped, or survivors below the quorum", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.stopped = [8, 9, 10, 11, 12]
+        expect(judgeDrill(parseDrillInput(raw)).phases.map(p => p.id)).toEqual(["P0"])
+        expect(safePreconditionError(30, 10, 10)).toBeNull()
+        expect(safePreconditionError(30, 10, 11)).toContain("more than a third")
+        expect(safePreconditionError(9, 10, 3)).toContain("fewer than the quorum")
+    })
+    it("reports the hold, not a halt", () => {
+        const input = load("third-n12s10.pass")
+        const lines = formatReport(input, judgeDrill(input))
+        expect(lines.some(l => l.startsWith("timing: hold with a third down 40.0"))).toBe(true)
+        expect(lines.some(l => l.includes("halt confirmed"))).toBe(false)
+    })
+})
+
 describe("report and CLI", () => {
     it("prints scenario 12's DRILL_TIMINGS line with the validator counts", () => {
         const input = load("halt-n13s10.pass")
@@ -390,6 +547,27 @@ describe("report and CLI", () => {
         expect(payload.stopped).toEqual([7, 8, 9, 10, 11, 12, 13])
         expect(payload.marks.t_stop).toBe("2026-11-04T12:02:05.000Z")
         expect(lines).toContain("timing: restart to all 13 converged 55.0s")
+        // an input from before the exclusions has none, and says nothing about them
+        expect(input.excludedForks).toEqual({})
+        expect("excludedForks" in payload).toBe(false)
+        expect(lines.find(l => l.startsWith("config: "))).not.toContain("excluded")
+    })
+    it("carries the excluded forks into DRILL_TIMINGS, the verdict timings and the config line", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        const why = "needs a genesis snapshot; the drills use the legacy genesis path"
+        raw.excludedForks = { identityCarryover: why }
+        raw.forks = { ...raw.forks, identityCarryover: null }
+        const input = parseDrillInput(raw)
+        expect(input.excludedForks).toEqual({ identityCarryover: why })
+        const lines = formatReport(input, judgeDrill(input))
+        const line = lines.find(l => l.startsWith("DRILL_TIMINGS ")) ?? ""
+        expect(JSON.parse(line.slice("DRILL_TIMINGS ".length)).excludedForks).toEqual({ identityCarryover: why })
+        expect(lines.find(l => l.startsWith("config: "))).toContain(`; excluded: identityCarryover (${why})`)
+        expect(timingsLine(input, judgeDrill(input)).excludedForks).toEqual({ identityCarryover: why })
+        raw.excludedForks = { identityCarryover: "" }
+        expect(() => parseDrillInput(raw)).toThrow("excludedForks.identityCarryover")
+        raw.excludedForks = ["identityCarryover"]
+        expect(() => parseDrillInput(raw)).toThrow("excludedForks: expected an object")
     })
     it("exits 0 on pass, 1 on fail and 2 on malformed input, and writes the verdict file", () => {
         const dir = mkdtempSync(join(tmpdir(), "judge-halt-"))
@@ -443,5 +621,13 @@ describe("run.sh wiring", () => {
     })
     it("judges with this script rather than in bash", () => {
         expect(runSh).toContain("testing/forks/rehearsal/lib/judgeHaltDrill.ts")
+    })
+    it("at 30 validators of shardSize 10 halts with 24 stopped, not 21, and rides 3", () => {
+        expect(caseLine("halt-n30s10")).toContain("N=30; SHARD=10; START=30; STOPS=24")
+        expect(caseLine("ride-n30s10")).toContain("N=30; SHARD=10; START=30; STOPS=3")
+        // 9 survivors still reach q = 7: the chain would not halt
+        expect(drillPreconditionError(10, 30, 30 - 21)).not.toBeNull()
+        expect(drillPreconditionError(10, 30, 30 - 24)).toBeNull()
+        expect(guaranteedTolerance(10, 30)).toBe(3)
     })
 })

@@ -20,7 +20,7 @@ via the `proxy` compose profile (opt-in — no impact when off).
 | `https://${PROXY_DOMAIN}/mcp/` | MCP `node:3001` | basic-auth (rejects all by default) |
 | `https://${PROXY_DOMAIN}/metrics` | Node metrics `node:9090` | basic-auth |
 | `https://${PROXY_DOMAIN}/grafana/` | Grafana `grafana:3000` | Grafana login |
-| `https://${PROXY_DOMAIN}/prometheus/` | Prometheus `prometheus:9090` | none (read-only UI) |
+| `https://${PROXY_DOMAIN}/prometheus/` | Prometheus `prometheus:9090` | basic-auth (same credential as `/metrics`) |
 
 OmniProtocol (`:53551`) stays direct — its custom-fingerprint TLS cannot
 survive proxy termination. Gossip (`GOSSIP_PORT`, default `:9095`) stays
@@ -44,6 +44,14 @@ published and drops every other host port of the node.
    whitelisted key or the node's own key are exempt from these limits, and
    failed checks claiming one of those keys are counted for that key alone,
    so only forged claims of that very key from the same address block it.
+   Every loopback source address (all of `127.0.0.0/8` and `::1`) skips the
+   HTTP RPC's per-address limits (HTTP rate limiter, identity confirm cap,
+   web2 per-caller caps); it still counts toward the web2 node-wide cap and
+   the per-caller Human Passport claim limit, and OmniProtocol's per-IP
+   limits still apply. A reverse proxy or sidecar on the same host must
+   therefore be listed in `TRUSTED_PROXIES`, and must set `X-Forwarded-For`
+   or `X-Real-IP` to the client's address; a forwarder that sets neither
+   makes every client it relays local.
 
 ## Step-by-step
 
@@ -99,13 +107,13 @@ First-time provisioning takes ~30s. Look for `obtained certificate` lines.
 
 ```bash
 # RPC root + health
-curl -fsS "https://${PROXY_DOMAIN}/health" | jq
+curl -sS "https://${PROXY_DOMAIN}/health" | jq
 
 # Grafana
 curl -fsS -o /dev/null -w "%{http_code}\n" "https://${PROXY_DOMAIN}/grafana/api/health"
 
-# Prometheus
-curl -fsS "https://${PROXY_DOMAIN}/prometheus/-/healthy"
+# Prometheus (basic-auth, same credential as /metrics)
+curl -u metrics:YOUR_PASSWORD_HERE -fsS "https://${PROXY_DOMAIN}/prometheus/-/healthy"
 
 # Metrics (basic-auth)
 curl -u metrics:YOUR_PASSWORD_HERE -fsS "https://${PROXY_DOMAIN}/metrics" | head -20

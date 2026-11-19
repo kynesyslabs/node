@@ -32,4 +32,6 @@ export interface MetricsServerConfig {
     port: number
     hostname: string
     enabled: boolean
+    /** Empty: no authentication. */
+    bearerToken?: string
 }

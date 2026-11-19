@@ -7,7 +7,6 @@
  * @module features/tlsnotary/types
  */
 
-import type { ChildProcess } from "child_process"
 
 // ============================================================================
 // FFI Types (from ffi.ts)
@@ -104,61 +103,7 @@ export interface TLSNotaryServiceStatus {
   mode?: TLSNotaryMode;
 }
 
-// ============================================================================
-// Proxy Manager Types (from proxyManager.ts)
-// ============================================================================
-
-/**
- * Error codes for proxy operations
- */
-export enum ProxyError {
-  PROXY_SPAWN_FAILED = "PROXY_SPAWN_FAILED",
-  PORT_EXHAUSTED = "PORT_EXHAUSTED",
-  INVALID_URL = "INVALID_URL",
-  WSTCP_NOT_AVAILABLE = "WSTCP_NOT_AVAILABLE",
-}
-
-/**
- * Information about a running proxy
- */
-export interface ProxyInfo {
-  proxyId: string // uuid
-  domain: string // "api.example.com"
-  targetPort: number // 443
-  port: number // allocated local port (55123)
-  process: ChildProcess // wstcp process handle
-  lastActivity: number // Date.now() timestamp
-  spawnedAt: number // Date.now() timestamp
-  websocketProxyUrl: string // "ws://node.demos.sh:55123"
-}
-
-/**
- * TLSNotary state stored in sharedState
- */
-export interface TLSNotaryState {
-  proxies: Map<string, ProxyInfo> // keyed by "domain:port"
-  portPool: PortPoolState
-}
-
-/**
- * Success response for proxy request
- */
-export interface ProxyRequestSuccess {
-  websocketProxyUrl: string
-  targetDomain: string
-  expiresIn: number
-  proxyId: string
-}
-
-/**
- * Error response for proxy request
- */
-export interface ProxyRequestError {
-  error: ProxyError
-  message: string
-  targetDomain?: string
-  lastError?: string
-}
+// Proxy types live in proxyManager.ts and proxyRelay.ts.
 
 // ============================================================================
 // Port Allocator Types (from portAllocator.ts)

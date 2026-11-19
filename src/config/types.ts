@@ -59,6 +59,11 @@ export interface CoreConfig {
     /** Max seconds a block's timestamp may lead the verifier's clock. */
     blockTimestampTolerance: number
     logLevel: string
+    /**
+     * Directory the per-node `logs_<port>_<identity>/` folder is created in.
+     * Empty means the working directory. The image sets it to its logs volume.
+     */
+    logsDir: string
     whitelistedIPs: string[]
     whitelistedKeys: string[]
     /**
@@ -79,6 +84,8 @@ export interface CoreConfig {
     /** How long an IP stays blocked after it exceeds a rate limit, in ms. */
     rateLimitBlockDurationMs: number
     mcpEnabled: boolean
+    /** WebRTC signaling server for instant messaging; consensus does not use it. */
+    signalingEnabled: boolean
     restore: boolean
     /**
      * Full genesis data hash (sha256 hex) the operator expects the network to
@@ -160,6 +167,8 @@ export interface OmniConfig {
 export interface L2PSConfig {
     zkEnabled: boolean
     zkUseMainThread: boolean
+    /** Settlement prover subprocesses; each takes a core and about 1 GB while it proves. */
+    settlementProvers: number
     hashIntervalMs: number
     aggregationIntervalMs: number
     minBatchSize: number
@@ -212,6 +221,8 @@ export interface MetricsConfig {
     enabled: boolean
     port: number
     host: string
+    /** When set, /metrics answers only `Authorization: Bearer <token>`. */
+    bearerToken: string
 }
 
 // --- System Diagnostics ---
@@ -220,6 +231,8 @@ export interface DiagnosticsConfig {
     minCpuSpeed: number
     minRam: number
     minDiskSpace: number
+    /** Path whose filesystem MIN_DISK_SPACE and demos_disk_free_bytes measure; "" means the working directory. */
+    diskSpacePath: string
     minNetworkDownloadSpeed: number
     minNetworkUploadSpeed: number
     networkTestFileSize: number
@@ -285,6 +298,40 @@ export interface GossipConfig {
     ipcConnectTimeoutMs: number
 }
 
+// --- Outbound requests the node makes for callers ---
+
+export interface OutboundConfig {
+    /** Off refuses cross-chain (XM) operations at the RPC entry. */
+    xmEnabled: boolean
+    /** Off refuses DemosWork scripts at the RPC entry. */
+    demosWorkEnabled: boolean
+    /** Off refuses web2 (DAHR) proxy requests at the RPC entry. */
+    web2Enabled: boolean
+    /**
+     * Hosts (or full origins) whose RPC URL an XM caller may name instead of
+     * the node's configured one. Empty: the configured RPC is always used.
+     */
+    xmRpcAllowlist: string[]
+    /** Largest web2 origin response the proxy reads, in bytes. */
+    web2MaxResponseBytes: number
+    /** Idle lifetime of a web2 (DAHR) session, in ms. */
+    web2SessionTtlMs: number
+    /** Dev only: skip certificate checks on web2 HTTPS targets. Refused with PROD. */
+    web2InsecureTls: boolean
+    /** web2 fetches one caller (client IP or tx sender) may have running at once. */
+    web2MaxInflightPerCaller: number
+    /** web2 fetches one caller may start per minute. */
+    web2MaxFetchesPerMinutePerCaller: number
+    /** web2 response bytes one caller may pull per hour. */
+    web2MaxBytesPerHourPerCaller: number
+    /** web2 fetches running at once on this node, all callers and paths together. */
+    web2MaxInflightTotal: number
+    /** Target ports the TLSNotary relay may connect to. */
+    tlsnotaryAllowedPorts: number[]
+    /** Dev only: let the TLSNotary relay reach private and loopback addresses. */
+    tlsnotaryAllowPrivateTargets: boolean
+}
+
 // --- Full Application Config ---
 
 export interface AppConfig {
@@ -301,4 +348,5 @@ export interface AppConfig {
     bridges: BridgesConfig
     ipfs: IPFSConfig
     gossip: GossipConfig
+    outbound: OutboundConfig
 }

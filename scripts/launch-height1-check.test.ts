@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import {
+    DEFAULT_MAX_SCAN,
+    DEFAULT_TIMEOUT_MS,
     type DenominationInputs,
     type LaunchExpectation,
     type NodeObservation,
@@ -9,6 +11,7 @@ import {
     denominationScales,
     observeNode,
     parseAmount,
+    parseArgs,
     parseReplyAmount,
 } from "./launch-height1-check"
 
@@ -286,6 +289,89 @@ describe("observeNode", () => {
             expect(obs.error).toContain("head after the state read")
             const decision = decideHeight1(expectation(), [obs], { maxScan: 50 })
             expect(decision.verdict).not.toBe("pass")
+        } finally {
+            server.stop(true)
+        }
+    })
+})
+
+describe("defaults for a check run from outside the validators' network", () => {
+    const required = ["--genesis", "g.json", "--snapshot", "snap", "--genesis-hash", BLOCK0]
+
+    it("waits long enough for a remote RPC and scans past the head a late run finds", () => {
+        const args = parseArgs(required)
+        expect(args.timeoutMs).toBe(DEFAULT_TIMEOUT_MS)
+        expect(args.maxScan).toBe(DEFAULT_MAX_SCAN)
+        // Probed across the internet, 5000 ms timed out and the head was soon past a scan of 20
+        expect(DEFAULT_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000)
+        expect(DEFAULT_MAX_SCAN).toBeGreaterThanOrEqual(100)
+        expect(parseArgs([...required, "--max-scan", "20", "--timeout", "5000"])).toMatchObject({ maxScan: 20, timeoutMs: 5000 })
+    })
+
+    it("compares the state of an empty chain whose head is past block 20", () => {
+        const blocks = Array.from({ length: 54 }, (_, i) => ({
+            number: i + 1,
+            hash: i === 0 ? BLOCK1 : "c".repeat(64),
+            previousHash: i === 0 ? BLOCK0 : "d".repeat(64),
+            txCount: 0,
+        }))
+        const d = decideHeight1(expectation(), [node(0, { head: 54, blocks })])
+        expect(d.checks.find(c => c.name === "balances")?.status).toBe("pass")
+        expect(d.verdict).toBe("pass")
+    })
+})
+
+describe("observeNode block scan", () => {
+    it("stops reading blocks at the first one with transactions", async () => {
+        const read: number[] = []
+        const server = Bun.serve({
+            port: 0,
+            hostname: "127.0.0.1",
+            async fetch(req) {
+                if (req.method === "GET") return Response.json({ hash: BLOCK0 })
+                const { message, data } = (await req.json()).params[0]
+                const ok = (response: unknown) => Response.json({ result: 200, response })
+                if (message === "getLastBlockNumber") return ok(50)
+                if (message === "getBlockByNumber") {
+                    read.push(data.blockNumber)
+                    const txs = data.blockNumber === 3 ? [{}] : []
+                    return ok({ hash: BLOCK1, content: { previousHash: BLOCK0, ordered_transactions: txs } })
+                }
+                return ok([])
+            },
+        })
+        try {
+            const obs = await observeNode(`http://127.0.0.1:${server.port}`, [id(100)], 4000, 2000)
+            expect(read).toEqual([1, 2, 3])
+            const d = decideHeight1(expectation(), [obs], { maxScan: 4000 })
+            expect(d.checks.find(c => c.name === "balances")?.detail).toContain("block 3 has 1 transactions")
+        } finally {
+            server.stop(true)
+        }
+    })
+
+    it("reads only block 1 when the head is past the scan window", async () => {
+        const read: number[] = []
+        const server = Bun.serve({
+            port: 0,
+            hostname: "127.0.0.1",
+            async fetch(req) {
+                if (req.method === "GET") return Response.json({ hash: BLOCK0 })
+                const { message, data } = (await req.json()).params[0]
+                const ok = (response: unknown) => Response.json({ result: 200, response })
+                if (message === "getLastBlockNumber") return ok(5000)
+                if (message === "getBlockByNumber") {
+                    read.push(data.blockNumber)
+                    return ok({ hash: BLOCK1, content: { previousHash: BLOCK0, ordered_transactions: [] } })
+                }
+                return ok([])
+            },
+        })
+        try {
+            const obs = await observeNode(`http://127.0.0.1:${server.port}`, [id(100)], 1000, 2000)
+            expect(read).toEqual([1])
+            const d = decideHeight1(expectation(), [obs], { maxScan: 1000 })
+            expect(d.checks.find(c => c.name === "balances")?.detail).toContain("past the first 1000 blocks")
         } finally {
             server.stop(true)
         }

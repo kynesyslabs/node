@@ -8,6 +8,7 @@ import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
 import { restoreGenesisState } from "src/libs/blockchain/genesis/restoreGenesisState"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { markStorageProgramsDirty } from "./finality/storageRoot"
+import { withBlockTime } from "./gcr/applyTime"
 
 /**
  * `checkHash` sees block 0's hash before anything is written and may throw to
@@ -61,6 +62,17 @@ export async function generateGenesisBlock(
     // from "fully initialised chain". The operator recovers by wiping via
     // `./run -b true`. Full atomicity (approach a) would require plumbing an
     // optional EntityManager through insertBlock — deferred to a future refactor.
+    // Every node seeds block 0's accounts itself, so the rows carry block
+    // 0's time, not the clock of the node that seeds them.
+    await withBlockTime(genesisBlock.content.timestamp, () =>
+        seedGenesisAccounts(genesisData),
+    )
+
+    await insertBlock(genesisBlock, [genesisTx], 0)
+    return genesisBlock
+}
+
+async function seedGenesisAccounts(genesisData: any): Promise<void> {
     const snapshot = await loadSnapshot()
 
     // The restore writes gcr_storageprogram; a rolled-back restore changes
@@ -123,7 +135,4 @@ export async function generateGenesisBlock(
             )
         }
     }
-
-    await insertBlock(genesisBlock, [genesisTx], 0)
-    return genesisBlock
 }

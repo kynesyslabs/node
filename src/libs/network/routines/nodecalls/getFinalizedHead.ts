@@ -2,6 +2,8 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import { certificateMessageOf } from "src/libs/consensus/v2/commitLock/domain"
 import { getAheadValidatorPeers } from "src/libs/consensus/v2/routines/networkAheadVeto"
+import { signerRuleOf } from "src/libs/blockchain/validation/signerRule"
+import { isForkActive } from "@/forks/forkGates"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
@@ -37,6 +39,53 @@ async function isNodeSynced(): Promise<boolean> {
     }
 }
 
+interface HeadSigners {
+    committee: string[] | null
+    committeeRule: "bound_committee" | "eligible_pool" | null
+    threshold: number | null
+}
+
+const NO_SIGNERS: HeadSigners = {
+    committee: null,
+    committeeRule: null,
+    threshold: null,
+}
+
+// Clients poll the head; its signer set changes only with the head.
+let lastSigners: { hash: string; signers: HeadSigners } | null = null
+
+/**
+ * Who may sign the head and how many verified signatures it needs, by the
+ * rule sync applies to it. Null for genesis, which nobody signs, and when
+ * the set cannot be read: the head itself is still worth answering.
+ *
+ * Also null until finalityProofs applies to the head. Before it the pool is
+ * filtered by the validators table, which holds only the present: once the
+ * head is applied, a validator it unstaked is gone, so the set read now can
+ * leave out a signer sync counted and lower the threshold. From the fork on
+ * the pool comes from the validator set recorded with the parent's parent.
+ */
+async function headSigners(block: { number: number; hash: string }): Promise<HeadSigners> {
+    if (block.number === 0) return NO_SIGNERS
+    if (!isForkActive("finalityProofs", block.number)) return NO_SIGNERS
+    if (lastSigners?.hash === block.hash) return lastSigners.signers
+    try {
+        const rule = await signerRuleOf(block.number)
+        const signers: HeadSigners = {
+            committee: rule.members,
+            committeeRule: rule.bound ? "bound_committee" : "eligible_pool",
+            threshold: rule.threshold,
+        }
+        lastSigners = { hash: block.hash, signers }
+        return signers
+    } catch (error) {
+        log.warning(
+            `[getFinalizedHead] signer set of block ${block.number} unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        return NO_SIGNERS
+    }
+}
+
 /**
  * The latest block this node has inserted, which is its finalized head:
  * nothing past genesis enters the chain without a signer quorum. Which
@@ -53,9 +102,13 @@ async function isNodeSynced(): Promise<boolean> {
  *
  * `signatures` are the block's stored validator signatures and
  * `signedMessage` is the exact text each of them signs, so a client can
- * verify them, not just count them. `timestamp` is in seconds, the unit
- * `ageSeconds` is derived in. Genesis is final by configuration and carries
- * a single placeholder entry.
+ * verify them, not just count them. `committee` is who may sign it and
+ * `threshold` how many of them must, as this node counts them (null when
+ * they cannot be recovered for the head, see headSigners): a client
+ * that holds its own validator set checks them against it instead of
+ * trusting them. `timestamp` is in seconds, the unit `ageSeconds` is
+ * derived in. Genesis is final by configuration and carries a single
+ * placeholder entry.
  */
 export default async function getFinalizedHead(): Promise<RPCResponse> {
     try {
@@ -74,6 +127,7 @@ export default async function getFinalizedHead(): Promise<RPCResponse> {
                     signatures: {},
                     round: null,
                     signedMessage: null,
+                    ...NO_SIGNERS,
                 },
                 extra: { reason: "node_not_synced" },
                 require_reply: false,
@@ -84,6 +138,7 @@ export default async function getFinalizedHead(): Promise<RPCResponse> {
         const seconds = toSeconds(block.content?.timestamp as unknown)
         const signatures = block.validation_data?.signatures ?? {}
         const round = block.validation_data?.round
+        const signers = await headSigners(block)
         return {
             result: 200,
             response: {
@@ -100,6 +155,7 @@ export default async function getFinalizedHead(): Promise<RPCResponse> {
                 signatures,
                 round: typeof round === "number" ? round : null,
                 signedMessage: certificateMessageOf(block),
+                ...signers,
             },
             extra: "",
             require_reply: false,

@@ -3,13 +3,24 @@ import {
     IWeb2Request,
     IWeb2Result,
 } from "@kynesyslabs/demosdk/types"
-import { Proxy } from "src/features/web2/proxy/Proxy"
+import { Proxy, type Web2FetchMeter } from "src/features/web2/proxy/Proxy"
 import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
 import { EnumWeb2Actions } from "@kynesyslabs/demosdk/types"
 import { sanitizeWeb2RequestForStorage } from "src/features/web2/sanitizeWeb2Request"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
+import {
+    isSuccessStatus,
+    UnattestableResponseError,
+} from "src/features/web2/dahr/originStatus"
+
+export type DAHRStartProxyParams = IDAHRStartProxyParams & {
+    /** Return non-2xx origin responses instead of refusing them. */
+    allowNonSuccessStatus?: boolean
+    /** Receives the count of origin response bytes read, whatever the outcome. */
+    meter?: Web2FetchMeter
+}
 
 /**
  * DAHR - Data Agnostic HTTPS Relay, class that handles the Web2 request and proxy process.
@@ -60,6 +71,10 @@ export class DAHR {
 
     /**
      * Start the proxy and return the response.
+     *
+     * A non-2xx origin status (including 3xx: redirects are not followed) is
+     * refused with an `UnattestableResponseError` unless
+     * `allowNonSuccessStatus` is set; the returned `status` then carries it.
      * @returns {Promise<IWeb2Result>} The response from the proxy.
      */
     async startProxy({
@@ -68,7 +83,9 @@ export class DAHR {
         payload,
         authorization,
         url,
-    }: IDAHRStartProxyParams): Promise<IWeb2Result> {
+        allowNonSuccessStatus = false,
+        meter,
+    }: DAHRStartProxyParams): Promise<IWeb2Result> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
 
@@ -86,7 +103,7 @@ export class DAHR {
             throw err
         }
 
-        const web2Response = await this._proxy.sendHTTPRequest({
+        const web2Response: IWeb2Result = await this._proxy.sendHTTPRequest({
             web2Request: {
                 ...this._web2Request,
                 raw: {
@@ -99,7 +116,22 @@ export class DAHR {
             targetHeaders: headers,
             payload,
             targetAuthorization: authorization,
-        })
+        }, meter)
+
+        // An error page attested as data is indistinguishable from the real
+        // thing to anyone reading the chain, so it needs an explicit opt-in.
+        if (!allowNonSuccessStatus && !isSuccessStatus(web2Response.status)) {
+            const statusLine =
+                `${web2Response.status} ${web2Response.statusText ?? ""}`.trim()
+            throw new UnattestableResponseError(
+                `Origin responded with HTTP ${statusLine}; ` +
+                    "non-2xx responses are not attested unless the request " +
+                    "sets the allowNonSuccessStatus parameter",
+                "origin-non-2xx",
+                502,
+                web2Response.status,
+            )
+        }
 
         return web2Response
     }

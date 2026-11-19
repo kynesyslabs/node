@@ -1,6 +1,7 @@
 import * as ntpClient from "ntp-client"
 import log from "src/utilities/logger"
 import { getMetricsService } from "src/features/metrics/MetricsService"
+import { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS } from "src/libs/consensus/v2/routines/cosignTimestamp"
 
 /**
  * Measures how far the host clock is from public NTP and reports it. It never
@@ -18,8 +19,9 @@ export const NTP_PROBE_SERVERS = [
 // servers whose answers all lie within this span of each other.
 export const MAX_SERVER_SPREAD_MS = 2000
 export const MIN_AGREEING_SERVERS = 2
-// Members refuse to sign a block stamped more than 5 s ahead of their own
-// clock, so an offset past 1 s is worth fixing before it costs blocks.
+// Members refuse to sign a block stamped more than
+// COSIGN_TIMESTAMP_MAX_LEAD_SECONDS ahead of their own clock, so an offset
+// past 1 s is worth fixing before it costs blocks.
 export const CLOCK_OFFSET_WARN_MS = 1000
 // Servers are asked in parallel, so this is also the most a probe delays boot.
 const QUERY_TIMEOUT_MS = 3000
@@ -129,7 +131,7 @@ function reportProbe(result: ClockProbeResult): void {
     } else if (Math.abs(result.offsetMs) > CLOCK_OFFSET_WARN_MS) {
         log.warning(
             `[CLOCK] The host clock is ${describeOffset(result.offsetMs)} (${result.agreeing} servers agree): ` +
-                "check the host's NTP service; members refuse blocks stamped more than 5s ahead of their clock",
+                `check the host's NTP service; members refuse blocks stamped more than ${COSIGN_TIMESTAMP_MAX_LEAD_SECONDS}s ahead of their clock`,
         )
     } else {
         log.info(
@@ -166,23 +168,26 @@ export async function runClockProbe(
 }
 
 /**
- * A host this far off has its blocks rejected by every peer, so a production
- * node refuses to start instead of joining with it. No answer, or servers
- * that disagree, never stop the node: the host clock stays the authority.
+ * A production node whose host clock is further off than members accept a
+ * block timestamp refuses to start instead of joining with it. Ahead, every
+ * block it stamps as secretary is refused and the round stalls; behind, it
+ * refuses every honest block as too far ahead, or stamps one no later than
+ * its parent. No answer, or servers that disagree, never stop the node: the
+ * host clock stays the authority.
  */
 export async function checkClockAtBoot(options: {
     production: boolean
-    toleranceSeconds: number
     query?: NtpOffsetQuery
 }): Promise<ClockProbeResult> {
     const result = await runClockProbe(options.query)
+    const limitSeconds = COSIGN_TIMESTAMP_MAX_LEAD_SECONDS
     if (
         result.offsetMs !== null &&
-        Math.abs(result.offsetMs) > options.toleranceSeconds * 1000
+        Math.abs(result.offsetMs) > limitSeconds * 1000
     ) {
         const message =
             `[CLOCK] The host clock is ${describeOffset(result.offsetMs)} (${result.agreeing} servers agree), ` +
-            `more than the ${options.toleranceSeconds}s block timestamp tolerance, so peers would reject this node's blocks. ` +
+            `more than the ${limitSeconds}s members accept between a block timestamp and their clock, so this node would stall rounds. ` +
             "Fix the host's NTP (chrony or systemd-timesyncd) and start again."
         if (options.production) {
             throw new Error(message)

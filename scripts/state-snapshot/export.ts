@@ -207,19 +207,33 @@ const SQL_IDENTITY = `SELECT json_build_object(
 WHERE NOT (provider = 'test' AND leaf_index = -1)
 ORDER BY commitment_hash`
 
-const SQL_VALIDATORS = `SELECT json_build_object(
-  'address', address,
-  'status', status,
-  'connection_url', connection_url,
-  'staked_amount', staked_amount,
-  'first_seen', first_seen,
-  'valid_at', valid_at,
-  'unstake_requested_at', unstake_requested_at,
-  'unstake_available_at', unstake_available_at,
-  'nft_mint', nft_mint,
-  'nft_owner', nft_owner,
-  'nft_proof_tx', nft_proof_tx
-) FROM validators ORDER BY address`
+// A row seated without an NFT is written without the NFT keys, so a chain
+// that never ran nftValidatorGating exports the same bytes as before.
+const SQL_VALIDATORS = `SELECT CASE
+  WHEN nft_mint IS NULL AND nft_owner IS NULL AND nft_proof_tx IS NULL THEN json_build_object(
+    'address', address,
+    'status', status,
+    'connection_url', connection_url,
+    'staked_amount', staked_amount,
+    'first_seen', first_seen,
+    'valid_at', valid_at,
+    'unstake_requested_at', unstake_requested_at,
+    'unstake_available_at', unstake_available_at
+  )
+  ELSE json_build_object(
+    'address', address,
+    'status', status,
+    'connection_url', connection_url,
+    'staked_amount', staked_amount,
+    'first_seen', first_seen,
+    'valid_at', valid_at,
+    'unstake_requested_at', unstake_requested_at,
+    'unstake_available_at', unstake_available_at,
+    'nft_mint', nft_mint,
+    'nft_owner', nft_owner,
+    'nft_proof_tx', nft_proof_tx
+  )
+END FROM validators ORDER BY address`
 
 const SQL_FORK_STATE = `SELECT json_build_object(
   'fork_name', fork_name,

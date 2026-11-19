@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url"
 import { DataSource } from "typeorm"
 import { Config } from "src/config"
 import log from "@/utilities/logger"
-import { describeDbConnectionFailure } from "./dbPreflight"
+import { connectWithRetry, describeDbConnectionFailure } from "./dbPreflight"
 
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
@@ -52,6 +52,34 @@ import { GenesisImportedIdentity } from "./entities/GenesisImportedIdentity.js"
 // L2PS Messaging
 import { L2PSMessage } from "@/features/l2ps-messaging/entities/L2PSMessage"
 
+/**
+ * Server-side limits for every session, so a stuck query, a lock that is
+ * never released or a transaction left open ends in an error instead of
+ * holding the consensus round, and with it the chain, forever.
+ *
+ * query_timeout is left off on purpose: it is a client-side timer that
+ * leaves the statement running on the server and the connection busy.
+ *
+ * The typeorm CLI loads this file to run migrations, which may rewrite whole
+ * tables; the limits are sized for the node's own queries, so the CLI runs
+ * without them.
+ */
+export function sessionTimeouts(
+    db: {
+        statementTimeoutMs: number
+        lockTimeoutMs: number
+        idleTransactionTimeoutMs: number
+    },
+    argv: string[] = process.argv,
+): Record<string, number> {
+    if (argv.some(arg => arg.startsWith("migration:"))) return {}
+    return {
+        statement_timeout: db.statementTimeoutMs,
+        lock_timeout: db.lockTimeoutMs,
+        idle_in_transaction_session_timeout: db.idleTransactionTimeoutMs,
+    }
+}
+
 export const dataSource = new DataSource({
     type: "postgres",
     host: Config.getInstance().database.host,
@@ -63,11 +91,7 @@ export const dataSource = new DataSource({
         connectionTimeoutMillis: Config.getInstance().database.connectTimeoutMs,
         keepAlive: true,
         keepAliveInitialDelayMillis: 5000,
-        // statement_timeout: Config.getInstance().database.statementTimeoutMs,
-        // query_timeout: Config.getInstance().database.queryTimeoutMs,
-        // lock_timeout: Config.getInstance().database.lockTimeoutMs,
-        // idle_in_transaction_session_timeout:
-        //     Config.getInstance().database.idleTransactionTimeoutMs,
+        ...sessionTimeouts(Config.getInstance().database),
     },
     migrations: ["src/migrations/*.{ts,js}"],
     // Migrations are applied by hand (`bun run migration:run`), never at
@@ -142,8 +166,13 @@ export async function assertNoPendingMigrations(
     }
 }
 
+// About half a minute of backoff: enough for a Postgres container started
+// alongside the node, short enough that a real outage still stops the boot.
+const DB_CONNECT_RETRY = { attempts: 10, baseDelayMs: 500, maxDelayMs: 5_000 }
+
 class Datasource {
     private static instance: Datasource
+    private static connecting: Promise<Datasource> | null = null
     private dataSource: DataSource
 
     private constructor() {
@@ -151,18 +180,37 @@ class Datasource {
     }
 
     public static async getInstance(): Promise<Datasource> {
-        if (!Datasource.instance) {
-            Datasource.instance = new Datasource()
-            try {
-                await Datasource.instance.dataSource.initialize()
-            } catch (error) {
-                const db = Config.getInstance().database
-                log.error(describeDbConnectionFailure(db, error))
-                // Same error as before, so the caller exits the way it did
-                throw error
-            }
+        if (Datasource.instance) return Datasource.instance
+        // One connect for every caller that arrives meanwhile; a failed one is
+        // not kept, so the next caller tries again instead of getting a
+        // DataSource that was never initialized.
+        if (!Datasource.connecting) {
+            Datasource.connecting = Datasource.connect().finally(() => {
+                Datasource.connecting = null
+            })
         }
-        return Datasource.instance
+        return Datasource.connecting
+    }
+
+    private static async connect(): Promise<Datasource> {
+        const candidate = new Datasource()
+        const db = Config.getInstance().database
+        try {
+            await connectWithRetry(() => candidate.dataSource.initialize(), {
+                ...DB_CONNECT_RETRY,
+                onRetry: (attempt, delayMs, error) =>
+                    log.warning(
+                        `${describeDbConnectionFailure(db, error)} Retrying in ${delayMs} ms ` +
+                            `(attempt ${attempt + 1} of ${DB_CONNECT_RETRY.attempts})`,
+                    ),
+            })
+        } catch (error) {
+            log.error(describeDbConnectionFailure(db, error))
+            // Same error as before, so the caller exits the way it did
+            throw error
+        }
+        Datasource.instance = candidate
+        return candidate
     }
 
     public getDataSource(): DataSource {

@@ -10,6 +10,8 @@ import { Config, isLoopbackHost, parseNodeUrl } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { Peer, PeerManager } from "src/libs/peer"
 import { reportTwin } from "src/libs/peer/identityLiveness"
+import { URL_BOUND_TO_OTHER } from "src/libs/peer/helloAuth"
+import { signingStopState } from "src/libs/identity/signingRecord"
 
 import {
     buildHeightsRecord,
@@ -270,7 +272,7 @@ export class GossipManager {
             const err =
                 (e as NodeJS.ErrnoException).code === "ENOENT"
                     ? new SidecarConfigError(
-                          "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (or set GOSSIP_ENABLED=false)",
+                          "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (GOSSIP_ENABLED=false also starts, but blocks and heights then travel by direct HTTP pushes, with a 10 s height poll as the fallback)",
                       )
                     : e
             if (!launched) {
@@ -1011,6 +1013,14 @@ export class GossipManager {
     /** Publish a validated transaction envelope. Fire and forget. */
     async publishTx(validityData: ValidityData): Promise<boolean> {
         if (!(await this.mayPublish(TXS_TOPIC))) return false
+        // Readiness counts heights subscribers only, and the sidecar
+        // publishes to an empty topic without error: with no peer on the
+        // tx topic the tx would reach nobody, so it stays held for retry.
+        if ((this.lastStats?.perTopic[TXS_TOPIC]?.subscribers ?? 0) < 1) {
+            countPublishSkipped("no_tx_peers")
+            this.logPublishSkipped(TXS_TOPIC, "no peer subscribed to the tx topic")
+            return false
+        }
         this.send({
             type: "publish",
             topic: TXS_TOPIC,
@@ -1024,11 +1034,26 @@ export class GossipManager {
 
     async publishOwnHeights(): Promise<boolean> {
         if (!(await this.mayPublish(HEIGHTS_TOPIC))) return false
+        // Peers send the key's consensus calls to the URL in its latest
+        // heights record. A copy that refuses to sign must not draw them
+        // away from the copy that does.
+        if (signingStopState(getSharedState.identityFile).stopped) {
+            countPublishSkipped("signing_stopped")
+            this.logPublishSkipped(HEIGHTS_TOPIC, "block signing is stopped")
+            return false
+        }
         const advertised = this.getListenAddr()
         const record = await buildHeightsRecord(
             this.getPeerId() ?? "",
             advertised ? [advertised] : (this.readyInfo?.addrs ?? []),
         )
+        // The build signs through a worker; a block received meanwhile can
+        // stop signing, and the finished record must not go out then.
+        if (signingStopState(getSharedState.identityFile).stopped) {
+            countPublishSkipped("signing_stopped")
+            this.logPublishSkipped(HEIGHTS_TOPIC, "block signing is stopped")
+            return false
+        }
         this.send({
             type: "publish",
             topic: HEIGHTS_TOPIC,
@@ -1204,6 +1229,11 @@ export class GossipManager {
                 log.info(
                     `[GOSSIP] ${record.pubkey} announced new URL ${record.url}: ${ok ? "updated" : `rejected (${message})`}`,
                 )
+                // Another identity holds that URL: a signed record is not
+                // proof of serving it, a hello reply from there is.
+                if (!ok && message.startsWith(URL_BOUND_TO_OTHER)) {
+                    this.helloUnknownPeer(record.pubkey, record.url)
+                }
             }
 
             if (

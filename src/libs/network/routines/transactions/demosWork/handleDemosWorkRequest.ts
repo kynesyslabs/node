@@ -10,6 +10,8 @@ import _ from "lodash"
 import log from "src/utilities/logger"
 import { emptyResponse } from "../../../server_rpc"
 import { processOperations } from "./processOperations"
+import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
+import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
 // SECTION Operation types
 // SECTION Handlers
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
@@ -94,10 +96,18 @@ export type OperationResult = {
 // ANCHOR - Handle the demosWork request
 export default async function handleDemosWorkRequest(
     content: DemoScript,
+    web2Caller?: Web2FetchCaller,
 ): Promise<RPCResponse> {
     let compiledScript: DemoScript = _.cloneDeep(content)
     let operationsResults: OperationResult[] = []
     const response: RPCResponse = _.cloneDeep(emptyResponse)
+
+    const disabled = featureDisabledMessage("demoswork")
+    if (disabled) {
+        response.result = 403
+        response.extra = disabled
+        return response
+    }
 
     log.info("[demosWork] [handleDemosWorkRequest] Received a DemoScript: ")
     log.debug(JSON.stringify(content))
@@ -106,7 +116,10 @@ export default async function handleDemosWorkRequest(
     explicitly specified otherwise, the steps are executed even if one fails with a
     fallback to the next step and a meaningful error(s) log in the return value */
     try {
-        [compiledScript, operationsResults] = await processOperations(content)
+        [compiledScript, operationsResults] = await processOperations(
+            content,
+            web2Caller,
+        )
         response.result = 200
         response.response = {
             compiledScript: compiledScript,

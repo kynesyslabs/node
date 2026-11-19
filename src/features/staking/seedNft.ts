@@ -26,14 +26,35 @@ function holdsSeat(row: Pick<SeededValidatorNft, "status">): boolean {
     )
 }
 
+/**
+ * `fromChain`: the rows are a chain's own validator table (a snapshot),
+ * not a genesis list. A seat there with no NFT fields at all was taken
+ * without one, by a genesis `nft_exempt` entry or before the fork, and the
+ * table does not keep which; the chain already judged it.
+ */
+export interface SeedNftOptions {
+    fromChain?: boolean
+}
+
+function hasNoNftFields(row: SeededValidatorNft): boolean {
+    return (
+        (row.nft_mint ?? null) === null &&
+        (row.nft_owner ?? null) === null &&
+        (row.nft_proof_tx ?? null) === null
+    )
+}
+
 /** Whether a seeded row opts out of the NFT fields. Only a literal `true` counts. */
-export function isNftExemptSeed(row: Pick<SeededValidatorNft, "nft_exempt">): boolean {
-    return row.nft_exempt === true
+export function isNftExemptSeed(
+    row: SeededValidatorNft,
+    options: SeedNftOptions = {},
+): boolean {
+    return row.nft_exempt === true || (options.fromChain === true && hasNoNftFields(row))
 }
 
 /** The addresses of the seeded rows that opt out of the NFT fields. */
 export function nftExemptSeeds(rows: readonly SeededValidatorNft[]): string[] {
-    return rows.filter(isNftExemptSeed).map(row => row.address)
+    return rows.filter(row => isNftExemptSeed(row)).map(row => row.address)
 }
 
 /**
@@ -44,6 +65,7 @@ export function nftExemptSeeds(rows: readonly SeededValidatorNft[]): string[] {
 export function seededNftReasons(
     rows: readonly SeededValidatorNft[],
     label: string,
+    options: SeedNftOptions = {},
 ): string[] {
     const reasons: string[] = []
     const holders = new Map<string, string>()
@@ -54,7 +76,7 @@ export function seededNftReasons(
             reasons.push(`${where}: nft_exempt must be a boolean`)
             return
         }
-        const exempt = isNftExemptSeed(row)
+        const exempt = isNftExemptSeed(row, options)
         if (exempt) {
             for (const key of ["nft_mint", "nft_owner", "nft_proof_tx"] as const) {
                 const value = row[key]
@@ -98,11 +120,12 @@ export function seededNftReasons(
 export async function verifySeededNfts(
     rows: readonly SeededValidatorNft[],
     label: string,
+    options: SeedNftOptions = {},
 ): Promise<string[]> {
-    const reasons = seededNftReasons(rows, label)
+    const reasons = seededNftReasons(rows, label, options)
     if (reasons.length > 0) return reasons
     const checks = rows.map(async (row, index) => {
-        if (!holdsSeat(row) || isNftExemptSeed(row)) return null
+        if (!holdsSeat(row) || isNftExemptSeed(row, options)) return null
         const where = `${label}[${index}] (${row.address})`
         const nft = {
             mint: row.nft_mint as string,

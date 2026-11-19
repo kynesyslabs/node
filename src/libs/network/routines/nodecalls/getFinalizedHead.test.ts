@@ -7,19 +7,11 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 import type { Blocks } from "src/model/entities/Blocks"
 
-const getLastBlock = jest.fn(async () => null as any)
-const getAheadValidatorPeers = jest.fn(async () => [] as unknown[])
-const getNetworkTimestamp = jest.fn(() => 1_800_000_100)
-const sharedState: Record<string, unknown> = { syncStatus: true, inSyncLoop: false }
+import { mockFinalizedHeadReads } from "./finalizedHeadMocks"
 
-jest.mock("src/libs/blockchain/chain", () => ({ __esModule: true, default: { getLastBlock } }))
-jest.mock("src/libs/consensus/v2/routines/networkAheadVeto", () => ({ __esModule: true, getAheadValidatorPeers }))
-jest.mock("src/libs/utils/calibrateTime", () => ({ __esModule: true, getNetworkTimestamp }))
-jest.mock("src/utilities/sharedState", () => ({ __esModule: true, getSharedState: sharedState }))
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() },
-}))
+const { getLastBlock, getAheadValidatorPeers, getNetworkTimestamp, signerRuleOf, sharedState } =
+    mockFinalizedHeadReads(1_800_000_100)
+const COMMITTEE = ["0xaa", "0xbb", "0xcc", "0xdd"]
 
 const { default: getFinalizedHead } = await import("./getFinalizedHead")
 
@@ -39,12 +31,14 @@ beforeEach(() => {
     getLastBlock.mockReset()
     getAheadValidatorPeers.mockReset()
     getNetworkTimestamp.mockReset()
+    signerRuleOf.mockReset()
+    signerRuleOf.mockResolvedValue({ bound: true, members: COMMITTEE, threshold: 3 })
     getLastBlock.mockResolvedValue(block())
     getAheadValidatorPeers.mockResolvedValue([])
     getNetworkTimestamp.mockReturnValue(1_800_000_100)
     sharedState.syncStatus = true
     sharedState.inSyncLoop = false
-    sharedState.forkConfig = undefined
+    sharedState.forkConfig = { finalityProofs: { activationHeight: 0 } }
 })
 
 describe("getFinalizedHead", () => {
@@ -62,7 +56,58 @@ describe("getFinalizedHead", () => {
             signatures: SIGNATURES,
             round: null,
             signedMessage: "e3b0c442",
+            committee: COMMITTEE,
+            committeeRule: "bound_committee",
+            threshold: 3,
         })
+    })
+
+    it("names the signer set and threshold sync applies to the head", async () => {
+        signerRuleOf.mockResolvedValue({ bound: false, members: ["0xaa", "0xbb"], threshold: 2 })
+        getLastBlock.mockResolvedValue(block({ number: 77, hash: "0177" }))
+        const reply = await getFinalizedHead()
+        expect(signerRuleOf).toHaveBeenCalledWith(77)
+        expect(reply.response.committee).toEqual(["0xaa", "0xbb"])
+        expect(reply.response.committeeRule).toBe("eligible_pool")
+        expect(reply.response.threshold).toBe(2)
+    })
+
+    it("gives no signer set for a head whose pool was read from the live validators table", async () => {
+        // Before finalityProofs the pool is the present table, which no longer
+        // holds a validator the head itself unstaked: a set read now could
+        // leave out a signer that counted and lower the bar.
+        sharedState.forkConfig = { finalityProofs: { activationHeight: 81 } }
+        getLastBlock.mockResolvedValue(block({ number: 80, hash: "0180" }))
+        const before = await getFinalizedHead()
+        expect(before.result).toBe(200)
+        expect(before.response.committee).toBeNull()
+        expect(before.response.committeeRule).toBeNull()
+        expect(before.response.threshold).toBeNull()
+        expect(signerRuleOf).not.toHaveBeenCalled()
+
+        getLastBlock.mockResolvedValue(block({ number: 81, hash: "0181" }))
+        const from = await getFinalizedHead()
+        expect(from.response.committee).toEqual(COMMITTEE)
+        expect(from.response.threshold).toBe(3)
+        expect(signerRuleOf).toHaveBeenCalledWith(81)
+    })
+
+    it("reads the signer set once per head", async () => {
+        getLastBlock.mockResolvedValue(block({ number: 78, hash: "0178" }))
+        await getFinalizedHead()
+        await getFinalizedHead()
+        expect(signerRuleOf).toHaveBeenCalledTimes(1)
+    })
+
+    it("still answers the head with a null signer set when it cannot be read", async () => {
+        signerRuleOf.mockRejectedValue(new Error("block 78 not found"))
+        getLastBlock.mockResolvedValue(block({ number: 79, hash: "0179" }))
+        const reply = await getFinalizedHead()
+        expect(reply.result).toBe(200)
+        expect(reply.response.number).toBe(79)
+        expect(reply.response.committee).toBeNull()
+        expect(reply.response.committeeRule).toBeNull()
+        expect(reply.response.threshold).toBeNull()
     })
 
     it("still answers the head with nodeSynced false before the node is synced", async () => {
@@ -110,6 +155,9 @@ describe("getFinalizedHead", () => {
             signatures: {},
             round: null,
             signedMessage: null,
+            committee: null,
+            committeeRule: null,
+            threshold: null,
         })
     })
 
@@ -137,6 +185,9 @@ describe("getFinalizedHead", () => {
         expect(reply.response.timestamp).toBe(1_800_000_040)
         expect(reply.response.ageSeconds).toBe(60)
         expect(reply.response.signatureCount).toBe(1)
+        expect(reply.response.committee).toBeNull()
+        expect(reply.response.threshold).toBeNull()
+        expect(signerRuleOf).not.toHaveBeenCalled()
     })
 
     it("reads a genesis configured in seconds as is", async () => {

@@ -29,8 +29,8 @@ import {
     handleGetReferralInfo,
     handleValidateReferral,
     handleGetAccountByIdentity,
-    handleIdentityAssign,
 } from "./handlers/gcr"
+import { encodeResponse, errorResponse } from "./handlers/utils"
 import {
     handleExecute,
     handleNativeBridge,
@@ -76,6 +76,17 @@ export type HandlerRegistry = Map<OmniOpcode, HandlerDescriptor>
 const createHttpFallbackHandler = (): OmniHandler<Buffer> => {
     return async ({ fallbackToHttp }) => fallbackToHttp()
 }
+
+// Identity edits reach GCRMain only through a transaction in a block. The
+// old handler applied a peer-supplied edit to any account straight to the
+// database, outside consensus, so the opcode stays known but is refused.
+const refuseIdentityAssign: OmniHandler<Buffer> = async () =>
+    encodeResponse(
+        errorResponse(
+            403,
+            "gcr_identityAssign is not served: identity changes apply only from blocks",
+        ),
+    )
 
 const DESCRIPTORS: HandlerDescriptor[] = [
     // 0x0X Control & Infrastructure
@@ -307,7 +318,7 @@ const DESCRIPTORS: HandlerDescriptor[] = [
         opcode: OmniOpcode.GCR_IDENTITY_ASSIGN,
         name: "gcr_identityAssign",
         authRequired: true,
-        handler: handleIdentityAssign,
+        handler: refuseIdentityAssign,
     },
     {
         opcode: OmniOpcode.GCR_GET_IDENTITIES,

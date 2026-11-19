@@ -20,6 +20,21 @@ export function parseIntSetting(raw: string | undefined): number | undefined {
     return Number.isNaN(parsed) ? undefined : parsed
 }
 
+const DURATION_UNITS_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000 }
+
+/**
+ * A duration setting in milliseconds: a bare integer is milliseconds, or a
+ * number with ms, s or m. parseInt read "15s" as 15 ms, so anything else is
+ * NaN for the caller to refuse rather than a silently wrong value.
+ */
+export function parseDurationMs(raw: string | undefined): number | undefined {
+    if (raw === undefined || raw.trim() === "") return undefined
+    const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/i.exec(raw.trim())
+    if (!match) return Number.NaN
+    const unit = DURATION_UNITS_MS[(match[2] ?? "ms").toLowerCase()]
+    return Math.round(Number(match[1]) * unit)
+}
+
 /** L2PS_MESSAGING_ENABLED is on only for the word true, in any case. */
 export function parseMessagingEnabled(raw: string | undefined): boolean {
     return raw?.toLowerCase() === "true"

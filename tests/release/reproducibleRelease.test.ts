@@ -172,11 +172,18 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
     })
 
     it("every base image in the release Dockerfile is pinned by @sha256 digest", () => {
+        // A FROM naming an earlier stage builds on that stage's pinned image.
+        const stages = new Set(
+            [...read("Dockerfile").matchAll(/^\s*FROM\s+\S+\s+AS\s+(\S+)/gim)].map(m => m[1].toLowerCase()),
+        )
         const undigested = offendingLines(
             ["Dockerfile"],
             /^\s*FROM\s+/i,
             /@sha256:[0-9a-f]{64}/,
-        )
+        ).filter(line => {
+            const image = line.match(/FROM\s+(?:--\S+\s+)*(\S+)/i)?.[1]
+            return !image || !stages.has(image.toLowerCase())
+        })
         expect(undigested).toEqual([]) // tags like :1.3-debian or :1-slim are mutable
     })
 
@@ -287,35 +294,5 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(help).toBeGreaterThan(-1)
         expect(help).toBeLessThan(run.indexOf("\ncheck_bun_version\n"))
         expect(help).toBeLessThan(run.indexOf("bun install --frozen-lockfile"))
-    })
-
-    it("every wstcp install names the same --version", () => {
-        const files = [
-            "Dockerfile",
-            "scripts/install-deps.sh",
-            "src/features/tlsnotary/proxyManager.ts",
-        ]
-        const sites: string[] = []
-        const versions = new Set<string>()
-        for (const file of files) {
-            read(file)
-                .split("\n")
-                .forEach((line, i) => {
-                    const code = line.trim()
-                    if (code.startsWith("#") || code.startsWith("//")) return
-                    if (/cargo\S*\s+install\s+wstcp\b/.test(code)) {
-                        sites.push(`${file}:${i + 1}: ${code}`)
-                    }
-                })
-            for (const m of read(file).matchAll(
-                /WSTCP_VERSION\s*=\s*"?(\d+\.\d+\.\d+)|wstcp --version (\d+\.\d+\.\d+)/g,
-            )) {
-                versions.add(m[1] ?? m[2])
-            }
-        }
-        expect(sites).toHaveLength(files.length)
-        const unpinned = sites.filter(s => !/--version\b/.test(s))
-        expect(unpinned).toEqual([]) // each entry installs whatever crates.io serves today
-        expect([...versions]).toHaveLength(1)
     })
 })

@@ -9,7 +9,7 @@ groups:
           severity: warning
         annotations:
           summary: Spike of uncaught exceptions
-          description: "{{ $value }} uncaught exceptions in 5m. The handler is swallowing them — subsystems may be in a corrupted state."
+          description: "{{ $value }} uncaught exceptions in 5m on {{ $labels.instance }}. The handler is swallowing them — subsystems may be in a corrupted state."
 
       - alert: UnhandledRejectionSpike
         expr: increase(demos_unhandled_rejection_total[5m]) > 10
@@ -18,4 +18,4 @@ groups:
           severity: warning
         annotations:
           summary: Spike of unhandled promise rejections
-          description: "{{ $value }} unhandled rejections in 5m. Same caveat as UncaughtExceptionSpike."
+          description: "{{ $value }} unhandled rejections in 5m on {{ $labels.instance }}. Same caveat as UncaughtExceptionSpike."

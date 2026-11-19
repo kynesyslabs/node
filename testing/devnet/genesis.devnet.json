@@ -40,7 +40,71 @@
     "finalityProofs": {
       "activationHeight": 0
     },
+    "blockCaps": {
+      "activationHeight": 0
+    },
     "networkGovernance": {
+      "activationHeight": 0
+    },
+    "txTypeAllowList": {
+      "activationHeight": 0
+    },
+    "instantMessagingBinding": {
+      "activationHeight": 0
+    },
+    "nativeSendBinding": {
+      "activationHeight": 0
+    },
+    "canonicalAddresses": {
+      "activationHeight": 0
+    },
+    "feeBinding": {
+      "activationHeight": 0
+    },
+    "web2ProofBinding": {
+      "activationHeight": 0
+    },
+    "tlsnProofEnforcement": {
+      "activationHeight": 0
+    },
+    "l2psSettlement": {
+      "activationHeight": 0
+    },
+    "l2psGate": {
+      "activationHeight": null
+    },
+    "tlsnDisabled": {
+      "activationHeight": null
+    },
+    "nftValidatorGating": {
+      "activationHeight": null
+    },
+    "tlsnVerified": {
+      "activationHeight": 0,
+      "notaryKeys": [
+        {
+          "id": "devnet-test-notary-1",
+          "alg": "k256",
+          "hex": "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e"
+        },
+        {
+          "id": "devnet-test-notary-2",
+          "alg": "k256",
+          "hex": "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870"
+        }
+      ],
+      "verifierWasmSha256": "5ed9774dd485266227b633504beba4cb3bed47c26af01b817ed128ce8517e455",
+      "maxPresentationBytes": 65536,
+      "freshnessWindowSec": 3600,
+      "futureSkewSec": 60
+    },
+    "xmProofBinding": {
+      "activationHeight": 0
+    },
+    "storageFeeSettlement": {
+      "activationHeight": 0
+    },
+    "referenceBlockRoom10": {
       "activationHeight": 0
     }
   },

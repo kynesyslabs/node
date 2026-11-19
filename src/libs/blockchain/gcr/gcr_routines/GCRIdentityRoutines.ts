@@ -29,6 +29,8 @@ import {
     applyEthosIdentityRemove,
     applyTLSNIdentityAdd,
     applyTLSNIdentityRemove,
+    rollbackTLSNIdentityAdd,
+    rollbackTLSNIdentityRemove,
 } from "./routines"
 import type { EditPlace } from "./routines/removedIdentities"
 
@@ -76,6 +78,14 @@ export default class GCRIdentityRoutines {
                     return rollbackXmIdentityAdd(identityEdit, accountGCR)
                 case "xmremove":
                     return rollbackXmIdentityRemove(
+                        identityEdit,
+                        accountGCR,
+                        place,
+                    )
+                case "tlsnadd":
+                    return rollbackTLSNIdentityAdd(identityEdit, accountGCR, entities)
+                case "tlsnremove":
+                    return rollbackTLSNIdentityRemove(
                         identityEdit,
                         accountGCR,
                         place,
@@ -213,6 +223,7 @@ export default class GCRIdentityRoutines {
                         result = await applyTLSNIdentityAdd(
                             identityEdit,
                             accountGCR,
+                            entities,
                         )
                         break
 
@@ -220,6 +231,7 @@ export default class GCRIdentityRoutines {
                         result = await applyTLSNIdentityRemove(
                             identityEdit,
                             accountGCR,
+                            place,
                         )
                         break
                     default:

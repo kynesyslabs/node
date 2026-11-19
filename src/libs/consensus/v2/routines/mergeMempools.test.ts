@@ -50,6 +50,7 @@ const { __resetMempoolLimits, __setMempoolLimits } = await import(
     "@/libs/blockchain/mempoolLimits"
 )
 const { mergeMempools } = await import("./mergeMempools")
+const { MERGE_REPLY_MAX_PAGES } = await import("@/utilities/constants")
 
 const tx = (hash: string) =>
     ({ hash, content: { from: "0xa" }, signature: {} }) as never
@@ -111,10 +112,56 @@ describe("mergeMempools batching", () => {
 
     it("collects the txs peers return across all of their responses, once each", async () => {
         __setMempoolLimits({ maxTxs: 1 })
-        const peer = fakePeer("0xp1", () => ok([tx("x"), tx("y")]))
-        await mergeMempools([tx("a"), tx("b")], [peer], 7)
+        const replies = [[tx("x")], [tx("y")]]
+        let call = 0
+        const peer = fakePeer("0xp1", () => ok(replies[call++]))
+        const again = fakePeer("0xp2", () => ok([tx("x")]))
+        await mergeMempools([tx("a"), tx("b")], [peer, again], 7)
         expect(received).toHaveLength(1)
         expect((received[0] as Array<{ hash: string }>).map(t => t.hash).sort()).toEqual(["x", "y"])
+    })
+
+    it("takes a full pool from one reply, not a fixed part of it", async () => {
+        const theirs = Array.from({ length: 7_000 }, (_, i) => tx(`t${i}`))
+        const peer = fakePeer("0xp1", () => ok(theirs))
+        await mergeMempools([], [peer], 7)
+        expect(received[0]).toHaveLength(7_000)
+    })
+
+    it("bounds a reply larger than one request to the part that fits", async () => {
+        __setMempoolLimits({ maxTxs: 3 })
+        const peer = fakePeer("0xp1", () => ok(["a", "b", "c", "d", "e"].map(tx)))
+        await mergeMempools([], [peer], 7)
+        expect((received[0] as Array<{ hash: string }>).map(t => t.hash)).toEqual(["a", "b", "c"])
+    })
+
+    it("asks for the rest of a peer's pool when its reply says there is more", async () => {
+        const peer = fakePeer("0xp1", (sent: any) =>
+            sent.after === undefined
+                ? { ...ok([tx("a"), tx("b")]), response: { txs: [tx("a"), tx("b")], peerlist: [], more: true } }
+                : sent.after === "b"
+                  ? ok([tx("c")])
+                  : ok(),
+        )
+        await mergeMempools([tx("own")], [peer], 7)
+        // The follow-up carries no txs: ours already went in the first request.
+        expect(peer.requests.map((r: any) => [r.txs.length, r.after])).toEqual([
+            [1, undefined],
+            [0, "b"],
+        ])
+        expect((received[0] as Array<{ hash: string }>).map(t => t.hash).sort()).toEqual([
+            "a", "b", "c",
+        ])
+    })
+
+    it("stops following a peer's pool after a bounded number of pages", async () => {
+        let page = 0
+        const peer = fakePeer("0xp1", () => ({
+            ...ok(),
+            response: { txs: [tx(`p${page++}`)], peerlist: [], more: true },
+        }))
+        await mergeMempools([], [peer], 7)
+        expect(peer.requests.length).toBe(MERGE_REPLY_MAX_PAGES)
     })
 
     it("stops sending to a peer that fails, without affecting the others", async () => {
@@ -124,5 +171,26 @@ describe("mergeMempools batching", () => {
         await mergeMempools([tx("a"), tx("b"), tx("c")], [bad, good], 7)
         expect(bad.requests).toHaveLength(1)
         expect(good.requests).toHaveLength(3)
+    })
+})
+
+describe("mergeMempools attempts", () => {
+    it("sends a batch that got no answer once, with the whole budget", async () => {
+        const { default: Peer } = await import("@/libs/peer/Peer")
+        const slow = {
+            identity: "0xslow",
+            connection: { string: "http://0xslow" },
+            call: jest.fn(async () => ({
+                result: 504,
+                response: "Request timeout",
+                require_reply: false,
+                extra: null,
+            })),
+            longCall: Peer.prototype.longCall,
+        } as any
+        await mergeMempools([tx("a")], [slow], 7)
+        await new Promise(resolve => setTimeout(resolve, 300))
+        expect(slow.call).toHaveBeenCalledTimes(1)
+        expect((slow.call.mock.calls[0] as any[])[2].timeoutMs).toBe(10_000)
     })
 })

@@ -15,6 +15,18 @@ import { getSharedState } from "@/utilities/sharedState"
 import { storageProgramsRoot } from "@/libs/blockchain/finality/storageRoot"
 
 /**
+ * UTF-8 byte order: what Postgres gives under the "C" collation, and what the
+ * pinned Alpine image gives under its default one, since musl collates by
+ * bytes. A glibc or ICU collation orders case and punctuation differently, so
+ * the rows are sorted here and the hash does not depend on the database's
+ * locale.
+ */
+function byKeyBytes<T>(key: (row: T) => string): (a: T, b: T) => number {
+    return (a, b) =>
+        Buffer.compare(Buffer.from(key(a), "utf8"), Buffer.from(key(b), "utf8"))
+}
+
+/**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
  * The hash is created by:
  * 1. Ordering all records by publicKey (ASC)
@@ -56,19 +68,63 @@ export async function hashSubnetsTxsTable(): Promise<string> {
             tx_hash: "ASC",
         },
     })
+    records.sort(byKeyBytes(r => r.tx_hash))
 
     const tableString = JSON.stringify(records)
     return Hashing.sha256(tableString)
 }
 
-// REVIEW: TLSNotary proofs table hash for integrity verification
 /**
- * Generates a SHA-256 hash for the GCRTLSNotary table.
- * Orders by tokenId for deterministic hashing.
- *
- * @returns Promise<string> - SHA-256 hash of the TLSNotary proofs table
+ * The digest of the TLSN table rows. Before `tlsnVerified` it covers the
+ * `createdAt` each node's database stamps, so it differs between nodes and
+ * Sync leaves it out; that branch stays as it was, so old blocks keep their
+ * hash. Under the fork it covers only what the chain wrote, the token and
+ * proof columns, and no wall-clock field, so it is the same on every node.
  */
-export async function hashTLSNotaryTable(): Promise<string> {
+export function tlsnTableDigest(rows: GCRTLSNotary[], verified: boolean): string {
+    const records = [...rows].sort(byKeyBytes(r => r.tokenId))
+    if (!verified) {
+        return Hashing.sha256(
+            JSON.stringify(
+                records.map(r => ({
+                    tokenId: r.tokenId,
+                    owner: r.owner,
+                    domain: r.domain,
+                    proof: r.proof,
+                    storageType: r.storageType,
+                    txhash: r.txhash,
+                    proofTimestamp: String(r.proofTimestamp),
+                    createdAt: r.createdAt ? r.createdAt.toISOString() : null,
+                })),
+            ),
+        )
+    }
+    const int = (v: number | string | null | undefined) =>
+        v === null || v === undefined ? null : Number(v)
+    return Hashing.sha256(
+        JSON.stringify(
+            records.map(r => ({
+                tokenId: r.tokenId,
+                owner: r.owner,
+                domain: r.domain,
+                status: r.status ?? null,
+                requestHeight: int(r.requestHeight),
+                expiresAtHeight: int(r.expiresAtHeight),
+                proof: r.proof ?? null,
+                storageType: r.storageType ?? null,
+                txhash: r.txhash,
+                proofTimestamp: String(r.proofTimestamp),
+                attestationId: r.attestationId ?? null,
+                storedAtHeight: int(r.storedAtHeight),
+            })),
+        ),
+    )
+}
+
+/** SHA-256 of the TLSN table as it stands before the block at `blockHeight` applies. */
+export async function hashTLSNotaryTable(
+    blockHeight: number = getSharedState.lastBlockNumber ?? 0,
+): Promise<string> {
     const db = await Datasource.getInstance()
     const repository = db.getDataSource().getRepository(GCRTLSNotary)
 
@@ -77,20 +133,7 @@ export async function hashTLSNotaryTable(): Promise<string> {
             tokenId: "ASC",
         },
     })
-
-    // Normalize to plain objects with fixed field order for deterministic hashing
-    const normalized = records.map(r => ({
-        tokenId: r.tokenId,
-        owner: r.owner,
-        domain: r.domain,
-        proof: r.proof,
-        storageType: r.storageType,
-        txhash: r.txhash,
-        proofTimestamp: String(r.proofTimestamp),
-        createdAt: r.createdAt ? r.createdAt.toISOString() : null,
-    }))
-
-    return Hashing.sha256(JSON.stringify(normalized))
+    return tlsnTableDigest(records, isForkActive("tlsnVerified", blockHeight))
 }
 
 /**
@@ -112,7 +155,7 @@ export default async function hashGCRTables(
     // REVIEW: The below was GCRTracker without "", which was causing an error as is not an entity
     const subnetsTxsHash = await hashSubnetsTxsTable()
     // REVIEW: TLSNotary proofs included in GCR integrity hash
-    const tlsnotaryHash = await hashTLSNotaryTable()
+    const tlsnotaryHash = await hashTLSNotaryTable(blockHeight)
     const hashes = {
         native_subnets_txs: subnetsTxsHash,
         native_tlsnotary: tlsnotaryHash,
@@ -153,6 +196,9 @@ export async function hashAtomicWorkTables(): Promise<string> {
         .where("sp.metadata -> 'atomicWork' IS NOT NULL")
         .orderBy("sp.storageAddress", "ASC")
         .getMany()
+    works.sort(byKeyBytes(w => w.workId))
+    slots.sort(byKeyBytes(s => s.resourceKey))
+    writes.sort(byKeyBytes(w => w.storageAddress))
 
     // JCS, because slot records and stored values come back from jsonb with
     // their keys in the database's order, not the order they were written.

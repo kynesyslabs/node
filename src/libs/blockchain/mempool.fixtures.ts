@@ -34,3 +34,26 @@ export function installPoolStorageMocks(): Array<Record<string, unknown>> {
     }))
     return inserted
 }
+
+/**
+ * Passes every transaction through the checks other tests cover: the worker
+ * pool (coherence and signature), the admission window and identity proofs.
+ * What remains is the edit binding and the type rules. Call before importing
+ * the mempool.
+ */
+export function installPoolValidationMocks(): void {
+    mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
+        __esModule: true,
+        default: {
+            getInstance: () => ({
+                validate: async (txs: Array<{ hash: string }>) => txs.map(t => ({ valid: true, hash: t.hash })),
+            }),
+        },
+    }))
+    mock.module("./validation/txAdmission", () => ({
+        checkTxAdmissible: async () => ({ ok: true }),
+    }))
+    mock.module("./validation/identityAdmission", () => ({
+        checkIdentityAdmission: async () => ({ ok: true }),
+    }))
+}

@@ -31,7 +31,8 @@ import {
     showPeerValue,
     type ForkConfigLike,
 } from "./forkScheduleAgreement"
-import { Config } from "src/config"
+import { requestScheduleCheck } from "./forkScheduleWatch"
+import { Config, parseNodeUrl } from "src/config"
 import { replaceFileAtomically } from "./replaceFileAtomically"
 import {
     AnchorRefusal,
@@ -279,13 +280,21 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
  * genesis edit peers legitimately disagree for a while. A peer that has not
  * loaded its own genesis yet answers "not ready"; that is retried and then left
  * to the periodic comparison (forkScheduleWatch.ts), not reported as a mismatch.
+ * A different gasFeeSeparation treasury, or a different height for a fork
+ * already active, splits the nodes at once rather than at a later height, so
+ * it starts a watch round now, which leaves the peer out
+ * of the shard (or this node out of consensus) as a mismatch inside the window
+ * would. Boot does not wait for that round; the consensus routine does, through
+ * ensureWindowChecked, before it forges or votes.
  */
 async function warnOnForkScheduleMismatch(peer: Peer) {
     const ours = localScheduleView(
         getSharedState.forkConfig as unknown as ForkConfigLike,
         getSharedState.chainId,
     )
-    const result = await checkPeerSchedule(peer, ours)
+    const result = await checkPeerSchedule(peer, ours, {
+        tip: getSharedState.lastBlockNumber ?? 0,
+    })
     switch (result.status) {
         case "mismatch":
             log.error(
@@ -296,6 +305,23 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
                     ". This node will split from its peers at the first activation height that differs. " +
                     `Fix the forks entries and properties.id in ${genesisFilePath()} and restart.`,
             )
+            if (result.treasuryDiffers) {
+                log.error(
+                    "[BOOTSTRAP] gasFeeSeparation TREASURY MISMATCH with " +
+                        peer.connection.string +
+                        ": fees are credited to different accounts from the first block, so the two " +
+                        "nodes cannot agree on any block that carries a fee",
+                )
+            }
+            if (result.activeForkDiffers) {
+                log.error(
+                    "[BOOTSTRAP] ACTIVE FORK MISMATCH with " +
+                        peer.connection.string +
+                        ": a fork already active on one side has a different activation height on the " +
+                        "other, so the two nodes apply different rules from now on",
+                )
+            }
+            if (result.treasuryDiffers || result.activeForkDiffers) void requestScheduleCheck()
             break
         case "skipped":
             log.debug(
@@ -413,6 +439,23 @@ function startDeferredAnchorChecks(
     return checks
 }
 
+/**
+ * Why a peer list URL must be skipped. The list is keyed by public key, so a
+ * copied template or a stale file can name us under another key. The exact
+ * bound host, or a numeric loopback URL when the bind is a wildcard
+ * (`0.0.0.0`/`::`), on our RPC port, is skipped here. Other spellings,
+ * including localhost and the public URL, are dialed; a signed self reply
+ * refuses boot.
+ */
+async function skipPeerUrlReason(connection: string): Promise<string | null> {
+    const url = parseNodeUrl(connection)
+    if (!url) return null
+    if (await PeerManager.urlIsOurAddress(url)) {
+        return "is this node's own address"
+    }
+    return null
+}
+
 // ANCHOR Main function
 export default async function peerBootstrap(
     localList: Peer[],
@@ -444,11 +487,27 @@ export default async function peerBootstrap(
     ourGenesisDataHash = hashGenesisData(genesisData)
     ourGenesisCoreHash = hashGenesisCore(genesisData)
 
-    const anchors = localList
-        .filter(peer => peer.identity !== getSharedState.publicKeyHex)
-        .map(peer => new Peer(peer.connection.string, peer.identity))
+    const anchors: Peer[] = []
+    for (const peer of localList) {
+        if (peer.identity.toLowerCase() === getSharedState.publicKeyHex.toLowerCase()) continue
+        const reason = await skipPeerUrlReason(peer.connection.string)
+        if (reason) {
+            log.warning(
+                `[BOOTSTRAP] Skipping peer ${peer.identity}: its URL ${peer.connection.string} ${reason}`,
+            )
+        } else {
+            anchors.push(new Peer(peer.connection.string, peer.identity))
+        }
+    }
     for (const peer of anchors) {
         log.debug("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
+    }
+    if (anchors.length === 0) {
+        const message =
+            `[BOOTSTRAP] No usable peers in ${getSharedState.peerListFile}: this node has nobody to pair with. ` +
+            "Add the public key and URL of a known validator and restart to join a network."
+        if (localList.length === 0) log.info(message)
+        else log.warning(message)
     }
 
     const { paired, unreachable } = await pairAnchorsAtBoot(

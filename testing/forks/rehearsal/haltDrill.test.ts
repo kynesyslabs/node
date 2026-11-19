@@ -33,12 +33,10 @@ describe("G3-6: quorum-loss drill is shipped and registered", () => {
         expect(src).toContain("stopService(")
         expect(src).toContain("startService(")
     })
-    it("drill genesis activates the launch safety forks at height 0", () => {
+    it("drill genesis takes the launch fork set from the mainnet genesis template", () => {
         const src = readFileSync(resolve(REHEARSAL_DIR, SCENARIO), "utf8")
-        expect(src).toMatch(
-            /LAUNCH_FORKS\s*=\s*\[\s*"quorumParity"\s*,\s*"committeeBinding"\s*,\s*"commitLock"\s*\]/,
-        )
-        expect(src).toContain("activationHeight: 0")
+        expect(src).toContain("withLaunchForks(genesis)")
+        expect(src).not.toContain("LAUNCH_FORKS")
     })
 })
 

@@ -1,8 +1,8 @@
 /**
- * The fee gate at confirm time once gasFeeSeparation is active. A gasless
- * type (identity, validator seat transactions) is confirmed for an account
- * that cannot pay the fee; a native transfer from the same account is
- * refused there. The balance is 1 OS: enough for the transfer, not the fee.
+ * The fee gate at confirm time once gasFeeSeparation is active. Under
+ * nftValidatorGating a validator seat transaction is confirmed for an account
+ * that cannot pay the fee; before it, and for every other type, the fee is
+ * charged as before. The balance is 1 OS: enough for the transfer, not the fee.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
@@ -28,6 +28,7 @@ mock.module("src/libs/blockchain/gcr/gcr", () => ({
     default: {
         getAccountNonce: async () => 0,
         getAccountBalance: async () => 1n,
+        getGCRValidatorStatus: async () => null,
     },
 }))
 mock.module("src/libs/blockchain/validation/txAdmission", () => ({
@@ -63,19 +64,42 @@ afterEach(() => {
 })
 
 describe("the fee gate for an account that cannot pay the fee", () => {
+    // The released SDK builds only bonded stakes, so the seat stake (amount 0)
+    // is put together by hand.
+    const bondedStake = async () =>
+        onTheWire(await DemosTransactions.stake("1000", "https://node.example", demos))
+    const seatStake = async () =>
+        onTheWire(await handMade("validatorStake", { amount: "0", connectionUrl: "https://node.example" }))
+
     it("refuses a native transfer", async () => {
         const tx = onTheWire(await DemosTransactions.pay(PEER, 1n, demos))
         expect(await confirm(tx)).toContain(FEE_ERROR)
     })
 
-    it("lets an identity transaction and a validator stake through", async () => {
+    it("charges an identity transaction", async () => {
         const identity = await handMade("identity", {
             context: "zk",
             method: "zk_commitmentadd",
             payload: [{ commitment: "c1", provider: "github" }],
         })
-        expect(await confirm(onTheWire(identity))).not.toContain(FEE_ERROR)
-        const stake = onTheWire(await DemosTransactions.stake("0", "https://node.example", demos))
-        expect(await confirm(stake)).not.toContain(FEE_ERROR)
+        expect(await confirm(onTheWire(identity))).toContain(FEE_ERROR)
+    })
+
+    it("charges a validator stake before nftValidatorGating", async () => {
+        expect(await confirm(await bondedStake())).toContain(FEE_ERROR)
+    })
+
+    it("lets a validator stake through under nftValidatorGating", async () => {
+        const forks = getSharedState.forkConfig as unknown as Record<string, unknown>
+        const before = forks.nftValidatorGating
+        forks.nftValidatorGating = { activationHeight: 0 }
+        try {
+            // The stake clears the fee gate and is judged as a seat entrance.
+            const message = await confirm(await seatStake())
+            expect(message).not.toContain(FEE_ERROR)
+            expect(message).toContain("NFT proof is required")
+        } finally {
+            forks.nftValidatorGating = before
+        }
     })
 })

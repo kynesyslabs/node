@@ -26,7 +26,7 @@ export interface StakingTxResult {
 export async function handleStakingTx(
     tx: Transaction,
 ): Promise<StakingTxResult> {
-    const type = tx.content.type
+    const type = tx.content.type as string
     const sender = requireSender(tx)
     if (!sender) {
         return { success: false, message: "Missing sender" }

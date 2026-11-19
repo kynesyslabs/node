@@ -1,0 +1,73 @@
+{
+  "id": "N01",
+  "kind": "negative (availability)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01): 503 node_not_synced / head age",
+    "kynesyslabs/node#1060 (U-02): stale node handling"
+  ],
+  "requests": {
+    "height": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getLastBlockNumber",
+            "data": {},
+            "muid": "testnet-soak-read"
+          }
+        ]
+      }
+    },
+    "info": {
+      "method": "GET",
+      "url": "https://demosnode.discus.sh/info"
+    }
+  },
+  "window_utc": {
+    "from": "2026-10-14T12:00:22.003439Z",
+    "to": "2026-10-15T01:31:04.102491Z"
+  },
+  "runs": 55,
+  "probes": 330,
+  "http_502": 330,
+  "by_kind": {
+    "height": 165,
+    "info": 165
+  },
+  "successful_probes": 0,
+  "timeouts": 0,
+  "parse_errors": 0,
+  "local_errors": 0,
+  "runs_per_hour_utc": {
+    "2026-10-14T12:00Z": 4,
+    "2026-10-14T13:00Z": 4,
+    "2026-10-14T14:00Z": 4,
+    "2026-10-14T15:00Z": 4,
+    "2026-10-14T16:00Z": 4,
+    "2026-10-14T17:00Z": 4,
+    "2026-10-14T18:00Z": 4,
+    "2026-10-14T19:00Z": 4,
+    "2026-10-14T20:00Z": 4,
+    "2026-10-14T21:00Z": 4,
+    "2026-10-14T22:00Z": 4,
+    "2026-10-14T23:00Z": 4,
+    "2026-10-15T00:00Z": 4,
+    "2026-10-15T01:00Z": 3
+  },
+  "later_retained_window": {
+    "from": "2026-10-14T13:01:23.616465Z",
+    "to": "2026-10-15T10:16:20.305012Z",
+    "probes": 512,
+    "by_error_code": {
+      "http_502": 512
+    }
+  },
+  "response_form": "the HTTP status only; a 502 is raised before any body is parsed, so no body is recorded",
+  "scope": "one public gateway; this is not evidence that every testnet node was down",
+  "bears_on": "a gateway 502 carries no node height, sync state or reason. A client cannot tell gateway failure, node lag and chain halt apart from it; #1059/#1060 ask for distinct 503 node_not_synced and head timestamps"
+}

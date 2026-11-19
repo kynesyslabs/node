@@ -7,7 +7,7 @@
  *  - balance coercion: string, number, bigint
  *  - rejects fractional, NaN, negative balances
  *  - rejects malformed entry shapes
- *  - dedup last-wins on duplicate pubkey
+ *  - a duplicate pubkey is refused
  *  - UPDATE path: existing row → balance overwritten, other fields preserved
  *  - INSERT path: missing row → fresh row with default columns
  *  - mixed batch: counts (updated, inserted, total) are correct
@@ -147,6 +147,23 @@ describe("mergeGenesisBalances", () => {
         ).rejects.toThrow(/unsupported balance type/)
     })
 
+    it.each(["", "  ", " 100", "0x10", "+5", "1e3", "1_000", "10.0"])(
+        "rejects the non-decimal string balance %j before writing anything",
+        async raw => {
+            const { em, rows } = makeMockEm()
+            const address = "0xaa00000000000000000000000000000000000000000000000000000000000001"
+            await expect(mergeGenesisBalances(em, [[address, raw]])).rejects.toThrow(/must be decimal digits/)
+            expect(rows.size).toBe(0)
+            expect(genesisBalancesProblems([[address, raw]])).toHaveLength(1)
+        },
+    )
+
+    it("rejects an integer number too large to be exact", () => {
+        const address = "0xaa00000000000000000000000000000000000000000000000000000000000001"
+        expect(genesisBalancesProblems([[address, 2 ** 53 + 2]])[0]).toMatch(/decimal string/)
+        expect(genesisBalancesProblems([[address, 2 ** 53 - 1]])).toEqual([])
+    })
+
     it("coerces string balance to bigint", async () => {
         const { em, rows } = makeMockEm()
         await mergeGenesisBalances(em, [["0xaa00000000000000000000000000000000000000000000000000000000000001", "1000000000000000000"]])
@@ -165,14 +182,18 @@ describe("mergeGenesisBalances", () => {
         expect(rows.get("0xaa00000000000000000000000000000000000000000000000000000000000001")?.balance).toBe(99n)
     })
 
-    it("dedup: last-wins on duplicate pubkey", async () => {
+    it("refuses a duplicate pubkey before writing anything", async () => {
         const { em, rows } = makeMockEm()
-        const r = await mergeGenesisBalances(em, [
+        const balances = [
             ["0xaa00000000000000000000000000000000000000000000000000000000000001", "1"],
+            ["0xaa00000000000000000000000000000000000000000000000000000000000002", "5"],
             ["0xaa00000000000000000000000000000000000000000000000000000000000001", "999"],
-        ])
-        expect(r.total).toBe(1)
-        expect(rows.get("0xaa00000000000000000000000000000000000000000000000000000000000001")?.balance).toBe(999n)
+        ]
+        await expect(mergeGenesisBalances(em, balances)).rejects.toThrow(
+            /name 0xaa0+1 2 times \(entries 0, 2\)/,
+        )
+        expect(rows.size).toBe(0)
+        expect(genesisBalancesProblems(balances).join()).toContain("2 times")
     })
 
     it("UPDATE path: existing row → balance overwritten, identity preserved", async () => {

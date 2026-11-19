@@ -34,23 +34,24 @@ const OWN_KEY = "0x" + "aa".repeat(32)
 mockMempoolDeps(() => ds)
 // The real shared state pulls in the whole network stack, bridge SDK and
 // its tron dependency included, none of which these queries touch.
-mock.module("src/utilities/sharedState", () => ({
-    getSharedState: {
-        lastBlockNumber: 100,
-        referenceBlockRoom: 1,
-        publicKeyHex: OWN_KEY,
-        inConsensusLoop: false,
-    },
-}))
-mock.module("@/utilities/sharedState", () => ({
-    getSharedState: {
-        lastBlockNumber: 100,
-        referenceBlockRoom: 1,
-        publicKeyHex: OWN_KEY,
-        inConsensusLoop: false,
-    },
-}))
+const sharedState = {
+    lastBlockNumber: 100,
+    publicKeyHex: OWN_KEY,
+    inConsensusLoop: false,
+}
+const sharedStateModule = () => ({
+    __esModule: true,
+    getSharedState: sharedState,
+    default: { getInstance: () => sharedState },
+})
+mock.module("src/utilities/sharedState", sharedStateModule)
+mock.module("@/utilities/sharedState", sharedStateModule)
 mock.module("src/libs/network/manageBridge", () => ({ __esModule: true, default: () => undefined }))
+// Every sender can pay: the eviction test is about ranking, not funding.
+mock.module("src/libs/blockchain/gcr/gcr", () => ({
+    __esModule: true,
+    default: { getAccountBalance: async () => 10n ** 30n },
+}))
 
 const { default: Mempool } = await import("./mempool")
 const { txStoredBytes, txTotalFee, __resetMempoolLimits } = await import("./mempoolLimits")
@@ -102,6 +103,7 @@ describe.skipIf(!PG_URL)("mempool admission queries on Postgres", () => {
     beforeEach(async () => {
         await ds.query('TRUNCATE "mempooltx"')
         ;(Mempool as any).lastAgeSweep = 0
+        ;(Mempool as any).lastGossipEvictAttempt = 0
     })
 
     it("totals count and stored bytes exactly as txStoredBytes measures one tx", async () => {
@@ -225,10 +227,59 @@ describe.skipIf(!PG_URL)("mempool admission queries on Postgres", () => {
                 row("0xdear", { ts: Date.now(), fee: { network_fee: 9 } }),
             ])
             const incoming = row("0xnew", { ts: Date.now(), fee: { network_fee: 5 } }) as any
-            const plan = await Mempool.checkAdmission(incoming, "gossip")
+            const plan = await Mempool.checkAdmission(incoming, "internal")
             expect(plan).toEqual({ reason: "pool_full" })
             const left = (await ds.getRepository(MempoolTx).find()).map(r => r.hash).sort()
             expect(left).toEqual(["0xcheap", "0xdear"])
+        } finally {
+            __resetMempoolLimits()
+        }
+    })
+
+    // Postgres keeps a JSON number fee's stored digits; JS reads the fetched
+    // row to the nearest double, 300000000000000500 DEM as 300000000000000512
+    // DEM. Admission must rank by what listEvictionCandidates returns, as
+    // chooseVictims does, not by the stored value.
+    it("evicts the tx chooseVictims ranks cheapest when a number fee is past 2^53", async () => {
+        const { __setMempoolLimits, chooseVictims } = await import("./mempoolLimits")
+        __setMempoolLimits({ maxTxs: 2 })
+        try {
+            await ds.getRepository(MempoolTx).insert([
+                row("0xnumber", { ts: Date.now(), fee: { network_fee: Number("300000000000000500") } }),
+                row("0xstring", { ts: Date.now(), fee: { network_fee: "300000000000000500000000001" } }),
+            ])
+            const incoming = row("0xnew", {
+                from: "0xpayer",
+                ts: Date.now(),
+                fee: { network_fee: "300000000000000500000000002" },
+            }) as any
+            const victims = chooseVictims(
+                await Mempool.listEvictionCandidates(),
+                { fee: txTotalFee(incoming.content.transaction_fee), bytes: txStoredBytes(incoming) },
+                await Mempool.getUsage(),
+            )
+            expect(victims?.map(v => v.hash)).toEqual(["0xstring"])
+            expect(await Mempool.checkAdmission(incoming, "gossip")).toEqual({ evict: ["0xstring"] })
+            expect(await Mempool.checkAdmission(incoming, "rpc")).toEqual({ evict: ["0xstring"] })
+        } finally {
+            __resetMempoolLimits()
+        }
+    })
+
+    // A digit string too long for Postgres numeric fits the pool's size caps.
+    // Admission at a full pool must not cast held fees in SQL, or every later
+    // submission fails with "value overflows numeric format".
+    it("still plans eviction at a full pool holding a fee string too long for numeric", async () => {
+        const { __setMempoolLimits } = await import("./mempoolLimits")
+        __setMempoolLimits({ maxTxs: 2 })
+        try {
+            await ds.getRepository(MempoolTx).insert([
+                row("0xlong", { ts: Date.now(), fee: { network_fee: "9".repeat(131_073) } }),
+                row("0xcheap", { ts: Date.now(), fee: { network_fee: 1 } }),
+            ])
+            const incoming = row("0xnew", { from: "0xpayer", ts: Date.now(), fee: { network_fee: 5 } }) as any
+            expect(await Mempool.checkAdmission(incoming, "gossip")).toEqual({ evict: ["0xcheap"] })
+            expect(await Mempool.checkAdmission(incoming, "rpc")).toEqual({ evict: ["0xcheap"] })
         } finally {
             __resetMempoolLimits()
         }

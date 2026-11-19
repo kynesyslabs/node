@@ -54,8 +54,15 @@ function managerFor(staged: Map<string, unknown[]>, check: StageCheck) {
     return em
 }
 
-/** Installs the fake database and returns its durable rows, by entity name. */
-export function installFakeBlockDatabase(check: StageCheck): Map<string, unknown[]> {
+/**
+ * Installs the fake database and returns its durable rows, by entity name.
+ * `afterCommit` runs once a transaction's rows are durable and may throw, as
+ * a COMMIT whose reply is lost does.
+ */
+export function installFakeBlockDatabase(
+    check: StageCheck,
+    afterCommit: () => void = () => {},
+): Map<string, unknown[]> {
     const durable = new Map<string, unknown[]>()
     const fakeDataSource = {
         transaction: async (work: (em: unknown) => Promise<unknown>) => {
@@ -64,6 +71,7 @@ export function installFakeBlockDatabase(check: StageCheck): Map<string, unknown
             for (const [name, rows] of staged) {
                 durable.set(name, [...(durable.get(name) ?? []), ...rows])
             }
+            afterCommit()
             return result
         },
         getRepository: (entity: any) => repoFor(durable, nameOf(entity), check),

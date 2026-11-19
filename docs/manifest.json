@@ -33,8 +33,8 @@
     {
       "path": "runbooks/wstcp-reachability-check.md",
       "type": "runbook",
-      "title": "Verify wstcp Pool Reachability",
-      "date": "2026-05-14",
+      "title": "Verify TLSNotary Proxy Pool Reachability",
+      "date": "2026-11-17",
       "status": "active"
     },
     {
@@ -70,6 +70,13 @@
       "type": "runbook",
       "title": "Apply Database Migrations by Hand",
       "date": "2026-11-04",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/finality-read-api.md",
+      "type": "runbook",
+      "title": "Finality and Storage Read Calls for Clients",
+      "date": "2026-11-06",
       "status": "active"
     }
   ]

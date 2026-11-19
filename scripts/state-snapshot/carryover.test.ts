@@ -23,10 +23,18 @@ describe("launchValidatorRows", () => {
         expect(row).not.toHaveProperty("nft_exempt")
     })
 
-    it("writes null NFT fields for an entry without them", () => {
+    it("writes no NFT keys for an entry without them, as before the fork", () => {
         const [row] = launchValidatorRows({ validators: [entry(0)] })
-        expect(row).toMatchObject({ nft_mint: null, nft_owner: null, nft_proof_tx: null })
-        expect(JSON.stringify(row)).not.toContain("nft_exempt")
+        expect(Object.keys(row)).toEqual([
+            "address",
+            "status",
+            "connection_url",
+            "staked_amount",
+            "first_seen",
+            "valid_at",
+            "unstake_requested_at",
+            "unstake_available_at",
+        ])
     })
 
     it("refuses an nft_exempt entry: the exemption is a genesis rule", () => {

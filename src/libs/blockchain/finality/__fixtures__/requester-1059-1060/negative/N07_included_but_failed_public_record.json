@@ -1,0 +1,65 @@
+{
+  "id": "N07",
+  "kind": "negative (reference to a public third-party record; NOT captured by PATH-OS)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01): executed-status readback, edge case \"included but failed\""
+  ],
+  "public_record": "https://github.com/DACS-Agent-commerce/dacs-sdk/issues/338 (filed 2026-10-09 by another DACS participant)",
+  "tx": "85b8fcdcee48822742a39e1b9877f5e2f8dde36430e8e486e3a8b0c9a7744cbd",
+  "block": 480877,
+  "requests": {
+    "getTransactionStatus": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getTransactionStatus",
+            "data": {
+              "hash": "85b8fcdcee48822742a39e1b9877f5e2f8dde36430e8e486e3a8b0c9a7744cbd"
+            },
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    },
+    "getTxByHash": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getTxByHash",
+            "data": {
+              "hash": "85b8fcdcee48822742a39e1b9877f5e2f8dde36430e8e486e3a8b0c9a7744cbd"
+            },
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    }
+  },
+  "reported_responses (quoted from the public records, not re-captured)": {
+    "getTransactionStatus": {
+      "state": "included",
+      "blockNumber": 480877
+    },
+    "getTxByHash (excerpt)": {
+      "status": "failed",
+      "blockNumber": 480877,
+      "attrs": {
+        "code": "TX_NONCE_INVALID_LOW"
+      }
+    }
+  },
+  "our_handling": "F04 requires getTxByHash.status in {confirmed, included, pending} and treats any other value as indeterminate, so this transaction would not be accepted; it was not run against this tx by us",
+  "not_reproduced": "the gateway returned HTTP 502 throughout this package's build window, so we did not re-read it"
+}

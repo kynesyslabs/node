@@ -20,9 +20,13 @@ jest.mock("@/features/staking/solanaProof", () => ({
     verifyChallengeEvidence: jest.fn(async () => ({ status: "valid", slot: 2 })),
 }))
 
+const mockSharedState: { networkParameters: null; forkConfig: Record<string, unknown> } = {
+    networkParameters: null,
+    forkConfig: {},
+}
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null },
+    getSharedState: mockSharedState,
 }))
 
 jest.mock("@/utilities/logger", () => ({
@@ -341,15 +345,31 @@ describe("ensureValidatorSeed", () => {
         ).rejects.toThrow(/status/)
     })
 
-    it("rejects a negative stake", async () => {
+    it("rejects a stake of 0 when block 0 seats no NFTs", async () => {
         repoCount.mockResolvedValue(0)
         chainLastBlock.mockResolvedValue(0)
 
         await expect(
             ensureValidatorSeed({
-                validators: [makeSeed({ staked_amount: "-1" })],
+                validators: [makeSeed({ staked_amount: "0" })],
             }),
-        ).rejects.toThrow(/staked_amount must not be negative/)
+        ).rejects.toThrow(/staked_amount must be > 0/)
+    })
+
+    it("rejects a negative stake when block 0 seats NFTs", async () => {
+        mockSharedState.forkConfig = { nftValidatorGating: { activationHeight: 0 } }
+        repoCount.mockResolvedValue(0)
+        chainLastBlock.mockResolvedValue(0)
+
+        try {
+            await expect(
+                ensureValidatorSeed({
+                    validators: [makeSeed({ staked_amount: "-1" })],
+                }),
+            ).rejects.toThrow(/staked_amount must not be negative/)
+        } finally {
+            mockSharedState.forkConfig = {}
+        }
     })
 
     it("rejects non-bigint stake string", async () => {
@@ -361,6 +381,17 @@ describe("ensureValidatorSeed", () => {
                 validators: [makeSeed({ staked_amount: "1.5" })],
             }),
         ).rejects.toThrow(/staked_amount is not a valid bigint/)
+    })
+
+    it.each(["", "0x10", " 7", "+7"])("rejects the non-decimal stake %j", async stake => {
+        repoCount.mockResolvedValue(0)
+        chainLastBlock.mockResolvedValue(0)
+
+        await expect(
+            ensureValidatorSeed({
+                validators: [makeSeed({ staked_amount: stake })],
+            }),
+        ).rejects.toThrow(/staked_amount is not a valid bigint: .*\(decimal digits only\)/)
     })
 
     it("rejects negative valid_at", async () => {
@@ -397,6 +428,12 @@ describe("ensureValidatorSeed", () => {
     })
 
     describe("NFT rules", () => {
+        beforeEach(() => {
+            mockSharedState.forkConfig = { nftValidatorGating: { activationHeight: 0 } }
+        })
+        afterEach(() => {
+            mockSharedState.forkConfig = {}
+        })
 
         it("refuses a genesis seat without an NFT", async () => {
             repoCount.mockResolvedValue(0)
@@ -414,22 +451,26 @@ describe("ensureValidatorSeed", () => {
             expect(rows[0]).toMatchObject({ nft_mint: null, nft_owner: null, nft_proof_tx: null })
         })
 
-        it("refuses a snapshot row without an NFT; the flag is a genesis rule", async () => {
-            const addr = "0x" + "b".repeat(64)
-            repoCount.mockResolvedValue(0)
+        const snapshotRow = (fields: Record<string, unknown>) =>
             snapshotLoader.mockResolvedValue({
                 available: true,
                 manifest: { files: { "validators.jsonl": {} } },
                 streamValidators: async function* () {
-                    yield {
-                        ...makeSnapshotValidator(addr),
-                        nft_mint: null,
-                        nft_owner: null,
-                        nft_proof_tx: null,
-                    }
+                    yield { ...makeSnapshotValidator("0x" + "b".repeat(64)), ...fields }
                 },
             })
-            await expect(ensureValidatorSeed({})).rejects.toThrow(/validators\.jsonl\[0\].*nft_mint/)
+
+        it("seats a snapshot row with no NFT fields, which the chain seated before the fork", async () => {
+            repoCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1)
+            snapshotRow({ nft_mint: null, nft_owner: null, nft_proof_tx: null })
+            const result = await ensureValidatorSeed({})
+            expect(result).toMatchObject({ reseeded: true, count: 1, source: "snapshot" })
+        })
+
+        it("refuses a snapshot row with a partial NFT record", async () => {
+            repoCount.mockResolvedValue(0)
+            snapshotRow({ nft_mint: "4".repeat(44), nft_owner: null, nft_proof_tx: null })
+            await expect(ensureValidatorSeed({})).rejects.toThrow(/validators\.jsonl\[0\].*nft_owner/)
         })
     })
 })

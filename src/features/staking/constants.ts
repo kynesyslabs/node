@@ -11,7 +11,13 @@ import { demToOs } from "@kynesyslabs/demosdk/utils"
  *  Plan doc `staking_research/plan/plan.md` §0.2.3 pins this at 1000, ≈10x
  *  voting window, to make vote-and-run economically unattractive.
  */
-export const UNSTAKE_LOCK_BLOCKS = 20
+export const UNSTAKE_LOCK_BLOCKS = 1000
+
+/** The unstake lock of an NFT-backed seat (`nftValidatorGating`). The seat
+ *  holds no DEM to run with, so the lock only keeps it signing while the
+ *  set adjusts.
+ */
+export const NFT_UNSTAKE_LOCK_BLOCKS = 20
 
 /** Status codes we write into Validators.status. */
 export const VALIDATOR_STATUS_ACTIVE = "2"

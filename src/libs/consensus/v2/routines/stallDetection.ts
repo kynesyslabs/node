@@ -1,5 +1,3 @@
-import Alea from "alea"
-
 import Chain from "src/libs/blockchain/chain"
 import Block from "src/libs/blockchain/block"
 import { Peer } from "src/libs/peer"
@@ -11,9 +9,11 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { SECRETARY_ROTATION_GRACE_SECONDS } from "../../routines/consensusTime"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import {
+    drawLiveShard,
     getBoundCommittee,
     getEligiblePool,
     pinShardIdentities,
+    pinnedShardIdentities,
 } from "./getShard"
 import { isForkActive } from "@/forks/forkGates"
 import { countMissedSignature } from "@/features/metrics/consensusMetrics"
@@ -117,23 +117,17 @@ async function wasSelectedForBlock(
 
     const { commonValidatorSeed } = await getCommonValidatorSeed(prevBlock)
 
-    let committeeSize = getSharedState.shardSize
-    if (candidates.length < committeeSize) {
-        committeeSize = candidates.length
-    }
-
-    const deterministicRandomness = Alea(commonValidatorSeed)
-    const available = candidates.map(id => new Peer("", id))
-    const shard: Peer[] = []
-    for (let i = 0; i < committeeSize && available.length > 0; i++) {
-        const index = Math.floor(deterministicRandomness() * available.length)
-        shard.push(available[index])
-        available.splice(index, 1)
-    }
+    const shard = drawLiveShard(
+        commonValidatorSeed,
+        pool,
+        id => committed.has(id),
+        getSharedState.shardSize,
+    ).map(id => new Peer("", id))
 
     pinShardIdentities(
         shard,
         candidates.map(id => new Peer("", id)),
+        pinnedShardIdentities(block.number),
     )
 
     return shard.some(member => member.identity === ourKey)

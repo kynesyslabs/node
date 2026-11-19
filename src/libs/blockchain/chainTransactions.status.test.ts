@@ -7,24 +7,9 @@
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 
-const findOneBy = jest.fn(async (..._args: unknown[]) => null as any)
-const findByHash = jest.fn(async (..._args: unknown[]) => null as any)
+import { mockTransactionStore } from "./transactionStoreMocks"
 
-jest.mock("./chainDb", () => ({
-    __esModule: true,
-    getBlocksRepo: jest.fn(),
-    getTransactionsRepo: () => ({ findOneBy }),
-    setupChainDb: jest.fn(),
-    readSql: jest.fn(),
-    writeSql: jest.fn(),
-    maxRowsPerInsert: jest.fn(() => 1000),
-    chunkedInsert: jest.fn(),
-}))
-jest.mock("./mempool", () => ({ __esModule: true, default: { findByHash } }))
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() },
-}))
+const { findOneBy, findByHash } = mockTransactionStore()
 
 const { getTransactionStatus } = await import("./chainTransactions")
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
 import { In } from "typeorm"
 
 /**
@@ -71,6 +71,7 @@ const policyModule = () => ({
 mock.module("src/features/staking/nftAllowlist", policyModule)
 mock.module("@/features/staking/nftAllowlist", policyModule)
 
+const { getSharedState } = await import("@/utilities/sharedState")
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
 const { StateReadError } = await import("./stateReadError")
@@ -93,6 +94,12 @@ const stake = (url: string): any => ({
     nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
 })
 
+// A seat already held is topped up without a proof.
+const topUp = (url: string): any => {
+    const { nft: _nft, ...edit } = stake(url)
+    return edit
+}
+
 beforeEach(() => {
     durable.clear()
     issued.length = 0
@@ -101,6 +108,15 @@ beforeEach(() => {
 })
 
 describe("validator stake edits", () => {
+    // An NFT seat stakes 0, which only the nftValidatorGating apply accepts.
+    const state = getSharedState as unknown as { forkConfig?: unknown }
+    beforeEach(() => {
+        state.forkConfig = { nftValidatorGating: { activationHeight: 0 } }
+    })
+    afterEach(() => {
+        delete state.forkConfig
+    })
+
     it("stages the row instead of saving it, and writes it through the block's manager", async () => {
         const entities = caches()
         const result = await HandleGCR.applyGCREdit(stake("5"), entities, false, false)
@@ -121,7 +137,7 @@ describe("validator stake edits", () => {
     it("lets a later edit in the same set read what an earlier one staged", async () => {
         const entities = caches()
         const first = await HandleGCR.applyGCREdit(stake("5"), entities, false, false)
-        const second = await HandleGCR.applyGCREdit(stake("7"), entities, false, false)
+        const second = await HandleGCR.applyGCREdit(topUp("7"), entities, false, false)
 
         expect(first.success).toBe(true)
         expect(second.success).toBe(true)
@@ -132,10 +148,10 @@ describe("validator stake edits", () => {
 
     it("reads an existing row from the database once, then from the set", async () => {
         seeded = {
-            Validators: [{ address: "0xabc", status: "active", staked_amount: "0", connection_url: "https://10.example" }],
+            Validators: [{ address: "0xabc", status: "2", staked_amount: "0", connection_url: "https://10.example" }],
         }
         const entities = caches()
-        const result = await HandleGCR.applyGCREdit(stake("1"), entities, false, false)
+        const result = await HandleGCR.applyGCREdit(topUp("1"), entities, false, false)
 
         expect(result.success).toBe(true)
         expect(entities.validators.get("0xabc").connection_url).toBe("https://1.example")
@@ -153,7 +169,7 @@ describe("validator stake edits", () => {
     it("writes the row as it was staged, not as a later edit left it", async () => {
         const entities = caches()
         const first = await HandleGCR.applyGCREdit(stake("5"), entities, false, false)
-        await HandleGCR.applyGCREdit(stake("7"), entities, false, false)
+        await HandleGCR.applyGCREdit(topUp("7"), entities, false, false)
 
         await fakeDataSource.transaction(async em => first.deferredWrite!(em as any))
 
@@ -166,7 +182,7 @@ describe("validator stake edits", () => {
         const first = await HandleGCR.applyTransaction(entities, stakeTx(["5"]), false, false)
         expect(first.success).toBe(true)
 
-        const failing = stakeTx(["7"])
+        const failing = stakeTx(["7"], topUp)
         failing.content.gcr_edits.push({
             type: "balance",
             operation: "remove",
@@ -179,7 +195,7 @@ describe("validator stake edits", () => {
         expect(second.deferredWrites).toEqual([])
         expect(entities.validators.get("0xabc").connection_url).toBe("https://5.example")
 
-        const third = await HandleGCR.applyTransaction(entities, stakeTx(["6"]), false, false)
+        const third = await HandleGCR.applyTransaction(entities, stakeTx(["6"], topUp), false, false)
         expect(third.success).toBe(true)
         expect(entities.validators.get("0xabc").connection_url).toBe("https://6.example")
 
@@ -455,7 +471,7 @@ describe("ZK claims within a block", () => {
         const claims = entities.zkCommitments
 
         // A stake transaction fails while the ZK claim sits in the shared caches
-        const failing = stakeTx(["7"])
+        const failing = stakeTx(["7"], topUp)
         failing.content.gcr_edits.push({
             type: "balance",
             operation: "remove",
@@ -512,12 +528,12 @@ describe("a set applied on top of a pending one", () => {
     })
 })
 
-const stakeTx = (amounts: string[]): any => ({
+const stakeTx = (amounts: string[], edit: (url: string) => any = stake): any => ({
     hash: `0xstake${amounts.join("")}`,
     content: {
         type: "validatorStake",
         from_ed25519_address: "0xabc",
-        gcr_edits: amounts.map(stake),
+        gcr_edits: amounts.map(url => edit(url)),
     },
 })
 

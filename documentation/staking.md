@@ -59,6 +59,8 @@ Head over to https://faucet.demos.sh and paste your public key to get 2400 DEM.
 
 ## Staking
 
+> This guide is for testnet. On mainnet, token staking is off at launch (fork `tokenStakingGate`), and `validator:stake` is refused until the network opens it with the `tokenStaking` fork. See [docs/mainnet/genesis.md](../docs/mainnet/genesis.md).
+
 Update your node's `demos_peerlist.json` to look like this:
 
 ```json
@@ -94,6 +96,12 @@ This will run the node with the new Docker workflow. The `--clean` flag deletes 
 After your node is up and running (wait for debug prints), open `http://<your-ip>:53550/info` and confirm that `commitMessage` reads as `put back validators`.
 
 ## TIPS
+
+You can customize the amount (in DEM) using the `--amount` flag:
+
+```sh
+bun run validator:stake --amount 1200
+```
 
 To run the node later on without deleting the database:
 

@@ -12,6 +12,7 @@ import { exec } from "node:child_process"
 import { promisify } from "node:util"
 import { MetricsService } from "./MetricsService"
 import log from "@/utilities/logger"
+import { diskSpacePath, freeDiskBytes } from "@/utilities/diskSpace"
 import { Config } from "src/config"
 import type { MetricsCollectorConfig } from "./types"
 import {
@@ -413,6 +414,15 @@ export class MetricsCollector {
      */
     private async collectSystemMetrics(): Promise<void> {
         try {
+            // The DiskSpace alerts read this; the node refuses to start below
+            // MIN_DISK_SPACE, so the alert has to come before that point.
+            const freeBytes = freeDiskBytes(
+                diskSpacePath(Config.getInstance().diagnostics.diskSpacePath),
+            )
+            if (freeBytes !== null) {
+                this.metricsService.setGauge("disk_free_bytes", freeBytes)
+            }
+
             // Memory metrics
             const totalMem = os.totalmem()
             const freeMem = os.freemem()

@@ -1,106 +1,31 @@
 import { Config } from "src/config"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
+import { tlsnVerifiedParams } from "@/forks/tlsnVerifiedGate"
+import { getSharedState } from "@/utilities/sharedState"
+
+/**
+ * The presentation size cap the chain enforces at the tip, so a client can
+ * refuse an oversized proof before paying for it; undefined before the
+ * tlsnVerified fork, when the chain has none.
+ */
+export function chainMaxPresentationBytes(): number | undefined {
+    try {
+        return tlsnVerifiedParams(getSharedState.lastBlockNumber ?? 0)?.maxPresentationBytes
+    } catch {
+        return undefined
+    }
+}
+
+function proxyStatus(body: any): number {
+    return typeof body?.status === "number" ? body.status : 200
+}
 
 export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
-    requestTLSNproxy: async (data, response) => {
-        try {
-            const { requestProxy, ProxyError } = await import(
-                "@/features/tlsnotary/proxyManager"
-            )
-            const { validateToken, consumeRetry } = await import(
-                "@/features/tlsnotary/tokenManager"
-            )
-
-            if (!data.tokenId || !data.owner) {
-                response.result = 400
-                response.response = {
-                    error: "INVALID_REQUEST",
-                    message: "Missing tokenId or owner parameter",
-                }
-                return response
-            }
-
-            if (!data.targetUrl) {
-                response.result = 400
-                response.response = {
-                    error: "INVALID_REQUEST",
-                    message: "Missing targetUrl parameter",
-                }
-                return response
-            }
-
-            if (!data.targetUrl.startsWith("https://")) {
-                response.result = 400
-                response.response = {
-                    error: ProxyError.INVALID_URL,
-                    message:
-                        "Only HTTPS URLs are supported for TLS attestation",
-                }
-                return response
-            }
-
-            const validation = validateToken(
-                data.tokenId,
-                data.owner,
-                data.targetUrl,
-            )
-            if (!validation.valid) {
-                response.result =
-                    validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
-                response.response = {
-                    error: validation.error,
-                    message: `Token validation failed: ${validation.error}`,
-                    domain: validation.token?.domain,
-                }
-                return response
-            }
-
-            const result = await requestProxy(
-                data.targetUrl,
-                data.requestOrigin,
-            )
-
-            if ("error" in result) {
-                switch (result.error) {
-                    case ProxyError.INVALID_URL:
-                        response.result = 400
-                        break
-                    case ProxyError.PORT_EXHAUSTED:
-                        response.result = 503
-                        break
-                    case ProxyError.WSTCP_NOT_AVAILABLE:
-                    case ProxyError.PROXY_SPAWN_FAILED:
-                    default:
-                        response.result = 500
-                        break
-                }
-                response.response = result
-            } else {
-                const updatedToken = consumeRetry(
-                    data.tokenId,
-                    result.proxyId,
-                )
-                if (updatedToken) {
-                    log.info(
-                        `[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`,
-                    )
-                }
-
-                response.response = {
-                    ...result,
-                    tokenId: data.tokenId,
-                    retriesLeft: updatedToken?.retriesLeft ?? 0,
-                }
-            }
-        } catch (error) {
-            log.error("[manageNodeCall] requestTLSNproxy error: " + error)
-            response.result = 500
-            response.response = {
-                error: "INTERNAL_ERROR",
-                message: "Failed to request TLSNotary proxy",
-            }
-        }
+    requestTLSNproxy: async (data, response, sender, clientIP) => {
+        const { requestTlsnProxy } = await import("@/features/tlsnotary/proxyRequest")
+        response.response = await requestTlsnProxy(data ?? {}, sender, clientIP)
+        response.result = proxyStatus(response.response)
         return response
     },
 
@@ -132,11 +57,13 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
             const notaryUrl = getPublicUrl(port)
             const proxyUrl = getPublicUrl(proxyPort)
 
+            const maxPresentationBytes = chainMaxPresentationBytes()
             response.response = {
                 notaryUrl,
                 proxyUrl,
                 publicKey,
                 version: "0.1.0",
+                ...(maxPresentationBytes === undefined ? {} : { maxPresentationBytes }),
             }
         } catch (error) {
             log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)
@@ -151,7 +78,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
     "tlsnotary.getToken": async (data, response) => {
         try {
-            const { getTokenByTxHash, getToken } = await import(
+            const { lookupToken } = await import(
                 "@/features/tlsnotary/tokenManager"
             )
 
@@ -160,12 +87,8 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 txHash?: string
             }
 
-            let token
-            if (tokenId) {
-                token = getToken(tokenId)
-            } else if (txHash) {
-                token = getTokenByTxHash(txHash)
-            } else {
+            const id = tokenId || txHash
+            if (typeof id !== "string" || !id) {
                 response.result = 400
                 response.response = {
                     error: "INVALID_REQUEST",
@@ -174,6 +97,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
 
+            const token = await lookupToken(id)
             if (!token) {
                 response.result = 404
                 response.response = {
@@ -181,16 +105,7 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                     message: "No token found for the provided identifier",
                 }
             } else {
-                response.response = {
-                    token: {
-                        id: token.id,
-                        owner: token.owner,
-                        domain: token.domain,
-                        status: token.status,
-                        expiresAt: token.expiresAt,
-                        retriesLeft: token.retriesLeft,
-                    },
-                }
+                response.response = { token }
             }
         } catch (error) {
             log.error("[manageNodeCall] tlsnotary.getToken error: " + error)

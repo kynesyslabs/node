@@ -61,7 +61,9 @@
 		basic_auth {
 			metrics {$METRICS_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
 		}
-		reverse_proxy node-1:9090
+		reverse_proxy node-1:9090 {
+			header_up Authorization "Bearer {$METRICS_BEARER_TOKEN}"
+		}
 	}
 
 	# TLSNotary route — selected by TLSNOTARY_PROXY_MODE.

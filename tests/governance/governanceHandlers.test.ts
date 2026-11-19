@@ -18,7 +18,7 @@ jest.mock("@/utilities/logger", () => ({
     },
 }))
 
-const sharedStateStub: { networkParameters: unknown } = {
+const sharedStateStub: { networkParameters: unknown; forkConfig?: unknown } = {
     networkParameters: null,
 }
 jest.mock("@/utilities/sharedState", () => ({
@@ -177,10 +177,10 @@ describe("governanceHandlers.getProposalVotes", () => {
             snapshotBlock: 100,
         })
         voteRepoMock.find.mockResolvedValue([
-            { voterAddress: "v1", approve: true, weight: "1" },
-            { voterAddress: "v2", approve: false, weight: "1" },
+            { voterAddress: "v1", approve: true, weight: "40" },
+            { voterAddress: "v2", approve: false, weight: "10" },
         ])
-        // snapshot has 3 seats (including v3 who abstains)
+        // snapshot has 100 total stake (including v3 who abstains with 50)
         ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "40" },
             { staked_amount: "10" },
@@ -198,12 +198,36 @@ describe("governanceHandlers.getProposalVotes", () => {
             threshold: string
             passed: boolean
         }
-        expect(tally.approveWeight).toBe("1")
-        expect(tally.rejectWeight).toBe("1")
-        expect(tally.totalStakedWeight).toBe("3")
-        // ceil(2 * 3 / 3) = 2
-        expect(tally.threshold).toBe("2")
+        expect(tally.approveWeight).toBe("40")
+        expect(tally.rejectWeight).toBe("10")
+        expect(tally.totalStakedWeight).toBe("100")
+        // ceil(2 * 100 / 3) = 67
+        expect(tally.threshold).toBe("67")
         expect(tally.passed).toBe(false)
+    })
+
+    it("counts one seat per validator once nftValidatorGating holds at the snapshot", async () => {
+        sharedStateStub.forkConfig = { nftValidatorGating: { activationHeight: 0 } }
+        try {
+            proposalRepoMock.findOneBy.mockResolvedValue({ proposalId: "p1", snapshotBlock: 100 })
+            voteRepoMock.find.mockResolvedValue([
+                { voterAddress: "v1", approve: true, weight: "1" },
+                { voterAddress: "v2", approve: false, weight: "1" },
+            ])
+            ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+                { staked_amount: "0" },
+                { staked_amount: "0" },
+                { staked_amount: "0" },
+            ] as never)
+            const r = await governanceHandlers.getProposalVotes({ proposalId: "p1" }, emptyResponse())
+            const tally = r.response as { totalStakedWeight: string; threshold: string; passed: boolean }
+            expect(tally.totalStakedWeight).toBe("3")
+            // ceil(2 * 3 / 3) = 2
+            expect(tally.threshold).toBe("2")
+            expect(tally.passed).toBe(false)
+        } finally {
+            delete sharedStateStub.forkConfig
+        }
     })
 })
 

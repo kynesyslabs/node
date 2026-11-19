@@ -39,6 +39,7 @@ export const DEFAULT_SERVER_CONFIG: MetricsServerConfig = {
     port: Config.getInstance().metrics.port,
     hostname: Config.getInstance().metrics.host,
     enabled: Config.getInstance().metrics.enabled,
+    bearerToken: Config.getInstance().metrics.bearerToken,
 }
 
 // === Histogram Bucket Definitions ===

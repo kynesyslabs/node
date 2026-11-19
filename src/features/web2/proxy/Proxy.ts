@@ -4,6 +4,11 @@ import httpProxy from "http-proxy"
 import { URL } from "url"
 import net from "net"
 import dns from "node:dns/promises"
+import { Config } from "src/config"
+import {
+    isPublicAddress,
+    publicOnlyLookup,
+} from "src/utilities/outboundAddress"
 import {
     IWeb2Request,
     IWeb2Result,
@@ -15,6 +20,17 @@ import required from "src/utilities/required"
 import SharedState from "@/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import log from "@/utilities/logger"
+import { WEB2_REQUEST_TIMEOUT_MS } from "@/libs/abstraction/web2/boundedFetch"
+import {
+    DAHR_PROXY_ERROR_HEADER,
+    UnattestableResponseError,
+} from "src/features/web2/dahr/originStatus"
+
+
+/** Counts the origin response bytes one request read. */
+export interface Web2FetchMeter {
+    bytes: number
+}
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -26,10 +42,12 @@ export class Proxy {
     private _proxyPort = 0
     private _isInitialized = false
     private _currentTargetUrl = ""
+    private _agent: http.Agent | null = null
 
     constructor(
         private readonly _dahrSessionId: string,
-        private readonly _proxyHost: string = "localhost",
+        // The relay is only ever reached from this process.
+        private readonly _proxyHost: string = "127.0.0.1",
         private readonly _authConfig: IAuthorizationConfig = {
             requireAuthForAll: SharedState.getInstance().PROD,
             exceptions: [],
@@ -37,8 +55,12 @@ export class Proxy {
         private readonly _sslConfig: {
             verifyCertificates: boolean
         } = {
-            verifyCertificates: SharedState.getInstance().PROD, // Enable in production, disable in dev
+            // Only an explicit operator dev flag turns certificate checks off.
+            verifyCertificates: !Config.getInstance().outbound.web2InsecureTls,
         },
+        private readonly _maxResponseBytes: number = Config.getInstance()
+            .outbound.web2MaxResponseBytes,
+        private readonly _requestTimeoutMs: number = WEB2_REQUEST_TIMEOUT_MS,
     ) {
         required(this._dahrSessionId, "Missing dahr session Id")
     }
@@ -51,11 +73,14 @@ export class Proxy {
      * would be sent as `Bearer Bearer abc123`). `targetHeaders` and the URL
      * are copied into the signed on-chain `web2Request` tx; `targetAuthorization`
      * is not, so pass credentials there, not in `targetHeaders`.
+     * `meter.bytes` grows by every response byte read, including those of a
+     * response later refused, so the caller can be charged for them.
      * @returns Promise resolving to the response data
      * @throws Error if the proxy server fails to start or if the request fails
      */
     async sendHTTPRequest(
         params: ISendHTTPRequestParams,
+        meter?: Web2FetchMeter,
     ): Promise<IWeb2Result> {
         const {
             web2Request,
@@ -92,24 +117,78 @@ export class Proxy {
                 method: targetMethod,
                 path: "/",
                 headers,
-                timeout: 30000,
+                timeout: this._requestTimeoutMs,
+            })
+            const deadline = setTimeout(() => {
+                reject(
+                    new Error(
+                        `Web2 request did not complete within ${this._requestTimeoutMs} ms`,
+                    ),
+                )
+                req.destroy()
+            }, this._requestTimeoutMs)
+            const settle =
+                <T extends unknown[]>(fn: (...a: T) => void) =>
+                (...a: T) => {
+                    clearTimeout(deadline)
+                    fn(...a)
+                }
+            resolve = settle(resolve)
+            reject = settle(reject)
+            req.on("timeout", () => {
+                reject(
+                    new Error(`Web2 request idle for ${this._requestTimeoutMs} ms`),
+                )
+                req.destroy()
             })
             const chunks: Buffer[] = []
             let responseHeaders: http.IncomingHttpHeaders = {}
             let statusCode = 500
             let statusMessage = "Unknown"
             let requestHash: string | undefined
+            let received = 0
+            let tooLarge = false
 
             req.on("response", res => {
+                // A response the proxy made up itself must never reach
+                // attestation, opt-in or not: it says nothing about the origin.
+                const proxyError = res.headers[DAHR_PROXY_ERROR_HEADER]
+                if (proxyError) {
+                    res.resume()
+                    reject(
+                        new UnattestableResponseError(
+                            `DAHR proxy did not relay an origin response (${String(proxyError)})`,
+                            "proxy-error",
+                            res.statusCode || 502,
+                        ),
+                    )
+                    return
+                }
+
                 statusCode = res.statusCode || 500
                 statusMessage = res.statusMessage || "Unknown"
                 responseHeaders = res.headers
 
                 res.on("data", chunk => {
+                    if (tooLarge) return
+                    received += chunk.length
+                    if (meter) meter.bytes += chunk.length
+                    // An unbounded body would be held in memory whole.
+                    if (received > this._maxResponseBytes) {
+                        tooLarge = true
+                        req.destroy()
+                        reject(
+                            new Error(
+                                `Origin response exceeds ${this._maxResponseBytes} bytes`,
+                            ),
+                        )
+                        return
+                    }
                     chunks.push(Buffer.from(chunk))
                 })
 
                 res.on("end", () => {
+                    if (tooLarge) return
                     const dataBuffer = Buffer.concat(chunks)
                     const data = dataBuffer.toString()
 
@@ -121,10 +200,16 @@ export class Proxy {
                         this.canonicalizeHeaders(responseHeaders),
                     )
 
+                    // The SDK signs these headers into the on-chain tx, and a
+                    // cookie set for a credentialed request is a credential.
+                    // The headers hash already leaves set-cookie out.
+                    const { "set-cookie": _setCookie, ...returnedHeaders } =
+                        responseHeaders
+
                     resolve({
                         status: statusCode,
                         statusText: statusMessage,
-                        headers: responseHeaders,
+                        headers: returnedHeaders,
                         data: data,
                         responseHash: responseHash,
                         responseHeadersHash: responseHeadersHash,
@@ -163,6 +248,8 @@ export class Proxy {
      * @returns void
      */
     async stopProxy(): Promise<void> {
+        this._agent?.destroy()
+        this._agent = null
         const srv = this._server
         if (!srv) {
             this._isInitialized = false
@@ -187,55 +274,32 @@ export class Proxy {
         await this.createNewServer(targetUrl)
     }
 
+    private relayOptions(targetUrl: string): httpProxy.ServerOptions {
+        const { targetProtocol } = this.parseUrl(targetUrl)
+        const isHttps = targetProtocol === "https:"
+        return {
+            target: targetUrl,
+            changeOrigin: true,
+            secure: isHttps ? this._sslConfig.verifyCertificates : false,
+            ssl: isHttps
+                ? { rejectUnauthorized: this._sslConfig.verifyCertificates }
+                : undefined,
+            // Idle limit only: a trickling origin never trips it. The total
+            // deadline is enforced per request in createNewServer.
+            proxyTimeout: this._requestTimeoutMs,
+            timeout: this._requestTimeoutMs,
+        }
+    }
+
     private async createNewServer(targetUrl: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
             const { targetProtocol, targetHostname } = this.parseUrl(targetUrl)
 
-            // SSRF hardening: resolve DNS and block private/link-local/loopback destinations
-            const isDisallowedAddress = (addr: string): boolean => {
-                const lower = addr.toLowerCase()
-                const ipVersion = net.isIP(lower)
-
-                // Helper for IPv4 space
-                const isDisallowedV4 = (v4: string): boolean => {
-                    if (/^127(?:\.\d{1,3}){3}$/.test(v4)) return true // loopback
-                    if (/^10\./.test(v4)) return true // private
-                    const ipMatch = v4.match(/^172\.(\d{1,3})\./)
-                    if (ipMatch) {
-                        const secondOctet = Number(ipMatch[1])
-                        if (secondOctet >= 16 && secondOctet <= 31) return true
-                    }
-                    if (/^192\.168\./.test(v4)) return true // private
-                    if (/^169\.254\./.test(v4)) return true // link-local
-                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v4))
-                        return true // CGNAT 100.64/10
-                    if (/^0\./.test(v4)) return true // this network
-                    if (/^(?:22[4-9]|23\d)\./.test(v4)) return true // multicast 224/4
-                    if (/^(?:24\d|25[0-5])\./.test(v4)) return true // reserved 240/4 incl 255.255.255.255
-                    return false
-                }
-
-                if (ipVersion === 6) {
-                    if (lower === "::" || lower === "::1") return true // unspecified/loopback
-                    if (lower.startsWith("ff")) return true // multicast ff00::/8
-                    // ULA fc00::/7
-                    if (lower.startsWith("fc") || lower.startsWith("fd"))
-                        return true
-                    // Link-local fe80::/10 → fe8x, fe9x, feax, febx
-                    if (/^fe[89ab][0-9a-f]*:/i.test(lower)) return true
-                    // IPv4-mapped IPv6 ::ffff:a.b.c.d → re-check mapped v4
-                    const v4map = lower.match(
-                        /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/,
-                    )
-                    if (v4map && isDisallowedV4(v4map[1])) return true
-                    return false
-                }
-
-                if (ipVersion === 4) {
-                    return isDisallowedV4(lower)
-                }
-                return false
-            }
+            // Fast refusal for a literal or currently-private target. The
+            // connection itself goes through publicOnlyLookup, which checks
+            // the address actually dialled.
+            const isDisallowedAddress = (addr: string): boolean =>
+                !isPublicAddress(addr)
 
             const preflight = async () => {
                 try {
@@ -264,25 +328,43 @@ export class Proxy {
                 return true
             }
 
+            const agent =
+                targetProtocol === "https:"
+                    ? new https.Agent({
+                          lookup: publicOnlyLookup,
+                          rejectUnauthorized: this._sslConfig.verifyCertificates,
+                      })
+                    : new http.Agent({ lookup: publicOnlyLookup })
+            this._agent = agent
+
             // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
-                target: targetUrl,
-                changeOrigin: true,
-                secure:
-                    targetProtocol === "https:"
-                        ? this._sslConfig.verifyCertificates
-                        : false,
-                ssl:
-                    targetProtocol === "https:"
-                        ? {
-                              rejectUnauthorized:
-                                  this._sslConfig.verifyCertificates,
-                          }
-                        : undefined,
+                ...this.relayOptions(targetUrl),
+                agent,
+            })
+
+            // http-proxy only knows an idle timeout, and its abort on a gone
+            // client does not fire under Bun, so the relay cuts the origin
+            // request itself; this maps each inbound request to that cut.
+            const originHandlers = new WeakMap<
+                http.IncomingMessage,
+                (proxyReq: http.ClientRequest) => void
+            >()
+            proxyServer.on("proxyReq", (proxyReq, req) => {
+                originHandlers.get(req)?.(proxyReq)
             })
 
             // Handle proxy errors
             proxyServer.on("error", (err: any, _req, res) => {
+                // A cut origin errors after the response has started (or the
+                // client is gone); there is nothing left to answer.
+                if (
+                    res instanceof http.ServerResponse &&
+                    (res.headersSent || res.destroyed)
+                ) {
+                    res.destroy()
+                    return
+                }
                 // Handle SSL certificate errors specifically
                 if (
                     err.code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
@@ -292,6 +374,7 @@ export class Proxy {
                     if (res instanceof http.ServerResponse) {
                         res.writeHead(502, {
                             "Content-Type": "application/json",
+                            [DAHR_PROXY_ERROR_HEADER]: "tls",
                         })
                         res.end(
                             JSON.stringify({
@@ -308,6 +391,7 @@ export class Proxy {
                 if (res instanceof http.ServerResponse) {
                     res.writeHead(500, {
                         "Content-Type": "application/json",
+                        [DAHR_PROXY_ERROR_HEADER]: "upstream",
                     })
                     res.end(
                         JSON.stringify({
@@ -329,14 +413,38 @@ export class Proxy {
 
             // Listen for proxy responses to set the correct status code
             proxyServer.on("proxyRes", (proxyRes, _req, res) => {
+                // The origin must not be able to forge the proxy's own marker.
+                delete proxyRes.headers[DAHR_PROXY_ERROR_HEADER]
                 // Set the status code and headers from the target API
                 res.writeHead(proxyRes.statusCode || 500, proxyRes.headers)
             })
 
             // Create the main HTTP server
             this._server = http.createServer(async (req, res) => {
+                let origin: http.ClientRequest | null = null
+                let closed = false
+                const deadline = setTimeout(() => {
+                    res.destroy()
+                    origin?.destroy()
+                }, this._requestTimeoutMs)
+                // A finished response's socket may serve the next keep-alive
+                // request, so the deadline must not outlive it.
+                res.on("finish", () => clearTimeout(deadline))
+                // A caller that left early must not keep the origin busy.
+                res.on("close", () => {
+                    closed = true
+                    clearTimeout(deadline)
+                    if (!res.writableFinished) origin?.destroy()
+                })
+                originHandlers.set(req, proxyReq => {
+                    origin = proxyReq
+                    if (closed && !res.writableFinished) proxyReq.destroy()
+                })
+
                 if (!this.isAuthorizedRequest(req)) {
-                    res.writeHead(403)
+                    res.writeHead(403, {
+                        [DAHR_PROXY_ERROR_HEADER]: "unauthorized",
+                    })
                     res.end("Unauthorized")
                     return
                 }
@@ -344,7 +452,9 @@ export class Proxy {
                 // Ensure target is still safe at request time (DNS may have changed)
                 const ok = await preflight()
                 if (!ok) {
-                    res.writeHead(400)
+                    res.writeHead(400, {
+                        [DAHR_PROXY_ERROR_HEADER]: "invalid-target",
+                    })
                     res.end("Invalid target host")
                     return
                 }
@@ -358,6 +468,7 @@ export class Proxy {
 
                 proxyServer.web(req, res, {
                     target: targetOrigin,
+                    agent,
                     changeOrigin: true,
                     secure:
                         targetProtocol === "https:"
@@ -367,7 +478,7 @@ export class Proxy {
             })
 
             // Start the server
-            this._server.listen(0, "0.0.0.0", () => {
+            this._server.listen(0, this._proxyHost, () => {
                 const address = this._server?.address()
                 if (typeof address === "object" && address !== null) {
                     this._proxyPort = address.port
@@ -449,11 +560,12 @@ export class Proxy {
             }
         }
 
-        // Only set Content-Type if not provided by user
-        if (
-            ["POST", "PUT", "PATCH"].includes(targetMethod) &&
-            !headers["Content-Type"]
-        ) {
+        // Only set Content-Type if not provided by user, in any letter case:
+        // a second key would replace the caller's value on the wire
+        const hasContentType = Object.keys(headers).some(
+            k => k.toLowerCase() === "content-type",
+        )
+        if (["POST", "PUT", "PATCH"].includes(targetMethod) && !hasContentType) {
             headers["Content-Type"] = "application/json"
         }
 

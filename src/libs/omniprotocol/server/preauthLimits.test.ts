@@ -84,6 +84,10 @@ class FakePeerConnection extends EventEmitter {
         this.socket = fakeSocket(hostname)
         this.state = READY
     }
+    provenValidator = false
+    markProvenValidator() {
+        this.provenValidator = true
+    }
     /** What PeerConnection does once an auth block verifies. */
     simulateAuth(identity: string) {
         this.id = identity

@@ -14,21 +14,39 @@ import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemo
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { tlsnAdmissionCopy } from "../blockchain/gcr/tlsnTransitions"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
-import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"
+import { web2CallerForAddress } from "@/features/web2/web2FetchLimiter"
+import {
+    credentialFieldsInDemoScript,
+    credentialFieldsInWeb2Payload,
+    headersForReplay,
+} from "@/features/web2/sanitizeWeb2Request"
+import {
+    FEATURE_DISABLED,
+    featureDisabledMessage,
+    type OutboundFeature,
+} from "./outboundSwitches"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import { identityReplyExtra } from "./routines/transactions/identityReply"
 import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
-import { submitValidatedTx } from "./txSubmission"
+import { gossipSizeRefusal, submitValidatedTx } from "./txSubmission"
+import GossipManager from "src/libs/gossip/GossipManager"
 import { isSelfStaked } from "src/libs/consensus/stakedSet"
 import handleL2PS from "./routines/transactions/handleL2PS"
 
-import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
+import {
+    isReferenceBlockAllowed,
+    isReferenceBlockAllowedAt,
+} from "@/libs/blockchain/referenceBlockWindow"
+import Mempool from "src/libs/blockchain/mempool"
+import { ErrorCode } from "@/errors"
 
 /**
  * How an accepted transaction left this node. "mempool" is the only path
@@ -50,6 +68,85 @@ export function withDisposition<T extends { extra?: unknown }>(
     const extra =
         reply.extra && typeof reply.extra === "object" ? reply.extra : {}
     return { ...reply, extra: { ...extra, hash, disposition } }
+}
+
+/** Marks `result` refused when the operator switched `feature` off. */
+function refusedAsDisabled(
+    result: ExecutionResult,
+    feature: OutboundFeature,
+): boolean {
+    const message = featureDisabledMessage(feature)
+    if (!message) return false
+    result.success = false
+    result.response = { error: FEATURE_DISABLED, message }
+    result.extra = { error: FEATURE_DISABLED, message }
+    return true
+}
+
+/**
+ * Marks `result` refused when a signed tx carries credentials: it is stored on
+ * chain verbatim, so the node cannot strip them, only refuse the tx.
+ */
+function refusedForCredentials(
+    result: ExecutionResult,
+    txType: string,
+    credentials: string[],
+    hint: string,
+): boolean {
+    if (credentials.length === 0) return false
+    const message =
+        `${txType} tx carries credentials that would be stored on chain: ` +
+        credentials.join(", ") +
+        `. ${hint}`
+    result.success = false
+    result.response = { error: "WEB2_CREDENTIALS_IN_TX", message }
+    result.extra = { error: "WEB2_CREDENTIALS_IN_TX", message }
+    return true
+}
+
+/**
+ * Marks `result` refused when the reference block is outside the window at
+ * our head, or outside the window of the block the mempool would queue the
+ * tx for: during a consensus round, the block after the one being forged.
+ * Best effort at broadcast: it uses this node's head and round state at the
+ * time of the check, so a node that is behind the network, a validator that
+ * is not in the current round's committee (it leaves the round at once), a
+ * round that starts before the tx is queued, or a block-capped pool that holds
+ * the tx past the queued block can still let one through; a round that fails
+ * before the tx is queued can refuse one that would have been included.
+ */
+function refusedForReferenceBlock(
+    result: ExecutionResult,
+    referenceBlock: number,
+    head: number,
+): boolean {
+    if (!isReferenceBlockAllowed(referenceBlock, head)) {
+        log.error(
+            "[handleExecuteTransaction] Invalid validityData block reference: " +
+                referenceBlock +
+                " - " +
+                head,
+        )
+        result.success = false
+        result.response = false
+        result.extra = "Invalid block reference"
+        return true
+    }
+
+    const targetBlock = Mempool.nextBlockRef()
+    if (isReferenceBlockAllowedAt(referenceBlock, targetBlock, head)) {
+        return false
+    }
+    const error = ErrorCode.TX_REFERENCE_BLOCK_OUT_OF_RANGE_AT_INCLUSION
+    const message =
+        `Reference block ${referenceBlock} is outside the window of block ` +
+        `${targetBlock}, the block this transaction would be included in. ` +
+        "Confirm the transaction again and broadcast the new validity data."
+    log.error("[handleExecuteTransaction] " + message)
+    result.success = false
+    result.response = { error, message }
+    result.extra = { error, message }
+    return true
 }
 
 export async function handleExecuteTransaction(
@@ -120,16 +217,7 @@ export async function handleExecuteTransaction(
         `[SERVER] Read last block number in ${handleBlockNumberEnd - handleBlockNumberStart}ms`,
     )
 
-    if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
-        log.error(
-            "[handleExecuteTransaction] Invalid validityData block reference: " +
-                blockNumber +
-                " - " +
-                lastBlockNumber,
-        )
-        result.success = false
-        result.response = false
-        result.extra = "Invalid block reference"
+    if (refusedForReferenceBlock(result, blockNumber, lastBlockNumber)) {
         return result
     }
 
@@ -141,6 +229,25 @@ export async function handleExecuteTransaction(
         result.success = false
         result.response = false
         result.extra = validatedData.data.message
+        return result
+    }
+
+    // l2psEncryptedTx returns before submission and never reaches the tx topic.
+    const sizeRefusal =
+        GossipManager.isEnabled() &&
+        validatedData.data.transaction?.content?.type !== "l2psEncryptedTx"
+            ? gossipSizeRefusal(validatedData)
+            : null
+    if (sizeRefusal) {
+        result.success = false
+        result.response = {
+            message: "Failed to add transaction to mempool",
+        }
+        result.extra = {
+            confirmationBlock: null,
+            lastBlockNumber: getSharedState.lastBlockNumber,
+            error: sizeRefusal,
+        }
         return result
     }
 
@@ -160,8 +267,9 @@ export async function handleExecuteTransaction(
         result.success = true
     }
 
-    switch (tx.content.type) {
+    switch (tx.content.type as string) {
         case "crosschainOperation": {
+            if (refusedAsDisabled(result, "xm")) break
             payload = tx.content.data
             const xmResult = await multichainDispatcher.digest(
                 payload[1] as XMScript,
@@ -232,8 +340,19 @@ export async function handleExecuteTransaction(
         }
 
         case "web2Request": {
+            if (refusedAsDisabled(result, "web2")) break
             const handleWeb2RequestStart = Date.now()
             payload = tx.content.data[1] as IWeb2Payload
+            if (
+                refusedForCredentials(
+                    result,
+                    "web2Request",
+                    credentialFieldsInWeb2Payload(payload),
+                    "Pass the token as the request's authorization option, not in the signed tx.",
+                )
+            ) {
+                break
+            }
             const params = parseWeb2ProxyRequest(payload)
             // This re-runs the request when the tx is broadcast. Drop the
             // credential headers on the sensitive-key list and the tx's own
@@ -243,7 +362,10 @@ export async function handleExecuteTransaction(
                 params.web2Request.raw.headers,
             )
             params.authorization = undefined
-            const web2Result = await handleWeb2ProxyRequest(params)
+            const web2Result = await handleWeb2ProxyRequest(
+                params,
+                web2CallerForAddress(tx.content.from),
+            )
             result.response = web2Result
             const handleWeb2RequestEnd = Date.now()
             log.only(
@@ -253,11 +375,24 @@ export async function handleExecuteTransaction(
         }
 
         case "demoswork": {
+            if (refusedAsDisabled(result, "demoswork")) break
             const demosWorkPayload = tx.content.data
             const demosWorkScript = demosWorkPayload[1] as DemoScript
+            if (
+                refusedForCredentials(
+                    result,
+                    "demoswork",
+                    credentialFieldsInDemoScript(demosWorkScript),
+                    "Remove them from the script's web2 steps.",
+                )
+            ) {
+                break
+            }
             try {
-                const demosWorkResult =
-                    await handleDemosWorkRequest(demosWorkScript)
+                const demosWorkResult = await handleDemosWorkRequest(
+                    demosWorkScript,
+                    web2CallerForAddress(tx.content.from),
+                )
                 result.response = demosWorkResult
             } catch (e) {
                 log.error("[handleExecuteTransaction] Error in demosWork: " + e)
@@ -278,15 +413,8 @@ export async function handleExecuteTransaction(
         case "identity":
             try {
                 const identityResult = await handleIdentityRequest(tx, sender)
-                const status = identityResult.success
-                    ? "applied"
-                    : "not applied"
-
                 result.success = identityResult.success
-                result.extra = {
-                    message:
-                        identityResult.message + `. Transaction ${status}.`,
-                }
+                result.extra = identityReplyExtra(identityResult)
             } catch (e) {
                 log.error("[handleverifyPayload] Error in identity: " + e)
                 result.success = false
@@ -342,10 +470,21 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const entities = await HandleGCR.prepareEntities([queriedTx])
+        // Under tlsnVerified a TLSNotary tx is simulated with the edit the
+        // block will derive for it, so a store the block would refuse or
+        // fail is refused here, before it pays.
+        const tlsn = tlsnAdmissionCopy(queriedTx)
+        if (tlsn.ok === false) {
+            log.error(`[handleExecuteTransaction] TLSNotary tx refused: ${tlsn.reason}`)
+            result.success = false
+            result.response = false
+            result.extra = { error: tlsn.reason }
+            return result
+        }
+        const entities = await HandleGCR.prepareEntities([tlsn.tx])
         const simulateResult = await HandleGCR.applyTransaction(
             entities,
-            queriedTx,
+            tlsn.tx,
             false,
             true,
         )

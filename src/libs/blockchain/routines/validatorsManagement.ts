@@ -3,14 +3,25 @@
 // lives in endpointExecution.ts; this module owns the validation rules that
 // sit between the tx and the GCR edits that mutate the Validators table.
 
+import forge from "node-forge"
+
 import Chain from "src/libs/blockchain/chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
+import { calculateFeeBreakdown } from "./calculateCurrentGas"
 import { requireSender } from "src/libs/network/utils/txHelpers"
+import log from "src/utilities/logger"
+import { getSharedState } from "src/utilities/sharedState"
+import { isForkActive } from "@/forks"
+import { TOKEN_STAKING_REFUSAL, tokenStakingOpen } from "@/forks/tokenStakingGate"
+import { nftGatingActive } from "@/forks/nftValidatorGatingGate"
+import { chainMinValidatorStake } from "src/features/staking/chainMinStake"
+import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import type {
     ValidatorStakePayload,
     ValidatorChallengePayload,
     ValidatorNftProof,
+    GCREditValidatorStake,
 } from "src/features/staking/types"
 import { isAllowlistedMint } from "src/features/staking/nftAllowlist"
 import {
@@ -21,10 +32,50 @@ import {
     type SolanaCheck,
 } from "src/features/staking/solanaProof"
 import {
+    DEFAULT_MIN_VALIDATOR_STAKE,
+    UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
 } from "src/features/staking/constants"
+
+/**
+ * Current minimum stake required to register as a validator.
+ *
+ * Prefers the governance-driven value in `sharedState.networkParameters`;
+ * falls back to the Phase-0 default when governance has not loaded yet
+ * (e.g. during bootstrap before `loadNetworkParameters()` completes).
+ */
+export function getMinValidatorStake(): bigint {
+    const governed = (
+        getSharedState.networkParameters as {
+            minValidatorStake?: string
+        } | null
+    )?.minValidatorStake
+    if (typeof governed === "string" && governed.length > 0) {
+        try {
+            return BigInt(governed)
+        } catch {
+            /* fall through */
+        }
+    }
+    return BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
+}
+
+/** Whether `stakeApplyChecks` holds for the block applied on the current tip. */
+async function stakeChecksActive(): Promise<boolean> {
+    return isForkActive("stakeApplyChecks", await Chain.getLastBlockNumber())
+}
+
+/** Whether token staking is open for the block applied on the current tip. */
+async function stakingOpen(): Promise<boolean> {
+    return tokenStakingOpen(await Chain.getLastBlockNumber())
+}
+
+/** Whether `nftValidatorGating` holds for the block applied on the current tip. */
+async function nftGating(): Promise<boolean> {
+    return nftGatingActive(await Chain.getLastBlockNumber())
+}
 
 /**
  * `unreachable` marks a verdict that no Solana endpoint could answer: the
@@ -32,6 +83,30 @@ import {
  * out of its candidate without treating it as invalid.
  */
 export type StakeTxResult = { valid: boolean; message: string; unreachable?: boolean }
+
+function parseStakeTx(tx: Transaction):
+    | { valid: true; payload: ValidatorStakePayload; sender: string; amount: bigint }
+    | { valid: false; result: StakeTxResult } {
+    const payload = extractStakePayload(tx, false)
+    if (!payload) {
+        return { valid: false, result: { valid: false, message: "Missing stake payload" } }
+    }
+
+    const sender = requireSender(tx)
+    if (!sender) return { valid: false, result: { valid: false, message: "Missing sender" } }
+
+    let amount: bigint
+    try {
+        amount = BigInt(payload.amount)
+    } catch {
+        return { valid: false, result: { valid: false, message: "Invalid stake amount encoding" } }
+    }
+    if (amount <= 0n) {
+        return { valid: false, result: { valid: false, message: "Stake amount must be positive" } }
+    }
+
+    return { valid: true, payload, sender, amount }
+}
 
 export default class ValidatorsManagement {
     // ------------------------------------------------------------------
@@ -45,6 +120,90 @@ export default class ValidatorsManagement {
     static async manageValidatorStakeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
+        if (!(await stakingOpen())) {
+            return { valid: false, message: TOKEN_STAKING_REFUSAL }
+        }
+        if (await nftGating()) return ValidatorsManagement.manageNftSeatStakeTx(tx)
+        const parsed = parseStakeTx(tx)
+        if (parsed.valid === false) return parsed.result
+        const { payload, sender, amount } = parsed
+
+        const existing = await GCR.getGCRValidatorStatus(sender)
+        const bonding = await stakeChecksActive()
+        const min = bonding
+            ? maxOf(getMinValidatorStake(), chainMinValidatorStake())
+            : getMinValidatorStake()
+
+        if (bonding) {
+            return checkBondedStake(
+                existing,
+                amount,
+                payload.connectionUrl,
+                min,
+                await GCR.getAccountBalance(sender),
+                BigInt((await calculateFeeBreakdown(tx)).total),
+            )
+        }
+
+        // The stake must be backed by funds: the cumulative staked amount
+        // after this tx (prior stake + increase) plus the tx gas fee must
+        // be covered by the sender's balance. The stake itself is not
+        // debited in Phase 0, so checking only the increase would let two
+        // sequential stakes each pass against the same balance and push
+        // the staked total above what the account holds.
+        let priorStake: bigint
+        try {
+            priorStake = BigInt(existing?.staked_amount ?? "0")
+        } catch {
+            return {
+                valid: false,
+                message: `Invalid persisted staked_amount=${existing?.staked_amount}`,
+            }
+        }
+        const balance = await GCR.getAccountBalance(sender)
+        const gasFee = BigInt((await calculateFeeBreakdown(tx)).total)
+        const totalStake = priorStake + amount
+        if (balance < totalStake + gasFee) {
+            return {
+                valid: false,
+                message: `Insufficient balance for stake: total stake ${totalStake} (existing ${priorStake} + new ${amount}) + gas ${gasFee} exceeds balance ${balance}`,
+            }
+        }
+
+        if (!existing) {
+            // New validator registration
+            if (amount < min) {
+                return {
+                    valid: false,
+                    message: `Initial stake ${amount} below minimum ${min}`,
+                }
+            }
+            if (!payload.connectionUrl) {
+                return {
+                    valid: false,
+                    message: "connectionUrl required for first stake",
+                }
+            }
+            return { valid: true, message: "Validator entrance valid" }
+        }
+
+        if (
+            existing.status !== VALIDATOR_STATUS_ACTIVE &&
+            existing.status !== VALIDATOR_STATUS_UNSTAKING
+        ) {
+            return {
+                valid: false,
+                message: `Validator not eligible for stake top-up (status=${existing.status})`,
+            }
+        }
+        return { valid: true, message: "Validator stake increase valid" }
+    }
+
+    /**
+     * A `validatorStake` under `nftValidatorGating`: the seat is backed by an
+     * NFT, not by DEM, so the amount is 0 and entering the set takes a proof.
+     */
+    static async manageNftSeatStakeTx(tx: Transaction): Promise<StakeTxResult> {
         const payload = extractStakePayload(tx)
         if (!payload) {
             return { valid: false, message: "Missing stake payload" }
@@ -64,13 +223,20 @@ export default class ValidatorsManagement {
         }
 
         const existing = await GCR.getGCRValidatorStatus(sender)
-
-        const entering =
-            !existing || existing.status === VALIDATOR_STATUS_EXITED
+        const entering = !existing || existing.status === VALIDATOR_STATUS_EXITED
+        if (
+            !entering &&
+            existing.status !== VALIDATOR_STATUS_ACTIVE &&
+            existing.status !== VALIDATOR_STATUS_UNSTAKING
+        ) {
+            return {
+                valid: false,
+                message: `Validator not eligible for stake (status=${existing.status})`,
+            }
+        }
 
         if (entering) {
-            // New validator registration, or re-entry after an exit
-            if (!payload.connectionUrl) {
+            if (!payload.connectionUrl && !existing?.connection_url) {
                 return {
                     valid: false,
                     message: "connectionUrl required for first stake",
@@ -85,17 +251,8 @@ export default class ValidatorsManagement {
             return { valid: true, message: `Validator entrance valid (${nft.message})` }
         }
 
-        if (
-            existing.status !== VALIDATOR_STATUS_ACTIVE &&
-            existing.status !== VALIDATOR_STATUS_UNSTAKING
-        ) {
-            return {
-                valid: false,
-                message: `Validator not eligible for stake top-up (status=${existing.status})`,
-            }
-        }
-        // A proof on a top-up is never checked against Solana, and the apply
-        // step treats any exited row as an entrance, so one must not ride in.
+        // A proof on a top-up is never checked against Solana, so one must
+        // not ride in and be recorded as the seat's NFT.
         if (payload.nft !== undefined) {
             return {
                 valid: false,
@@ -150,6 +307,9 @@ export default class ValidatorsManagement {
     static async manageValidatorChallengeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
+        if (!(await nftGating())) {
+            return { valid: false, message: "validatorChallenge is not active on this network" }
+        }
         const sender = requireSender(tx)
         if (!sender) return { valid: false, message: "Missing sender" }
         const payload = extractChallengePayload(tx)
@@ -192,6 +352,9 @@ export default class ValidatorsManagement {
     static async manageValidatorUnstakeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
+        if (!(await stakingOpen())) {
+            return { valid: false, message: TOKEN_STAKING_REFUSAL }
+        }
         const sender = requireSender(tx)
         if (!sender) return { valid: false, message: "Missing sender" }
 
@@ -209,6 +372,20 @@ export default class ValidatorsManagement {
             return {
                 valid: false,
                 message: "Unstake already requested",
+            }
+        }
+        if (await stakeChecksActive()) {
+            const active = (
+                (await GCR.getGCRValidatorsAtBlock(
+                    await Chain.getLastBlockNumber(),
+                )) as unknown[]
+            ).length
+            const floor = quorumThreshold(getSharedState.shardSize)
+            if (active - 1 < floor) {
+                return {
+                    valid: false,
+                    message: `Unstake would leave ${active - 1} active validators, below the committee floor of ${floor}`,
+                }
             }
         }
         return { valid: true, message: "Unstake valid" }
@@ -250,6 +427,80 @@ export default class ValidatorsManagement {
         }
         return { valid: true, message: "Exit valid" }
     }
+
+    // ------------------------------------------------------------------
+    // GCR-edit builders — invoked from the tx-derivation stage so the edit
+    // is embedded in the signed transaction and applied atomically at
+    // confirmation time.
+    // ------------------------------------------------------------------
+
+    static buildStakeEdit(
+        account: string,
+        amount: string,
+        connectionUrl: string,
+        txhash: string,
+    ): GCREditValidatorStake {
+        return {
+            type: "validatorStake",
+            isRollback: false,
+            account,
+            operation: "stake",
+            amount,
+            connectionUrl,
+            txhash,
+        }
+    }
+
+    static buildUnstakeEdit(
+        account: string,
+        txhash: string,
+    ): GCREditValidatorStake {
+        return {
+            type: "validatorStake",
+            isRollback: false,
+            account,
+            operation: "unstake",
+            amount: "0",
+            txhash,
+        }
+    }
+
+    static buildExitEdit(
+        account: string,
+        txhash: string,
+    ): GCREditValidatorStake {
+        return {
+            type: "validatorStake",
+            isRollback: false,
+            account,
+            operation: "exit",
+            amount: "0",
+            txhash,
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Observational helpers preserved from the old API
+    // ------------------------------------------------------------------
+
+    static async isValidatorActive(publicKey: forge.pki.ed25519.BinaryBuffer) {
+        const hexKey = Buffer.from(publicKey as Uint8Array).toString("hex")
+        const validator = await GCR.getGCRValidatorStatus(hexKey)
+        if (!validator) return false
+        return validator.status === VALIDATOR_STATUS_ACTIVE
+    }
+
+    static async manageValidatorOnlineStatus(
+        publicKey: forge.pki.ed25519.BinaryBuffer,
+    ) {
+        const hexKey = Buffer.from(publicKey as Uint8Array).toString("hex")
+        const validator = await GCR.getGCRValidatorStatus(hexKey)
+        if (!validator) return
+        log.debug(
+            `[Validators] online-status probe for ${hexKey} (url=${validator.connection_url})`,
+        )
+        // TODO: connection test (legacy TODO carried over).
+    }
 }
 
 /** A tx verdict from a Solana check, keeping "unreachable" distinct from "invalid". */
@@ -267,8 +518,57 @@ function fromCheck(check: SolanaCheck, what: string): StakeTxResult {
     return { valid: true, message: `${what} valid` }
 }
 
-/** Pull the `ValidatorStakePayload` out of a tx, or return null if malformed. */
-function extractStakePayload(tx: Transaction): ValidatorStakePayload | null {
+function maxOf(a: bigint, b: bigint): bigint {
+    return a > b ? a : b
+}
+
+/**
+ * Admission rule for a stake under `stakeApplyChecks`, where the stake leaves
+ * the balance: the balance covers this stake and the fee, and entering the
+ * set (new, or after an exit) takes the minimum and a connection URL.
+ */
+function checkBondedStake(
+    existing: { status: string | null; connection_url: string | null } | null,
+    amount: bigint,
+    connectionUrl: string,
+    min: bigint,
+    balance: bigint,
+    gasFee: bigint,
+): StakeTxResult {
+    if (balance < amount + gasFee) {
+        return {
+            valid: false,
+            message: `Insufficient balance for stake: ${amount} + gas ${gasFee} exceeds balance ${balance}`,
+        }
+    }
+    const entering =
+        !existing ||
+        (existing.status !== VALIDATOR_STATUS_ACTIVE &&
+            existing.status !== VALIDATOR_STATUS_UNSTAKING)
+    if (!entering) {
+        return { valid: true, message: "Validator stake increase valid" }
+    }
+    if (amount < min) {
+        return {
+            valid: false,
+            message: `Initial stake ${amount} below minimum ${min}`,
+        }
+    }
+    if (!connectionUrl && !existing?.connection_url) {
+        return { valid: false, message: "connectionUrl required for first stake" }
+    }
+    return { valid: true, message: "Validator entrance valid" }
+}
+
+/**
+ * Pull the `ValidatorStakePayload` out of a tx, or return null if malformed.
+ * The NFT proof is read only under `nftValidatorGating`; before it the
+ * payload is judged as it always was.
+ */
+function extractStakePayload(
+    tx: Transaction,
+    withNft = true,
+): ValidatorStakePayload | null {
     const data = tx.content?.data as unknown as [string, unknown] | undefined
     if (!Array.isArray(data) || data.length < 2) return null
     const payload = data[1]
@@ -279,7 +579,7 @@ function extractStakePayload(tx: Transaction): ValidatorStakePayload | null {
         amount,
         connectionUrl: typeof connectionUrl === "string" ? connectionUrl : "",
     }
-    if (nft !== undefined) {
+    if (withNft && nft !== undefined) {
         if (
             nft === null ||
             typeof nft !== "object" ||
@@ -308,4 +608,3 @@ function extractChallengePayload(
     }
     return { validator: validator.toLowerCase(), evidenceTx, proofTx }
 }
-

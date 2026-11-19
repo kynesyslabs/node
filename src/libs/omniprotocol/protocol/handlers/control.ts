@@ -10,6 +10,7 @@ import {
     PeerlistEntry,
 } from "../../serialization/control"
 import { HelloPeerRequest } from "src/libs/network/manageHelloPeer"
+import { BODY_BOUND_NODE_CALLS } from "src/libs/network/peerHttpAuth"
 
 async function loadPeerlistEntries(): Promise<{
     entries: PeerlistEntry[]
@@ -83,6 +84,7 @@ const OPEN_GCR_METHODS: ReadonlySet<string> = new Set([
     "validateReferralCode",
     "getAccountByIdentity",
     "getHumanPassportScore",
+    "getHumanPassportClaim",
     "getStorageProgram",
     "getStorageProgramsByOwner",
     "searchStoragePrograms",
@@ -279,11 +281,26 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
         (params.length === 0 ? {} : params.length === 1 ? params[0] : params)
     const actualMuid = innerCall?.muid ?? ""
 
-    const response = await manageNodeCall({
-        message: actualMessage,
-        data: actualData,
-        muid: actualMuid,
-    })
+    // These calls need a signature over the exact request naming this node,
+    // which only the HTTP RPC checks; clients reach them over HTTPS.
+    if (typeof actualMessage === "string" && BODY_BOUND_NODE_CALLS.has(actualMessage)) {
+        return encodeNodeCallResponse({
+            status: 401,
+            value: `${actualMessage} is served over the HTTP RPC only`,
+            requireReply: false,
+            extra: null,
+        })
+    }
+
+    const response = await manageNodeCall(
+        {
+            message: actualMessage,
+            data: actualData,
+            muid: actualMuid,
+        },
+        context.isAuthenticated ? context.peerIdentity ?? "" : "",
+        context.remoteAddress,
+    )
 
     return encodeNodeCallResponse({
         status: response.result,

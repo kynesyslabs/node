@@ -50,6 +50,7 @@
 // REVIEW: TLSNotary feature module - entry point for HTTPS attestation feature
 import type { BunServer } from "@/libs/network/bunServer"
 import {
+    NotaryUnreachableError,
     TLSNotaryService,
     getTLSNotaryService,
     initializeTLSNotaryService,
@@ -61,6 +62,7 @@ import log from "@/utilities/logger"
 
 // Re-export types and classes
 export {
+    NotaryUnreachableError,
     TLSNotaryService,
     getTLSNotaryService,
     getConfigFromEnv,
@@ -119,6 +121,8 @@ export async function initializeTLSNotary(
 
         return true
     } catch (error) {
+        // The boot decides whether this node runs as a relay without one
+        if (error instanceof NotaryUnreachableError) throw error
         log.error("[TLSNotary] Failed to initialize:", error)
         return false
     }

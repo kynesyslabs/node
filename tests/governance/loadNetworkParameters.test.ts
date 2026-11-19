@@ -18,6 +18,22 @@ jest.mock("@/utilities/logger", () => ({
     },
 }))
 
+// nodeVersion reads `import.meta.url`, which the CommonJS output of ts-jest
+// cannot load; the loader only needs a commit value to check.
+jest.mock("@/utilities/nodeVersion", () => ({
+    __esModule: true,
+    NODE_VERSION: {
+        name: "demos-node",
+        version: "0.0.0-test",
+        commit: null,
+        commitShort: null,
+        commitMessage: null,
+        branch: null,
+        dirty: false,
+        builtAt: null,
+    },
+}))
+
 jest.mock("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: jest.fn() },
@@ -51,9 +67,37 @@ beforeAll(async () => {
     ))
 })
 
+type Loader = typeof import("@/libs/blockchain/routines/loadNetworkParameters")
+
+/**
+ * A module instance that has never read the chain. Jest isolates the module
+ * registry; bun has no isolateModules, but a query suffix on the specifier
+ * gives a separate instance there.
+ */
+async function freshLoader(): Promise<Loader> {
+    if (typeof jest.isolateModulesAsync === "function") {
+        let fresh: Loader | undefined
+        await jest.isolateModulesAsync(async () => {
+            fresh = await import("@/libs/blockchain/routines/loadNetworkParameters")
+        })
+        return fresh as Loader
+    }
+    return import(
+        "../../src/libs/blockchain/routines/loadNetworkParameters.ts?first-read-fails"
+    )
+}
+
 function makeRepo(rows: Array<Record<string, unknown>>) {
     return {
         find: jest.fn(async () => rows),
+    } as any
+}
+
+function failingRepo() {
+    return {
+        find: jest.fn(async () => {
+            throw new Error("db down")
+        }),
     } as any
 }
 
@@ -121,14 +165,33 @@ describe("loadNetworkParameters", () => {
         })
     })
 
-    it("falls back to genesis defaults when the DB query throws", async () => {
-        const repo = {
-            find: jest.fn(async () => {
-                throw new Error("db down")
-            }),
-        } as any
-        const params = await loadNetworkParameters(repo)
+    it("falls back to genesis defaults when the first DB read throws", async () => {
+        // A fresh module instance has never read the chain, which is the
+        // boot-without-datasource case the genesis fallback exists for.
+        const fresh = await freshLoader()
+        const params = await fresh.loadNetworkParameters(failingRepo())
         expect(params).toEqual(GENESIS)
+        expect(sharedStateStub.networkParameters).toEqual(GENESIS)
+    })
+
+    it("keeps the last loaded parameters when a later DB read throws", async () => {
+        const loaded = await loadNetworkParameters(
+            makeRepo([
+                {
+                    proposalId: "p1",
+                    effectiveAtBlock: 100,
+                    proposedParameters: {
+                        networkFee: 25,
+                        featureFlags: { tlsn: false },
+                    },
+                },
+            ]),
+        )
+        const params = await loadNetworkParameters(failingRepo())
+        expect(params).toEqual(loaded)
+        expect(params.networkFee).toBe(25)
+        expect(params.featureFlags.tlsn).toBe(false)
+        expect(params).not.toEqual(GENESIS)
     })
 
     it("writes the loaded parameters into shared state", async () => {

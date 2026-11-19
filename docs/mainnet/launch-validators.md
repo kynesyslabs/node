@@ -13,13 +13,14 @@ the table; go/no-go reads it as a JSON file. Start from
 
 ```json
 {
-  "0x<validator identity>": { "operator": "acme", "provider": "hetzner", "region": "eu-central" }
+  "0x<validator identity>": { "owner": "buyer-1", "operator": "acme", "provider": "hetzner", "region": "eu-central" }
 }
 ```
 
 | Column | Meaning |
 |---|---|
 | identity (the key) | the validator's public key, lowercase `0x` + 64 hex, as listed in the genesis or the snapshot's `validators.jsonl` |
+| `owner` | the beneficial owner: the person or company that holds the node (bought it, or holds its NFT or licence) and can direct its key, whoever operates it. One name per owner across all their nodes, after KYC. Required on the mainnet chain id |
 | `operator` | the organisation that controls the host and the key |
 | `provider` | the cloud or data-centre company the host runs on (`self-hosted` plus the site for own hardware) |
 | `region` | the provider's region or data-centre location |
@@ -45,9 +46,19 @@ missing committee members and stops at the 4th.
    does not weigh votes. Rule 3 implies it at 10 to 13 validators; the
    check is kept separate so a change of rule 3 cannot loosen it.
 5. No launch validator is one of the pinned committee identities.
-
-Region is recorded so two "different" providers in one data centre are
-visible; it is not capped.
+6. On the mainnet chain id every entry names an `owner`, and no owner runs
+   more launch validators than rule 3 allows any operator (3 with 10 or
+   more launch validators) nor more than a third of the first committee's
+   votes. One buyer behind several operators and providers is one party:
+   [validator-concentration.md](validator-concentration.md) shows why the
+   cap is a count of validators, not a share of the set.
+7. No region hosts a third or more of the launch validators. A region is
+   not one party, so it is not held to the committee cap, but a third of
+   the set in one region is one outage away from a stall.
+8. No owner, operator, provider or region holds a third or more of block
+   0's stake (`staked_amount`). Stake weighs no block vote; it weighs the
+   governance tally once `networkGovernance` is scheduled, where more than
+   a third is a veto and two thirds pass a proposal alone.
 
 ## Check it
 
@@ -55,11 +66,13 @@ visible; it is not capped.
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony>
 ```
 
 Each rule prints one `PASS` or `FAIL` line, followed by the counts per
-operator and provider. Exit 0 when every check passes, 1 otherwise,
+operator, provider, owner and region. Exit 0 when every check passes, 1 otherwise,
 2 on bad input. `--json` prints the same as JSON. At T-0 the same file is
 passed to the full go/no-go check (`docs/runbooks/launch-go-no-go.md`),
 where a missing region is only a warning.
@@ -78,24 +91,26 @@ timing, fees, stake floor and ZK points, which every validator must run with
 the same values), a synchronised clock, outbound NTP, both genesis pins, and
 that no one-start switch is left set. Each operator then confirms on the
 launch thread that they run the published sheet: a Docker host posts the
-`docker inspect` output from INSTALL.md ("Run a released image", step 7); a
+`docker inspect` output from INSTALL.md ("Run a released image", step 10); a
 bare-metal host has no container to inspect, so it posts the `node-doctor
 --production --env-from env` output, run from the node checkout in the shell
 that starts the node. That reads the process environment over `.env`, as the
 node does, and prints each sheet value it found on its `PASS` line.
 
 The node does not create its database schema at boot, so before its first
-start each validator creates it once, with the released image (Docker host):
+start each validator creates it once, with the released image (Docker host;
+`SUFFIX` is the install's `INSTANCE_SUFFIX`, INSTALL.md "Run a released image",
+step 3):
 
 ```bash
 docker compose pull node &&
 docker compose up -d --wait postgres &&
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:run &&
 docker compose up -d --no-build
 ```
 
 A bare-metal host makes its first start `./run -c true`, which creates the
 schema on the launcher's empty Postgres. A node started without the schema
 stops at boot, before block 0, and names the command
-(`INSTALL.md`, step 5 of "Run a released image";
+(`INSTALL.md`, step 8 of "Run a released image";
 `docs/runbooks/database-migrations.md`).

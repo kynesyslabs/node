@@ -43,12 +43,12 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null },
+    getSharedState: { networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 import Chain from "@/libs/blockchain/chain"
 import {
-    UNSTAKE_LOCK_BLOCKS,
+    NFT_UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
@@ -167,7 +167,7 @@ describe("GCRValidatorStakeRoutines", () => {
             const existing = validatorRow({ staked_amount: "5" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit() as any,
+                stakeEdit({ nft: undefined }) as any,
                 repo as any,
                 100,
             )
@@ -212,7 +212,7 @@ describe("GCRValidatorStakeRoutines", () => {
             } as any)
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit() as any,
+                stakeEdit({ nft: undefined }) as any,
                 repo as any,
                 100,
             )
@@ -237,7 +237,7 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
             expect(repo.state.row?.unstake_requested_at).toBe(100)
             expect(repo.state.row?.unstake_available_at).toBe(
-                100 + UNSTAKE_LOCK_BLOCKS,
+                100 + NFT_UNSTAKE_LOCK_BLOCKS,
             )
         })
 
@@ -271,13 +271,13 @@ describe("GCRValidatorStakeRoutines", () => {
                 status: VALIDATOR_STATUS_UNSTAKING,
                 staked_amount: "100",
                 unstake_requested_at: 10,
-                unstake_available_at: 10 + UNSTAKE_LOCK_BLOCKS,
+                unstake_available_at: 10 + NFT_UNSTAKE_LOCK_BLOCKS,
             })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
                 stakeEdit({ operation: "exit", amount: "0" }) as any,
                 repo as any,
-                10 + UNSTAKE_LOCK_BLOCKS,
+                10 + NFT_UNSTAKE_LOCK_BLOCKS,
             )
             expect(r.success).toBe(true)
             expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_EXITED)
@@ -286,7 +286,7 @@ describe("GCRValidatorStakeRoutines", () => {
     })
 
     describe("rollback", () => {
-        it("refuses, so an orphaned block holding a stake sends the node to a resync", async () => {
+        it("refuses a stake edit shipped as a rollback", async () => {
             const existing = validatorRow({ staked_amount: "50" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
@@ -295,7 +295,7 @@ describe("GCRValidatorStakeRoutines", () => {
                 100,
             )
             expect(r.success).toBe(false)
-            expect(r.message).toContain("resync")
+            expect(r.message).toContain("rollback")
             expect(repo.state.row?.staked_amount).toBe("50")
             expect(repo.save).not.toHaveBeenCalled()
         })

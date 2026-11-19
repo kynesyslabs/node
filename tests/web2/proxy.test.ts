@@ -13,6 +13,18 @@ jest.mock("src/libs/crypto/hashing", () => ({
     __esModule: true,
     default: { sha256: (v: string) => v },
 }))
+// The real config loader reads import.meta, which ts-jest's CommonJS output
+// cannot parse; the Proxy only needs the outbound defaults from it.
+jest.mock("src/config", () => ({
+    Config: {
+        getInstance: () => ({
+            outbound: {
+                web2InsecureTls: false,
+                web2MaxResponseBytes: 10 * 1024 * 1024,
+            },
+        }),
+    },
+}))
 
 import { Proxy } from "@/features/web2/proxy/Proxy"
 import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"

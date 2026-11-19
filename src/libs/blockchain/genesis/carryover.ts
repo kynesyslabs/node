@@ -13,6 +13,7 @@ import { createHash } from "node:crypto"
 import { compareCodeUnits } from "@/libs/crypto/canonicalJson"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import { GenesisRefusal } from "./genesisPin"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 import type {
     SnapshotLoaderAvailable,
     ValidatorSeed,
@@ -284,13 +285,25 @@ function snapshotValidators(
         if (v.unstake_requested_at !== null || v.unstake_available_at !== null) {
             problems.push(`validators.jsonl row ${address} has an unstake under way`)
         }
-        if (!/^\d+$/.test(v.staked_amount)) {
+        if (!stakeAllowed(v.staked_amount)) {
             problems.push(
-                `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a non-negative integer`,
+                nftGatingActiveAtGenesis()
+                    ? `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a non-negative integer`
+                    : `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a positive integer`,
             )
         }
     }
     return fromSnapshot
+}
+
+/**
+ * With validators.jsonl in the snapshot, block 0 seeds its rows directly and
+ * skips seedValidators, the other place that refuses a stake of 0, and the
+ * active-set query has no stake filter. A genesis that seats validators
+ * under `nftValidatorGating` backs a seat by its NFT, so 0 is a stake there.
+ */
+function stakeAllowed(stake: string): boolean {
+    return nftGatingActiveAtGenesis() ? /^\d+$/.test(stake) : /^[1-9]\d*$/.test(stake)
 }
 
 function genesisValidatorMap(

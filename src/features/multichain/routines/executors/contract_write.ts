@@ -1,26 +1,13 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
-import { EVM, MULTIVERSX, SOLANA, TON } from "@kynesyslabs/demosdk/xm-localsdk"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { MULTIVERSX, SOLANA, TON } from "@kynesyslabs/demosdk/xm-localsdk"
 import log from "@/utilities/logger"
 import handleAptosContractWrite from "./aptos_contract_write"
 import { genericJsonRpcPay } from "./pay"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
+import { pickRpcUrl, sendSignedEvmTransaction } from "./rpcUrl"
 
 async function handleEVMContractWrite(operation: IOperation, chainID: number) {
-    // NOTE: Logic is similar to handleEVMPay
-    let evmInstance = EVM.getInstance(chainID)
-
-    if (!evmInstance) {
-        const rpcUrl =
-            operation.rpc || evmProviders[operation.chain][operation.subchain]
-
-        evmInstance = EVM.createInstance(chainID, rpcUrl)
-        await evmInstance.connect()
-    }
-
-    return await evmInstance.sendSignedTransaction(
-        operation.task.signedPayloads[0],
-    )
+    return await sendSignedEvmTransaction(operation, chainID)
 }
 
 async function handleSolanaContractWrite(operation: IOperation) {
@@ -37,7 +24,7 @@ async function handleMultiversxContractWrite(operation: IOperation) {
     // POSTs it to the MultiversX REST API at /transaction/send.
     return await genericJsonRpcPay(
         MULTIVERSX,
-        operation.rpc || chainProviders.egld[operation.subchain],
+        pickRpcUrl(operation.rpc, chainProviders.egld[operation.subchain]),
         operation,
     )
 }
@@ -47,7 +34,7 @@ async function handleTonContractWrite(operation: IOperation) {
     // TON.sendTransaction parses it and broadcasts via TonCenter.
     return await genericJsonRpcPay(
         TON,
-        operation.rpc || chainProviders.ton[operation.subchain],
+        pickRpcUrl(operation.rpc, chainProviders.ton[operation.subchain]),
         operation,
     )
 }

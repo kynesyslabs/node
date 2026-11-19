@@ -17,7 +17,7 @@ import {
     VOTING_WINDOW_BLOCKS,
 } from "@/features/networkUpgrade/constants"
 import { checkSafetyBounds } from "@/features/networkUpgrade/safetyBounds"
-import { SEAT_WEIGHT } from "@/features/networkUpgrade/governanceWeight"
+import { SEAT_WEIGHT, seatWeighted } from "@/features/networkUpgrade/governanceWeight"
 import type { NetworkParameters } from "@/features/networkUpgrade/types"
 import { VALIDATOR_STATUS_ACTIVE } from "@/features/staking/constants"
 import { getSharedState } from "@/utilities/sharedState"
@@ -212,20 +212,23 @@ export default class GCRNetworkUpgradeRoutines {
             currentBlock ??
             (await readState("chain tip", () => Chain.getLastBlockNumber()))
 
-        // Voter must be in the snapshot validator set; a vote counts one seat.
+        // Voter must be in the snapshot validator set; otherwise the vote
+        // would be persisted with weight="0", contaminating tallies. Seat
+        // weighted, a vote counts one seat; otherwise the voter's stake.
         // Validator rows are stored lower-cased (see GCRValidatorStakeRoutines)
         // so the comparison uses the canonical voter address.
         const snapshotValidators = (await readState("snapshot validators", () =>
             GCR.getGCRValidatorsAtBlockOrThrow(proposal.snapshotBlock),
         )) as Validators[]
+        const bySeat = seatWeighted(proposal.snapshotBlock)
         const v = snapshotValidators.find(x => x.address === voterAddress)
-        if (!v) {
+        if (!v || (!bySeat && !v.staked_amount)) {
             return {
                 success: true,
                 message: `Vote skipped: ${voterAddress} not in snapshot validator set for ${e.proposalId}`,
             }
         }
-        const weight = SEAT_WEIGHT
+        const weight = bySeat ? SEAT_WEIGHT : v.staked_amount
 
         const row = votes.create({
             proposalId: e.proposalId,

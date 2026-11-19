@@ -6,11 +6,16 @@ Prometheus + Grafana monitoring solution for Demos Network nodes with full Demos
 
 ```bash
 cd monitoring
+echo "GRAFANA_ADMIN_PASSWORD=<a strong password>" >> .env   # required; "demos" is refused
 docker compose up -d
 ```
 
 **Access Grafana**: http://localhost:3000
-**Default credentials**: admin / demos
+**Credentials**: `admin` / the `GRAFANA_ADMIN_PASSWORD` set in `monitoring/.env`
+
+`up` also needs the three Alertmanager webhook files (`slack_webhook`, `pager_webhook`,
+`deadman_webhook`) in `monitoring/secrets/`; create them first as described in
+[`secrets/README.md`](secrets/README.md).
 
 ## Prerequisites
 
@@ -55,12 +60,13 @@ Create a `.env` file in the monitoring directory or export these variables:
 | Variable                 | Default                 | Description                                                  |
 | ------------------------ | ----------------------- | ------------------------------------------------------------ |
 | `PROMETHEUS_PORT`        | `9091`                  | Prometheus server external port (not the node metrics port!) |
-| `PROMETHEUS_RETENTION`   | `15d`                   | Data retention period                                        |
+| `PROMETHEUS_RETENTION`   | `15d`                   | Data retention period; minimum `7d` for the consensus alert latch |
 | `GRAFANA_PORT`           | `3000`                  | Grafana external port                                        |
 | `GRAFANA_ADMIN_USER`     | `admin`                 | Grafana admin username                                       |
-| `GRAFANA_ADMIN_PASSWORD` | `demos`                 | Grafana admin password                                       |
+| `GRAFANA_ADMIN_PASSWORD` | _(required)_            | Grafana admin password; compose refuses to start without it, or with `demos` |
 | `GRAFANA_ROOT_URL`       | `http://localhost:3000` | Public Grafana URL                                           |
 | `NODE_EXPORTER_PORT`     | `9100`                  | Node Exporter port (full profile)                            |
+| `MONITORING_BIND`        | `127.0.0.1`             | Host interface for the Prometheus, Grafana and Node Exporter ports; never `0.0.0.0` |
 
 ### Example `.env` file
 
@@ -154,6 +160,8 @@ Detailed system metrics:
 
 ## Commands
 
+Run these from `monitoring/` (the `cd monitoring` from Quick Start).
+
 ```bash
 # Start the stack
 docker compose up -d
@@ -190,6 +198,19 @@ scrape_configs:
       static_configs:
           - targets: ["host.docker.internal:8080"]
 ```
+
+### Alert rules and routing
+
+Rules are in `prometheus/alerts/`, routing in `alertmanager/alertmanager.yml`. What each
+alert means and what to do is in [`docs/runbooks/mainnet-monitoring.md`](../docs/runbooks/mainnet-monitoring.md).
+Critical and page alerts go to both Slack and paging, warning and info to Slack only (except `MissedSignatures`, which notifies nobody), the
+dead-man heartbeat to its own receiver only. `ConflictingBlock`,
+`ForeignSignature` and `PrecommitEquivocation` are latched for 7 days and do not resolve by
+themselves; the clear procedure is in the runbook ("Clearing a latched alert").
+`BlockHashMismatch` is a plain alert (4 or more peer disagreements in 10 min, counted per
+disagreeing peer, held 5 min) and resolves by itself.
+Unit tests for the rules are in `prometheus/tests/`. Check rules, config and routing with
+`./scripts/check-monitoring.sh` from the repository root (needs `promtool` and `amtool` on PATH).
 
 ### Creating Custom Dashboards
 
@@ -252,7 +273,11 @@ monitoring/
 ├── docker-compose.yml          # Main stack configuration
 ├── README.md                   # This file
 ├── prometheus/
-│   └── prometheus.yml          # Prometheus scrape configuration
+│   ├── prometheus.yml          # Prometheus scrape configuration
+│   ├── alerts/                 # Alert rules (loaded by alerts/*.yml)
+│   └── tests/                  # promtool unit tests for the alert rules
+├── alertmanager/
+│   └── alertmanager.yml        # Routing: Slack, paging, dead-man receivers
 └── grafana/
     ├── grafana.ini             # Grafana settings
     ├── branding/               # Custom logos and assets

@@ -6,7 +6,7 @@ import type {
     TokenBalance,
 } from "@solana/web3.js"
 import { PublicKey } from "@solana/web3.js"
-import type { ValidatorNftProof } from "@kynesyslabs/demosdk/types"
+import type { ValidatorNftProof } from "./types"
 import { SolanaUnreachableError, withSolana } from "./solanaRpc"
 
 /**

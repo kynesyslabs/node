@@ -17,6 +17,10 @@ import {
 import { fetchLocks, type ReportedLock } from "./getLock"
 import { type CommitLock, type LockInputs, lockAt } from "./lockStore"
 import { committeePeers } from "./precommit"
+import { blockCapsRefusal, DEFAULT_BLOCK_CAPS } from "../routines/blockCaps"
+import { leaveOutRefusedPqcTxs } from "../routines/blockTransactions"
+import { blockCapsActive } from "src/forks/blockCapsGate"
+import { isForkActive } from "src/forks/forkGates"
 import { closePrevotes, withLockMutex } from "./roundState"
 
 /**
@@ -233,8 +237,10 @@ async function fetchMissingTransactions(
                 tx => tx && wanted.has(tx.hash),
             )
             if (served.length === 0) continue
-            // Admitted only through the mempool's own validation
-            await Mempool.receive(served, false)
+            // Admitted only through the mempool's own validation. The
+            // per-sender cap does not refuse them: they are the txs the block
+            // was voted with, and a peer's later txs may have pushed them out.
+            await Mempool.receive(served, false, { rebuild: true })
         }
     }
 }
@@ -264,6 +270,15 @@ export async function rebuildTransactions(
     }
     const hashes = inputs.orderedTransactions
     if (new Set(hashes).size !== hashes.length) return null
+    // A block over the caps is one no honest member forges; not worth
+    // fetching, and not to be prevoted.
+    const capped = blockCapsActive(height)
+    if (capped && hashes.length > DEFAULT_BLOCK_CAPS.maxTxs) {
+        log.warning(
+            `[commitLock] The block to rebuild at ${height} has ${hashes.length} txs, over the block cap`,
+        )
+        return null
+    }
     if (hashes.length > 0) {
         await fetchMissingTransactions(hashes, sources)
     }
@@ -285,8 +300,21 @@ export async function rebuildTransactions(
         tx.blockNumber = height
         ordered.push(tx)
     }
+    if (capped) {
+        const refusal = blockCapsRefusal(
+            ordered,
+            isForkActive("osDenomination", height),
+        )
+        if (refusal) {
+            log.warning(
+                `[commitLock] The block to rebuild at ${height} has ${refusal}`,
+            )
+            return null
+        }
+    }
 
-    const ref = filterMempoolByRefBlock(ordered, true)
+    const identity = await leaveOutRefusedPqcTxs(ordered, height)
+    const ref = filterMempoolByRefBlock(identity.kept, true)
     const nonce = await filterMempoolByNonce(ref.validTxs)
     const kept = nonce.validTxs.map(t => t.hash)
     if (

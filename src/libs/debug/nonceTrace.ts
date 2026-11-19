@@ -9,6 +9,16 @@ import type { PendingGCRWrite } from "@/libs/blockchain/gcr/handleGCR"
 
 export const NONCE_TRACE_ATTR_KEY = "nonceTrace"
 
+/**
+ * Most accounts one trace may hold. A synced block's trace comes from a peer
+ * and every key is read from the database, so an uncapped one is a free
+ * query and memory amplifier; a forged block above it carries no trace.
+ */
+export const MAX_NONCE_TRACE_ACCOUNTS = 2048
+
+/** Mismatches logged one per line; the rest are only counted. */
+const MAX_LOGGED_MISMATCHES = 20
+
 export interface NonceTraceEntry {
     startFilter: number
     projectedEnd: number
@@ -114,7 +124,9 @@ export function readNonceTrace(
 ): NonceTrace | null {
     const trace = attrs?.[NONCE_TRACE_ATTR_KEY]
     if (!trace || typeof trace !== "object" || Array.isArray(trace)) return null
-    if (!Object.values(trace).every(isTraceEntry)) return null
+    const entries = Object.values(trace)
+    if (entries.length > MAX_NONCE_TRACE_ACCOUNTS) return null
+    if (!entries.every(isTraceEntry)) return null
     return trace as NonceTrace
 }
 
@@ -129,14 +141,17 @@ function report(context: string, blockNumber: number, mismatches: Mismatch[]) {
     log.error(
         `[DEBUG_ASSERT] ${context}: nonce trace mismatch on block ${blockNumber} for ${mismatches.length} account(s)`,
     )
-    for (const mismatch of mismatches) {
+    const shown = mismatches.slice(0, MAX_LOGGED_MISMATCHES)
+    for (const mismatch of shown) {
         log.error(
             `[DEBUG_ASSERT] ${mismatch.account} ${mismatch.field}: expected ${mismatch.expected}, got ${mismatch.actual}`,
         )
     }
-    log.error(
-        "[DEBUG_ASSERT] Mismatches: " + JSON.stringify(mismatches, null, 2),
-    )
+    if (mismatches.length > shown.length) {
+        log.error(
+            `[DEBUG_ASSERT] ${mismatches.length - shown.length} more mismatch(es) not shown`,
+        )
+    }
 }
 
 function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {

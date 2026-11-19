@@ -1,7 +1,8 @@
 // Shared governance weight helpers.
 //
-// Two call sites need to compute the snapshot weight (one per validator
-// active at a given block):
+// Two call sites need to compute the snapshot weight (the stakes of the
+// validators active at a given block, or one per validator once
+// `nftValidatorGating` holds at that block):
 //   - `tallyUpgradeVotes`         — must be deterministic on every node.
 //                                   Wraps the kernel in try/catch and
 //                                   returns 0n on lookup failure (safe
@@ -16,6 +17,7 @@
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { Validators } from "@/model/entities/Validators"
 import log from "@/utilities/logger"
+import { nftGatingActive } from "@/forks/nftValidatorGatingGate"
 
 /**
  * Parse a stake amount stored as a bigint-as-string. Defensive against
@@ -42,11 +44,21 @@ export function safeBigInt(
     return v
 }
 
-/** A vote counts one seat, whatever the row's staked_amount says. */
+/** Under `nftValidatorGating` a vote counts one seat, whatever the row's staked_amount says. */
 export const SEAT_WEIGHT = "1"
 
 /**
- * One seat per validator active at `snapshotBlock`.
+ * Whether a proposal snapshotted at `snapshotBlock` weighs votes by seat.
+ * Read at the snapshot block, as the vote weights are, so a proposal's
+ * votes and its total always follow the same rule.
+ */
+export function seatWeighted(snapshotBlock: number): boolean {
+    return nftGatingActive(snapshotBlock)
+}
+
+/**
+ * Sum `staked_amount` across every validator active at `snapshotBlock`, or
+ * count them when the proposal is seat weighted (`seatWeighted`).
  *
  * A failed validator query does not throw: `GCR.getGCRValidatorsAtBlock`
  * answers it with [], so the weight comes out 0n, the same value the
@@ -59,5 +71,10 @@ export async function computeSnapshotWeight(
     const validators = (await GCR.getGCRValidatorsAtBlock(
         snapshotBlock,
     )) as Validators[]
-    return BigInt(validators.length)
+    if (seatWeighted(snapshotBlock)) return BigInt(validators.length)
+    let total = 0n
+    for (const v of validators) {
+        total += safeBigInt(v.staked_amount)
+    }
+    return total
 }

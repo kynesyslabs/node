@@ -1,2 +1,4 @@
 # Run dirs hold devnet keys and node logs; never commit them
 runs/
+# Cloud campaign dirs hold run logs and host facts
+campaigns/

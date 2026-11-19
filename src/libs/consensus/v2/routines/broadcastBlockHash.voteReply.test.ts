@@ -41,6 +41,7 @@ const { broadcastBlockHash } = await import("./broadcastBlockHash")
 const { getBoundCommittee, __resetValidatorCache: resetPoolCache } = await import("./getShard")
 const { proofOfLock } = await import("../commitLock/votes")
 const { prevoteMessage } = await import("../commitLock/domain")
+const { StateReadError } = await import("src/libs/blockchain/gcr/stateReadError")
 const validatorPool = (
     await import("src/libs/blockchain/validation/txValidatorPool")
 ).default.getInstance()
@@ -154,14 +155,15 @@ describe("broadcastBlockHash keeps only the vote signer set from a reply", () =>
         expect(merged()).toEqual(ids(members[0], members[2]))
     })
 
-    it("admits no reply when the signer set cannot be resolved", async () => {
+    it("sits the round out when the signer set cannot be read, counting no reply as con", async () => {
         chain.tip = 8
         const shard = [
             replying(members[1].identity, () => signaturesOf(members[1])),
             replying(members[2].identity, () => signaturesOf(members[2])),
         ]
-        const [pro, con] = await broadcastBlockHash(block, shard as never)
-        expect([pro, con]).toEqual([0, 2])
+        await expect(broadcastBlockHash(block, shard as never)).rejects.toBeInstanceOf(
+            StateReadError,
+        )
         expect(merged()).toEqual(ids(members[0]))
     })
 
@@ -182,38 +184,56 @@ describe("broadcastBlockHash keeps only the vote signer set from a reply", () =>
         expect(merged()).toEqual(ids(...members))
     })
 
-    it("retries a failed signer-set lookup once for a later reply", async () => {
-        chain.tip = 8
-        const shard = [
-            replying(members[1].identity, () => signaturesOf(members[1])),
-            replying(members[2].identity, async () => {
-                await later(50)
-                chain.tip = 9
-                return signaturesOf(members[2])
-            }),
-        ]
-        const [pro, con] = await broadcastBlockHash(block, shard as never)
-        expect([pro, con]).toEqual([1, 1])
-        expect(merged()).toEqual(ids(members[0], members[2]))
+    it("retries a failed signer-set read once and counts every reply waiting on it", async () => {
+        // The first chain read fails, as a passing database error would.
+        let failingReads = 1
+        Object.defineProperty(chain, "tip", {
+            configurable: true,
+            get: () => (failingReads-- > 0 ? 8 : 9),
+        })
+        try {
+            const shard = [
+                replying(members[1].identity, () => signaturesOf(members[1])),
+                replying(members[2].identity, () => signaturesOf(members[2])),
+                replying(members[3].identity, () => signaturesOf(members[3])),
+            ]
+            const [pro, con] = await broadcastBlockHash(block, shard as never)
+            expect([pro, con]).toEqual([3, 0])
+            expect(merged()).toEqual(ids(...members))
+        } finally {
+            Object.defineProperty(chain, "tip", {
+                configurable: true,
+                writable: true,
+                enumerable: true,
+                value: 9,
+            })
+        }
     })
 
-    it("admits nothing more once the retry has failed too", async () => {
+    it("sits the round out when the retry fails too, whatever replies arrive later", async () => {
         chain.tip = 8
         const shard = [
             replying(members[1].identity, () => signaturesOf(members[1])),
             replying(members[2].identity, async () => {
                 await later(50)
+                chain.tip = 9
                 return signaturesOf(members[2])
             }),
-            replying(members[3].identity, async () => {
-                await later(100)
-                chain.tip = 9
-                return signaturesOf(members[3])
-            }),
         ]
+        await expect(broadcastBlockHash(block, shard as never)).rejects.toBeInstanceOf(
+            StateReadError,
+        )
+    })
+
+    it("reads no signer set and sits nothing out on a round of refusals", async () => {
+        chain.tip = 8
+        const refusing = (identity: string) => ({
+            identity,
+            longCall: async () => ({ result: 409, response: identity, extra: {} }),
+        })
+        const shard = [refusing(members[1].identity), refusing(members[2].identity)]
         const [pro, con] = await broadcastBlockHash(block, shard as never)
-        expect([pro, con]).toEqual([0, 3])
-        expect(merged()).toEqual(ids(members[0]))
+        expect([pro, con]).toEqual([0, 2])
     })
 
     it("keeps pool signatures and drops throwaway keys before committeeBinding", async () => {

@@ -8,6 +8,7 @@ is generated per run because N changes between scenarios.
 
 ```
 testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|off] <scenario> [label]
+testing/devnet/quorum-drills/run.sh --hosts FILE --image REF@sha256:<digest> [--netem SPEC] <scenario> [label]
 ```
 
 - `--image` (or `IMAGE`): a prebuilt node image. Default
@@ -17,7 +18,17 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   The tree must match the image's dependencies.
 - `--binding` (or `BINDING`): `on` (default) activates `committeeBinding`
   at block 0; `off` keeps it dormant to reproduce the pre-fork behaviour on
-  the same code. `quorumParity` is active from block 0 in both.
+  the same code. `quorumParity` is active from block 0 in both. `off` also
+  turns `commitLock` off (`gen-inputs.py`, where it turns `committeeBinding`
+  off): `genesis.devnet.json` activates it at 0, and the node's fork loader
+  refuses a genesis that has `commitLock` without `committeeBinding`
+  (`assertCommitLockHasCommittee`, `src/forks/loadForkConfig.ts:296-315`).
+  `loadForkConfigFromGenesis` accepts the generated `--binding off` genesis
+  (`drillInputs.test.ts`); a node boot on it was not run. The three
+  mainnet-shape cases take `--binding on` only.
+- `--hosts FILE`: run the nodes on several hosts instead of this one, see
+  [Several hosts](#several-hosts) and `HOSTS.md`. `--netem SPEC` adds
+  `tc qdisc ... netem SPEC` on those hosts for the drill.
 
 ### How a node starts
 
@@ -51,9 +62,44 @@ start path from the result (`start=` in the preflight line of `run.sh`'s log):
 
 What still differs from mainnet on the image path: `NODE_ENV=development` (a
 production node needs `EXPECTED_GENESIS_HASH` for a genesis that is new each
-run, `genesisPin.ts:56-67`), postgres and `/app/state` on tmpfs, the generated
+run, `src/libs/blockchain/genesis/genesisPin.ts:56-68`), postgres and `/app/state` on tmpfs, the generated
 genesis and the empty snapshot, `OMNI_MODE=HTTP_ONLY`, TLSNotary off, and no
 published ports.
+
+### What differs from mainnet: identityCarryover
+
+`identityCarryover` is **off in the drills** and is at 0 in the mainnet genesis
+template (`docs/mainnet/genesis.template.json`). On mainnet every validator
+needs the genesis snapshot (a manifest and files matching the
+`snapshot.manifestSha256` in block 0's genesis, in `data/snapshot` or
+`DEMOS_SNAPSHOT_DIR`) on **every** boot, every restart and every rebuild of its
+database:
+
+- **Fresh database or rebuild.** No snapshot is a refusal
+  (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`), and so is a
+  genesis without `snapshot.manifestSha256`, a missing manifest or a manifest
+  that hashes differently
+  (`src/libs/blockchain/routines/findGenesisBlock.ts:219-227`,
+  `src/libs/blockchain/genesis/genesisPin.ts:165-184`). The snapshot is loaded
+  and verified file by file
+  (`src/libs/blockchain/genesis/loadSnapshot.ts:454`) and
+  `assertCarryoverSnapshot` checks it before the database transaction opens
+  (`src/libs/blockchain/genesis/restoreGenesisState.ts:71-73`).
+- **Every restart.** The node reads the stored block 0, and if it schedules
+  `identityCarryover` at 0 it opens the snapshot again: no manifest, a manifest
+  that does not hash to block 0's value, or a `gcr_main.jsonl` that does not
+  match the manifest stops the boot, as does an imported-identity registry that
+  differs from the snapshot
+  (`src/libs/blockchain/routines/findGenesisBlock.ts:188-199`,
+  `src/libs/blockchain/genesis/verifyImportedIdentities.ts:40-77`,
+  `src/libs/blockchain/genesis/loadSnapshot.ts:555-589`).
+  A restart does not re-hash the other snapshot files.
+
+The drills **do not cover any of this**: they run the legacy genesis path with
+an empty snapshot directory, so the snapshot check, the carried-over identities
+and the apply-time rules of the fork (no first-link award for an imported
+identity, web2 unlink by `userId`) are not exercised. A launch rehearsal that
+needs them has to build a snapshot and mount it, which these drills do not do.
 
 The preflight checks that everything the node service execs exists and is
 executable for the image's user (`docker run` as its default user): `sh cp`, the
@@ -73,9 +119,29 @@ that guess.
 Exit code 0 means pass, 1 fail, 2 the run could not be carried out
 (preflight, boot, timing). A running node whose head cannot be read during
 an observation window (three tries) ends the run as `ERROR`, exit 2: a
-crashed node must not pass for a stalled one. Each run with a verdict
-appends a row to `runs/results.tsv`. Log-line counts (floor refusals,
-fallback lines) only take lines logged in the window being judged.
+crashed node must not pass for a stalled one, and neither may a run in which
+Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
+writes `verdict.json`, then appends a row to `runs/results.tsv`, under a lock
+other runs take too (see "Postgres connections", Backstop). A row that
+cannot be added rewrites `verdict.json` as `ERROR`, exit 2: `could not
+record the verdict: no row added to .../results.tsv (why); the result was
+PASS (detail)` (`run.log` says `RESULT PASS`, then `RESULT ERROR`). A
+`verdict.json` that cannot be written makes the row `ERROR` instead, exit 2:
+`could not record the verdict: .../verdict.json not written; the result was
+PASS (detail)`. With no lock within 30 s the table is not touched; a write
+that fails part way (a full disk on a first run, after the header line, for
+example) can leave a header or a partial row in it. What a crash between the
+two leaves is in [Notes](#notes). Log-line counts (floor refusals,
+fallback lines) only take lines logged in the window being judged, and a
+node log such a count cannot read to the end (a docker error, no answer
+within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning), or a `sed` or `grep`
+that failed on it) ends the run as `ERROR`, exit 2 (`<phase>: node log
+unreadable`), never as a count without that node's lines. The few lines
+`run.log` shows of them (`grep_logs ... | head`) are read the same way, the
+rest of each log drained, so a reader that stops early is not taken for a
+failed read, whether SIGPIPE is ignored or not. A progress phase counts only a head read that finished inside
+its `PROGRESS_TIMEOUT` window: one that returns after it is not progress,
+whatever height it shows.
 
 ## Scenarios
 
@@ -93,6 +159,14 @@ live. With N > shardSize (`halt-n13s10`, `ride-n13s10`) it does not: see
 | `halt-n10s10` | 10 | 10 | 7 | Stops validators 7-10 at once (6 live < q), holds for `HALT_ROUNDS` rounds, restarts them | Scenario 12's P1-P6, judged by `judgeHaltDrill.ts` (below) |
 | `halt-n13s10` | 13 | 10 | 7 | Stops validators 7-13 at once (6 live < q, a pool larger than the committee), holds, restarts them | Same P1-P6 |
 | `ride-n13s10` | 13 | 10 | 7 | Stops validators 11-13 at once (3, the most the committee code guarantees), waits for `RIDE_BLOCKS` blocks | P1 baseline, R2 ride (every survivor reaches pre-stop + `RIDE_BLOCKS`, one hash per height, every block >= 7 signatures), P6 no crash |
+| `drop-n30s10` | 30 | 10 | 7 | Stops validators 30, 29, 28, 27 in turn, each while it is a member of the round in flight, then restarts them | Progress after each stop, the stopped validators gone from the committed peerlist, progress after the restart ([30 validators](#30-validators)) |
+| `halt-n30s10` | 30 | 10 | 7 | Stops validators 7-30 at once (6 live < q), holds, restarts them | Same P1-P6 |
+| `ride-n30s10` | 30 | 10 | 7 | Stops validators 28-30 at once (3 = 10 - q), waits for `RIDE_BLOCKS` blocks | Same as `ride-n13s10` |
+| `restart-n30s10` | 30 | 10 | 7 | Restarts `RESTARTS` (5, at most N-1) random validators one at a time, each at a random point of a round it is a committee member of | Each back signing at its first or second committee round, no stall over `MAX_GAP_S`, one chain, no crash (`judgeRestartDrill.ts`) |
+| `<kind>-n<N>s<S>` | 4-400 | <= N | | `halt`, `ride` or `restart` at any size (`halt` stops N - q + 1, `ride` S - q), and the three below | As the fixed cases of the same kind |
+| `third-n<N>s<S>` | N | S | | Stops N / 3 validators at once (the survivors must still hold q), holds `SAFE_ROUNDS` rounds, restarts them | S2 every survivor answers and never goes back, S3 one hash per height and quorum signatures up to the common height (the chain may pause or forge meanwhile), P5 recovery, P6 no crash (`judgeHaltDrill.ts`, mode `safe`) |
+| `load-n<N>s<S>` | N | S | | Native transfers from `LOAD_WALLETS` genesis-funded wallets at `LOAD_TPS` for `LOAD_DURATION_S`, signed by the image's own SDK (`load-client.ts`) | L1 the load was carried, L2 at least `LOAD_MIN_INCLUDED` of the accepted transfers included, L3 no stall over `MAX_GAP_S`, L4 one chain with quorum signatures, L5 no crash; reports main TPS, block times and time to inclusion (`judgeLoadDrill.ts`) |
+| `hostloss-n<N>s<S>` | N | S | | `--hosts` only: stops every validator of the last host at once, as a host outage would | As `ride`; refused when the host runs more validators than `guaranteedTolerance(S, N)` |
 | `listed-stall` | 10 staked, 7 running | 10 | 7 | Stops a listed validator, starts the 3 staked ones that never ran, then brings the listed one back | Stall after the stop, still stalled with the 3 extras up (the listed pool holds q, so the staked-set fallback does not apply), progress once the listed one is back |
 | `fallback` | 10 | 10 | 7 | Stops every node on one head, rewrites that block's committed peerlist in every database to 6 validators (below q), restarts all 10 | `--binding on`: progress, with the `drawing the committee from all 10 staked validators` log line. `--binding off`: stall (the pre-fork pool is the 6 listed) |
 | `partition` | 6 | 4 | 3 | Splits the network into {1,2,3} and {4,5,6} for `PARTITION_TIME`, then heals it | `--binding on`: at most one side forges, no height carries two hashes, one chain after the heal. `--binding off`: both sides forge, two hashes at one height (the pre-fork finding) |
@@ -108,6 +182,210 @@ the real-ed25519 suite in
 `src/libs/blockchain/validation/verifyBlock.crypto.test.ts` covers the pool
 of 14.
 
+## 30 validators
+
+`drop-n30s10`, `halt-n30s10`, `ride-n30s10` and `restart-n30s10` run 30
+validators at mainnet's shardSize 10 on the launch fork set with gossip on,
+like the other mainnet-shape cases. None of them has been run in Docker yet:
+what was run is the unit tests of `lib/committeeOutcome.ts` and
+`lib/judgeRestartDrill.ts`, the input generator's tests
+(`test_multihost_inputs.py`) and the stub tests.
+
+**Drop.** With N > shardSize a stop does not shrink the committee: it is
+drawn from the pool, and an offline member stays in it as a missing vote
+until the stopped validator leaves the committed peerlist (about two blocks;
+[Which validators are stopped](#which-validators-are-stopped)). So each
+victim is stopped while it is a member of the round in flight (its own log
+shows `We are forging block B` for B past the head, waited for up to 180 s;
+it is drawn about one round in three) and the expected outcome of the k-th
+stop comes from `lib/committeeOutcome.ts`: the first block after the stop
+draws min(10, pool) members of whom one is down, the pool being 30 - (k - 1)
+since the earlier victims have left it. All four stops leave 9 of 10 members
+live, above q = 7, so the chain must keep forging; the check after each one
+also reads the peerlist of the newest block, which must list none of the
+stopped validators. The same function gives the old rule (progress iff
+N - k >= q) for every N <= shardSize, so the other drop scenarios are judged
+as before. A stop whose outcome depends on the draw is refused (ABORT).
+
+**Halt: 24 stopped, not 21.** With 21 stopped, 9 validators stay live. A
+committee of 10 drawn from 30 holds 7 or more of them about 0.2% of the time,
+and once the 21 leave the peerlist the 9 live ones are the whole pool, reach
+q and forge on: the chain would not halt, and the judge's precondition
+(`drillPreconditionError`) refuses that setup. 24 stopped leaves 6 live,
+below q whatever the draw.
+
+**Ride.** 3 = shardSize - q is the most `guaranteedTolerance(10, 30)` allows:
+any committee drawn from the 30 keeps 7 live members.
+
+**Restart.** `RESTARTS` distinct validators from 2..30 (node-1 seeds the
+peerlist) are restarted one at a time. For each, the harness waits until the
+victim logs `We are forging block B` for a B past the head (it is in that
+round's committee), sleeps a random 0..`CONSENSUS_TIME` s, runs
+`docker compose restart -t 0`, then records when it serves again, when it
+holds the head the network had then, and its log lines since the restart
+until it logs a `[commitLock] Precommit tally` or `REJOIN_TIMEOUT` passes.
+At the end it waits for one head with one hash, reads every node's blocks of
+the drill, the block timestamps and the restart counts into
+`restart-input.json`, and `lib/judgeRestartDrill.ts` decides:
+
+- per restart: it serves within `REJOIN_BOOT_S` (180) and holds the head
+  within `REJOIN_SYNC_S` (60) of serving; of the heights it is drawn for after
+  the restart, the first or the second carries its precommit (the round in
+  flight may be refused by the restart signing floor, by design), logged
+  within `REJOIN_ROUND_S` (3 x `CONSENSUS_TIME`) of that round's start, the
+  round starting within `REJOIN_TIMEOUT` (300) of serving; its restart count
+  does not move after it served (no second restart);
+- over the drill: no gap between consecutive block timestamps, nor from the
+  last block to the end, above `MAX_GAP_S` = 2 x `CONSENSUS_TIME` + 90 (the
+  60 s green-light and 30 s validator-phase timeouts of `secretaryManager`);
+  every node holds every height with one hash and quorum signatures; the
+  validators never restarted keep their restart counts.
+
+The pre-fix failure (a restarted validator waiting out a 60 s green light
+that never came, round after round, until a second restart) fails the
+signing check and, with too few others live, the gap check
+(`fixtures/restart-judge/restart-n30s10.u1-stuck.json`).
+
+Deviation from a real node: `/app/state` is tmpfs, so a restart loses the
+state file and the restart signing floor comes from the clock alone, not
+from the rounds recorded there.
+
+### Several hosts
+
+`--hosts FILE` takes one `user@ip [max_nodes]` per line (`#` comments). Node
+i goes to the hosts round-robin, skipping a host once it holds `max_nodes`;
+node 1 is always on the first host. Each node publishes its RPC
+(53549 + 2i), OMNI (RPC + 1) and gossip (54549 + i, `GOSSIP_PORT`) ports and
+is reached at `EXPOSED_URL=http://<ip>:<rpc port>`, which is also its genesis
+`connection_url` and node-1's peerlist entry. Each host gets its own compose
+file (its nodes and a postgres for their databases) and an `inputs/` with
+only its nodes' identities, copied over ssh into `~/qdrill-runs/<run id>`
+(mode 0700). From then on every docker call of `run.sh` goes to the host of
+the node it is about (`multihost.sh`): the drills address nodes by index
+whatever host they are on, node RPC is read from the controller over the
+public URL, and database reads go to the node's host. The preflight runs on
+every host for the nodes it gets and pulls the image there by digest
+(`--image` must be `REF@sha256:<digest>`). The teardown removes the
+containers and the remote run dir on every host on any exit.
+
+`--netem "delay 80ms 20ms"` sets `tc qdisc replace dev br-<network id> root
+netem ...` on each host's bridge of the run's network after bring-up and
+removes it in the teardown: every packet a host routes into its containers
+(from the other hosts and from the controller) gets the delay, containers on
+one host do not. It needs root or passwordless sudo; a host without either
+is skipped with a warning. `--src`, `partition`, `fallback` and
+`listed-stall` are refused with `--hosts`. Host prerequisites: `HOSTS.md`.
+
+```
+# one host, 30 nodes (about 50 GB available RAM: 30 x 1600 MB + 3 GB)
+testing/devnet/quorum-drills/run.sh --image IMAGE restart-n30s10
+# four hosts
+testing/devnet/quorum-drills/run.sh --hosts hosts.txt --image ghcr.io/ORG/demos-node@sha256:DIGEST \
+    --netem "delay 80ms 20ms" halt-n30s10
+```
+
+## Cloud drill
+
+`cloud-drill.sh` runs the drills on rented hosts with one command. Its only
+provider input is an inventory, one host per line,
+`address ssh_user ssh_port validators` (`inventory.example`: 10 hosts x 3
+validators); what to rent is in `PROVIDER-SPEC.md`.
+
+```
+REGISTRY_TOKEN=... QDRILL_SSH_IDENTITY=~/.ssh/drill QDRILL_SSH_ACCEPT_NEW=1 \
+testing/devnet/quorum-drills/cloud-drill.sh --inventory inventory.txt \
+    --image ghcr.io/kynesyslabs/node:v1.0.0-rc.13@sha256:6ec7fa4848b7118ad32ece271ee01ab59bd2cb7403fb8acfa81f3e677080d0cc \
+    --prepare --carryover rc13
+```
+
+1. The inventory becomes a `--hosts` file (`drill_inputs.py inventory`); N is
+   the sum of its validators, the committee `--shard` (10).
+2. `--prepare` runs `prepare-host.sh` on every host through `sudo -n`, with
+   the node ports opened to the inventory's addresses and the controller's
+   public address (or `--allow-from`).
+3. Host facts (CPUs, RAM, free disk, kernel, Docker, NTP) go to `hosts.tsv`,
+   with each host's clock offset from the controller: over `CLOCK_MAX_MS`
+   (500) the campaign stops, as node logs are read by time. An inter-host
+   ping matrix goes to `ping-matrix.tsv`.
+4. One `run.sh --hosts` per scenario of `--scenarios` (default
+   `restart third hostloss halt load`), each as `<kind>-n<N>s<S>`, with
+   `HEADROOM_MB=1536` (the hosts run nothing else). Ports are published on
+   every address and fenced by `--prepare`'s `DOCKER-USER` rules;
+   `BIND_HOST_IP=1` publishes them on the inventory address only, for hosts
+   that have their public address on an interface (not behind 1:1 NAT). `hostloss` is skipped when the
+   last host runs more validators than the committee tolerates. Each run
+   generates its own genesis (every fork of the launch template at 0 as the
+   release does, chain id 1337, rehearsal notary keys), pulls the image by
+   digest on every host (`REGISTRY_TOKEN`, see `HOSTS.md`), checks headroom
+   per host, and tears down with `down -v`.
+5. The evidence of every run, without its keys and inputs, goes to
+   `campaigns/<time>-<label>/evidence/`, and `summary.md` sums up the results,
+   the load metrics, the per-container resources and the teardown checks.
+6. Last, every host is checked for a `qdrill-` container, volume or run dir
+   left behind (`leftovers.txt`); one makes the campaign exit 2.
+
+Exit 0 when every scenario passed, 1 when one failed, 2 when one could not
+run or a host was left dirty. `--dry-run` prints the plan without contacting
+a host. `cloud-drill-stub.test.sh` runs the whole flow against stubbed ssh
+hosts.
+
+What each run records for sizing (also in a single-host run):
+
+- `logs/resources.tsv`: `docker stats` of every container of the run every
+  `RESOURCE_SAMPLE_S` (15) s from bring-up to the verdict, per host;
+  `resources-summary.json` gives per container and per role (node,
+  postgres) the memory peak, mean and peak CPU (% of one core), and network
+  MB per hour.
+- `logs/pg-sizes.tsv`: each node database's size at the end, and
+  `logs/disk.txt` the volumes of the run as `docker system df -v` sees them.
+- `teardown-check.txt`: the run's containers, networks and volumes after
+  `down -v`, on every host.
+
+What has been run: `cloud-drill.sh` over ssh against one local host with the
+rc.13 release image, 4 validators: `third-n4s4` PASS, `load-n4s4` PASS (2 TPS,
+main TPS 1.92, 360 of 360 included, blocks p50/p95 10/10 s, time to inclusion
+p50/p95 6/10.5 s) and `load-n4s4 --carryover` PASS (every fork the launch
+genesis activates at block 0, main TPS 1.87, 240 of 240 included), each torn
+down clean. The 30-validator campaign on rented hosts has not been run yet;
+the sizing it needs is in `PROVIDER-SPEC.md`.
+
+### The new scenarios
+
+**third.** A third of the validators (N / 3, the survivors must hold q) stop
+at once. Unlike `halt`, the chain may go on forging or pause: with 20 of 30
+live, a committee of 10 drawn from the pool holds 7 live members only
+sometimes, until the stopped ones leave the peerlist. What must hold is
+safety: every survivor answers and never goes back, every height up to the
+common one has one hash and quorum signatures, then all rejoin and the chain
+moves on (`judgeHaltDrill.ts`, mode `safe`).
+
+**hostloss.** Every validator of the last host stops at once, as a host
+outage would. With 3 validators per host and a committee of 10 that is
+within `guaranteedTolerance(10, 30) = 3`, so the chain must keep forging;
+judged as `ride`.
+
+**load.** `LOAD_WALLETS` wallets (one per validator, at least 8) are funded
+in the genesis and send native transfers of 1,000,000 units at `LOAD_TPS` (4) for `LOAD_DURATION_S` (300), each
+signed by the SDK inside the image under test (`load-client.ts` runs as the
+compose `load` service on host 1) and sent through confirm + broadcast,
+wallet i through node i (mod N), so every node takes client submissions. A wallet keeps at most 18 transfers in flight, under
+the node's 20-ahead nonce window. Every accepted transfer is followed with
+`getTransactionStatus` until it is included or `LOAD_DRAIN_S` (180) passes.
+`judgeLoadDrill.ts` reports the four load metrics: main TPS (included
+transfers over the time from the first send to the block of the last),
+L2PS TPS (not measured here), block times p50/p95/max, and time to
+inclusion (submit to `included` seen on the entry node; submit to the
+block's timestamp as well).
+
+**--carryover.** By default the drills exclude `identityCarryover` (it needs
+a genesis snapshot). With `--carryover` the run copies the image's own
+`/app/data/snapshot`, builds the carry-over snapshot for the drill's
+validators with `scripts/state-snapshot/carryover.ts`, binds its manifest
+hash into the genesis on every host, and runs every fork the launch genesis
+activates at block 0. Before bring-up the run checks that the genesis
+declares exactly the forks the image knows (`DEFAULT_FORK_CONFIG`), so a
+genesis older than the image is caught before any node refuses it.
+
 ## Mainnet-shape halt and ride drills
 
 `halt-n10s10`, `halt-n13s10` and `ride-n13s10` run the drill of rehearsal
@@ -116,40 +394,188 @@ scenario 12 (`../../forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts`,
 of these three cases have **not been run** yet. What was run offline: the unit
 tests of the judge, and the bash glue against a mocked chain (no containers).
 
+### Fork set
+
+Scenario 12 and these three cases run the forks `docs/mainnet/genesis.template.json`
+launches with, read from that file when the drill starts: a fork is active at
+0 if its `activationHeight` there is the number `0`; `null` and `"FILL: ..."`
+stay off. The genesis `forks` object is replaced as a whole, so no fork is left
+to a default (`osDenomination`, `nonceEnforcement` and `gasFeeSeparation`
+default to 0, `src/forks/forkConfig.ts:432-450`, `src/forks/forkConfig.ts:493-504`), and a template
+that stops activating `quorumParity`, `committeeBinding` or `commitLock` is an
+error. The code is `launch_fork_heights` and `with_launch_forks` in
+`drill_inputs.py` (`run.sh` through `gen-inputs.py --fork-set launch`; scenario
+12 through `withLaunchForks`). The drills run every fork the template has at
+0 except `identityCarryover`. The set is read from the template on each run,
+not kept in this file, and each run logs it (below).
+`identityCarryover` is at 0 in the template and **excluded by name** (the
+`LAUNCH_EXCLUDED_FORKS` list in `drill_inputs.py`, one reason per fork): the
+drills mount an empty `data/snapshot`, and a node with `identityCarryover`
+active at 0 and no snapshot refuses to boot (see
+[What differs from mainnet](#what-differs-from-mainnet-identitycarryover)). It
+is written into the drill genesis as `activationHeight: null`, also when the
+template does not list it. `gasFeeSeparation`, `web2ProofBinding`,
+`tlsnProofEnforcement`, `xmProofBinding`, `atomicWork` and `networkGovernance`
+are off (`gasFeeSeparation` keeps a treasury address, which the loader wants
+even when the fork is off). `networkGovernance` is off because the template
+has it `null`, which `scripts/launch-go-no-go.ts` requires of a mainnet genesis
+(`LAUNCH_DORMANT_FORKS`, `scripts/launch-go-no-go.ts:179`); it is not excluded
+by name, and the drills have it off although `genesis.devnet.json` has it at
+0. Off, its gate refuses only `networkUpgrade` and `networkUpgradeVote`
+transactions and transactions carrying their edits, at RPC intake, pool
+admission and apply (`governanceGateRefusal`,
+`src/forks/governanceGate.ts:64-85`), and the drills send no transactions
+(see `nonceEnforcement` below). The drill genesis lists every fork of the
+template, each at 0 or `null`.
+
+If the template ever sets another fork to 0 that needs a snapshot, add it to
+that list. Until then a drill with it active does not run: no node serves, and
+`run.sh` ends the bring-up as `ABORT: node-N did not serve within 180s` (exit
+2) followed by `node-N log: ...`, the node's last `Refusing to boot` line
+(`boot_failure_line`, from the log's last 2000 lines, each docker call within
+60 s; the full log is kept in `node-N.log`). A log that cannot be read gives
+`node-N log: unreadable (why)`, still exit 2. Scenario 12 times out on its
+baseline height (exit 1, `scenario.ts`) and appends the same line to the error
+(`withBootRefusals`: the last 400 lines, read within 30 s; a log it cannot read
+is named `log unreadable (why)`). Neither run produces a verdict. Neither has been run against a real
+refusal here; the line extraction is tested against stubs.
+
+`run.sh` logs the set (`forks (launch): ...; excluded: identityCarryover
+(needs a genesis snapshot; the drills use the legacy genesis path)`, and
+scenario 12 the same in its fork-set line), and `drill-input.json`,
+`DRILL_TIMINGS` and `drill.timings.forks` in `verdict.json` carry every fork of
+the genesis the nodes ran. The excluded forks are in `DRILL_TIMINGS` and
+`drill.timings.excludedForks` too, and `run.sh` writes them to `verdict.json`
+as `excludedForks`. The other scenarios keep the forks of
+`genesis.devnet.json` (each fork it lists, all at 0 there, `gasFeeSeparation`
+and `networkGovernance` among them, plus the two `gen-inputs.py` sets, and
+`commitLock` off with `--binding off`); their generated genesis and output
+are byte-identical to before (`--binding on`), and their compose differs only
+in the postgres `command` (see
+[Postgres connections](#postgres-connections)).
+
+What the drill genesis has to provide for the forks that were not all on
+before (scenario 12 had `osDenomination` at 5 and none of `signatureDomain`,
+`editBinding`, `nonceIntegrity`, `finalityProofs`; the quorum cases already
+inherited all nine from `genesis.devnet.json`, so there only `gasFeeSeparation`
+is new, and off; `networkGovernance`, at 0 in `genesis.devnet.json`, is off
+there and needs nothing):
+
+- **`finalityProofs`** draws the pool from the validator set snapshot after
+  block B-2 and throws `no validator set snapshot at or below block N` without
+  one (`src/libs/consensus/v2/routines/getShard.ts:83-101`); a block commits
+  its parent's snapshot hash
+  (`src/libs/blockchain/finality/commitments.ts:215-225`,
+  `src/libs/blockchain/finality/commitments.ts:248`). The snapshot is a row of
+  Postgres' `validator_set_snapshots`, not a file, so the empty
+  `data/snapshot` mount does not matter. Block 0's row is written at boot:
+  with no snapshot manifest `loadSnapshot` is unavailable
+  (`src/libs/blockchain/genesis/loadSnapshot.ts:468-474`),
+  `restoreGenesisState` returns false
+  (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`; with
+  `identityCarryover` off, as in the drills, it neither refuses nor restores),
+  `generateGenesisBlock` takes the legacy path and seeds no validators
+  (`src/libs/blockchain/chainGenesis.ts:71-85`), `ensureValidatorSeed` then
+  seeds them from `genesis.json` at block 0
+  (`src/index.ts:607`,
+  `src/libs/blockchain/routines/ensureValidatorSeed.ts:119-151`) and
+  `ensureValidatorSetSnapshot(0)` records the set (`src/index.ts:609`,
+  `src/libs/blockchain/finality/validatorSet.ts:142-164`). Every later block
+  adds a row only when the set changed
+  (`src/libs/blockchain/chainBlocks.ts:553-560`,
+  `src/libs/blockchain/finality/validatorSet.ts:71-89`), so the
+  one row at block 0 answers every height here. A restarted node keeps its
+  database; its boot check wants a row at or below tip-1
+  (`src/libs/blockchain/finality/validatorSet.ts:128-140`), which is that row.
+- **`osDenomination`** runs its migration when block 0 is inserted
+  (`src/libs/blockchain/chainBlocks.ts:414-428`), as on every fresh chain (its
+  default is 0).
+- **`signatureDomain`** needs `properties.id` to be an integer
+  (`src/forks/loadForkConfig.ts:220-228`, `src/forks/loadForkConfig.ts:274-282`;
+  `src/forks/signatureDomainGate.ts:36-52`);
+  `genesis.devnet.json` has 1337 and `genesis-fork-low.json` has 1. Nothing in
+  the node refuses those ids. Its list of them, `NON_MAINNET_CHAIN_IDS`
+  (`src/forks/forkConfig.ts:408`), only allows `DEMOS_DISABLE_FORK_MACHINERY`
+  on them (`src/forks/loadForkConfig.ts:192-200`), a flag the drills do not
+  set. Only `scripts/launch-go-no-go.ts:631-636` refuses them, for a real
+  launch.
+- **`nonceEnforcement`, `editBinding`, `nonceIntegrity`** act on transactions
+  (`src/libs/blockchain/gcr/handleGCR.ts:1207-1215`,
+  `src/libs/blockchain/gcr/handleGCR.ts:2097-2101`,
+  `src/libs/blockchain/mempool.ts:582`, `src/libs/blockchain/mempool.ts:643`,
+  `src/libs/blockchain/routines/validateTransaction.ts:111`,
+  `src/libs/blockchain/validation/editBinding.ts:138-150`). The drills send none:
+  `run.sh` makes only `getLastBlockNumber` and `getBlockByNumber` calls
+  (`run.sh` `head_of`, `block_req`) and reads the databases, and scenario 12
+  reads heads and `blocks` rows.
+
+Loading the generated genesis of all three launch cases and of scenario 12 with
+`loadForkConfigFromGenesis` accepts it and activates exactly the nine, with
+`identityCarryover` and `networkGovernance` loaded as null (checked again
+after the merge of stabilisation 6013cd3b44, on the `genesis-fork-low.json` and
+`genesis.devnet.json` bases; it is a unit test now,
+`drillInputs.test.ts`).
+
 ### Which validators are stopped
 
-With `committeeBinding` active (block 0 here, `gen-inputs.py`; `--binding on`),
-read from `src/libs/consensus/v2`:
+With `committeeBinding` active (block 0 here, `gen-inputs.py`; `--binding on`)
+and `finalityProofs` active as well (both are in the launch fork set, see
+[Fork set](#fork-set)), read from `src/libs/consensus/v2`:
 
 - **Pool.** The committee for block B is drawn from the peerlist committed in
-  block B-1, intersected with the staked set (`routines/getShard.ts:133-146`,
-  `chainEligiblePool`). Only when that pool holds fewer than q = 7 identities
-  does it become the whole staked set (`getShard.ts:244-267`, `getBoundPool`);
+  block B-1, intersected with the staked set
+  (`src/libs/consensus/v2/routines/getShard.ts:165-201`, `chainEligiblePool`;
+  the rule is `eligiblePoolFrom`,
+  `src/libs/consensus/v2/routines/poolRules.ts:37-56`).
+  Under `finalityProofs` the staked set is the validator set snapshot after
+  block B-2, not the live table
+  (`src/libs/consensus/v2/routines/getShard.ts:83-101`, `poolValidatorAddresses`):
+  a join or exit reaches the pool one block later. The drill has no joins or
+  exits, so the set is the genesis validators throughout and the pool
+  arithmetic below is the same as before the fork. Only when the pool holds
+  fewer than q = 7 identities does it become the whole staked set
+  (`src/libs/consensus/v2/routines/getShard.ts:272-296`, `getBoundPool`;
+  `src/libs/consensus/v2/routines/poolRules.ts:64-71`, `boundPoolFrom`);
   at a block without a peerlist (block 0) it is the staked set
-  (`getShard.ts:156-160`). It is not all staked validators in the normal case.
+  (`src/libs/consensus/v2/routines/getShard.ts:40-42`,
+  `src/libs/consensus/v2/routines/poolRules.ts:49-51`). It is not all staked
+  validators in the normal case.
 - **Draw.** The pool is ranked with `Alea(seed)` and the first `shardSize`
-  identities are the committee (`getShard.ts:223-233`, `287-293`). The seed
-  is the common validator seed of the parent block (`getShard.ts:304-317`), so
+  identities are the committee
+  (`src/libs/consensus/v2/routines/getShard.ts:251-261`, `315-321`). The seed
+  is the common validator seed of the parent block
+  (`src/libs/consensus/v2/routines/getShard.ts:332-345`), so
   which validators are drawn is not known before that block exists.
 - **Offline members are not filtered out.** They stay in the committee and
-  count as missing votes (`getShard.ts:295-303`, `420-445`). Only the
-  pre-fork path drops them and takes the next live identity
-  (`getShard.ts:389-392`; run with `--binding off` to see it).
+  count as missing votes
+  (`src/libs/consensus/v2/routines/getShard.ts:323-330`, `372-376`, `413-415`,
+  `448-473`; `src/libs/consensus/v2/routines/boundCommittee.test.ts:266`,
+  "does not replace an offline member"). Only the pre-fork path drops them and
+  takes the next live identity
+  (`src/libs/consensus/v2/routines/getShard.ts:417-420`; run with `--binding off` to see it, but
+  see the note under `--binding`).
 - **What a block needs.** 2/3 + 1 of shardSize = 7 signatures
-  (`quorum.ts:10`, `19-27`), counted only from committee members
-  (`src/libs/blockchain/validation/verifyBlock.ts:138-143`, `158-195`). A
-  producer commits on the same bar (`PoRBFT.ts:1415-1422`).
+  (`src/libs/consensus/v2/quorum.ts:10-12`, `19-27`), counted only from
+  committee members
+  (`src/libs/blockchain/validation/verifyBlock.ts:139-151`, `165-209`). A
+  producer commits on the same bar
+  (`src/libs/consensus/v2/PoRBFT.ts:1428-1435`).
 - **What the next pool is.** The committed peerlist lists the identities that
   at least 7 committee voters saw at the parent block
-  (`routines/peerlistMerge.ts:205-253`, `267-314`; the bar is `quorumThreshold(shardSize)`
-  at `:281-283`). A voter counts a peer only if its last known sync state is
-  exactly the parent block (`peerlistMerge.ts:92-105`), so a stopped
-  validator drops out of the pool once the chain has moved past the height it
-  stopped at; the block right after the stop can still list it.
+  (`src/libs/consensus/v2/routines/peerlistMerge.ts:211-259`, `273-320`; the
+  bar is `quorumThreshold(shardSize)` at `:287-289`). A voter counts a peer
+  only if its last known sync state is exactly the parent block
+  (`src/libs/consensus/v2/routines/peerlistMerge.ts:74-100`, `isAtParent` at
+  `:281-284`), so a stopped validator drops out of the pool once the chain has
+  moved past the height it stopped at; the block right after the stop can
+  still list it. (This merge filters its list by the live validators table,
+  `:230-232`, where the pool uses the snapshot; the two differ only when the
+  set changes.)
 - **Secretary and floor.** Only live committee members form the shard; fewer
   than q refuse to forge, and the secretary is the first live member that
   holds our tip, replaced when it goes offline
-  (`types/secretaryManager.ts:255-270`, `299-306`, `548-592`).
+  (`src/libs/consensus/v2/types/secretaryManager.ts:259-274`, `303-310`,
+  `605-649`).
 
 What follows for 13 validators and a committee of 10:
 
@@ -192,14 +618,34 @@ Scenario 12's, judged by `testing/forks/rehearsal/lib/haltDrill.ts`:
   `RIDE_TIMEOUT`, one hash per height, every block >= q signatures) and P6.
   The stopped validators are not restarted.
 
+Late recovery does not pass (6dbe2b40a3, 4643532f7e). P5 and R2 count a
+target only when it is reached inside `RECOVERY_TIMEOUT` (`RIDE_TIMEOUT`):
+`run.sh` sets `t_converged` only from a read in which every node is at the
+target and that finished before the deadline, and the judge fails the phase
+when `t_converged` is null (`the nodes did not reach the target inside the
+timeout (t_converged is null)`), whatever the heads and rows read after it
+show. So a node that catches up after the deadline fails the phase, and so
+does a head read that starts inside the window but returns after it, even
+with every node at the target: it is not counted as reaching it in time.
+The older scenarios' progress phases follow the same rule (see the exit
+codes above).
+
 ### Where the verdict is computed
 
 `run.sh` stops and starts the containers and writes what it saw (heads, block
 rows with signature counts from `validation_data->'signatures'`, restart
 counts, wall-clock marks) to `drill-input.json`. It then runs
 `bun testing/forks/rehearsal/lib/judgeHaltDrill.ts drill-input.json --out drill-verdict.json`
-and takes its exit code (0 pass, 1 fail, 2 malformed input, which `run.sh`
-reports as `ERROR`). The judge imports `evaluateSettle`, `evaluateHalt`,
+and takes its exit code (0 pass, 1 fail, 2 no verdict, which `run.sh`
+reports as `ERROR`, exit 2, with the judge's reasons in the detail: `the
+judge gave no verdict on .../drill-input.json (exit 2); forks.commitLock: the
+drill needs commitLock active at block 0, got null`). No verdict is given on
+malformed input, nor on a genesis that does not have `quorumParity`,
+`committeeBinding` and `commitLock` each active at block 0
+(`DRILL_REQUIRED_FORKS` in `judgeHaltDrill.ts`): the pass criteria rest on
+them, so the judge checks the fork set again after `drill_inputs.py` and
+`gen-inputs.py`, and names each one that is missing, off or at another
+height. The judge imports `evaluateSettle`, `evaluateHalt`,
 `evaluateRecovery`, `evaluateNoCrash`, `agreedHeight`, `signatureQuorum` and
 `phaseDurations` from `haltDrill.ts`, so the criteria are scenario 12's and
 nothing is re-implemented in bash.
@@ -218,29 +664,211 @@ in `verdict.json`. `cold start` starts when all N validators serve, so it
 includes the wait for the genesis time. `ride-n13s10` reports stop to first
 new block and stop to target instead of the restart timings.
 
+### Not covered
+
+The drills test the chain's behaviour under validator loss. They send no
+transactions, and some launch forks are never exercised:
+
+- `gasFeeSeparation` and `networkGovernance`: off in the mainnet-shape
+  drills, because the template has `gasFeeSeparation` as `"FILL: 0 or
+  null"` and `networkGovernance` as `null` (only the number 0 activates a
+  fork, see [Fork set](#fork-set)). The other scenarios inherit both at 0
+  from `genesis.devnet.json`, but nothing in them pays a fee or sends a
+  governance transaction.
+- `identityCarryover`: at 0 in the template, but excluded by name
+  (`LAUNCH_EXCLUDED_FORKS`): it needs a genesis snapshot and the drills
+  mount an empty one (see
+  [What differs from mainnet](#what-differs-from-mainnet-identitycarryover)).
+
+No scenario covers them, and none is planned here.
+
 ### Resources per case
 
-From the preflight formula (`START * 1100 + 256 + 3072` MB) and the timeouts
-in `run.sh`. These are estimates from the constants, not measurements.
+From the preflight formula (`START * NODE_EST_MB + HEADROOM_MB`, 1600 MB per
+node with its share of postgres and 3072 MB headroom) and the timeouts in
+`run.sh`. These are estimates from the constants, not measurements. With
+`--hosts` each host is checked for the nodes it gets.
 
 | Case | Nodes | Available RAM the preflight needs | Docker memory caps (not all used) | Time |
 |---|---|---|---|---|
-| `halt-n10s10` | 10 | 14,328 MB (14.0 GiB) | 10 x 1800 MB + 1 GB | about 12-16 min: genesis delay 310 s, baseline and one more block, settle 20-50 s, hold about 130 s, recovery 1-5 min, teardown |
-| `halt-n13s10` | 13 | 17,628 MB (17.2 GiB) | 13 x 1800 MB + 1 GB | about 13-17 min: genesis delay 385 s, then as above |
-| `ride-n13s10` | 13 | 17,628 MB (17.2 GiB) | 13 x 1800 MB + 1 GB | about 10-14 min: genesis delay 385 s, then up to `RIDE_TIMEOUT` (300 s) for 5 blocks, no restart |
+| `halt-n10s10` | 10 | 19,072 MB (18.6 GiB) | 10 x 1800 MB + 1 GB | about 12-16 min: genesis delay 310 s, baseline and one more block, settle 20-50 s, hold about 130 s, recovery 1-5 min, teardown |
+| `halt-n13s10` | 13 | 23,872 MB (23.3 GiB) | 13 x 1800 MB + 1 GB | about 13-17 min: genesis delay 385 s, then as above |
+| `ride-n13s10` | 13 | 23,872 MB (23.3 GiB) | 13 x 1800 MB + 1 GB | about 10-14 min: genesis delay 385 s, then up to `RIDE_TIMEOUT` (300 s) for 5 blocks, no restart |
+| `*-n30s10` | 30 | 51,072 MB (49.9 GiB) | 30 x 1536 MB + 3000 MB | genesis delay 810 s, then as the matching case; `restart-n30s10` about 1-6 min per restart |
 
 Disk: the preflight needs 10 GB free on `/` (`MIN_DISK_GB`). Node and
-postgres state are on tmpfs, so they count as RAM; the run's own disk use is
-the 13 container logs and the run dir, which has not been measured.
+postgres state are on tmpfs, so they count as RAM; the image's anonymous
+volumes take about 68 MB per node and each run records its own use
+(`logs/disk.txt`, `logs/pg-sizes.tsv`). Measured per-validator figures:
+`PROVIDER-SPEC.md`.
+
+### Postgres connections
+
+Every node's database is on one shared `postgres:16-alpine`; real validators
+have a database each. With the default `max_connections` of 100 the 13-node
+cases ran out: `FATAL: sorry, too many clients already` in the node logs and in
+`run.sh`'s own `psql` read (`ride-n13s10` aborted at its baseline read; the
+passing `halt-n13s10` logged it on 11 nodes, so that pass cannot be trusted).
+
+What opens a Postgres connection while a node runs:
+
+| Where | Connections |
+|---|---|
+| `src/model/datasource.ts:55-71`, the one TypeORM `DataSource` (`Datasource.getInstance`, `:153-166`, is the only caller of `initialize()`; about 40 files go through it, the boot check for pending migrations included; `migrationsRun: false` at `:75`) | one pool of up to **10**: no `max` or `poolSize` is set, so TypeORM passes `max: undefined` (`node_modules/typeorm/driver/postgres/PostgresDriver.js:1205`) and pg-pool uses 10 (`node_modules/pg-pool/index.js:89`, pg-pool 3.10.1 under pg 8.16.3, typeorm 0.3.31) |
+| `src/utilities/backupAndRestore.ts:35`, `new Client` from `pg` | 1, but it is the `bun run restore` tool (`package.json:46`), not started by the node or the image entrypoint |
+| a second `DataSource`, `new Pool`, LISTEN/NOTIFY | none in `src/`; the other `new DataSource` calls are in `*Pg.test.ts` files |
+| the sidecar (`sidecar/`), `scripts/docker-entrypoint.sh` | none |
+
+So a node holds at most 10. The drill adds its own: `psql_node` (`run.sh`, one
+`docker exec psql` at a time) and the healthcheck's `pg_isready` every 2 s
+(`gen-inputs.py`), plus 3 slots Postgres keeps for superusers
+(`superuser_reserved_connections`, counted inside `max_connections`). The
+image path's one-off migrations open the same `DataSource`, one node database
+at a time and before any node starts, so they do not add to the peak. On the
+`run-devnet` path each container runs `migration:run` itself, a process that
+exits before its node starts, so a container still holds one pool at a time.
+
+`gen-inputs.py` therefore starts the shared postgres with
+`command: ["postgres", "-c", "max_connections=M"]`, **M = 2 x 10 x N + 20**
+(`drill_inputs.py pg_max_connections`): N=4 gives 100, N=10 220, N=13 280.
+Twice the pools because a node stopped with `docker compose stop -t 0` is
+killed and the server drops its backends only when it sees the sockets close,
+while the restarted node (`restart: unless-stopped`) is already opening 10
+more. The fewest M a run can work with is 10 x N + 20 (N=13: 150).
+
+Memory: `max_connections` reserves nothing by itself. `shared_buffers` stays at
+its default 128MB (Postgres needs at least 16kB x M, 4.4MB at M=280) and the
+extra shared structures for 280 slots are a few MB. A backend costs memory only
+while its connection is open (a node's pool also closes idle connections after
+10 s), so the postgres 1g limit up to 13 nodes and the preflight RAM formula
+(`START x NODE_EST_MB + HEADROOM_MB`) do not depend on it. Not measured: this
+has not been run.
+
+Every scenario gets the setting, so the older scenarios' generated compose
+differs from before only in the postgres service's `command` (checked by
+generating both for N=4, 10 and 13 and diffing them). For 4 nodes, which is
+also what the default was:
+
+```diff
+     "postgres": {
+       "image": "postgres:16-alpine",
++      "command": ["postgres", "-c", "max_connections=100"],
+       "mem_limit": "1g",
+```
+
+and for `halt-n13s10` (the same line with `max_connections=280`).
+
+A connection-limit hit can no longer pass:
+
+- **Preflight**: after `postgres` is up and before the image path's
+  migrations and any node start, `run.sh`
+  reads `SHOW max_connections` and ends the run as exit 2, `could not run:
+  postgres max_connections is X, N nodes need Y`, if X < 10 x N + 20. It
+  tries 45 times, 2 s apart; each try looks the postgres container up within
+  `LOG_READ_TIMEOUT_S` and reads within `DB_TIMEOUT_S`. If no try gets a
+  number, exit 2 too: `could not read max_connections from postgres (45
+  tries; last: why)`.
+- **Verdict**: before the verdict is written, `run.sh` greps every node's log
+  and the log of its own `psql_node` reads (`logs/psql-errors.log`) for `too
+  many clients`. Any hit turns a PASS or a FAIL into `ERROR`, exit 2, `could
+  not run: postgres connection limit hit (n lines in node-.. node-..); the
+  result was PASS`, in `verdict.json` and `results.tsv`.
+- **Unreadable logs**: the check reads, for every node that was started
+  (`read_node_log`), the log the Docker daemon keeps. That is the node's
+  whole log unless the host's logging driver rotates logs (the `local`
+  driver, or `json-file` with `max-size`/`max-file`): then early lines can
+  have been dropped, and a hit in them is not seen. `run.log` names the
+  driver at bring-up (`docker logging driver: json-file`, or `unknown` if
+  `docker info` fails), and once the nodes run, the `max-size` and
+  `max-file` the node containers were created with, from their
+  `HostConfig.LogConfig.Config` (`node log rotation: max-size 10m, max-file
+  3`; `none set` for an option that is not; `unreadable` for a container
+  that could not be inspected in time). The compose file sets no logging
+  options, so these are the daemon's `log-opts`. With `json-file`, `none
+  set` means the whole log is kept; the `local` driver rotates even then, at
+  its own defaults (20 MB x 5 files). No driver is refused. Each docker call the check
+  makes is bounded by `LOG_READ_TIMEOUT_S` (60 s), and the log by
+  `LOG_READ_MAX_BYTES` (256 MiB, after colour codes are stripped). A log it
+  cannot read in full, or a `psql-errors.log` it cannot read, is also
+  `ERROR`, exit 2: `could not run: could not read the log of node-N to check
+  for the postgres connection limit (why); the result was PASS`. The reason
+  can be a docker error, no answer in time, no container, a log over the
+  bound, or a copy of the log that could not be written (`could not write
+  the copy to <file>`: a full disk). So are psql errors `psql_node` could not
+  write to `psql-errors.log`: it keeps them in `logs/psql-err.XXXXXX` (`psql
+  errors not written to it, kept in ...`). A psql that fails with nothing on
+  stderr (killed by a signal) is kept the same way, so the run still ends as
+  exit 2: `psql_node` then says `psql nodeN_db: exit 137, error text: none
+  given (... is kept)`, and the kept file holds that line. If even that line
+  cannot be written (a full disk), it says `its errors could not be written`.
+- **Backstop**: when the logs are collected at teardown (with the same
+  bounds), a hit also replaces exit 0 or 1 by 2, for the exits that skip the
+  verdict (an early FAIL) and for a hit a node logged after the check. So
+  does a started node's log that could not be collected, or written, or a
+  kept `psql-err.XXXXXX`, unless the check above already read every log. When the verdict was already written,
+  `verdict.json` and the run's `results.tsv` row are rewritten to match:
+  `ERROR`, `could not run: postgres connection limit hit (in the logs
+  collected at teardown: node-N.log); the result was PASS`. A record that
+  cannot be rewritten is named on stderr, and the exit is still 2.
+  `results.tsv` is shared by every run in `RUNS_DIR`, so its rewrite, like
+  the append of the row, holds an exclusive `flock` on `results.tsv.lock` next
+  to it and waits up to 30 s for it; without the lock the row is not
+  touched, and stderr says so (`no lock on .../results.tsv.lock within 30s`).
+  An append without the lock is also `ERROR`, exit 2: the `verdict.json`
+  written before it is rewritten (above). The rewrite's
+  copy of the table is the run's own (`results.tsv.tmp.<run>`), made,
+  renamed and removed only while it holds the lock.
+
+`lockstep-stub.test.sh` covers the preflight, the check and the backstop
+(also after the verdict is written)
+against a fake `docker` (a `docker logs` that fails, stalls past a 3 s bound
+set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log, and
+that exits 141 when its reader goes away, as the docker CLI does whether
+SIGPIPE is ignored or not; the file passes either way, e.g. under
+`trap '' PIPE`; a
+postgres lookup that stalls, fails or finds no container), with file writes
+failing as on a full disk (a file size limit of 0, SIGXFSZ ignored: the copy
+of a node log, the psql errors, the rewritten records), and runs `run.sh` from the top on both start paths (on the image
+path: preflight, then the 13 migrations, then node-1), and twice in one
+second (a stub `date`: two run dirs and two compose projects). It also runs `run.sh`
+whole, bring-up to verdict, against a stub chain (a stub `docker` whose head
+grows while enough nodes run, a stub `bun` and judge, a 20 ms `sleep`):
+`drop-n7s10 --binding off`, `fallback` and `ride-n13s10`, and, with one
+docker call that stalls for 300 s, `floor` (a node's `docker logs`),
+`ride-n13s10` (the restart count `inspect`) and `drop-n7s10` (node-1's head
+reads after the stop, and node-1's `docker logs` as `stop_mid_round` waits
+for a round start: no node stopped), each of which must end as exit 2 within the bound;
+then `floor` with a hit logged after the verdict (the row rewritten under the
+lock), `fallback` with one psql killed (`none given`, exit 2), a
+`ride-n13s10` whose judge refuses the fork set (`ERROR`, the fork named in
+the detail), and a `PATH` without `flock` (no start). The lock is tested on its own as well: held by
+another process, the append and the rewrite wait, then leave `results.tsv`
+and that process's copy as they were and say so, and the append rewrites the
+`verdict.json` it wrote as `PASS` to `ERROR`, exit 2 (as it does when
+`results.tsv` cannot be written); eight rewrites at once lose none of the
+eight rows. The order is tested where the append starts (a stub `flock`
+that copies both records, then kills the run): `verdict.json` already says
+`PASS`, `results.tsv` has no row of the run, and the kill leaves them so. A
+kill before `verdict.json`'s `mv` leaves neither. A `verdict.json` that
+cannot be written (an `ERROR` row, exit 2), or not rewritten after the row
+failed (it still says `PASS`, stderr says so, exit 2), is tested too.
+`drillInputs.test.ts` covers the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
 
 Everything goes to `runs/<UTC time>-<scenario>-<binding>-<label>/`
-(gitignored, mode 700): `inputs/` (identities, genesis, peerlist, compose
-file: devnet keys, never commit them), `logs/01-preflight.log` ..
+(gitignored, mode 700). The dir is created with `mkdir`, not `mkdir -p`, so
+it is never shared: a run started in the same second with the same options
+and label finds it taken and gets the next free suffix (`...-<label>-2`,
+`-3`, up to 99 tries, then exit 2), and the compose project is named after
+the dir it got, lowercased: labels that differ only in letter case (`Foo`,
+`foo`) started in the same second get distinct dirs but the same project. It
+holds `inputs/` (identities, genesis, peerlist, compose file: devnet keys,
+never commit them), `logs/01-preflight.log` ..
 `05-verdict.log` per step, `events.log` with a timestamped line per stop,
 start and partition change, `node-N.log` (full container logs, collected at
-teardown), `phases.tsv` (per phase: validators down and live, height range,
+teardown, each within the bounds of the connection-limit check below),
+`phases.tsv` (per phase: validators down and live, height range,
 blocks, mean and longest gap between block timestamps, outcome),
 `verdict.json` and `run.log` with the whole run. The `halt-*` and `ride-*`
 drills also leave `drill-input.json` (what the run observed),
@@ -251,14 +879,19 @@ drills also leave `drill-input.json` (what the run observed),
 ## Isolation on a shared host
 
 - Preflight aborts when free disk is under 10 GB, available RAM is under
-  `START * NODE_EST_MB + 256 + HEADROOM_MB` (1100 MB per node, 3 GB
-  headroom), the 1-minute load is above the core count, the host is
-  swapping, an image is missing, or another `crace-`/`qdrill-` stack is
-  running.
-- A unique compose project per run (`qdrill-<run id>`), no container names,
-  no published ports (the harness uses `docker exec`), postgres and node
-  state on tmpfs, no named volumes. Memory caps: `NODE_MEM` (1800m) per
-  node, 1 GB postgres, 64 MB per partition sidecar.
+  `START * NODE_EST_MB + HEADROOM_MB` (1600 MB per node with its share of
+  postgres, 3 GB headroom; the message gives the figure), the 1-minute load
+  is above the core count, the host is swapping, an image is missing,
+  another `crace-`/`qdrill-` stack is running, or `flock` (util-linux) is not
+  installed: `run.sh` writes the shared `runs/results.tsv` under a lock and
+  does not start without it.
+- A compose project per run (`qdrill-<run id>`, the run dir's name
+  lowercased: two runs never share a run dir, and their projects differ unless
+  their labels differ only in letter case, see [Runs and logs](#runs-and-logs)),
+  no container names, no published ports (the harness uses `docker exec`),
+  postgres and node state on tmpfs, no named volumes. Memory caps:
+  `NODE_MEM` (1800m up to 13 nodes, 1536m above) per node, postgres 1 GB up
+  to 13 nodes and 100 MB per node database above, 64 MB per partition sidecar.
 - The node runs as the image's user (`demos`, uid 1000 in the release image),
   and Docker creates a tmpfs root-owned. `run.sh` reads the uid and gid from
   `${IMAGE}` and mounts the node's `/app/state` as
@@ -266,21 +899,59 @@ drills also leave `drill-input.json` (what the run observed),
   the same string in a throwaway container and copies, restricts and reads the
   identity there as that user. Everything else the node writes (`/app`,
   `/app/data`, `/app/logs`) is an image directory the Dockerfile chowns to it.
+  `gen-inputs.py` and `drill_inputs.py tmpfs` called without `--uid`/`--gid`
+  give the plain root-owned `/app/state` of before; one of the two alone is
+  refused.
 - A trap collects the logs, removes the sidecars and runs
   `docker compose down -v --remove-orphans` on any exit, including Ctrl-C.
 
 ## Tuning
 
-`CONSENSUS_TIME` (10), `GENESIS_DELAY` (60 + 25 s per node),
+`CONSENSUS_TIME` (10, a whole number of seconds, 1 or more, no leading zero:
+`10s`, `08` and `10.5` are refused with exit 2 before any docker call), `GENESIS_DELAY` (60 + 25 s per node),
 `LOCKSTEP_TIMEOUT` (420), `PROGRESS_BLOCKS` (3), `PROGRESS_TIMEOUT` (180),
 `STALL_WINDOW` (120), `PARTITION_TIME` (120), `SETTLE_TIMEOUT` (300),
 `READ_TIMEOUT` (8, the curl timeout in seconds of the one retry after an
 empty or timed-out read of a node's head or hash during the lockstep waits),
-`NETSHOOT_IMAGE`, `RUNS_DIR`. For the `halt-*` and `ride-*` drills:
+`NETSHOOT_IMAGE`, `RUNS_DIR`. Database reads and writes are not tunable: each
+has a 10 s connect timeout, a 20 s `statement_timeout` and a 30 s outer
+`timeout` (`DB_TIMEOUT_S`). Before a read or a write (the `fallback`
+rewrite too), the postgres container is looked up
+(`docker compose ps`) within `LOG_READ_TIMEOUT_S` (60 s); a lookup that fails,
+finds no container or gets no answer is a failed read. A read that fails or
+times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. The docker
+reads a check makes that are listed here are bounded by `LOG_READ_TIMEOUT_S`
+as well, so a stalled Docker daemon ends the read and not the run: the node container
+lookups and the `docker exec` of every head and block read (`cid_of`, `rpc`),
+`serving`, the log reads of `stop_mid_round` and of the log-line counts
+(`grep_logs`), the restart counts and the bring-up snapshot (`docker stats`,
+memory). A call that does not answer in time is a failed read, never an
+answer, handled as any failed read of it: a head that cannot be read is an
+unreadable node (`ERROR` or `ABORT`, exit 2, in the other scenarios; `-1`,
+no answer, for the judge of the `halt-*` and `ride-*` drills), a log-line
+count `ERROR`, exit 2, the restart counts `ABORT`, exit 2, and a
+`stop_mid_round` whose container lookup or log read fails or does not
+answer, or that sees no round start within `ROUND_START_WAIT_S` (60 s, or 3 rounds if longer),
+`ERROR`, exit 2, before it stops the node (`stop node-N: round start unseen
+on node-1 (why)`): a stop not seen mid-round is not the drill. The
+`ROUND_START_WAIT_S` deadline is checked before each `docker logs` read, not
+after it: a read that starts before the deadline and returns after it with a
+round start in it still leads to the stop. In the `partition` fork scan, a
+block hash that cannot be read at a height every running node holds (up to the
+lowest head) ends the run as `ERROR`, exit 2; above the lowest head a node may
+not hold the block yet, and a missing hash is left out. The snapshot
+only notes the call in `03-bringup.log`. Two docker calls are still not
+bounded and a stalled daemon can hang the run there: the bring-up
+`docker compose exec -T postgres pg_isready` loop and its `ABORT` check, and
+the `docker inspect` of each container's IP before the `partition` drill. For the
+`halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
 `RIDE_TIMEOUT` (300); the first five are scenario 12's values. The judge
 needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
+For `restart-*`: `RESTARTS` (5, or N-1 below 6 validators), `REJOIN_BOOT_S` (180), `REJOIN_SYNC_S` (60),
+`REJOIN_ROUND_S` (3 x `CONSENSUS_TIME`), `REJOIN_TIMEOUT` (300), `MAX_GAP_S`
+(2 x `CONSENSUS_TIME` + 90), see [30 validators](#30-validators).
 
 ## Notes
 
@@ -300,13 +971,27 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
   scenarios other than `halt-n10s10`, `halt-n13s10` and `ride-n13s10`; those
   three always run with `GOSSIP_ENABLED=true`, whatever the environment says
   (`run.sh`), because with gossip off a restarted node never sees that the
-  network is ahead (`Sync.ts:129-136`, `networkAheadVeto.ts:59`) and the
+  network is ahead (`src/libs/blockchain/routines/Sync.ts:131-135`,
+  `src/libs/consensus/v2/routines/networkAheadVeto.ts:58-73`,
+  `src/libs/communications/broadcastManager.ts:369-415`) and the
   recovery result would measure that, not the halt. Gossip needs the sidecar
   (`node sidecar/dist/gossip-sidecar.mjs`, started by the node process itself
   from `/app`, so under either start path): the preflight aborts when the image
   has no bundle or its `node` is not a real Node.js >= 20 (a devnet-style
   image has Bun's wrapper), so those three cases need a release image.
 - Validators are stopped with `docker compose stop -t 0` right after a
-  round start is logged, so the restart policy leaves them down.
+  round start is logged, so the restart policy leaves them down. A round
+  start that is not seen (see [Tuning](#tuning)) stops nothing: the run
+  ends as `ERROR`, exit 2.
 - Round times come from block timestamps, so they show the chain's own
   pace, including retries at a height.
+- `write_verdict` writes `verdict.json` whole (to `verdict.json.tmp`, then
+  `mv`) and only then appends the row to `results.tsv`. A crash before the
+  `mv` leaves no `verdict.json` and no row (`verdict.json.tmp` may be left).
+  A crash or an interrupt after it and before the row leaves a
+  `verdict.json` with the scenario's result and no row; so does a crash
+  after a row that could not be added and before the `ERROR` rewrite's
+  `mv`, and so does a rewrite that fails (stderr says so, exit 2). After
+  the row both say the same. No crash leaves a row with no `verdict.json`;
+  the only row without one is the `ERROR` row of a `verdict.json` that
+  could not be written.

@@ -15,25 +15,32 @@ swallowed errors.
 ## Quick check
 
 ```bash
-curl -fsS http://localhost:53550/health | jq
+curl -sS http://localhost:53550/health | jq
 ```
 
-200 + `status` reflects node state. 503 means the node should not
-receive traffic.
+`/health` is the readiness probe: 200 only when the node is booted, synced
+and not dormant (`ready: true`); otherwise 503, with the reasons in
+`not_ready` (`failing`, `dormant`, `booting`, `not_synced`). 503 means the
+node should not receive traffic.
+
+`/health/live` is the liveness probe: the same body, 503 only when `status`
+is `failing`. The Docker and compose healthchecks use it, so a node that is
+still catching up is not reported unhealthy. Use `curl -sS` (not `-f`) to
+read the body of a 503.
 
 ## Status precedence
 
 `status` is one of, in order of severity:
 
-| Status | HTTP | When |
+| Status | `/health/live` | When |
 |---|---|---|
 | `ok` | 200 | All subsystems ready, boot complete, mainLoop alive |
 | `degraded` | 200 | At least one optional subsystem failed (L2PS, MCP, TLSNotary) but core flow intact |
 | `dormant` | 200 | Peer list was empty at boot — signaling/MCP/TLSN/mainLoop were skipped on purpose. Adds `X-Demos-Dormant: true` response header |
 | `failing` | 503 | Chain DB unreachable, mempool count failing, OR mainLoop dead while not in dormant mode |
 
-For k8s readiness probes: 503 is the only "not ready" signal. dormant +
-degraded are 200 because the node is intentionally in that state.
+`/health` answers 503 for `failing` and `dormant`, and also for `ok` or
+`degraded` while the node is still booting or not synced.
 
 ## Response shape
 
@@ -48,6 +55,8 @@ degraded are 200 because the node is intentionally in that state.
 
   // Epic 13 T7 additions
   "status": "ok",
+  "ready": true,
+  "not_ready": [],             // failing | dormant | booting | not_synced
   "dormant": false,
   "boot": {
     "complete": true,
@@ -97,7 +106,7 @@ degraded are 200 because the node is intentionally in that state.
 For ops dashboards that only need subsystem state:
 
 ```bash
-curl -fsS http://localhost:53550/health/subsystems | jq
+curl -sS http://localhost:53550/health/subsystems | jq
 ```
 
 Returns `{ dormant, subsystems }` only. Same rate-limit allowlist as
@@ -113,8 +122,8 @@ Expect 2xx; consider Connection: close.
 ```
 
 The LB does not need to parse the body — 503 means "remove from rotation",
-2xx means "keep in rotation". Dormant nodes stay in rotation because they
-can still serve read-only RPC.
+2xx means "keep in rotation". Dormant, booting and unsynced nodes are taken
+out of rotation: they would answer from stale state.
 
 ### k8s readiness
 
@@ -125,20 +134,26 @@ readinessProbe:
     port: 53550
   initialDelaySeconds: 60
   periodSeconds: 10
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 53550
+  initialDelaySeconds: 300
+  periodSeconds: 30
 ```
 
 ### Manual sanity check
 
 ```bash
 # Are all subsystems up?
-curl -fsS http://localhost:53550/health | \
+curl -sS http://localhost:53550/health | \
   jq '.subsystems | to_entries[] | select(.value.status != "ready" and .value.status != "skipped")'
 
 # What boot step are we on?
-curl -fsS http://localhost:53550/health | jq '.boot'
+curl -sS http://localhost:53550/health | jq '.boot'
 
 # Did a port drift?
-curl -fsS http://localhost:53550/health | jq '.ports | to_entries[] | select(.value.drifted)'
+curl -sS http://localhost:53550/health | jq '.ports | to_entries[] | select(.value.drifted)'
 ```
 
 ## Common failure patterns

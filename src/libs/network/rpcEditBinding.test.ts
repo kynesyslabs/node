@@ -5,7 +5,9 @@
  * ones; the chain, the pool and the confirmation step are replaced.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import { beforeEach, describe, expect, it, mock } from "bun:test"
+
+import { captureQueued, installSubmissionMocks } from "./txSubmission.fixtures"
 
 const logged: string[] = []
 mock.module("src/utilities/logger", () => ({
@@ -20,17 +22,7 @@ mock.module("src/utilities/logger", () => ({
         custom: () => {},
     },
 }))
-mock.module("src/libs/blockchain/chain", () => ({
-    __esModule: true,
-    default: { getLastBlockNumber: async () => 100 },
-}))
-mock.module("src/libs/gossip/GossipManager", () => ({
-    __esModule: true,
-    default: { isEnabled: () => false },
-}))
-mock.module("src/libs/consensus/confirmationEstimate", () => ({
-    estimateNextConfirmationBlock: async () => 101,
-}))
+installSubmissionMocks()
 mock.module("src/libs/blockchain/routines/validateTransaction", () => ({
     confirmTransaction: async (tx: Transaction) => ({
         data: { valid: true, reference_block: 100, message: "ok", gas_operation: null, transaction: tx },
@@ -57,20 +49,10 @@ import { OS, PEER, SENDER, chainIs, demos, onTheWire } from "src/libs/blockchain
 const { submitValidatedTx } = await import("./txSubmission")
 const { handleValidateTransaction } = await import("./endpointValidation")
 
-const original = (Mempool as any).addTransactionWithLock
-let queued: string[] = []
+const queued = captureQueued(Mempool)
 
 beforeEach(() => {
     logged.length = 0
-    queued = []
-    ;(Mempool as any).addTransactionWithLock = async (tx: Transaction) => {
-        queued.push(tx.hash)
-        return { confirmationBlock: 101 }
-    }
-})
-
-afterEach(() => {
-    ;(Mempool as any).addTransactionWithLock = original
 })
 
 const edits = (tx: Transaction) => tx.content.gcr_edits as unknown as Array<Record<string, any>>
@@ -93,7 +75,7 @@ describe("RPC submission", () => {
 
         expect(out.ok).toBe(false)
         expect(out.error).toContain("gcr_edits")
-        expect(queued).toEqual([])
+        expect(queued.hashes).toEqual([])
     })
 
     it("queues the same transaction while editBinding is dormant", async () => {
@@ -103,7 +85,7 @@ describe("RPC submission", () => {
         const out = await submitValidatedTx(envelope(tx), tx)
 
         expect(out.ok).toBe(true)
-        expect(queued).toEqual([tx.hash])
+        expect(queued.hashes).toEqual([tx.hash])
     })
 
     it("queues an unmodified transaction once active", async () => {
@@ -111,7 +93,7 @@ describe("RPC submission", () => {
         const tx = onTheWire(await DemosTransactions.pay(PEER, 3n * OS, demos))
 
         expect((await submitValidatedTx(envelope(tx), tx)).ok).toBe(true)
-        expect(queued).toEqual([tx.hash])
+        expect(queued.hashes).toEqual([tx.hash])
     })
 
     it("gives the verdict peers give for the same transaction", async () => {
@@ -133,6 +115,18 @@ describe("RPC validation", () => {
     it("refuses a native transaction with a numeric gas edit once editBinding is active", async () => {
         chainIs(true, 0)
         const out = await handleValidateTransaction(await numericGas(), sender)
+
+        expect(out.data.valid).toBe(false)
+        expect(out.data.message).toContain("GCREdit mismatch")
+        expect(out.data.message).toContain("gcr_edits do not match regenerated set")
+    })
+
+    it("keeps the generic mismatch for a changed edit while editBinding is dormant", async () => {
+        chainIs(true, null)
+        const tx = onTheWire(await DemosTransactions.pay(PEER, 3n * OS, demos))
+        edits(tx).find(e => e.type === "nonce")!.amount = 2
+
+        const out = await handleValidateTransaction(tx, sender)
 
         expect(out.data.valid).toBe(false)
         expect(out.data.message).toBe("GCREdit mismatch")

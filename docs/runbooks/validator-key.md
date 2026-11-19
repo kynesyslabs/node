@@ -83,9 +83,10 @@ that is off by some seconds moves the floor by the same amount. A round still
 in the files above stays refused whatever the clock says; a round missing from
 them is covered only when the restart took longer than the clock's actual
 error, which a normal boot does for a host synchronised by chrony or
-`systemd-timesyncd`. A production node refuses to start when two or more
-public NTP servers agree its clock is off by more than the block timestamp
-tolerance (60 s): fix the host's NTP and start again.
+`systemd-timesyncd`. A production node refuses to start when its clock is
+more than 5 s ahead or behind the median of the largest group of public NTP
+servers that agree within 2 s of each other (at least two, and only if no
+other group is as large): fix the host's NTP and start again.
 
 The files are not tied to a chain. When the key moves to another network
 with its old files, a round in them later than the network clock holds the
@@ -137,6 +138,9 @@ until the network has committed past the height first.
 Exactly one named host runs a validator for a given key at any time. Write the
 host down next to the key's backup. Never start a second node with the same
 key "just to test".
+Never run a second process for a validator key, even a stopped or halted one:
+peers count connections per key, so the copies evict each other's connections,
+and a halted copy keeps holding peer slots the live validator needs.
 
 ## The identity lock
 
@@ -203,6 +207,10 @@ refused.
    every signing state file listed above. The record is what keeps the new
    host from signing a round the old one already signed. An older copy of the
    record makes the self-check below stop the new node.
+   The new host also needs the genesis snapshot, which is not in the state
+   directory: keep the genesis snapshot on every validator for the life of
+   the chain; with `identityCarryover` active a node without it refuses to
+   start ([genesis-import.md](../mainnet/genesis-import.md)).
 3. Start the new node. If the copied lock still beats, the old node is alive:
    go back to step 1. A stale lock is replaced after a watch of 10 to 25
    seconds; `DEMOS_IDENTITY_TAKEOVER=true` shortens it to about 7 seconds.
@@ -245,7 +253,12 @@ When it fires:
    start it with the newest state directory (identity file and record).
 
 The `ForeignSignature` alert fires on any increase of
-`demos_foreign_signature_total`.
+`demos_foreign_signature_total`, and also when the first scrape after a node start
+already reads 1 or more. It is latched: it keeps firing for 7 days after
+the last event, whatever the node does afterwards, and does not resolve after 10
+minutes. Once the second copy of the key is found and stopped, acknowledge and
+clear it as described in "Clearing a latched alert" in
+`mainnet-monitoring.md`.
 
 ## Production refusals
 
@@ -280,8 +293,11 @@ chain.
 
 ## Expected file modes
 
-- Identity file: `600`. The node tightens it on start if group or other bits
-  are set, and logs a warning when it does. If it cannot (read-only mount,
-  other owner) it still starts, so fix the mode on the host.
+- Identity file: `600` (or stricter). The node tightens it on start if group
+  or other bits are set, and logs a warning when it does. If it cannot
+  (read-only mount, other owner), a production node (`PROD=true`) refuses to
+  start until the mode is fixed on the host; elsewhere it logs the problem
+  and starts. `scripts/node-doctor` (and `--production`) fails on a key file
+  group or other users can read.
 - Signing record: `600`, written by the node.
 - The directory holding them should not be readable by other users.

@@ -14,6 +14,7 @@ import {
     failedRead,
     refusal,
     signedHeader,
+    transactionBytes,
 } from "./finalityShared"
 
 const TX_HASH_REGEX = /^[0-9a-fA-F]{64}$/
@@ -26,12 +27,17 @@ const TX_HASH_REGEX = /^[0-9a-fA-F]{64}$/
  * whose committed peerlist and validator set name who may sign m + 1) and
  * block m + 1 with its certificate.
  *
+ * `tx` is the transaction itself: the bytes its hash is the sha256 of and
+ * its signature, so a client checks from, to, amount and nonce against what
+ * the block orders without a second read.
+ *
  * 404 not_found for a hash this node does not hold (503 node_not_synced
  * while it is behind, as getTransactionStatus); 404 no_result_commitment
  * when block m + 1 is outside finalityProofs or m is genesis; 409
  * not_yet_committed until block m + 1 exists; 500 content_unrecoverable when
- * a block's stored content no longer hashes to its hash, and 500
- * lookup_failed when this node's rows do not rebuild the committed root.
+ * a block's or the transaction's stored content no longer hashes to its
+ * hash, and 500 lookup_failed when this node's rows do not rebuild the
+ * committed root.
  */
 export default async function getTransactionProof(data: {
     hash?: unknown
@@ -82,6 +88,8 @@ export default async function getTransactionProof(data: {
             )
         }
 
+        const txBytes = transactionBytes(tx, m)
+
         return answer({
             hash: txHash,
             blockNumber: m,
@@ -92,6 +100,7 @@ export default async function getTransactionProof(data: {
             committedIn: m + 1,
             inclusionBlock: blockBytes(inclusion),
             commitBlock: signedHeader(commit),
+            tx: txBytes,
         })
     } catch (error) {
         log.error("[getTransactionProof] Error building the proof:", error)

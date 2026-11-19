@@ -10,22 +10,48 @@ import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { isSystemRelayTx, verifySystemRelayTx } from "./validation/systemRelayTx"
+import type { TxValidationResult } from "./validation/types"
 import { chunkedInsert } from "./chainDb"
-import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
+import {
+    admissionReads,
+    expectsNonceEdit,
+    loadAdmissionReads,
+    settlementBatchRefusal,
+    verifyAdmissionEdits,
+} from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { clientTxTypeRefusal } from "./validation/txTypes"
 import { admissionRefusal } from "./validation/postgresStorable"
-import { checkIdentityAdmission } from "./validation/identityAdmission"
+import {
+    IDENTITY_ADMISSION_TIMEOUT_MS,
+    checkIdentityAdmission,
+} from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
-import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
+import {
+    deepWindowCutoff,
+    isWithinDeepWindow,
+    referenceBlockRoomAt,
+} from "./referenceBlockWindow"
+import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
+import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
+import { nftGatingActive, nftGatingAtTip } from "@/forks/nftValidatorGatingGate"
+import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
+import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
 import {
     EvictionCandidate,
     MempoolRejectReason,
     PoolUsage,
+    SenderSlot,
     checkTxAge,
+    chooseSenderOverflow,
     chooseVictims,
     countMempoolRejection,
     getMempoolLimits,
+    holdSendersToCap,
     rejectMessage,
     txStoredBytes,
     txTotalFee,
@@ -59,8 +85,8 @@ const SIGNED_TS_SQL =
 type PoolTx = Transaction & { reference_block: number }
 
 /**
- * Where a tx entered from. Only an RPC submit may displace other txs at a
- * full pool; see `checkAdmission`.
+ * Where a tx entered from. Only an RPC submit or a gossiped tx may displace
+ * other txs at a full pool; see `checkAdmission`.
  */
 export type AdmissionOrigin = "rpc" | "gossip" | "internal"
 
@@ -68,7 +94,21 @@ export interface AddTransactionOptions {
     origin?: AdmissionOrigin
 }
 
+export interface ReceiveOptions {
+    /**
+     * The txs restore a block being rebuilt (a locked or proof-of-lock
+     * candidate): the per-sender cap does not refuse them, since the block
+     * was voted with them and cannot be rebuilt without them.
+     */
+    rebuild?: boolean
+}
+
 const AGE_SWEEP_MIN_INTERVAL_MS = 2_000
+
+// At a full pool, a gossiped tx may try to evict at most once per interval.
+// A try reads every held tx under the mempool lock, and gossip brings every
+// peer's submissions here; the others are refused as full, as before.
+const MEMPOOL_GOSSIP_EVICT_INTERVAL_MS = 1_000
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -98,6 +138,23 @@ function notOwnRelaySql(): string {
         `COALESCE(NOT (("content"->>'type') IN (${types}) ` +
         `AND LOWER("content"->>'from') = '${own}'), TRUE)`
     )
+}
+
+/** Whether a pool row is one of the node's own relay txs (see notOwnRelaySql). */
+function isOwnRelay(sender: string, type: unknown): boolean {
+    const own = getSharedState.publicKeyHex?.toLowerCase()
+    return (
+        typeof own === "string" &&
+        own !== "" &&
+        sender === own &&
+        typeof type === "string" &&
+        SYSTEM_RELAY_TX_TYPES.has(type)
+    )
+}
+
+/** The block the pool is gathered for: the one forged on the current tip. */
+function pendingHeight(): number {
+    return (getSharedState.lastBlockNumber ?? 0) + 1
 }
 
 export default class Mempool {
@@ -190,7 +247,7 @@ export default class Mempool {
      * Counts every tx whose `content.from` matches the supplied
      * lowercase hex address AND whose `reference_block` is still
      * inside the allowed window
-     * (`lastBlock - referenceBlockRoom ..= lastBlock`) — the same
+     * (`lastBlock - referenceBlockRoomAt(lastBlock) ..= lastBlock`) — the same
      * cut-off that `cleanMempool` uses to mark a tx stale and that
      * `isReferenceBlockAllowed` enforces on inbound RPC. Without the
      * window filter, expired-but-not-yet-swept rows would inflate
@@ -214,7 +271,7 @@ export default class Mempool {
         address: string,
     ): Promise<number> {
         const lastBlock = await Chain.getLastBlockNumber()
-        const cutoff = lastBlock - getSharedState.referenceBlockRoom
+        const cutoff = lastBlock - referenceBlockRoomAt(lastBlock)
         return await this.repo
             .createQueryBuilder("tx")
             .where("LOWER(tx.content->>'from') = LOWER(:address)", {
@@ -252,12 +309,57 @@ export default class Mempool {
         return counts
     }
 
+    /** Hash, sender, signed nonce and type of every pending tx from `addresses`. */
+    public static async listPendingBySenders(
+        addresses: string[],
+    ): Promise<Array<SenderSlot & { type?: unknown }>> {
+        if (addresses.length === 0) return []
+        const rows = await this.repo.query(
+            `SELECT "hash", LOWER("content"->>'from') AS sender, "content"->>'nonce' AS nonce, "content"->>'type' AS type FROM "mempooltx" WHERE LOWER("content"->>'from') = ANY($1)`,
+            [addresses.map(a => a.toLowerCase())],
+        )
+        return rows.map((row: SenderSlot & { type?: unknown }) => ({
+            hash: row.hash,
+            sender: row.sender,
+            nonce: row.nonce,
+            type: row.type,
+        }))
+    }
+
+    /**
+     * Txs of the block our commit lock binds at `height`. Kept from every
+     * eviction: a validator that cannot rebuild its locked block cannot vote
+     * at that height at all, and members rebuilding it fetch them from us.
+     */
+    public static lockedHashes(height: number = pendingHeight()): Set<string> {
+        return lockedTransactionHashes(
+            getSharedState.identityFile,
+            getSharedState.genesisBlockHash,
+            height,
+        )
+    }
+
+    /** Under blockCaps, why no block can take `tx` (see oversizeTxRefusal), or null. */
+    private static blockSizeRefusal(tx: Transaction): string | null {
+        if (!blockCapsActiveForPendingBlock()) return null
+        return oversizeTxRefusal(tx, isForkActive("osDenomination", pendingHeight()))
+    }
+
+    /**
+     * Why the pool would refuse this transaction whatever it holds and
+     * however often it is offered: unstorable, or larger than a block.
+     */
+    public static permanentRefusal(tx: Transaction): string | null {
+        return admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
+    }
+
     /** Every row's eviction ranking inputs. Only read when the pool is full. */
     public static async listEvictionCandidates(): Promise<EvictionCandidate[]> {
         const rows = await this.repo.query(
             `SELECT "hash", ${SIGNED_TS_SQL} AS ts, "content"->'transaction_fee' AS fee, (${STORED_BYTES_SQL}) AS bytes FROM "mempooltx" WHERE ${notOwnRelaySql()}`,
         )
-        return rows.map(
+        const locked = this.lockedHashes()
+        return rows.filter((row: { hash: string }) => !locked.has(row.hash)).map(
             (row: { hash: string; ts: string | null; fee: unknown; bytes: string }) => ({
                 hash: row.hash,
                 timestamp: row.ts === null ? 0 : Number(row.ts),
@@ -268,6 +370,7 @@ export default class Mempool {
     }
 
     private static lastAgeSweep = 0
+    private static lastGossipEvictAttempt = 0
 
     /**
      * Drops txs whose signed timestamp is past the pool lifetime, or is not
@@ -302,12 +405,16 @@ export default class Mempool {
      * and the pool-wide count and byte caps, and decides, without changing
      * anything, which held txs would have to go to make room.
      *
-     * Only an RPC submit may displace held txs, and only when the sender can
-     * pay the fee it offers: a tx that pays nothing it can lose must not be
-     * able to push out others. Gossip and internal txs are turned away at a
-     * full pool instead. The caller deletes the returned victims in the same
-     * database transaction as the insert, after its own nonce and duplicate
-     * checks, so a tx that then fails never costs anyone their place.
+     * Only an RPC submit or a gossiped tx may displace held txs, and only when
+     * the sender can pay the fee it offers: a tx that pays nothing it can lose
+     * must not be able to push out others. A gossiped tx is judged by the
+     * same fee rule as an RPC one, but only the first gossiped tx to get here
+     * in each MEMPOOL_GOSSIP_EVICT_INTERVAL_MS is considered; the rest are
+     * refused as full. RPC is not limited. Internal txs are turned away at a
+     * full pool instead.
+     * The caller deletes the returned victims in the same database
+     * transaction as the insert, after its own nonce and duplicate checks, so
+     * a tx that then fails never costs anyone their place.
      *
      * The peer merge does not come through here: every committee member
      * must end it with the same pool, so it is not subject to caps or
@@ -363,8 +470,20 @@ export default class Mempool {
         // Deleting a held tx while a round runs would change the pool the
         // committee is exchanging: members that already received it keep it,
         // and this node's final read would not.
-        if (origin !== "rpc" || sender === null || getSharedState.inConsensusLoop) {
+        if (origin === "internal" || sender === null || getSharedState.inConsensusLoop) {
             return refuse(full)
+        }
+        // A try counts from here, refused or failed, timed when it gets here:
+        // the queries above can be slow. Gossip only comes in under
+        // Mempool.lock (addTransactionWithLock), so no other lock. A clock
+        // stepped back behind the last try counts as a lapsed interval.
+        if (origin === "gossip") {
+            const at = Date.now()
+            const last = this.lastGossipEvictAttempt
+            if (at >= last && at - last < MEMPOOL_GOSSIP_EVICT_INTERVAL_MS) {
+                return refuse(full)
+            }
+            this.lastGossipEvictAttempt = at
         }
 
         // One balance read, and only at a full pool.
@@ -435,7 +554,7 @@ export default class Mempool {
             )
             .andWhere("tx.nonce = :nonce", { nonce })
             .andWhere("tx.reference_block >= :cutoff", {
-                cutoff: head - getSharedState.referenceBlockRoom,
+                cutoff: head - referenceBlockRoomAt(head),
             })
             .getCount()
         return taken > 0
@@ -489,6 +608,12 @@ export default class Mempool {
             return { accepted: false, reason: `${admission.code}: ${admission.reason}` }
         }
 
+        // Node-authored types reach peers through the merge, never as gossip.
+        const typeRefusal = clientTxTypeRefusal(tx, nftGatingActive(head))
+        if (typeRefusal) {
+            return { accepted: false, reason: typeRefusal }
+        }
+
         // handleGCR applies gcr_edits of any type as written, so every type
         // is bound to the edits regenerated from its signed body.
         const edits = await verifyAdmissionEdits(tx)
@@ -512,6 +637,17 @@ export default class Mempool {
         return { accepted: true, confirmationBlock }
     }
 
+    /**
+     * The block a transaction admitted now is queued for: the next block,
+     * or, while a consensus round runs, the one after the block it forges.
+     */
+    public static nextBlockRef(): number {
+        if (getSharedState.inConsensusLoop) {
+            return SecretaryManager.lastBlockRef + 1
+        }
+        return getSharedState.lastBlockNumber + 1
+    }
+
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
@@ -522,6 +658,31 @@ export default class Mempool {
         const unstorable = admissionRefusal(transaction)
         if (unstorable !== null) {
             return { confirmationBlock: null, error: unstorable }
+        }
+        // Node-built L2PS batches and hash updates come here directly, so the
+        // feature gates hold here too, not only at RPC and gossip intake.
+        const featureOff =
+            l2psGateRefusal(transaction, l2psOff()) ??
+            tlsnDisabledRefusal(transaction, tlsnDisabled())
+        if (featureOff !== null) {
+            return { confirmationBlock: null, error: featureOff }
+        }
+        const oversize = this.blockSizeRefusal(transaction)
+        if (oversize !== null) {
+            return { confirmationBlock: null, error: oversize }
+        }
+        // The producer pools its batch on the verdict the merge gives it on
+        // every peer: one only its producer holds keeps blocks from agreeing.
+        if ((transaction.content?.type as string) === "l2psBatch" && l2psSettlementActive()) {
+            let refusal: string | null
+            try {
+                refusal = await settlementBatchRefusal(transaction)
+            } catch (error) {
+                refusal = `settlement batch could not be checked: ${error instanceof Error ? error.message : String(error)}`
+            }
+            if (refusal !== null) {
+                return { confirmationBlock: null, error: refusal }
+            }
         }
 
         const txExists = await Chain.checkTxExists(transaction.hash)
@@ -541,11 +702,7 @@ export default class Mempool {
         }
 
         if (blockRef === undefined) {
-            blockRef = getSharedState.lastBlockNumber + 1
-
-            if (getSharedState.inConsensusLoop) {
-                blockRef = SecretaryManager.lastBlockRef + 1
-            }
+            blockRef = this.nextBlockRef()
         }
 
         // Audit-sweep batch C PR 4 — re-check the nonce at the insert
@@ -592,17 +749,18 @@ export default class Mempool {
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
         // nonce, not a sequential per-account counter, and never advance
-        // the sender's account.nonce (no `nonce` GCR edit). The
-        // sequential `account.nonce + 1 + pendingCount` check below is
-        // built for value-transfer txs and would reject every batch (the
-        // timestamp nonce never equals account.nonce+1), trapping the
+        // the sender's account.nonce (no `nonce` GCR edit). The nonce
+        // window below (above the confirmed nonce, at most
+        // MEMPOOL_MAX_NONCE_AHEAD past it, one pending tx per nonce) is
+        // built for value-transfer txs and would reject every batch (a
+        // timestamp nonce is far past the window), trapping the
         // L2PSBatchAggregator in a permanent retry loop.
         //
         // The exemption is gated on the tx originating from THIS node's
         // OWN identity. The aggregator only ever submits batch txs from
         // the node's own keypair, via a direct local addTransaction call;
-        // legitimate batch txs reach other nodes inside a block, not via
-        // mempool admission. Gating on own-identity means an arbitrary
+        // legitimate batch txs reach other nodes through the consensus
+        // merge (Mempool.receive), not this RPC admission. Gating on own-identity means an arbitrary
         // signer (or a remote peer) cannot self-label a tx `l2psBatch`
         // to skip the per-account nonce throttle and flood the mempool —
         // their `from` won't match this node's identity and they stay on
@@ -843,8 +1001,11 @@ export default class Mempool {
      * admitted itself, the way `receive` judges those from peers, so a stake
      * whose NFT moved since admission leaves this pool as it leaves theirs and
      * the committee keeps building the same block. An unanswerable one stays.
+     * Only under `nftValidatorGating`, the rule whose verdict can change
+     * after admission.
      */
     public static async dropRefusedSeatTransactions(): Promise<string[]> {
+        if (!nftGatingAtTip()) return []
         const { isStakingTxType } = await import("src/features/staking/types")
         const { handleStakingTx } = await import(
             "src/libs/network/routines/transactions/handleStakingTx"
@@ -865,11 +1026,121 @@ export default class Mempool {
         return refused.map(tx => tx.hash)
     }
 
-    public static async receive(incoming: Transaction[], returnDiff = true) {
+    /**
+     * Holds the senders of merged-in `txs` to the per-sender cap (see
+     * chooseSenderOverflow), evicting the held txs that no longer fit, and
+     * returns the txs still to insert. Runs under the pool lock.
+     */
+    private static async enforceSenderCap(
+        txs: Transaction[],
+    ): Promise<Transaction[]> {
+        const incoming = new Map<string, SenderSlot>()
+        for (const tx of txs) {
+            const from = tx.content?.from
+            if (typeof from !== "string") continue
+            incoming.set(tx.hash, {
+                hash: tx.hash,
+                sender: from.toLowerCase(),
+                nonce: tx.content.nonce,
+            })
+        }
+        const slots = [...incoming.values()]
+        const held = await this.listPendingBySenders([
+            ...new Set(slots.map(slot => slot.sender)),
+        ])
+        // The node's own relay txs past the cap stay queued, as do the txs
+        // of a locked block; the round leaves them out (see holdSendersToCap).
+        const keep = this.lockedHashes()
+        for (const slot of held) {
+            if (isOwnRelay(slot.sender, slot.type)) keep.add(slot.hash)
+        }
+        // A held tx can arrive again (inserted by an overlapping exchange,
+        // or held past lastBlockRef where the hash check does not look). It
+        // is ranked once, as incoming; if it does not fit, its row leaves.
+        const { refuse, evict } = chooseSenderOverflow(
+            held.filter(slot => !incoming.has(slot.hash)),
+            slots,
+            getMempoolLimits().maxPerSender,
+            keep,
+        )
+        for (const slot of held) {
+            if (refuse.has(slot.hash) && !keep.has(slot.hash)) evict.push(slot.hash)
+        }
+        if (refuse.size > 0 || evict.length > 0) {
+            log.warning(
+                `[Mempool.receive] Sender cap: refusing ${refuse.size} merged tx(s), evicting ${evict.length} held tx(s)`,
+            )
+        }
+        if (evict.length > 0) {
+            await this.repo.delete({ hash: In(evict) })
+            evict.forEach(() => countMempoolRejection("evicted"))
+        }
+        refuse.forEach(() => countMempoolRejection("sender_limit"))
+        return txs.filter(tx => !refuse.has(tx.hash))
+    }
+
+    /**
+     * Holds every sender in the pool to the per-sender cap by the merge's
+     * rule (see chooseSenderOverflow), evicting what does not fit, and
+     * returns the evicted hashes. The node's own txs skip the cap at
+     * admission and the merge caps only the senders it receives txs from,
+     * so without this a member keeps more of one sender than its peers do
+     * and forges a different block from the same txs. Runs under the pool
+     * lock.
+     *
+     * Two kinds stay queued past the cap instead: the node's own relay txs,
+     * which the aggregator cannot create again, and the txs of the block
+     * our lock binds at `height`. The round still leaves them out of what
+     * it exchanges and forges from (holdSendersToCap), as every peer does.
+     */
+    public static async capPoolSenders(
+        height: number = pendingHeight(),
+    ): Promise<string[]> {
+        const limit = getMempoolLimits().maxPerSender
+        const rows = await this.repo.query(
+            `SELECT "hash", LOWER("content"->>'from') AS sender, "content"->>'nonce' AS nonce, "content"->>'type' AS type FROM "mempooltx" WHERE LOWER("content"->>'from') IN (SELECT LOWER("content"->>'from') FROM "mempooltx" GROUP BY 1 HAVING COUNT(*) > $1)`,
+            [limit],
+        )
+        const keep = this.lockedHashes(height)
+        const slots: SenderSlot[] = rows.map(
+            (row: SenderSlot & { type?: unknown }) => {
+                if (isOwnRelay(row.sender, row.type)) keep.add(row.hash)
+                return { hash: row.hash, sender: row.sender, nonce: row.nonce }
+            },
+        )
+        const { refuse } = chooseSenderOverflow([], slots, limit, keep)
+        if (refuse.size === 0) return []
+        const evict = [...refuse]
+        log.warning(
+            `[Mempool.capPoolSenders] Sender cap: evicting ${evict.length} held tx(s)`,
+        )
+        await this.repo.delete({ hash: In(evict) })
+        evict.forEach(() => countMempoolRejection("evicted"))
+        return evict
+    }
+
+    public static async receive(
+        incoming: Transaction[],
+        returnDiff = true,
+        options: ReceiveOptions = {},
+    ) {
+        const capped = blockCapsActiveForPendingBlock()
         if (incoming.length === 0) {
+            // Nothing to merge, but a member with an empty pool, or one
+            // asking for the next page of ours, still gets our pool back.
+            if (!returnDiff) return { success: true, mempool: [] }
+            const blockNumber = SecretaryManager.lastBlockRef
+            const pool = await this.getMempool(blockNumber)
+            // Under blockCaps a block leaves txs pooled for later ones, and
+            // their rows keep the block number they entered with: the round's
+            // pool is every row through this block, as the merge reads it.
             return {
                 success: true,
-                mempool: [],
+                mempool: capped
+                    ? holdSendersToCap(
+                          pool.filter(tx => tx.blockNumber <= blockNumber),
+                      )
+                    : pool.filter(tx => tx.blockNumber === blockNumber),
             }
         }
 
@@ -880,7 +1151,7 @@ export default class Mempool {
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
         // Drop gossiped txs whose reference block has aged out of the deep
-        // window (5x referenceBlockRoom) before they reach validation.
+        // window (5x the room of the head) before they reach validation.
         // Expired-but-recent txs — outside the inclusion window that
         // isReferenceBlockAllowed enforces on the endpoint admission path,
         // but inside the deep window — are admitted so consensus can
@@ -893,7 +1164,7 @@ export default class Mempool {
         // first, since the chain lookup below queries by the hash.
         const unseenCandidates = incoming.filter(tx => {
             if (existingHashes[tx.hash]) return false
-            const unstorable = admissionRefusal(tx)
+            const unstorable = this.permanentRefusal(tx)
             if (unstorable !== null) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${String(tx?.hash).slice(0, 80)}: ${unstorable}`,
@@ -925,10 +1196,10 @@ export default class Mempool {
                 )
                 return false
             }
-            if (!isWithinDeepWindow(tx.reference_block, lastBlock)) {
+            if (!isWithinDeepWindow(peerColumns.reference_block, lastBlock)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
-                        `${tx.reference_block} outside the allowed window at block ${lastBlock}`,
+                        `${peerColumns.reference_block} outside the allowed window at block ${lastBlock}`,
                 )
                 return false
             }
@@ -949,7 +1220,10 @@ export default class Mempool {
 
         if (unseenTransactions.length === 0) {
             const incomingHashes = new Set(incoming.map(tx => tx.hash))
-            const finalPool = await this.getMempool(blockNumber)
+            const pool = await this.getMempool(blockNumber)
+            const finalPool = capped
+                ? holdSendersToCap(pool.filter(tx => tx.blockNumber <= blockNumber))
+                : pool
             const final = finalPool.filter(
                 tx =>
                     tx.blockNumber <= blockNumber &&
@@ -975,11 +1249,25 @@ export default class Mempool {
         // Same story for the signature preimage: resolved here, where the
         // fork config and the chain tip live, and threaded into the workers.
         const signatureDomain = pendingTxSignatureContext()
-        const results = await TxValidatorPool.getInstance().validate(
-            unseenTransactions,
+        // A relay tx is hashed and signed by its producer's rule, which the
+        // standard check never accepts. Judged here by the rule block and
+        // sync verification apply, every member pools a peer's batch; refused,
+        // only its producer forms a block with it and no block is agreed on.
+        // Not behind l2psSettlement: what a member pools is no apply rule,
+        // and block and Sync verification judge relay txs this way on both
+        // sides of the fork, so the old refusal stalled pre-fork batches too.
+        const standardTxs = unseenTransactions.filter(tx => !isSystemRelayTx(tx))
+        const standardResults = await TxValidatorPool.getInstance().validate(
+            standardTxs,
             coherenceIsPostFork,
             signatureDomain,
         )
+        const verdictByTx = new Map<Transaction, TxValidationResult>()
+        standardTxs.forEach((tx, i) => verdictByTx.set(tx, standardResults[i]))
+        for (const tx of unseenTransactions) {
+            if (isSystemRelayTx(tx)) verdictByTx.set(tx, await verifySystemRelayTx(tx))
+        }
+        const results = unseenTransactions.map(tx => verdictByTx.get(tx)!)
         const end = Date.now()
         log.only(
             `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${unseenTransactions.length} transactions`,
@@ -1008,8 +1296,13 @@ export default class Mempool {
         // comparison carries them.
         {
             const editVerifiedTransactions: Transaction[] = []
+            // The tip and the validator set are read once for the merge. A
+            // failed read fails the merge rather than drop transactions the
+            // peers keep.
+            const reads = admissionReads()
+            await loadAdmissionReads(validTransactions, reads)
             for (const tx of validTransactions) {
-                const edits = await verifyAdmissionEdits(tx)
+                const edits = await verifyAdmissionEdits(tx, reads)
                 if (!edits.ok) {
                     log.error(
                         `[Mempool.receive] Rejecting tx ${tx.hash}: ${edits.reason}`,
@@ -1026,8 +1319,10 @@ export default class Mempool {
         // tx, not only by the RPC node that admitted it, so a seat needs a
         // voting quorum to agree the NFT proof holds. A tx no Solana
         // endpoint could answer for is left out and comes back at the next
-        // merge; one a healthy endpoint rejected is dropped.
-        {
+        // merge; one a healthy endpoint rejected is dropped. Only under
+        // nftValidatorGating: before it the staking policy reads the chain
+        // alone, which the block's apply already judges.
+        if (nftGatingAtTip()) {
             const { isStakingTxType } = await import("src/features/staking/types")
             const { handleStakingTx } = await import(
                 "src/libs/network/routines/transactions/handleStakingTx"
@@ -1062,7 +1357,13 @@ export default class Mempool {
         // once per merge rather than once per identity transaction.
         {
             const verdicts = await Promise.all(
-                validTransactions.map(tx => checkIdentityAdmission(tx)),
+                validTransactions.map(tx =>
+                    checkIdentityAdmission(
+                        tx,
+                        IDENTITY_ADMISSION_TIMEOUT_MS,
+                        capped ? "merge" : "ingest",
+                    ),
+                ),
             )
             const proofChecked: Transaction[] = []
             verdicts.forEach((verdict, i) => {
@@ -1083,42 +1384,57 @@ export default class Mempool {
             `[Mempool.receive] Valid transactions: ${validTransactions.length}`,
         )
 
-        // The merge is not subject to the admission caps or the tx lifetime:
+        // The merge is not subject to the pool caps or the tx lifetime:
         // every committee member must end it holding the same pool, and a
         // cap or a clock applied per node would have each one drop
-        // different txs. Callers bound the batch size.
-        for (const tx of validTransactions) {
-            noSendBackTxs.set(tx.hash, tx.hash)
-            tx.status = TRANSACTION_STATUS.PENDING
-        }
+        // different txs. Callers bound the batch size. Under blockCaps the
+        // per-sender cap does apply, by a rule that depends only on the txs
+        // seen (see chooseSenderOverflow), so members still converge. The
+        // cap's read and the insert run under the pool lock: overlapping
+        // exchanges must see each other's txs, or each admits up to the cap
+        // and the sender ends over it on this member alone.
+        const store = async () => {
+            if (capped && !options.rebuild && validTransactions.length > 0) {
+                const kept = await this.enforceSenderCap(validTransactions)
+                validTransactions.length = 0
+                validTransactions.push(...kept)
+            }
 
-        if (validTransactions.length > 0) {
-            // The peer's own timestamp and nonce are unsigned: the row takes
-            // the signed ones, which the validator checked Postgres reads, as
-            // addTransaction does.
-            const rows = validTransactions.map(tx => ({
-                ...tx,
-                timestamp: tx.content.timestamp,
-                nonce: tx.content.nonce,
-            }))
-            try {
-                const { inserted } = await chunkedInsert(
-                    this.repo,
-                    MempoolTx,
-                    rows as any[],
-                    {
-                        conflictTarget: ["hash"],
-                        overwrite: ["blockNumber"],
-                    },
-                )
-                log.only(
-                    `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
-                )
-            } catch (error) {
-                log.error("[Mempool.receive] Error saving received mempool:")
-                console.error(error)
+            for (const tx of validTransactions) {
+                noSendBackTxs.set(tx.hash, tx.hash)
+                tx.status = TRANSACTION_STATUS.PENDING
+            }
+
+            if (validTransactions.length > 0) {
+                // The peer's own timestamp and nonce are unsigned: the row takes
+                // the signed ones, which the validator checked Postgres reads, as
+                // addTransaction does.
+                const rows = validTransactions.map(tx => ({
+                    ...tx,
+                    timestamp: tx.content.timestamp,
+                    nonce: tx.content.nonce,
+                }))
+                try {
+                    const { inserted } = await chunkedInsert(
+                        this.repo,
+                        MempoolTx,
+                        rows as any[],
+                        {
+                            conflictTarget: ["hash"],
+                            overwrite: ["blockNumber"],
+                        },
+                    )
+                    log.only(
+                        `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
+                    )
+                } catch (error) {
+                    log.error("[Mempool.receive] Error saving received mempool:")
+                    console.error(error)
+                }
             }
         }
+        if (capped) await this.lock.runExclusive(store)
+        else await store()
 
         if (!returnDiff) {
             return {
@@ -1134,6 +1450,22 @@ export default class Mempool {
 
         // INFO: Redundancy
         // INFO: Return the difference to the caller node
+        if (capped) {
+            // Every row through this block, as in the empty-request reply,
+            // less what the caller sent: a reply is paged, and pages spent on
+            // txs it holds would leave out ones it lacks.
+            const incomingHashes = new Set(incoming.map(tx => tx.hash))
+            return {
+                success: true,
+                mempool: holdSendersToCap(
+                    finalPool.filter(tx => tx.blockNumber <= blockNumber),
+                ).filter(
+                    tx =>
+                        !noSendBackTxs.has(tx.hash) &&
+                        !incomingHashes.has(tx.hash),
+                ),
+            }
+        }
         const final = finalPool.filter(
             tx => tx.blockNumber === blockNumber && !noSendBackTxs.has(tx.hash),
         )
@@ -1185,7 +1517,7 @@ export default class Mempool {
      * Removes old and executed transactions from the mempool.
      *
      * Old: reference_block falls outside the deep window
-     * (5x referenceBlockRoom). Rows in the expired-but-includable band —
+     * (5x the room of the head). Rows in the expired-but-includable band —
      * outside the inclusion window isReferenceBlockAllowed enforces on
      * inbound RPC, but inside the deep window — are retained so consensus
      * can include them as failed.

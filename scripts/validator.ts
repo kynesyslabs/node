@@ -9,6 +9,7 @@ import {
     type ParsedTransactionWithMeta,
 } from "@solana/web3.js"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import { parseNodeUrl } from "../src/config/nodeUrl"
 
 import { parseNodeUrl } from "../src/config/nodeUrl"
 import { MEMO_PROGRAM_IDS, PROOF_MEMO_PREFIX } from "../src/features/staking/proofBytes"
@@ -78,17 +79,42 @@ function firstPeerlistRpc(): string {
             `${PEERLIST_FILE} not found. Pass --rpc <url> or create the peerlist.`,
         )
     }
-    let peers: Record<string, string>
+    let peers: unknown
     try {
         peers = JSON.parse(readFileSync(PEERLIST_FILE, "utf8"))
     } catch {
         exitWith(`failed to parse ${PEERLIST_FILE}`)
     }
-    const urls = Object.values(peers)
-    if (urls.length === 0) {
-        exitWith(`${PEERLIST_FILE} has no entries. Pass --rpc <url>.`)
+    if (typeof peers !== "object" || peers === null || Array.isArray(peers)) {
+        exitWith(
+            `${PEERLIST_FILE} must be an object of peer URLs. Pass --rpc <url>.`,
+        )
     }
-    return urls[0]
+    // Same entry shapes the node reads (PeerManager.ts), which skips the rest:
+    // "pubkey": "<url>" or "pubkey": { "url": "<url>", ... }
+    const entries: [string, unknown][] = Object.entries(peers)
+    for (const [key, value] of entries) {
+        const url =
+            typeof value === "object" && value !== null && "url" in value
+                ? value.url
+                : value
+        if (typeof url !== "string" || url.trim() === "") {
+            console.error(
+                `${PEERLIST_FILE} entry ${JSON.stringify(key)} is not a peer URL or an object with a url, skipping`,
+            )
+            continue
+        }
+        // An unedited copy of the example holds a placeholder such as
+        // https://<host>:53550; naming it here beats a connect failure later.
+        if (!parseNodeUrl(url)) {
+            console.error(
+                `${PEERLIST_FILE} entry ${JSON.stringify(key)} has no usable URL (${JSON.stringify(url)}). Set a real validator URL, skipping`,
+            )
+            continue
+        }
+        return url
+    }
+    exitWith(`${PEERLIST_FILE} has no usable entries. Pass --rpc <url>.`)
 }
 
 function loadMnemonic(file: string): string {

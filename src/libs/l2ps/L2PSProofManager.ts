@@ -26,6 +26,7 @@ import { L2PSProof, L2PSProofStatus } from "@/model/entities/L2PSProofs"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import Hashing from "@/libs/crypto/hashing"
 import log from "@/utilities/logger"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
@@ -117,6 +118,14 @@ export default class L2PSProofManager {
         transactionCount = 1,
         transactionHashes: string[] = [],
     ): Promise<ProofCreationResult> {
+        // A row written now would be applied by this node alone if the fork
+        // were ever switched off again; under the fork batches settle on L1.
+        if (l2psSettlementActive()) {
+            return {
+                success: false,
+                message: "L2PS proofs are not created under l2psSettlement; batches settle on L1",
+            }
+        }
         try {
             const repo = await this.getRepo()
 

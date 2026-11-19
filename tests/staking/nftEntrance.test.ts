@@ -25,7 +25,7 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null },
+    getSharedState: { networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
@@ -60,6 +60,9 @@ import {
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
 } from "@/features/staking/constants"
+
+// bun's jest shim has no jest.mocked.
+const asMock = (fn: unknown) => fn as { mockResolvedValue: (value: never) => void }
 
 let ValidatorsManagement: typeof import("@/libs/blockchain/routines/validatorsManagement").default
 beforeAll(async () => {
@@ -117,9 +120,9 @@ beforeEach(() => {
     jest.clearAllMocks()
     allowlisted.clear()
     allowlisted.add(MINT).add(MINT2)
-    jest.mocked(GCR.getAccountBalance).mockResolvedValue(BigInt(MIN) * 10n as never)
-    jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(null as never)
-    jest.mocked(GCR.getGCRValidatorByMint).mockResolvedValue(null as never)
+    asMock(GCR.getAccountBalance).mockResolvedValue(BigInt(MIN) * 10n as never)
+    asMock(GCR.getGCRValidatorStatus).mockResolvedValue(null as never)
+    asMock(GCR.getGCRValidatorByMint).mockResolvedValue(null as never)
     solana.proof.mockResolvedValue({ status: "valid", slot: 10 })
     solana.owner.mockResolvedValue({ status: "valid", slot: 11 })
     solana.evidence.mockResolvedValue({ status: "valid", slot: 12 })
@@ -148,7 +151,7 @@ describe("taking a seat", () => {
     })
 
     it("accepts a later proof for a mint backing another seat, naming the eviction", async () => {
-        jest.mocked(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER }) as never)
+        asMock(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER }) as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(r.valid).toBe(true)
         expect(r.message).toContain(`evicts ${OTHER}`)
@@ -156,7 +159,7 @@ describe("taking a seat", () => {
     })
 
     it("rejects a proof not later than the held seat's, and reports its proof unreachable", async () => {
-        jest.mocked(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER }) as never)
+        asMock(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER }) as never)
         solana.order.mockResolvedValue({ status: "invalid", reason: "not later than the seat's proof" })
         const stale = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(stale.valid).toBe(false)
@@ -169,7 +172,7 @@ describe("taking a seat", () => {
     })
 
     it("skips the ordering check when the held seat has no proof on record", async () => {
-        jest.mocked(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER, nft_proof_tx: null }) as never)
+        asMock(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER, nft_proof_tx: null }) as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(r.valid).toBe(true)
         expect(solana.order).not.toHaveBeenCalled()
@@ -196,7 +199,7 @@ describe("taking a seat", () => {
     })
 
     it("treats re-entry after an exit as taking a seat", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(
             seat({ status: VALIDATOR_STATUS_EXITED, staked_amount: "0" }) as never,
         )
         const without = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({}))
@@ -208,14 +211,14 @@ describe("taking a seat", () => {
 
 describe("topping up", () => {
     it("needs no proof and skips Solana", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({}))
         expect(r.valid).toBe(true)
         expect(solana.proof).not.toHaveBeenCalled()
     })
 
     it("refuses any proof, even for the seat's own mint, since it would go unchecked", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(r.valid).toBe(false)
         expect(r.message).toContain("cannot carry an NFT proof")
@@ -225,32 +228,32 @@ describe("topping up", () => {
 
 describe("challenging a seat", () => {
     it("accepts evidence that moves the recorded NFT, from any sender", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
         const r = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
         expect(r.valid).toBe(true)
         expect(solana.evidence).toHaveBeenCalledWith(SIG, { mint: MINT, owner: OWNER, proofTx: SIG })
     })
 
     it("also applies to a validator that is unstaking", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(
             seat({ status: VALIDATOR_STATUS_UNSTAKING }) as never,
         )
         expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).valid).toBe(true)
     })
 
     it("rejects a target that holds no seat or has no NFT on record", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(null as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(null as never)
         expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).message).toContain("not found")
 
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ status: VALIDATOR_STATUS_EXITED }) as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ status: VALIDATOR_STATUS_EXITED }) as never)
         expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).message).toContain("no seat")
 
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ nft_mint: null }) as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ nft_mint: null }) as never)
         expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).message).toContain("no NFT on record")
     })
 
     it("rejects a challenge judged against a proof the seat no longer rests on", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
         const r = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER, SIG, SIG2))
         expect(r.valid).toBe(false)
         expect(r.message).toContain("rests on")
@@ -258,7 +261,7 @@ describe("challenging a seat", () => {
     })
 
     it("rejects bad evidence and flags unanswered evidence as unreachable", async () => {
-        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
         solana.evidence.mockResolvedValue({ status: "invalid", reason: "not later than the proof" })
         const bad = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
         expect(bad.valid).toBe(false)

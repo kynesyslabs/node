@@ -20,7 +20,8 @@ interface GetStorageProgramData {
  * cross-repo contract).
  *
  * Enforces ACL via checkReadPermission. Anonymous callers can read public
- * programs; restricted/owner programs require requesterAddress.
+ * programs; restricted/owner programs need requesterAddress, which the
+ * handler sets from the verified sender only.
  */
 export default async function getStorageProgram(
     data: GetStorageProgramData,

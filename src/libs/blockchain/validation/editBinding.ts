@@ -39,15 +39,33 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
-import { GASLESS_TX_TYPES, GCRGeneration } from "@kynesyslabs/demosdk/websdk"
+import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { isForkActive } from "@/forks/forkGates"
+import { readState } from "@/libs/blockchain/gcr/stateReadError"
+import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 import { governanceGateRefusal } from "@/forks/governanceGate"
+import { tokenStakingOpen, tokenStakingRefusal } from "@/forks/tokenStakingGate"
+import { l2psGateRefusal, l2psOffAt } from "@/forks/l2psGate"
+import { tlsnDisabledAt, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
+import {
+    isGaslessTxType,
+    nftGatingActive,
+    nftGatingAtTip,
+    nftGatingRefusal,
+} from "@/forks/nftValidatorGatingGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
+import { valueRulesRefusal, type ValueRules } from "./nativeValueRules"
+import {
+    blockTxTypeRefusal,
+    isNodeMessage,
+    nodeMessageRefusal,
+    validatorKeysAt,
+} from "./txTypes"
 import {
     canonical,
     verifyGcrEditsMatch,
@@ -75,7 +93,8 @@ const EDIT_FREE_TYPES = new Set<string>(["l2psBatch", "genesis"])
 
 /**
  * The signalling server stores messages as `instantMessaging` transactions
- * signed by the node, with no edits. A client-signed one carries the universal
+ * signed by the node, with no edits; under `instantMessagingBinding` only a
+ * staked validator may sign one. A client-signed one carries the universal
  * edits instead and is compared like any other type.
  */
 const EDIT_FREE_OR_BOUND_TYPES = new Set<string>(["instantMessaging"])
@@ -110,8 +129,9 @@ export async function derivedGasEdit(
     type: string,
     account: string,
     postFork: boolean,
+    nftGating: boolean = nftGatingAtTip(),
 ): Promise<GCREdit | null> {
-    if (GASLESS_TX_TYPES.has(type)) return null
+    if (isGaslessTxType(type, nftGating)) return null
     const gas = (await GCRGeneration.createGasEdit(account, "", false)) as GCREdit
     return toWireShape([gas], postFork)[0] ?? null
 }
@@ -124,22 +144,151 @@ async function osDenominationActive(): Promise<boolean> {
  * Whether edits are bound, and the denomination shape expected, from one read
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
- * which is block H + 1. `governance` is the `networkGovernance` state, read
- * from the same tip so admission and apply judge it alike.
+ * which is block H + 1. `governance`, `typeAllowList`, `messageBinding` and
+ * `stakeChecks` are the `networkGovernance`, `txTypeAllowList`,
+ * `instantMessagingBinding` and `stakeApplyChecks` states, read from the same
+ * tip so admission and apply judge them alike, and so are the value rules
+ * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) and
+ * `stakingOpen`, whether token staking is open (`tokenStakingGate`,
+ * `tokenStaking`), and `l2psOff` and `tlsnOff`, the `l2psGate` and
+ * `tlsnDisabled` states, and `nftGating`, the `nftValidatorGating` state;
+ * `tip` is that tip.
  */
-export async function editBindingState(): Promise<{
+export interface EditBindingState extends ValueRules {
     active: boolean
     postFork: boolean
     nonceBound: boolean
     governance: boolean
-}> {
+    typeAllowList: boolean
+    messageBinding: boolean
+    stakeChecks: boolean
+    stakingOpen: boolean
+    l2psOff: boolean
+    tlsnOff: boolean
+    nftGating: boolean
+    /** l2psSettlement: a batch settles through its record, so it is admitted as one. */
+    settling: boolean
+    tip: number
+}
+
+export async function editBindingState(): Promise<EditBindingState> {
     const tip = await Chain.getLastBlockNumber()
     return {
         active: isForkActive("editBinding", tip),
         postFork: isForkActive("osDenomination", tip),
         nonceBound: isForkActive("nonceIntegrity", tip),
         governance: isForkActive("networkGovernance", tip),
+        typeAllowList: isForkActive("txTypeAllowList", tip),
+        messageBinding: isForkActive("instantMessagingBinding", tip),
+        stakeChecks: isForkActive("stakeApplyChecks", tip),
+        stakingOpen: tokenStakingOpen(tip),
+        l2psOff: l2psOffAt(tip),
+        tlsnOff: tlsnDisabledAt(tip),
+        nftGating: nftGatingActive(tip),
+        settling: isForkActive("l2psSettlement", tip),
+        sendBound: isForkActive("nativeSendBinding", tip),
+        canonical: isForkActive("canonicalAddresses", tip),
+        feeBound: isForkActive("feeBinding", tip),
+        tip,
     }
+}
+
+/**
+ * The reads admission makes that do not depend on the transaction: the fork
+ * state at the tip, for fee-free messages the validators staked there, and
+ * under `feeBinding` a refresh of network parameters a failed read left stale.
+ * A batch (the consensus merge) shares one instance, so each is read once per
+ * batch rather than once per transaction; the validator set only when a
+ * message needs it. A failed read refuses every transaction that needs it,
+ * as it would one by one, unless the batch loaded them first (see
+ * `loadAdmissionReads`).
+ */
+export interface AdmissionReads {
+    state(): Promise<EditBindingState>
+    validators(): Promise<ReadonlySet<string>>
+    parameters(): Promise<void>
+}
+
+export function admissionReads(): AdmissionReads {
+    let state: Promise<EditBindingState> | undefined
+    let validators: Promise<ReadonlySet<string>> | undefined
+    let parameters: Promise<void> | undefined
+    const reads: AdmissionReads = {
+        state: () => (state ??= readState("fork state", editBindingState)),
+        validators: () =>
+            (validators ??= reads
+                .state()
+                .then(s => readState("validator set", () => validatorKeysAt(s.tip)))),
+        parameters: () =>
+            (parameters ??= readState("network parameters", () =>
+                ensureNetworkParametersCurrent(),
+            )),
+    }
+    return reads
+}
+
+/**
+ * Makes the reads `txs` will need, so that a failed one throws a
+ * StateReadError here instead of refusing transactions in
+ * `verifyAdmissionEdits`. The consensus merge calls it: refusing there would
+ * leave this node alone without transactions every peer keeps. Under
+ * `feeBinding` that includes the network parameters the fees are judged on:
+ * after a failed refresh they may predate a fee change every peer applied.
+ */
+export async function loadAdmissionReads(
+    txs: Transaction[],
+    reads: AdmissionReads,
+): Promise<void> {
+    const { messageBinding, feeBound, settling } = await reads.state()
+    const batches = settling && txs.some(isSettlementBatch)
+    if ((feeBound || batches) && txs.length > 0) await reads.parameters()
+    if ((messageBinding && txs.some(isNodeMessage)) || batches) await reads.validators()
+}
+
+/**
+ * Why `tx` is refused because the feature it uses is off on this network
+ * (`l2psGate`, `tlsnDisabled`), or an edit `nftValidatorGating` confines to
+ * another transaction type, or null. Judged before any edit is looked
+ * at, so a refused transaction pays no fee and spends no nonce.
+ */
+export function featureGateRefusal(
+    tx: { content?: unknown },
+    state: Pick<EditBindingState, "l2psOff" | "tlsnOff"> & { nftGating?: boolean },
+): string | null {
+    return (
+        l2psGateRefusal(tx, state.l2psOff) ??
+        tlsnDisabledRefusal(tx, state.tlsnOff) ??
+        nftGatingRefusal(tx, state.nftGating === true)
+    )
+}
+
+/**
+ * Why a transaction's stake edits act on another account than the sender's,
+ * or claim to be a rollback, or null. Under `stakeApplyChecks` a stake moves
+ * the balance of the account it names, so that account must be the one that
+ * signed, and a rolled back stake pays its bond back with no lock or floor
+ * check, which only the node's own rollback may do. Both hold whether or not
+ * `editBinding` binds the rest of the edits. Under `nftValidatorGating` the
+ * evict edit of a challenge names the evicted validator, vouched for by the
+ * Solana evidence rather than the sender; `nftGatingRefusal` keeps it to
+ * challenges.
+ */
+export function stakeSenderRefusal(tx: Transaction, nftGating = false): string | null {
+    const sender = senderOf(tx)
+    const account = sender !== "" && !sender.startsWith("0x") ? `0x${sender}` : sender
+    for (const edit of (tx.content?.gcr_edits ?? []) as unknown as Array<
+        Record<string, unknown>
+    >) {
+        if (String(edit.type) !== "validatorStake") continue
+        const evict = nftGating && edit.operation === "evict"
+        if (!evict && (account === "" || edit.account !== account)) {
+            return "validatorStake edit acts on another account than the sender"
+        }
+        if (edit.isRollback) {
+            return "validatorStake edit is shipped as a rollback"
+        }
+    }
+    return null
 }
 
 /**
@@ -319,7 +468,10 @@ export async function verifyEditsAgainstBody(
  * Exceptions: a Telegram identity link is signed by the bot and acts on the
  * user's account, which the user's own signature inside the proof vouches for.
  */
-export function verifySenderBinding(tx: Transaction): EditVerdict {
+export function verifySenderBinding(
+    tx: Transaction,
+    nftGating: boolean = nftGatingAtTip(),
+): EditVerdict {
     const sender = senderOf(tx)
     // Generation prefixes every account it names, but copies the sender into a
     // storage edit's context as it was signed.
@@ -334,7 +486,7 @@ export function verifySenderBinding(tx: Transaction): EditVerdict {
             case "validatorStake":
                 // A challenge evicts another validator's seat; the evidence
                 // it carries is what vouches for it, not the sender.
-                if (edit.operation === "evict") break
+                if (nftGating && edit.operation === "evict") break
                 if (account === "" || edit.account !== account) {
                     return refuse(`${type} edit acts on another account than the sender`)
                 }
@@ -377,11 +529,11 @@ export function verifySenderBinding(tx: Transaction): EditVerdict {
  */
 export async function verifyEditsAtApply(
     tx: Transaction,
-    options: { postFork?: boolean } = {},
+    options: { postFork?: boolean; nftGating?: boolean } = {},
 ): Promise<EditVerdict> {
     const bound = await verifyEditsAgainstBody(tx, options)
     if (!bound.ok || isAwardPointsTx(tx)) return bound
-    return verifySenderBinding(tx)
+    return verifySenderBinding(tx, options.nftGating ?? nftGatingAtTip())
 }
 
 /** The fields an SDK nonce edit carries; anything else was not generated. */
@@ -458,17 +610,46 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
  * bound as well: the value-edit projection does not look at it. The
- * `networkGovernance` rule also holds on either side of `editBinding`.
+ * `networkGovernance`, `tokenStakingGate`, `txTypeAllowList`, `l2psGate`,
+ * `tlsnDisabled` and `instantMessagingBinding` rules and the value rules (`nativeSendBinding`,
+ * `canonicalAddresses`, `feeBinding`) also hold on either side of
+ * `editBinding`.
  *
- * Fails closed: a transaction that cannot be checked is refused.
+ * Fails closed: a transaction that cannot be checked is refused. A batch
+ * passes one `reads` to every call (see `admissionReads`).
  */
-export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
+export async function verifyAdmissionEdits(
+    tx: Transaction,
+    reads: AdmissionReads = admissionReads(),
+): Promise<EditVerdict> {
     try {
-        const { active, postFork, nonceBound, governance } = await editBindingState()
+        const state = await reads.state()
+        const { active, postFork, nonceBound, governance, typeAllowList, messageBinding } =
+            state
+        const typeRefusal = typeAllowList ? blockTxTypeRefusal(tx, state.nftGating) : null
+        if (typeRefusal) return refuse(typeRefusal)
+        const featureRefusal = featureGateRefusal(tx, state)
+        if (featureRefusal) return refuse(featureRefusal)
+        if (messageBinding && isNodeMessage(tx)) {
+            const messageRefusal = nodeMessageRefusal(tx, await reads.validators())
+            if (messageRefusal) return refuse(messageRefusal)
+        }
+        if (state.settling && isSettlementBatch(tx)) {
+            const batchRefusal = await settlementBatchRefusal(tx, reads)
+            if (batchRefusal) return refuse(batchRefusal)
+        }
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
+        const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
+        if (stakingRefusal) return refuse(stakingRefusal)
+        // A fee judged on parameters a failed read left behind a governance
+        // change would refuse what every peer accepts. A batch loaded them
+        // first; a single intake refuses until they can be read.
+        if (state.feeBound) await reads.parameters()
+        const valueRefusal = await valueRulesRefusal(tx, state)
+        if (valueRefusal) return refuse(valueRefusal)
         const verdict = active
-            ? await verifyEditsAtApply(tx, { postFork })
+            ? await verifyEditsAtApply(tx, { postFork, nftGating: state.nftGating })
             : await verifyAdmissionEditsBeforeBinding(tx)
         if (!verdict.ok || !nonceBound) return verdict
         return verifyNonceEditBinding(tx)
@@ -477,6 +658,25 @@ export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict
             `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
         )
     }
+}
+
+function isSettlementBatch(tx: { content?: unknown }): boolean {
+    return (tx.content as { type?: unknown } | undefined)?.type === "l2psBatch"
+}
+
+/**
+ * Why a settlement batch may not be pooled, or null: the same verdict for the
+ * producer's own insert and for a peer's batch in the merge, so every member
+ * holds the batches the producer does. Throws when a read fails.
+ */
+export async function settlementBatchRefusal(
+    tx: Transaction,
+    reads: AdmissionReads = admissionReads(),
+): Promise<string | null> {
+    // Lazy: the settlement checks reach gcr.ts, which imports this module.
+    const { settlementAdmissionRefusal } = await import("@/libs/l2ps/settlement/admission")
+    await reads.parameters()
+    return settlementAdmissionRefusal(tx, await reads.validators())
 }
 
 /** What admission checked before `editBinding`, kept for nodes on either side of its height. */
@@ -503,15 +703,24 @@ async function verifyAdmissionEditsBeforeBinding(tx: Transaction): Promise<EditV
  * apply step refuse.
  *
  * Inactive: only the nonce edit (under `nonceIntegrity`) and the
- * `networkGovernance` rule, because RPC intake keeps the comparison it always
- * made. `tx` must carry the edits as the sender signed them.
+ * `networkGovernance`, `tokenStakingGate`, `l2psGate` and `tlsnDisabled`
+ * rules, because RPC intake keeps the comparison it always made. `tx` must
+ * carry the edits as the sender signed them.
  */
 export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, nonceBound, governance } = await editBindingState()
+        const state = await editBindingState()
+        const { active, nonceBound, governance } = state
+        const featureRefusal = featureGateRefusal(tx, state)
+        if (featureRefusal) return refuse(featureRefusal)
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
+        const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
+        if (stakingRefusal) return refuse(stakingRefusal)
         if (active) return await verifyAdmissionEdits(tx)
+        if (state.feeBound) await ensureNetworkParametersCurrent()
+        const valueRefusal = await valueRulesRefusal(tx, state)
+        if (valueRefusal) return refuse(valueRefusal)
         return nonceBound ? verifyNonceEditBinding(tx) : OK
     } catch (e) {
         return refuse(

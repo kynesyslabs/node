@@ -15,6 +15,15 @@ export class Validators {
     @Column("text", { name: "staked_amount", nullable: true, default: "0" })
     staked_amount: string | null
 
+    /**
+     * The part of `staked_amount` that was taken from the account's balance,
+     * as a bigint-as-string. Exit returns this and nothing else, so a stake
+     * that was never debited (a genesis seat, or one staked before
+     * `stakeApplyChecks`) is never paid out.
+     */
+    @Column("text", { name: "bonded_amount", nullable: false, default: "0" })
+    bonded_amount: string
+
     @Column("integer", { name: "first_seen", nullable: true })
     first_seen: number | null
 

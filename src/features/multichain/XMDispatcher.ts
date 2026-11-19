@@ -4,10 +4,15 @@
 import XMParser from "./routines/XMParser"
 import { XMScript } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
+import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 
 export default class MultichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript) {
+        const disabled = featureDisabledMessage("xm")
+        if (disabled) {
+            return { success: false, message: disabled, results: {} }
+        }
         log.debug("\n\n")
         log.debug("[XM Script full digest]")
         log.debug(data)

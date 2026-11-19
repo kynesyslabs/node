@@ -3,8 +3,43 @@ import Datasource from "@/model/datasource"
 import { MerkleTreeManager } from "@/features/zk/merkle/MerkleTreeManager"
 import { getCurrentMerkleTreeState } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
+import { canonicalFieldElement } from "@/features/zk/proof/publicSignals"
 import { jsonResponse } from "./bunServer"
 import type { BunServer } from "./bunServer"
+
+const PREFIXED_HEX = /^0x[0-9a-fA-F]{64}$/
+const BARE_HEX = /^[0-9a-fA-F]{64}$/
+const DECIMAL_FIELD = /^(0|[1-9]\d{0,77})$/
+
+/**
+ * The forms a commitment can be stored under. A commitment keeps the form it
+ * was registered in (the SDK registers canonical decimal). A bare 64-digit
+ * value reads as either form, so every reading is tried, decimal first.
+ */
+export function commitmentLookupKeys(value: string): string[] | null {
+    const keys: string[] = []
+    if (DECIMAL_FIELD.test(value)) {
+        keys.push(value, BigInt(value).toString(16).padStart(64, "0"))
+    }
+    if (PREFIXED_HEX.test(value) || BARE_HEX.test(value)) {
+        const hex = value.toLowerCase().replace(/^0x/, "")
+        keys.push(hex, BigInt(`0x${hex}`).toString())
+    }
+    return keys.length > 0 ? [...new Set(keys)] : null
+}
+
+/**
+ * Nullifiers are stored as the proof's first public signal, reduced to the
+ * field: canonical decimal.
+ * A bare 64-digit value is therefore decimal; hex needs 0x or a letter.
+ */
+export function nullifierStorageKey(value: string): string | null {
+    if (DECIMAL_FIELD.test(value)) return canonicalFieldElement(value)
+    if (PREFIXED_HEX.test(value) || BARE_HEX.test(value)) {
+        return canonicalFieldElement(`0x${value.replace(/^0x/, "")}`)
+    }
+    return null
+}
 
 // ZK Merkle tree configuration constants
 const ZK_MERKLE_TREE_DEPTH = 20
@@ -137,12 +172,17 @@ export function registerZkRoutes(server: BunServer): void {
                 return jsonResponse({ error: "Commitment hash required" }, 400)
             }
 
-            if (!/^0x[0-9a-fA-F]{64}$/.test(commitment)) {
-                return jsonResponse({ error: "Invalid commitment format" }, 400)
+            const keys = commitmentLookupKeys(commitment)
+            if (!keys) {
+                return jsonResponse({ error: "Invalid commitment format: 64 hex digits or canonical decimal" }, 400)
             }
 
             const merkleManager = await getFreshMerkleTreeManager()
-            const proof = await merkleManager.getProofForCommitment(commitment)
+            let proof = null
+            for (const key of keys) {
+                proof = await merkleManager.getProofForCommitment(key)
+                if (proof) break
+            }
 
             if (!proof) {
                 return jsonResponse(
@@ -168,14 +208,13 @@ export function registerZkRoutes(server: BunServer): void {
 
     server.get("/zk/nullifier/:hash", async req => {
         try {
-            const nullifierHash = req.params.hash
-
-            if (!nullifierHash) {
+            if (!req.params.hash) {
                 return jsonResponse({ error: "Nullifier hash required" }, 400)
             }
 
-            if (!/^0x[0-9a-fA-F]{64}$/.test(nullifierHash)) {
-                return jsonResponse({ error: "Invalid nullifier hash format" }, 400)
+            const nullifierHash = nullifierStorageKey(req.params.hash)
+            if (!nullifierHash) {
+                return jsonResponse({ error: "Invalid nullifier hash format: 64 hex digits or canonical decimal" }, 400)
             }
 
             const db = await Datasource.getInstance()

@@ -26,6 +26,18 @@ export interface AuthContext {
      * The signature algorithm used (ed25519, falcon, ml-dsa)
      */
     algorithm: string | null
+
+    /**
+     * Body hash the verified signature covers (body-bound form only). A
+     * handler that reads the body must check it against this.
+     */
+    bodyHash?: string | null
+
+    /** Whether the verified signature names this node as its audience. */
+    audienceBound?: boolean
+
+    /** The timestamp the verified signature covers, when it covers one. */
+    timestamp?: number
 }
 
 /**

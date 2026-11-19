@@ -7,7 +7,7 @@
 
 import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
-import { parseBoolFlag, parseIntSetting } from "./envFlags"
+import { parseBoolFlag, parseDurationMs, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
 import type { AppConfig, ForkScheduleMismatchPolicy } from "./types"
 import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
@@ -29,6 +29,17 @@ function envStr(key: string, fallback: string): string {
 
 function envInt(key: string, fallback: number): number {
     return parseIntSetting(process.env[key]) ?? fallback
+}
+
+/**
+ * A count setting that must be a plain decimal integer. Anything else set
+ * (e.g. "10k", "2.5", "abc") is NaN for the sanity check to refuse, where
+ * parseInt would read a prefix or fall back without a word.
+ */
+function envStrictInt(key: string, fallback: number): number {
+    const raw = process.env[key]
+    if (raw === undefined || raw.trim() === "") return fallback
+    return /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN
 }
 
 function envFloat(key: string, fallback: number): number {
@@ -170,6 +181,7 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.blockTimestampTolerance,
             ),
             logLevel: envStr(EnvKey.LOG_LEVEL, d.core.logLevel),
+            logsDir: envStr(EnvKey.LOGS_DIR, d.core.logsDir),
             whitelistedIPs: envList(
                 EnvKey.WHITELISTED_IPS,
                 d.core.whitelistedIPs,
@@ -188,6 +200,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.rateLimitBlockDurationMs,
             ),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
+            signalingEnabled: envBool(
+                EnvKey.SIGNALING_ENABLED,
+                d.core.signalingEnabled,
+            ),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
             expectedGenesisHash: envStr(
                 EnvKey.EXPECTED_GENESIS_HASH,
@@ -294,6 +310,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_ZK_USE_MAIN_THREAD,
                 d.l2ps.zkUseMainThread,
             ),
+            settlementProvers: Math.max(
+                1,
+                envInt(EnvKey.L2PS_SETTLEMENT_PROVERS, d.l2ps.settlementProvers),
+            ),
             hashIntervalMs: envInt(
                 EnvKey.L2PS_HASH_INTERVAL_MS,
                 d.l2ps.hashIntervalMs,
@@ -352,6 +372,10 @@ export function loadConfig(): Readonly<AppConfig> {
             enabled: envBool(EnvKey.METRICS_ENABLED, d.metrics.enabled),
             port: envInt(EnvKey.METRICS_PORT, d.metrics.port),
             host: envStr(EnvKey.METRICS_HOST, d.metrics.host),
+            bearerToken: envStr(
+                EnvKey.METRICS_BEARER_TOKEN,
+                d.metrics.bearerToken,
+            ),
         },
 
         diagnostics: {
@@ -363,6 +387,10 @@ export function loadConfig(): Readonly<AppConfig> {
             minDiskSpace: envFloat(
                 EnvKey.MIN_DISK_SPACE,
                 d.diagnostics.minDiskSpace,
+            ),
+            diskSpacePath: envStr(
+                EnvKey.DISK_SPACE_PATH,
+                d.diagnostics.diskSpacePath,
             ),
             minNetworkDownloadSpeed: envFloat(
                 EnvKey.MIN_NETWORK_DOWNLOAD_SPEED,
@@ -512,9 +540,58 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.heightsIntervalMs,
             ),
             keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
-            ipcConnectTimeoutMs: envInt(
-                EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS,
-                d.gossip.ipcConnectTimeoutMs,
+            ipcConnectTimeoutMs:
+                parseDurationMs(
+                    process.env[EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS],
+                ) ?? d.gossip.ipcConnectTimeoutMs,
+        },
+
+        outbound: {
+            xmEnabled: envBool(EnvKey.XM_ENABLED, d.outbound.xmEnabled),
+            demosWorkEnabled: envBool(
+                EnvKey.DEMOSWORK_ENABLED,
+                d.outbound.demosWorkEnabled,
+            ),
+            web2Enabled: envBool(EnvKey.WEB2_ENABLED, d.outbound.web2Enabled),
+            xmRpcAllowlist: envList(
+                EnvKey.XM_RPC_ALLOWLIST,
+                d.outbound.xmRpcAllowlist,
+            ),
+            web2MaxResponseBytes: envInt(
+                EnvKey.WEB2_MAX_RESPONSE_BYTES,
+                d.outbound.web2MaxResponseBytes,
+            ),
+            web2SessionTtlMs: envInt(
+                EnvKey.WEB2_SESSION_TTL_MS,
+                d.outbound.web2SessionTtlMs,
+            ),
+            web2InsecureTls: envBool(
+                EnvKey.WEB2_INSECURE_TLS,
+                d.outbound.web2InsecureTls,
+            ),
+            web2MaxInflightPerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_INFLIGHT_PER_CALLER,
+                d.outbound.web2MaxInflightPerCaller,
+            ),
+            web2MaxFetchesPerMinutePerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER,
+                d.outbound.web2MaxFetchesPerMinutePerCaller,
+            ),
+            web2MaxBytesPerHourPerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_BYTES_PER_HOUR_PER_CALLER,
+                d.outbound.web2MaxBytesPerHourPerCaller,
+            ),
+            web2MaxInflightTotal: envStrictInt(
+                EnvKey.WEB2_MAX_INFLIGHT_TOTAL,
+                d.outbound.web2MaxInflightTotal,
+            ),
+            tlsnotaryAllowedPorts: envList(
+                EnvKey.TLSNOTARY_ALLOWED_PORTS,
+                d.outbound.tlsnotaryAllowedPorts.map(String),
+            ).map(Number),
+            tlsnotaryAllowPrivateTargets: envBool(
+                EnvKey.TLSNOTARY_ALLOW_PRIVATE_TARGETS,
+                d.outbound.tlsnotaryAllowPrivateTargets,
             ),
         },
     }
@@ -523,6 +600,7 @@ export function loadConfig(): Readonly<AppConfig> {
     assertL2psLimitsSane(config)
     assertRpcLimitsSane(config)
     assertGossipSane(config)
+    assertOutboundSane(config)
 
     return deepFreeze(config)
 }
@@ -604,6 +682,62 @@ function assertConsensusTimingSane(config: AppConfig): void {
 }
 
 /**
+ * A cap or lifetime of 0 or less would refuse every web2 response or expire
+ * every session at once, and a fetch cap of 0 would refuse every web2 fetch;
+ * a bad port would silently allow nothing. Skipping certificate checks is a
+ * dev setting and must not reach a production node.
+ */
+function assertOutboundSane(config: AppConfig): void {
+    const o = config.outbound
+    const problems: string[] = []
+    if (!Number.isInteger(o.web2MaxResponseBytes) || o.web2MaxResponseBytes <= 0) {
+        problems.push(
+            `WEB2_MAX_RESPONSE_BYTES must be an integer > 0 (got ${o.web2MaxResponseBytes})`,
+        )
+    }
+    if (!Number.isInteger(o.web2SessionTtlMs) || o.web2SessionTtlMs <= 0) {
+        problems.push(
+            `WEB2_SESSION_TTL_MS must be an integer > 0 (got ${o.web2SessionTtlMs})`,
+        )
+    }
+    const web2Caps: [string, number][] = [
+        [EnvKey.WEB2_MAX_INFLIGHT_PER_CALLER, o.web2MaxInflightPerCaller],
+        [
+            EnvKey.WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER,
+            o.web2MaxFetchesPerMinutePerCaller,
+        ],
+        [
+            EnvKey.WEB2_MAX_BYTES_PER_HOUR_PER_CALLER,
+            o.web2MaxBytesPerHourPerCaller,
+        ],
+        [EnvKey.WEB2_MAX_INFLIGHT_TOTAL, o.web2MaxInflightTotal],
+    ]
+    for (const [key, value] of web2Caps) {
+        if (!Number.isSafeInteger(value) || value <= 0) {
+            problems.push(
+                `${key} must be an integer > 0 (got ${process.env[key] ?? value})`,
+            )
+        }
+    }
+    const badPorts = o.tlsnotaryAllowedPorts.filter(
+        p => !Number.isInteger(p) || p < 1 || p > 65535,
+    )
+    if (badPorts.length > 0) {
+        problems.push(
+            `TLSNOTARY_ALLOWED_PORTS must list ports 1..65535 (got ${process.env[EnvKey.TLSNOTARY_ALLOWED_PORTS]})`,
+        )
+    }
+    if (o.web2InsecureTls && config.core.prod) {
+        problems.push("WEB2_INSECURE_TLS is a dev setting and is refused with PROD=true")
+    }
+    if (problems.length > 0) {
+        throw new Error(
+            `[config] invalid outbound request configuration:\n  - ${problems.join("\n  - ")}`,
+        )
+    }
+}
+
+/**
  * A non-positive IPC connect timeout fails every sidecar launch before the
  * child can bind its socket, so gossip would stay degraded forever with a log
  * that blames IPC instead of the setting.
@@ -612,7 +746,7 @@ function assertGossipSane(config: AppConfig): void {
     const { ipcConnectTimeoutMs } = config.gossip
     if (!Number.isInteger(ipcConnectTimeoutMs) || ipcConnectTimeoutMs <= 0) {
         throw new Error(
-            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 (got ${ipcConnectTimeoutMs})`,
+            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 in milliseconds, or a number with ms, s or m (got ${process.env[EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS]})`,
         )
     }
 }
@@ -623,6 +757,12 @@ function assertGossipSane(config: AppConfig): void {
  * the whole-backlog read the backlog cap exists to prevent.
  */
 const MAX_BATCHES_PER_CYCLE_LIMIT = 100
+
+/**
+ * Each settlement prover takes a core and about 1 GB while it proves; past
+ * this a typo starves the node it runs on instead of speeding it up.
+ */
+export const MAX_SETTLEMENT_PROVERS = 16
 
 /**
  * Reject L2PS backlog and relay limits that would wedge a subnet or silently
@@ -646,6 +786,11 @@ function assertL2psLimitsSane(config: AppConfig): void {
             `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET (${cap}) is below L2PS_MIN_BATCH_SIZE (${minBatchSize}): ` +
                 "a subnet would fill up before its first batch could form. " +
                 "Raise the cap to at least the minimum batch size, or set it to 0 to disable the limit.",
+        )
+    }
+    if (config.l2ps.settlementProvers > MAX_SETTLEMENT_PROVERS) {
+        problems.push(
+            `L2PS_SETTLEMENT_PROVERS must be at most ${MAX_SETTLEMENT_PROVERS} (got ${config.l2ps.settlementProvers})`,
         )
     }
     if (batches > MAX_BATCHES_PER_CYCLE_LIMIT) {

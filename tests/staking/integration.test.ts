@@ -61,7 +61,7 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
 // sharedState pulls in the whole framework — substitute a minimal stand-in.
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null },
+    getSharedState: { networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 // Pin the flat fee breakdown (prod: networkFee + rpcFee + additionalFee =
@@ -80,7 +80,7 @@ jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import {
-    UNSTAKE_LOCK_BLOCKS,
+    NFT_UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
@@ -319,16 +319,16 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         row = await apply(t3, 300)
         expect(row?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
         expect(row?.unstake_requested_at).toBe(300)
-        expect(row?.unstake_available_at).toBe(300 + UNSTAKE_LOCK_BLOCKS)
+        expect(row?.unstake_available_at).toBe(300 + NFT_UNSTAKE_LOCK_BLOCKS)
 
         // 4. Exit attempt BEFORE lock elapses is rejected at the validation layer.
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_UNSTAKING,
             unstake_requested_at: 300,
-            unstake_available_at: 300 + UNSTAKE_LOCK_BLOCKS,
+            unstake_available_at: 300 + NFT_UNSTAKE_LOCK_BLOCKS,
         } as never)
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(500 as never)
+        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue((300 + NFT_UNSTAKE_LOCK_BLOCKS - 1) as never)
         const earlyExit = exitTx("0xtx4_early")
         const earlyHandled = await handleStakingTx(earlyExit)
         expect(earlyHandled.success).toBe(false)
@@ -336,7 +336,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         expect(earlyExit.content.gcr_edits).toHaveLength(0)
 
         // 5. Exit at exactly the unlock block succeeds.
-        const unlockBlock = 300 + UNSTAKE_LOCK_BLOCKS
+        const unlockBlock = 300 + NFT_UNSTAKE_LOCK_BLOCKS
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             unlockBlock as never,
         )

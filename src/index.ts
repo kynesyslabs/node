@@ -25,6 +25,14 @@ import {
     onSelfStakeChange,
 } from "./libs/consensus/stakedSet"
 import { syncL2PSServices } from "./libs/l2ps/roleServices"
+import {
+    settlementProverProblem,
+    settlementScheduled,
+    settlementVerifierProblem,
+} from "./libs/l2ps/settlement/bootCheck"
+import { loadSettlementVerificationKey, settlementProverPool } from "./libs/l2ps/settlement/prover"
+import { isSettlementBuilt } from "./libs/l2ps/zk/settlementArtifacts"
+import { l2psOff } from "./forks/l2psGate"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
 import {
@@ -65,6 +73,12 @@ import {
 } from "./libs/peer/identityLiveness"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import {
+    diskSpacePath,
+    freeDiskBytes,
+    lowDiskRefusal,
+} from "./utilities/diskSpace"
+import { startSignaling } from "./features/InstantMessagingProtocol/signalingServer/startSignaling"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 import { genesisFilePath } from "./libs/blockchain/genesis/genesisFile"
@@ -253,10 +267,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 
 // ANCHOR Checking the host clock
 async function checkClock() {
-    await checkClockAtBoot({
-        production: getSharedState.PROD,
-        toleranceSeconds: getSharedState.getBlockTimestampTolerance(),
-    })
+    await checkClockAtBoot({ production: getSharedState.PROD })
     startClockProbe()
     log.info("[SYNC] Network timestamp: " + getNetworkTimestamp())
 }
@@ -532,6 +543,41 @@ async function startInboundServers() {
 
 // ANCHOR Preparing the main loop
 // ! Simplify this too
+/**
+ * Loads the joined L2PS networks and, for a settlement member, checks that
+ * it can prove. Runs before the node serves or joins consensus: a member
+ * that cannot prove would admit transfers it never settles, and one that
+ * exits only after joining has already been counted in the validator set.
+ */
+async function loadL2PSNetworks() {
+    const bootTracker = getSharedState.bootTracker
+    bootTracker.start("l2ps.networks")
+    try {
+        await ParallelNetworks.getInstance().loadAllL2PS()
+        bootTracker.ready("l2ps.networks")
+        log.info(
+            `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
+        )
+    } catch (error) {
+        handleError(error, "CORE", {
+            source: ErrorSource.L2PS_NETWORK_LOADING,
+        })
+        bootTracker.fail("l2ps.networks", error)
+        subsystemError(getSharedState.subsystems, "l2ps", error)
+    }
+
+    const proverProblem = await settlementProverProblem({
+        scheduled: settlementScheduled(),
+        member: (getSharedState.l2psJoinedUids?.length ?? 0) > 0,
+        built: () => isSettlementBuilt(),
+        probe: () => settlementProverPool().probe(),
+    })
+    if (proverProblem) {
+        log.error(`[BOOT] Refusing to start: ${proverProblem}`)
+        process.exit(1)
+    }
+}
+
 async function preMainLoop() {
     // NOTE Overriding if necessary
     if (indexState.OVERRIDE_PORT) {
@@ -625,6 +671,14 @@ async function preMainLoop() {
     // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
 
+    // The fork schedule is known from here; the key is otherwise read at the
+    // first settlement batch, where a missing one halts block apply.
+    const verifierProblem = settlementVerifierProblem(settlementScheduled(), () => loadSettlementVerificationKey())
+    if (verifierProblem) {
+        log.error(`[BOOT] Refusing to start: ${verifierProblem}`)
+        process.exit(1)
+    }
+
     // INFO: Set initial last block data before the first hello goes out, so
     // the sync data we advertise carries the real tip and genesis hash
     const lastBlock = await Chain.getLastBlock()
@@ -639,6 +693,13 @@ async function preMainLoop() {
     // Prime the node's own role before anything role-gated starts.
     invalidateStakedSet()
     await getStakedSet()
+
+    // After the first stake notice, which saw no joined network yet, so the
+    // L2PS services still start only once the node has synced. Under
+    // l2psGate no network is loaded, so l2psJoinedUids stays empty.
+    if (!l2psOff()) {
+        await loadL2PSNetworks()
+    }
 
     // Peers start a round as soon as they see this node.
     await waitForRestartSigningFloor(getNetworkTimestamp)
@@ -695,7 +756,6 @@ async function preMainLoop() {
  * Performs chain setup, warmup, time calibration, and pre-main-loop initialization; then ensures peer availability, starts the signaling server, optionally starts the MCP server, and initializes the DTR relay retry service when running in production.
  *
  * Side effects:
- * - May call process.exit(1) if the signaling server fails to start.
  * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
  * - Starts background services (MCP server) when configured.
  */
@@ -719,6 +779,15 @@ async function main() {
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
+    }
+
+    const { diskSpacePath: diskPathSetting, minDiskSpace } =
+        Config.getInstance().diagnostics
+    const diskPath = diskSpacePath(diskPathSetting)
+    const diskRefusal = lowDiskRefusal(freeDiskBytes(diskPath), minDiskSpace)
+    if (diskRefusal) {
+        log.error(`[BOOT] Refusing to start: ${diskPath}: ${diskRefusal}`)
+        process.exit(1)
     }
 
     // Before the TUI takes over the terminal, so its banner and the optional
@@ -899,7 +968,7 @@ async function main() {
 
             indexState.metricsServer = metricsServer
             log.info(
-                `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
+                `[METRICS] Prometheus metrics server started on http://${Config.getInstance().metrics.host}:${indexState.METRICS_PORT}/metrics`,
             )
 
             // REVIEW: Start metrics collector for live data gathering
@@ -974,34 +1043,42 @@ async function main() {
         if (indexState.COMMANDLINE_MODE) {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
-        // Starting the signaling server
         bootTracker.start("signaling")
-        indexState.signalingServer = new SignalingServer(
+        const signaling = startSignaling(
+            Config.getInstance().core.signalingEnabled,
             indexState.SIGNALING_SERVER_PORT,
+            port => new SignalingServer(port),
         )
-        if (indexState.signalingServer) {
+        if (signaling.status === "ready") {
+            indexState.signalingServer = signaling.server
             getSharedState.isSignalingServerStarted = true
-            log.info("[NETWORK] Signaling server started")
             bootTracker.ready("signaling")
             markSubsystem(getSharedState.subsystems, "signaling", "ready", {
                 port: indexState.SIGNALING_SERVER_PORT,
             })
+        } else if (signaling.status === "skipped") {
+            bootTracker.skip("signaling", "disabled")
+            markSubsystem(getSharedState.subsystems, "signaling", "skipped", {
+                reason: "SIGNALING_ENABLED=false",
+            })
         } else {
-            log.error("[NETWORK] Failed to start the signaling server")
-            bootTracker.fail(
-                "signaling",
-                new Error("constructor returned null"),
-            )
+            bootTracker.fail("signaling", signaling.error)
             subsystemError(
                 getSharedState.subsystems,
                 "signaling",
-                new Error("constructor returned null"),
+                signaling.error,
             )
-            process.exit(1)
         }
 
-        // Start L2PS Messaging server (failsafe)
-        if (indexState.L2PS_MESSAGING_ENABLED) {
+        // Start L2PS Messaging server (failsafe). It turns messages into L2PS
+        // transactions, so it stays down while l2psGate is active; a server
+        // started below a later gate height refuses every frame once the
+        // gate activates.
+        if (indexState.L2PS_MESSAGING_ENABLED && l2psOff()) {
+            log.info(
+                "[L2PS-IM] Messaging server not started: L2PS is off on this network (fork l2psGate)",
+            )
+        } else if (indexState.L2PS_MESSAGING_ENABLED) {
             try {
                 const { startL2PSMessaging } =
                     await import("./features/l2ps-messaging")
@@ -1149,20 +1226,35 @@ async function main() {
                     log.warning(msg)
                 }
             } catch (error) {
-                log.error(
-                    "[TLSNotary] Failed to start TLSNotary service: " + error,
-                )
-                bootTracker.fail("tlsnotary", error)
-                subsystemError(getSharedState.subsystems, "tlsnotary", error)
-                const { isTLSNotaryFatal } =
-                    await import("./features/tlsnotary")
-                if (isTLSNotaryFatal()) {
-                    log.error(
-                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                const tlsnotary = await import("./features/tlsnotary")
+                if (error instanceof tlsnotary.NotaryUnreachableError) {
+                    // requestTLSNproxy needs only TLSNOTARY_ENABLED: a node
+                    // that relays for the network's notary hosts none itself
+                    log.warning(
+                        `[TLSNotary] Relay only: ${error.message}. This node serves requestTLSNproxy ` +
+                            "sessions; provers notarize at the network's notary. To host a notary on this " +
+                            "node, start it (docker compose profile tlsnotary); TLSNOTARY_FATAL=true " +
+                            "makes a missing notary stop the node.",
                     )
-                    process.exit(1)
+                    bootTracker.ready("tlsnotary")
+                    markSubsystem(getSharedState.subsystems, "tlsnotary", "ready", {
+                        enabled: true,
+                        extra: { mode: "relay-only", notary: error.message },
+                    })
+                } else {
+                    log.error(
+                        "[TLSNotary] Failed to start TLSNotary service: " + error,
+                    )
+                    bootTracker.fail("tlsnotary", error)
+                    subsystemError(getSharedState.subsystems, "tlsnotary", error)
+                    if (tlsnotary.isTLSNotaryFatal()) {
+                        log.error(
+                            "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                        )
+                        process.exit(1)
+                    }
+                    // Continue without TLSNotary (failsafe)
                 }
-                // Continue without TLSNotary (failsafe)
             }
         } else {
             log.info(
@@ -1331,63 +1423,63 @@ async function main() {
         bootTracker.ready("main_loop")
         markSubsystem(getSharedState.subsystems, "main_loop", "running")
 
-        // Load L2PS networks configuration
-        bootTracker.start("l2ps.networks")
-        try {
-            await ParallelNetworks.getInstance().loadAllL2PS()
-            bootTracker.ready("l2ps.networks")
+        // Under l2psGate no network is loaded, so l2psJoinedUids stays empty
+        // and the hash service, the batch aggregator and the L2PS mempool sync
+        // that key on it never start.
+        if (l2psOff()) {
             log.info(
-                `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
-            )
-        } catch (error) {
-            handleError(error, "CORE", {
-                source: ErrorSource.L2PS_NETWORK_LOADING,
-            })
-            bootTracker.fail("l2ps.networks", error)
-            subsystemError(getSharedState.subsystems, "l2ps", error)
-        }
-
-        // Start L2PS hash generation service (for L2PS participating nodes)
-        // Note: l2psJoinedUids is populated during ParallelNetworks initialization
-        if (
-            getSharedState.l2psJoinedUids &&
-            getSharedState.l2psJoinedUids.length > 0
-        ) {
-            bootTracker.start("l2ps.services")
-            try {
-                const l2psHashService = L2PSHashService.getInstance()
-                await l2psHashService.start()
-                log.info(
-                    `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
-                )
-
-                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
-                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
-                await l2psBatchAggregator.start()
-                log.info("[CORE] [L2PS] Batch aggregator service started")
-                bootTracker.ready("l2ps.services")
-                markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
-                    enabled: true,
-                    extra: {
-                        joined_uids: getSharedState.l2psJoinedUids.length,
-                    },
-                })
-            } catch (error) {
-                handleError(error, "CORE", {
-                    source: ErrorSource.L2PS_SERVICES_STARTUP,
-                })
-                bootTracker.fail("l2ps.services", error)
-                subsystemError(getSharedState.subsystems, "l2ps", error)
-            }
-        } else {
-            log.info(
-                "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
+                "[CORE] [L2PS] L2PS is off on this network (fork l2psGate): networks not loaded, services not started",
             )
             markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
-                reason: "no joined networks",
+                reason: "fork l2psGate",
                 enabled: false,
             })
-            bootTracker.skip("l2ps.services", "no joined networks")
+            bootTracker.skip("l2ps.networks", "fork l2psGate")
+            bootTracker.skip("l2ps.services", "fork l2psGate")
+        } else {
+            // Networks were loaded in preMainLoop, before the node joined
+            // consensus. Start L2PS hash generation service (for L2PS participating nodes)
+            // Note: l2psJoinedUids is populated during ParallelNetworks initialization
+            if (
+                getSharedState.l2psJoinedUids &&
+                getSharedState.l2psJoinedUids.length > 0
+            ) {
+                bootTracker.start("l2ps.services")
+                try {
+                    const l2psHashService = L2PSHashService.getInstance()
+                    await l2psHashService.start()
+                    log.info(
+                        `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
+                    )
+
+                    // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+                    const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+                    await l2psBatchAggregator.start()
+                    log.info("[CORE] [L2PS] Batch aggregator service started")
+                    bootTracker.ready("l2ps.services")
+                    markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
+                        enabled: true,
+                        extra: {
+                            joined_uids: getSharedState.l2psJoinedUids.length,
+                        },
+                    })
+                } catch (error) {
+                    handleError(error, "CORE", {
+                        source: ErrorSource.L2PS_SERVICES_STARTUP,
+                    })
+                    bootTracker.fail("l2ps.services", error)
+                    subsystemError(getSharedState.subsystems, "l2ps", error)
+                }
+            } else {
+                log.info(
+                    "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
+                )
+                markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
+                    reason: "no joined networks",
+                    enabled: false,
+                })
+                bootTracker.skip("l2ps.services", "no joined networks")
+            }
         }
     }
 }

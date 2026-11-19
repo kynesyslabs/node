@@ -5,7 +5,8 @@ round trip would not for 18-digit stakes.
 
 Writes into --out:
   launch.json       the launch genesis: fixed timestamp, chain id, the
-                    mainnet forks at height 0, snapshot bound by its manifest
+                    mainnet forks at height 0, every other known fork
+                    declared, snapshot bound by its manifest
   onebyte.json      launch with the timestamp one second later
   forkpast.json     launch with commitLock moved to height 1 (inside tip + 50)
   forkfar.json      launch with atomicWork scheduled at 1000000 (beyond the window)
@@ -18,7 +19,25 @@ import json
 import os
 
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover"]
+MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical", "tokenStakingGate", "gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "storageFeeSettlement", "referenceBlockRoom10", "l2psSettlement", "tlsnVerified"]
+# Same list as KNOWN_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal.
+# A node on a mainnet chain id refuses a genesis that leaves one undeclared.
+# Same list as LAUNCH_DORMANT_FORKS in scripts/launch-go-no-go.ts
+LAUNCH_DORMANT_FORKS = ["atomicWork", "networkGovernance", "tokenStaking", "l2psGate", "tlsnDisabled", "nftValidatorGating"]
+KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "networkGovernance", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "tokenStakingGate", "tokenStaking", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical", "l2psSettlement", "l2psGate", "tlsnDisabled", "storageFeeSettlement", "referenceBlockRoom10", "nftValidatorGating", "tlsnVerified"]
+# The image genesis carries no tlsnVerified payload and the node refuses the fork
+# scheduled without one, so the launch genesis takes the devnet's test keys
+# (testing/devnet/genesis.devnet.json)
+TLSN_VERIFIED = {
+    "notaryKeys": [
+        {"id": "devnet-test-notary-1", "alg": "k256", "hex": "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e"},
+        {"id": "devnet-test-notary-2", "alg": "k256", "hex": "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870"},
+    ],
+    "verifierWasmSha256": "5ed9774dd485266227b633504beba4cb3bed47c26af01b817ed128ce8517e455",
+    "maxPresentationBytes": 65536,
+    "freshnessWindowSec": 3600,
+    "futureSkewSec": 60,
+}
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")
@@ -41,8 +60,17 @@ launch = copy.deepcopy(base)
 launch["timestamp"] = a.timestamp
 launch.setdefault("properties", {})["id"] = a.chain_id
 forks = launch.setdefault("forks", {})
+# A fork's own payload (gasFeeSeparation's treasury, from the base genesis) is kept
 for name in MAINNET_FORKS:
-    forks[name] = {"activationHeight": 0}
+    forks[name] = {**(forks.get(name) or {}), "activationHeight": 0}
+if "notaryKeys" not in forks["tlsnVerified"]:
+    forks["tlsnVerified"] = {**TLSN_VERIFIED, **forks["tlsnVerified"]}
+# The rest stay off
+for name in KNOWN_FORKS:
+    forks.setdefault(name, {"activationHeight": None})
+# Off at launch whatever the image's own genesis schedules, as on mainnet
+for name in LAUNCH_DORMANT_FORKS:
+    forks[name] = {"activationHeight": None}
 launch["snapshot"] = {"manifestSha256": manifest_sha}
 
 

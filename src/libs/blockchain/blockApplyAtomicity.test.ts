@@ -130,6 +130,24 @@ describe("a block and its state commit together", () => {
         })
     }
 
+    it("tells a failure after the commit apart from one before it", async () => {
+        const { CommittedBlockFollowUpError } = await import("./committedBlockError")
+        const pending = pendingState([])
+        pending.afterCommit = async () => {
+            throw new Error("follow-up failed")
+        }
+
+        const error = await insertBlock(block(), [tx()], undefined, pending).catch(e => e)
+
+        expect(error).toBeInstanceOf(CommittedBlockFollowUpError)
+        expect(durable.get("Blocks")?.length).toBe(1)
+
+        durable.clear()
+        failOn = "Blocks"
+        const before = await insertBlock(block(), [tx()], undefined, pendingState([])).catch(e => e)
+        expect(before).not.toBeInstanceOf(CommittedBlockFollowUpError)
+    })
+
     it("applies cleanly on a retry after a failed commit", async () => {
         failOn = "Blocks"
         await insertBlock(block(), [tx()], undefined, pendingState([])).catch(() => undefined)

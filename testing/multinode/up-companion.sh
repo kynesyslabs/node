@@ -70,11 +70,22 @@ echo "$HOST_PEERLIST" | docker run --rm -i \
 
 echo "+ peerlists seeded"
 
+COMPOSE=(docker compose
+    -f docker-compose.yml
+    -f testing/multinode/docker-compose.companion.yml)
+
+# The node refuses to start while migrations are pending, and the companion's
+# database is empty on the first run and behind after an image upgrade.
+"${COMPOSE[@]}" run --rm companion-db-init
+if ! "${COMPOSE[@]}" run --rm --no-deps --name demos-companion-migrate \
+    companion bun run migration:run; then
+    echo "migration:run failed on demos_companion; companion not started" >&2
+    exit 1
+fi
+echo "+ companion database migrated"
+
 # Bring up the companion alongside the primary stack.
-docker compose \
-    -f docker-compose.yml \
-    -f testing/multinode/docker-compose.companion.yml \
-    up -d companion-db-init companion
+"${COMPOSE[@]}" up -d companion-db-init companion
 
 echo "+ companion-up complete"
 echo "+ check status: docker compose ps"

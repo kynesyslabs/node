@@ -5,9 +5,9 @@ import hashGCRTables from "../gcr/gcr_routines/hashGCR"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { isSystemRelayTx, verifySystemRelayTx } from "../validation/systemRelayTx"
 import {
-    EXPIRED_TX_DEEP_WINDOW_MULTIPLIER,
     isReferenceBlockAllowed,
     isWithinDeepWindow,
+    previousRuleHeights,
 } from "../referenceBlockWindow"
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
@@ -49,39 +49,6 @@ async function validateAtHeight(
         isForkActive("osDenomination", height),
         txSignatureContext(height),
     )
-}
-
-const SIGNATURE_RULE_FORKS = ["osDenomination", "signatureDomain"] as const
-
-/**
- * Heights whose rules a block's transactions may legitimately have been
- * admitted under, besides the block's own: the height before each fork that
- * activated no more than a deep window ago.
- *
- * The forger admits a tx under the rules of the tip it saw and never
- * revalidates its mempool. A tx kept for a later round (a nonce ahead of its
- * predecessor) can therefore reach a block after a fork activated, for as long
- * as its reference block is still inside the deep window; past that the forger
- * drops it. Every fork rule is judged separately because they activate at
- * different heights.
- */
-function previousRuleHeights(height: number): number[] {
-    const window =
-        EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * getSharedState.referenceBlockRoom
-    const heights = new Set<number>()
-    for (const fork of SIGNATURE_RULE_FORKS) {
-        const activation = getSharedState.forkConfig?.[fork]?.activationHeight
-        if (
-            activation !== null &&
-            activation !== undefined &&
-            activation > 0 &&
-            height >= activation &&
-            height < activation + window
-        ) {
-            heights.add(activation - 1)
-        }
-    }
-    return [...heights]
 }
 
 /**
@@ -152,21 +119,22 @@ export async function verifyBlockTransactions(
 }
 
 /**
- * Left out of the comparison: its hash covers a `createdAt` the database
- * stamps with each node's own clock, so no two nodes hold the same value for
- * the same row and the entry cannot match across nodes.
+ * Left out of the comparison before `tlsnVerified`: its hash covers a
+ * `createdAt` the database stamps with each node's own clock, so no two nodes
+ * hold the same value for the same row. Under the fork the hash covers only
+ * chain-written columns and the chain writes the table, so it is compared.
  */
-const NODE_LOCAL_TABLE_HASHES = new Set(["native_tlsnotary"])
+const TLSN_TABLE_HASH = "native_tlsnotary"
+
+function nodeLocalTableHash(key: string, blockNumber: number): boolean {
+    return key === TLSN_TABLE_HASH && !isForkActive("tlsnVerified", blockNumber)
+}
 
 /**
- * Compared, but a difference is logged and counted instead of rejecting the
- * block. The storage root is new; until it has run on a live network, a
- * difference stopping every syncing node is the larger risk. Validators still
- * enforce it, since a forger with another root forges another block hash.
- * Present on one side only is still a rejection: that is a fork-schedule
- * disagreement, not diverged state.
+ * The storage root. A difference is counted before the block is refused, so
+ * a root that diverges on a live network shows up in the metrics too.
  */
-const WARN_ONLY_TABLE_HASHES = new Set(["native_storage_programs"])
+const STORAGE_ROOT_KEY = "native_storage_programs"
 
 /**
  * `native_tables_hashes` is taken by the forger before it applies the block,
@@ -186,15 +154,17 @@ export async function verifyNativeTablesHashes(block: Block): Promise<void> {
     const keys = new Set([...Object.keys(committed ?? {}), ...Object.keys(local)])
     const differing = [...keys].filter(
         key =>
-            !NODE_LOCAL_TABLE_HASHES.has(key) && committed?.[key] !== local[key],
+            !nodeLocalTableHash(key, block.number) && committed?.[key] !== local[key],
     )
-    for (const key of WARN_ONLY_TABLE_HASHES) {
-        const index = differing.indexOf(key)
-        if (index === -1 || !committed || !(key in committed) || !(key in local)) continue
-        differing.splice(index, 1)
+    if (
+        differing.includes(STORAGE_ROOT_KEY) &&
+        committed &&
+        STORAGE_ROOT_KEY in committed &&
+        STORAGE_ROOT_KEY in local
+    ) {
         countStorageRootSyncMismatch()
         log.error(
-            `[syncVerify] storage root of block ${block.number} differs from local state: block ${committed[key]}, local ${local[key]}; applying it anyway`,
+            `[syncVerify] storage root of block ${block.number} differs from local state: block ${committed[STORAGE_ROOT_KEY]}, local ${local[STORAGE_ROOT_KEY]}`,
         )
     }
     if (!committed || differing.length > 0) {
@@ -425,8 +395,9 @@ export function statusDisagreements(
  * remaining disagreement before the rows are stored: once N is stored its
  * statuses are final and its failure codes change only by repair.
  *
- * Only a next block that hashes to its own hash and builds on `block` is
- * compared; anything else is judged as a block on its own turn. It is not
+ * A next block that does not hash to its own hash or does not build on
+ * `block` is refused rather than skipped: skipping would let a peer store
+ * `block` unchecked by serving any block in the child's place. It is not
  * signature-checked yet (its committee depends on `block`), so a mismatch
  * rejects what this peer served, and nothing about this node's state.
  */
@@ -435,19 +406,16 @@ export async function checkResultsAgainstNextBlock(
     txs: Transaction[],
     next: Block | undefined,
 ): Promise<void> {
+    if (!next || !isForkActive(FINALITY_FORK, block.number + 1)) return
     if (
-        !next ||
         next.number !== block.number + 1 ||
-        !isForkActive(FINALITY_FORK, next.number) ||
-        next.content?.previousHash !== block.hash
-    ) {
-        return
-    }
-    if (
+        next.content?.previousHash !== block.hash ||
         Hashing.sha256(serializeBlockContent(next.content, next.number)) !==
-        next.hash
+            next.hash
     ) {
-        return
+        throw new SyncBlockRejectedError(
+            `block served as the child of block ${block.number} is not built on it`,
+        )
     }
 
     const committed = (next.content as unknown as Record<string, unknown>)
