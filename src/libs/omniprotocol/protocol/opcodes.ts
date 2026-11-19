@@ -57,8 +57,6 @@ export enum OmniOpcode {
     GCR_GET_ADDRESS_NONCE = 0x4b,
 
     // 0x5X Browser / Client
-    LOGIN_REQUEST = 0x50,
-    LOGIN_RESPONSE = 0x51,
     WEB2_PROXY_REQUEST = 0x52,
     GET_TWEET = 0x53,
     GET_DISCORD_MESSAGE = 0x54,
