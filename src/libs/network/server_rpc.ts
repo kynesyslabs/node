@@ -4,6 +4,7 @@ import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
 import Chain from "../blockchain/chain"
+import { asGenesisBlockContent } from "../blockchain/genesis/genesisBlockContent"
 import Mempool from "../blockchain/mempool"
 import GCR from "../blockchain/gcr/gcr"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
@@ -320,8 +321,9 @@ export async function serverRpcBun() {
 
     server.get("/genesis", async () => {
         try {
-            const genesisBlock = await Chain.getGenesisBlock()
-            let genesisData = genesisBlock.content.extra?.genesisData || null
+            let genesisData =
+                asGenesisBlockContent((await Chain.getGenesisBlock()).content)
+                    .extra?.genesisData || null
 
             if (typeof genesisData === "string") {
                 try {

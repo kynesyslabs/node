@@ -50,6 +50,7 @@ import { GenesisImportedIdentity } from "@/model/entities/GenesisImportedIdentit
 import Datasource from "src/model/datasource"
 import { identityCarryoverActiveAtGenesis } from "@/forks/identityCarryoverGate"
 import { genesisFileExists, genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
+import { asGenesisBlockContent } from "@/libs/blockchain/genesis/genesisBlockContent"
 import { readGenesisSudoPubkey } from "@/libs/consensus/genesisSudoPubkey"
 import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
 import { WINDOW_BLOCKS } from "@/libs/peer/routines/forkScheduleWatch"
@@ -198,9 +199,9 @@ export default async function findGenesisBlock() {
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
         log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
-        const genesisContent = (await Chain.getGenesisBlock())?.content as
-            | { extra?: { genesisData?: unknown } }
-            | undefined
+        const genesisContent = asGenesisBlockContent(
+            (await Chain.getGenesisBlock())?.content,
+        )
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
         refuse(bootSettingProblems(pin, chainIdOf(stored)))
