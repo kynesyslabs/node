@@ -33,8 +33,12 @@ const { default: Mempool } = await import("../mempool")
 const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
 const { getSharedState } = await import("@/utilities/sharedState")
 const { default: logger } = await import("src/utilities/logger")
-const { assertNoUnreconciledGcrState, rollbackOrphanedGcrState, unreconciledGcrBlockNumber } =
-    await import("./Sync")
+const {
+    assertNoUnreconciledGcrState,
+    GcrDriftProbeError,
+    rollbackOrphanedGcrState,
+    unreconciledGcrBlockNumber,
+} = await import("./Sync")
 
 const TIP = 20
 const ORPHAN = TIP + 1
@@ -215,7 +219,15 @@ describe("a drift probe that cannot run", () => {
     ])("refuses to apply after %s, and probes again on the next call", async (_, error) => {
         getRawOne.mockRejectedValueOnce(error)
 
-        await expect(assertNoUnreconciledGcrState()).rejects.toThrow(/orphaned GCR state/)
+        const rejection = await assertNoUnreconciledGcrState().then(
+            () => null,
+            (e: unknown) => e,
+        )
+        // Batch sync stops on this class without cooling the peer down.
+        expect(rejection).toBeInstanceOf(GcrDriftProbeError)
+        expect((rejection as Error).name).toBe("GcrDriftProbeError")
+        expect((rejection as Error).message).toMatch(/orphaned GCR state/)
+        expect((rejection as Error).cause).toBe(error)
         expect(logger.warning).toHaveBeenCalledWith(expect.stringContaining(`: ${error.message}`))
         expect(applyTransactions).not.toHaveBeenCalled()
         // The drift is unknown, not proven: nothing is latched.
@@ -231,11 +243,12 @@ describe("a drift probe that cannot run", () => {
     it("says what failed when the rejection is not an Error", async () => {
         getRawOne.mockRejectedValueOnce({ code: "ECONNRESET", syscall: "read" })
 
-        await expect(assertNoUnreconciledGcrState()).rejects.toThrow(
-            '{"code":"ECONNRESET","syscall":"read"}',
-        )
+        const contents = "{\"code\":\"ECONNRESET\",\"syscall\":\"read\"}"
+        const rejection = assertNoUnreconciledGcrState()
+        await expect(rejection).rejects.toThrow(contents)
+        await expect(rejection).rejects.toBeInstanceOf(GcrDriftProbeError)
         const warning = String((logger.warning as any).mock.calls[0][0])
-        expect(warning).toContain('{"code":"ECONNRESET","syscall":"read"}')
+        expect(warning).toContain(contents)
         expect(warning).not.toContain("[object Object]")
         expect(unreconciledGcrBlockNumber()).toBeNull()
     })

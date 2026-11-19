@@ -134,6 +134,14 @@ class ForkedPeerError extends Error {
     }
 }
 
+/** The local check for orphaned GCR state could not run. */
+export class GcrDriftProbeError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options)
+        this.name = "GcrDriftProbeError"
+    }
+}
+
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -1210,8 +1218,9 @@ function isMissingTableError(e: unknown): boolean {
  * or null when GCR state and chain history agree. Stamps commit with their
  * block, so a stamp above the tip was left by an older binary.
  *
- * @throws when the check cannot run for any reason but a missing table: the
- *   drift is then unknown, and nothing may be applied on top of it
+ * @throws {GcrDriftProbeError} when the check cannot run for any reason but
+ *   a missing table: the drift is then unknown, and nothing may be applied
+ *   on top of it
  */
 async function findOrphanedGcrBlock(): Promise<number | null> {
     try {
@@ -1243,7 +1252,7 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
         log.warning(
             `[applySyncedBlock] could not check for orphaned GCR state; not applying until it can: ${reason}`,
         )
-        throw new Error(
+        throw new GcrDriftProbeError(
             "[applySyncedBlock] refusing to apply: the check for orphaned GCR " +
                 `state failed: ${reason}`,
             { cause: e },
@@ -1773,6 +1782,15 @@ async function requestBlocks(): Promise<boolean> {
 
                 // Retry the current batch with new peer
                 continue
+            }
+
+            // The local drift check failed: stop this round without
+            // cooling the peer down.
+            if (error instanceof GcrDriftProbeError) {
+                log.error(
+                    `[requestBlocks] Local drift check failed; stopping this sync round without blaming peer ${peer.identity}: ${error.message}`,
+                )
+                return false
             }
 
             // Unknown error - log and break
