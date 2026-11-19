@@ -778,10 +778,10 @@ describe("node-doctor --production web2 identity credentials under keylessWeb2Id
     })
     afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 
-    function genesisWith(keyless: unknown): string {
+    function genesisWith(keyless: unknown, raw?: string): string {
         const file = path.join(dir, "genesis.json")
         const forks = keyless === undefined ? {} : { keylessWeb2Identity: keyless }
-        fs.writeFileSync(file, JSON.stringify({ properties: { id: 4242, shardSize: 3 }, forks }))
+        fs.writeFileSync(file, raw ?? JSON.stringify({ properties: { id: 4242, shardSize: 3 }, forks }))
         return file
     }
 
@@ -807,8 +807,21 @@ describe("node-doctor --production web2 identity credentials under keylessWeb2Id
         ])
     })
 
+    it("reads a height written as 0.0 as 0, like the node", () => {
+        const raw = '{"properties":{"id":4242,"shardSize":3},"forks":{"keylessWeb2Identity":{"activationHeight":0.0}}}'
+        const lines = credentialLines(genesisWith(undefined, raw))
+        expect(lines.filter(l => l.startsWith("FAIL"))).toEqual([])
+        expect(lines).toHaveLength(3)
+    })
+
     it("still fails empty credentials when the fork is absent, unscheduled or later", () => {
-        for (const keyless of [undefined, { activationHeight: null }, { activationHeight: 10 }, { activationHeight: "0" }]) {
+        for (const keyless of [
+            undefined,
+            { activationHeight: null },
+            { activationHeight: 10 },
+            { activationHeight: "0" },
+            { activationHeight: false },
+        ]) {
             const lines = credentialLines(genesisWith(keyless))
             expect([keyless, lines.filter(l => l.startsWith("FAIL")).map(l => l.split(":")[0])]).toEqual([
                 keyless,

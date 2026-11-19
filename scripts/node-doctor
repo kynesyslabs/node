@@ -748,7 +748,8 @@ def main():
     forks = genesis.get("forks")
     keyless = forks.get("keylessWeb2Identity") if isinstance(forks, dict) else None
     height = keyless.get("activationHeight") if isinstance(keyless, dict) else None
-    if type(height) is int and height == 0:
+    # JSON 0.0 is 0 to the node; bool is excluded because True == 1 is not a height.
+    if isinstance(height, (int, float)) and not isinstance(height, bool) and height == 0:
         out("FACT", "keylessWeb2Identity", "0")
 
     props = genesis.get("properties")
