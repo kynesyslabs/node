@@ -1038,11 +1038,15 @@ export function notaryKeysReasons(
     const ranged = (Array.isArray(entry?.notaryKeys) ? (entry.notaryKeys as unknown[]) : []).filter(
         k => typeof k === "object" && k !== null && ("validFrom" in k || "validUntil" in k),
     )
+    const rangedIds = ranged.map(k => {
+        const id = (k as { id?: unknown }).id
+        return typeof id === "string" ? id : String(JSON.stringify(id))
+    })
     const rangeReasons =
         ranged.length === 0
             ? []
             : [
-                  `the genesis tlsnVerified notaryKeys ${ranged.map(k => String((k as { id?: unknown }).id)).join(", ")} ` +
+                  `the genesis tlsnVerified notaryKeys ${rangedIds.join(", ")} ` +
                       "carry validFrom or validUntil: launch notary keys must not carry a range",
               ]
     if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {

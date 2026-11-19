@@ -751,6 +751,25 @@ describe("checkLaunch", () => {
             expect(d.reasons).toEqual([noKeys, range])
         })
 
+        it("names each ranged key by its id as written: a string as is, any other value as JSON", () => {
+            const hex = notaryKeyHex(0x11)
+            const notaryKeys = [
+                { id: "demos-notary-1", alg: "k256", hex, validUntil: 10 },
+                { id: { name: "x" }, alg: "k256", hex, validFrom: 0 },
+                { id: 7, alg: "k256", hex, validUntil: 10 },
+                { alg: "k256", hex, validUntil: 10 },
+            ]
+            const ranged = genesisFile(rows, {
+                ...mainnetForks(),
+                tlsnVerified: { activationHeight: 0, ...tlsnVerifiedPayload(), notaryKeys },
+            })
+            const g = { ...ranged, properties: { id: NON_MAINNET_CHAIN_IDS[0], shardSize: 10 } }
+            expect(notaryKeysReasons(g, null)).toEqual([
+                "the genesis tlsnVerified notaryKeys demos-notary-1, {\"name\":\"x\"}, 7, undefined carry validFrom or validUntil: " +
+                    "launch notary keys must not carry a range",
+            ])
+        })
+
         it("checks given keys on the testnet and devnet chain ids, and needs none there", () => {
             for (const chainId of NON_MAINNET_CHAIN_IDS) {
                 const g = { ...genesisFile(rows), properties: { id: chainId, shardSize: 10 } }

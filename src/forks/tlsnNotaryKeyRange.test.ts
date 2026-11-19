@@ -138,10 +138,14 @@ describe("validFrom / validUntil at load", () => {
     })
 
     it("accept either end alone, an end at the activation height, and an empty range", () => {
-        load({ tlsnVerified: verified([key("a", K1, { validFrom: 100 }), key("b", K2, { validUntil: 100 })], 100) })
-        load({ tlsnVerified: verified([key("a", K1, { validFrom: 300, validUntil: 300 })], 100) })
+        expect(() =>
+            load({ tlsnVerified: verified([key("a", K1, { validFrom: 100 }), key("b", K2, { validUntil: 100 })], 100) }),
+        ).not.toThrow()
+        expect(() => load({ tlsnVerified: verified([key("a", K1, { validFrom: 300, validUntil: 300 })], 100) })).not.toThrow()
         // An unscheduled entry has no activation height to compare with.
-        load({ tlsnVerified: verified([key("a", K1, { validFrom: 0 })], null as unknown as number) })
+        expect(() =>
+            load({ tlsnVerified: verified([key("a", K1, { validFrom: 0 })], null as unknown as number) }),
+        ).not.toThrow()
     })
 
     const refused: Array<[string, Record<string, unknown>, RegExp]> = [
