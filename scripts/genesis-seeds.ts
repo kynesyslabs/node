@@ -65,18 +65,28 @@ function flag(name: string): string | undefined {
     return at === -1 ? undefined : process.argv[at + 1]
 }
 
-/** The allowlisted node NFTs the wallet holds. */
-async function heldAllowlistedMints(connection: Connection, owner: PublicKey): Promise<string[]> {
+/** An allowlisted node NFT the wallet holds, and the token account it sits in. */
+interface HeldNft {
+    mint: string
+    tokenAccount: PublicKey
+}
+
+/**
+ * The allowlisted node NFTs the wallet holds. The token account is kept
+ * because an NFT need not sit in the wallet's associated account, and the
+ * proof must move it out of the account that holds it.
+ */
+async function heldAllowlistedMints(connection: Connection, owner: PublicKey): Promise<HeldNft[]> {
     const allowed = parseAllowlist(readFileSync(NFT_ALLOWLIST_PATH, "utf8"), NFT_ALLOWLIST_SHA256)
     const accounts = await connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }, "finalized")
-    const mints: string[] = []
-    for (const { account } of accounts.value) {
+    const mints: HeldNft[] = []
+    for (const { pubkey, account } of accounts.value) {
         const info = account.data.parsed?.info as
             | { mint?: string; tokenAmount?: { amount?: string; decimals?: number } }
             | undefined
         const mint = info?.mint
         if (mint && info.tokenAmount?.amount === "1" && info.tokenAmount.decimals === 0 && allowed.has(mint)) {
-            mints.push(mint)
+            mints.push({ mint, tokenAccount: pubkey })
         }
     }
     return mints
@@ -94,7 +104,7 @@ async function main(): Promise<void> {
     const connection = new Connection(rpc, { commitment: "finalized" })
     const mints = await heldAllowlistedMints(connection, keypair.publicKey)
     if (mints.length === 0) throw new Error(`${owner} holds no allowlisted node NFT`)
-    mints.forEach((mint, i) => console.error(`  ${i + 1}. ${mint}`))
+    mints.forEach(({ mint }, i) => console.error(`  ${i + 1}. ${mint}`))
 
     const rl = createInterface({ input: process.stdin, output: process.stderr })
     const answer = await rl.question("Mints to bind, one seat each (numbers, e.g. 1 3 4): ")
@@ -104,9 +114,16 @@ async function main(): Promise<void> {
     const validators: SeedRow[] = []
     const mnemonics: Record<string, string> = {}
     try {
-        for (const mint of chosen) {
+        for (const { mint, tokenAccount } of chosen) {
             const { mnemonic, address } = await newDemosIdentity()
-            const proofTx = await proveNft(connection, keypair, new PublicKey(mint), address, line => console.error(line))
+            const proofTx = await proveNft(
+                connection,
+                keypair,
+                new PublicKey(mint),
+                address,
+                line => console.error(line),
+                tokenAccount,
+            )
             validators.push(seedRow(address, mint, owner, proofTx))
             mnemonics[address] = mnemonic
         }

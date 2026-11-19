@@ -21,12 +21,13 @@ export async function proveNft(
     mint: PublicKey,
     demosAddress: string,
     say: (line: string) => void,
+    tokenAccount: PublicKey = associatedTokenAddress(keypair.publicKey, mint),
 ): Promise<string> {
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("finalized")
     const tx = buildProofTransaction({
         owner: keypair.publicKey,
         mint,
-        tokenAccount: associatedTokenAddress(keypair.publicKey, mint),
+        tokenAccount,
         demosAddress,
         blockhash,
         lastValidBlockHeight,

@@ -76,7 +76,11 @@ export async function nodeHoldsSeat(ownAddress: string): Promise<boolean> {
 export async function mintHolder(mint: string): Promise<string | null> {
     const demos = await anchorClient()
     try {
-        const info = (await demos.getValidatorByMint(mint)) as { address?: string } | null
+        // A node call rather than an SDK helper: the SDK releases this node
+        // builds with do not carry one.
+        const info = (await demos.nodeCall("getValidatorByMint", { mint })) as {
+            address?: string
+        } | null
         return info && typeof info.address === "string" ? info.address : null
     } catch (e) {
         throw new AnchorUnreachableError(`getValidatorByMint: ${e instanceof Error ? e.message : String(e)}`)

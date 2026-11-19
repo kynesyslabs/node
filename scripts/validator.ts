@@ -9,7 +9,7 @@ import {
     type ParsedTransactionWithMeta,
 } from "@solana/web3.js"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
-import { parseNodeUrl } from "../src/config/nodeUrl"
+import { demToOs } from "@kynesyslabs/demosdk/utils"
 
 import { parseNodeUrl } from "../src/config/nodeUrl"
 import { MEMO_PROGRAM_IDS, PROOF_MEMO_PREFIX } from "../src/features/staking/proofBytes"
@@ -245,6 +245,21 @@ function loadSolanaKeypair(file: string): Keypair {
     return signer.keypair
 }
 
+/**
+ * The token account of `owner` that holds `mint`. The NFT need not sit in the
+ * wallet's associated account, and the proof must move it out of the account
+ * that holds it.
+ */
+async function heldTokenAccount(connection: Connection, owner: PublicKey, mint: PublicKey): Promise<PublicKey> {
+    const accounts = await connection.getParsedTokenAccountsByOwner(owner, { mint }, "finalized")
+    for (const { pubkey, account } of accounts.value) {
+        const amount = (account.data.parsed?.info as { tokenAmount?: { amount?: string } } | undefined)
+            ?.tokenAmount?.amount
+        if (amount === "1") return pubkey
+    }
+    throw new Error(`${owner.toBase58()} does not hold NFT ${mint.toBase58()}`)
+}
+
 /** Warn when the mint already backs a seat, then make the proof. Returns the Solana signature. */
 async function sendNftProof(
     keypair: Keypair,
@@ -252,14 +267,18 @@ async function sendNftProof(
     demosAddress: string,
     demos: Demos,
 ): Promise<string> {
-    const holder = (await demos.getValidatorByMint(mint.toBase58())) as { address?: string } | null
+    const holder = (await demos.nodeCall("getValidatorByMint", { mint: mint.toBase58() })) as {
+        address?: string
+    } | null
     if (holder?.address) {
         process.stderr.write(
             yellow(`mint ${mint.toBase58()} backs the seat of ${holder.address}; staking with this proof evicts it\n`),
         )
     }
     try {
-        return await proveNft(solanaConnection(), keypair, mint, demosAddress, line => console.log(line))
+        const connection = solanaConnection()
+        const tokenAccount = await heldTokenAccount(connection, keypair.publicKey, mint)
+        return await proveNft(connection, keypair, mint, demosAddress, line => console.log(line), tokenAccount)
     } catch (e) {
         exitWith(e instanceof Error ? e.message : String(e))
     }
@@ -343,8 +362,50 @@ async function cmdNftProof(): Promise<void> {
     console.log(`  bun run validator:stake --nft-proof ${signature}`)
 }
 
+/**
+ * The NFT seat builders (an NFT proof on a stake, the challenge) ship with
+ * the SDK release that carries validator NFT gating; an older SDK would
+ * build a stake without the proof, which the network refuses.
+ */
+type NftSeatBuilders = {
+    stake(
+        amount: string,
+        connectionUrl: string,
+        demos: Demos,
+        options: { nft?: { mint: string; owner: string; proofTx: string } },
+    ): Promise<unknown>
+    challengeValidator(validator: string, evidenceTx: string, proofTx: string, demos: Demos): Promise<unknown>
+}
+
+function nftSeatBuilders(): NftSeatBuilders {
+    if (typeof (DemosTransactions as { challengeValidator?: unknown }).challengeValidator !== "function") {
+        exitWith(
+            "this @kynesyslabs/demosdk build has no validator NFT gating builders; " +
+                "install the SDK release that carries them",
+        )
+    }
+    return DemosTransactions as unknown as NftSeatBuilders
+}
+
+/** A stake bonded in DEM, the rule of a network that does not run nftValidatorGating. */
+async function cmdStakeDem(amountDem: string): Promise<void> {
+    let amountOs: string
+    try {
+        amountOs = demToOs(amountDem).toString()
+    } catch (e) {
+        exitWith(`invalid --amount "${amountDem}": ${e instanceof Error ? e.message : String(e)}`)
+    }
+    if (BigInt(amountOs) <= 0n) {
+        exitWith(`stake amount must be greater than 0 (got ${amountDem} DEM)`)
+    }
+    const demos = await connect()
+    const tx = await DemosTransactions.stake(amountOs, globalThis.validatorCtx.rpc, demos)
+    await submit(demos, tx, `Staking ${amountDem} DEM`)
+}
+
 async function cmdStake(): Promise<void> {
     const { flags } = globalThis.validatorCtx
+    if (flags.amount) return cmdStakeDem(flags.amount)
 
     // The seat records this node's public URL, not the node the tx goes through.
     const connectionUrl = process.env.EXPOSED_URL?.trim() ?? ""
@@ -389,8 +450,8 @@ async function cmdStake(): Promise<void> {
     }
 
     // A seat is backed by the NFT alone; the stake records no DEM.
-    const tx = await DemosTransactions.stake("0", connectionUrl, demos, { nft })
-    await submit(demos, tx, "Staking")
+    const tx = await nftSeatBuilders().stake("0", connectionUrl, demos, { nft })
+    await submit(demos, tx as Awaited<ReturnType<typeof DemosTransactions.stake>>, "Staking")
 }
 
 async function cmdUnstake(): Promise<void> {
@@ -415,8 +476,8 @@ async function cmdChallenge(): Promise<void> {
     const demos = await connect()
     const info = (await demos.getValidatorInfo(validator.toLowerCase())) as { nftProofTx?: string | null } | null
     if (!info?.nftProofTx) exitWith(`${validator} holds no seat backed by an NFT proof`)
-    const tx = await DemosTransactions.challengeValidator(validator.toLowerCase(), transfer, info.nftProofTx, demos)
-    await submit(demos, tx, `Challenging ${validator}`)
+    const tx = await nftSeatBuilders().challengeValidator(validator.toLowerCase(), transfer, info.nftProofTx, demos)
+    await submit(demos, tx as Awaited<ReturnType<typeof DemosTransactions.stake>>, `Challenging ${validator}`)
 }
 
 // ---------- entry point ----------
@@ -426,6 +487,7 @@ const USAGE =
     "[--identity <file>] [--rpc <url>] [--solana-rpc <url>]\n" +
     "  nft-proof --mint <MINT> --keypair <key file> [--account <n>] [--demos-address <0x...>]\n" +
     "    signs the proof, sends it to Solana, waits for finality\n" +
+    "  stake --amount <DEM>   (a network without nftValidatorGating)\n" +
     "  stake --nft-proof <signature>\n" +
     "  stake --nft-mint <MINT> --solana-keypair <key file> [--account <n>]\n" +
     `  key file: ${ACCEPTED_SECRET_FORMATS}; --account picks the mnemonic account index\n` +
