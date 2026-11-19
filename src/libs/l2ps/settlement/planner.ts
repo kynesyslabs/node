@@ -2,6 +2,11 @@
  * Picks the transfers of one batch and computes its net changes against the
  * given balances. Deterministic: the same transfers, balances and nonces give
  * the same plan on every member.
+ *
+ * The proof binds no balance and block apply only asks that each account
+ * cover its net change; the planner is stricter and keeps a transfer only if
+ * its sender covers it in batch order, so every transfer it places would
+ * also settle on its own.
  */
 import {
     AMOUNT_LIMIT,
@@ -20,9 +25,9 @@ export const DEFER_REASON = {
     accountsFull: "batch already touches the maximum number of accounts",
     invalidTransfer: "transfer fields are out of range or malformed",
     commitmentMismatch: "commitment does not open to the transfer",
-    nonce: "nonce is not the signer's next",
+    nonce: "nonce is not the signer's next L2PS nonce in this subnet",
     overdraft: "sender balance does not cover amount plus fee at this point in the batch",
-    overflow: "a balance would reach 2^128",
+    overflow: "a balance or a net change would reach 2^128",
 } as const
 
 function wellFormed(t: DecryptedTransfer): boolean {
@@ -57,7 +62,8 @@ function commitmentOpens(t: DecryptedTransfer): boolean {
  * changes nothing, so the transfers after it are judged as if it were absent.
  *
  * @param balances current L1 balance per account; a missing account holds 0
- * @param nonces current L1 nonce per account; a missing account has nonce 0
+ * @param nonces current L2PS nonce per account in the batch's subnet; a
+ *   missing account has nonce 0
  */
 export function planSettlement(
     transfers: DecryptedTransfer[],
@@ -101,7 +107,8 @@ export function planSettlement(
 
         const senderBefore = balanceOf(t.from)
         const receiverBefore = balanceOf(t.to)
-        // The circuit cannot hold a balance outside [0, 2^128).
+        // A balance at or past 2^128 cannot be stored as one, and a net
+        // change that large is not a statement the verifier accepts.
         if (
             senderBefore < 0n || senderBefore >= AMOUNT_LIMIT ||
             receiverBefore < 0n || receiverBefore >= AMOUNT_LIMIT
@@ -133,6 +140,5 @@ export function planSettlement(
         account,
         delta: (running.get(account) as bigint) - (before.get(account) as bigint),
     }))
-    const balancesBefore = new Map(accounts.map(a => [a, before.get(a) as bigint]))
-    return { transfers: kept, deferred, changes, balancesBefore }
+    return { transfers: kept, deferred, changes }
 }

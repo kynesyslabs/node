@@ -731,12 +731,13 @@ export default class L2PSTransactionExecutor {
     }
 
     /**
-     * A sender's transfers this node admitted, in any subnet, that have not
-     * settled or failed yet, past its account nonce, lowest nonce first.
+     * A sender's transfers this node admitted in one subnet that have not
+     * settled or failed yet, past its L2PS nonce there, lowest nonce first.
      */
     static async getUnsettledBySender(
         from: string,
-        accountNonce: bigint,
+        l2psUid: string,
+        l2psNonce: bigint,
         limit: number,
         offset = 0,
     ): Promise<L2PSTransaction[]> {
@@ -746,13 +747,30 @@ export default class L2PSTransactionExecutor {
         return ds.getRepository(L2PSTransaction).find({
             where: {
                 from_address: from,
+                l2ps_uid: l2psUid,
                 status: In(["pending", "batched"]),
-                nonce: MoreThan(accountNonce.toString() as unknown as bigint),
+                nonce: MoreThan(l2psNonce.toString() as unknown as bigint),
             },
             order: { nonce: "ASC", id: "ASC" },
             take: limit,
             skip: offset,
         })
+    }
+
+    /** The subnets in which a sender has transfers this node admitted and has not settled or failed. */
+    static async getUnsettledSubnetsOf(from: string): Promise<string[]> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        const rows = await ds
+            .getRepository(L2PSTransaction)
+            .createQueryBuilder("tx")
+            .select("DISTINCT tx.l2ps_uid", "l2ps_uid")
+            .where("tx.from_address = :from", { from })
+            .andWhere("tx.status IN (:...statuses)", { statuses: ["pending", "batched"] })
+            .orderBy("tx.l2ps_uid", "ASC")
+            .getRawMany<{ l2ps_uid: string }>()
+        return rows.map(row => row.l2ps_uid)
     }
 
     /** The encrypted hashes among `hashes` whose history row reads failed. Throws on a failed read. */

@@ -1,14 +1,18 @@
 /**
  * The entry node's half of L2PS settlement: turns executed L2PS transfers into
  * proven `l2psBatch` settlement records and follows each batch until it lands.
- * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1".
+ * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1.2".
  *
  * Rules this keeps:
- * - A batch is planned on balances and nonces read at the tip, so no account
- *   a batch in flight touches is planned again until that batch has landed or
- *   failed; otherwise the second proof would bind stale balances.
+ * - A batch is planned on balances and L2PS nonces read at the tip, so no
+ *   account a batch in flight touches is planned again until that batch has
+ *   landed or failed; otherwise two batches planned on one balance could
+ *   together debit more than it holds, and the second would fail at apply.
+ *   The proof binds no balance, so L1 activity on a touched account while a
+ *   batch proves does not make it stale; only a balance that no longer
+ *   covers the account's net debit fails it.
  * - A transfer that cannot go into this batch (overdraft, nonce gap, slots)
- *   stays queued; one whose nonce L1 has already spent, or whose signed fee is
+ *   stays queued; one whose L2PS nonce is already spent, or whose signed fee is
  *   below the native transfer fee now, can never settle and is dropped with a
  *   history status, so no batch that apply must fail is proved again and again.
  * - Transfers the planner cannot place at all are deferred: read in a window
@@ -36,7 +40,11 @@
  *   but only once a proof or batch of someone else has worked since its
  *   first failure alone: a prover or verifier that fails everything drops
  *   nothing. Failures that say nothing about the transfers (a full mempool,
- *   a tip that moved, a shutdown) are never counted.
+ *   an L2PS nonce spent elsewhere, a shutdown) are never counted.
+ * - A batch that fails on L1 because an account no longer covers its net
+ *   debit (its owner spent the balance on L1 while the batch proved) is
+ *   re-planned on the tip: the transfers of that signer the batch can no
+ *   longer carry are dropped, the rest are queued again, and none is blamed.
  */
 import type { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import type { TxStatus } from "@/libs/blockchain/chainTypes"
@@ -48,6 +56,7 @@ import type { TransferVerdict } from "./transfer"
 import type { TipAccount } from "./tipState"
 import type {
     DecryptedTransfer,
+    SettlementChange,
     SettlementPlan,
     SettlementProofResult,
 } from "./types"
@@ -94,7 +103,8 @@ export interface SettlementDeps {
     rows(l2psUid: string, status: L2PSStatus, limit: number, offset?: number): Promise<L2PSMempoolTx[]>
     /** Decrypts a queued row and opens its settlement transfer. Throws when the subnet cannot decrypt at all. */
     open(l2psUid: string, row: L2PSMempoolTx): Promise<TransferVerdict>
-    tip(accounts: Iterable<string>): Promise<Map<string, TipAccount>>
+    /** Balances and L2PS nonces in `l2psUid` at the tip. */
+    tip(l2psUid: string, accounts: Iterable<string>): Promise<Map<string, TipAccount>>
     /** The native transfer fee now, in OS: the floor block apply holds each transfer's fee to. */
     minimumFee(): Promise<bigint>
     plan(
@@ -157,8 +167,11 @@ interface InFlightBatch {
     submittedAt: number
     /** Proved alone, to isolate a transfer earlier batches failed with. */
     alone: boolean
-    /** Balances and nonces of its accounts it was planned on; unknown after a restart. */
+    /** Balances and L2PS nonces of its accounts it was planned on; unknown after a restart. */
     bound?: Map<string, TipAccount>
+    /** Its transfers and net changes; unknown after a restart. */
+    transfers?: DecryptedTransfer[]
+    changes?: SettlementChange[]
     /** Block the batch landed in; its accounts unlock once the tip is past it. */
     landedAt?: number
 }
@@ -284,8 +297,9 @@ export class SettlementAggregator {
         this.cycles++
         const order = [...subnets.slice(first), ...subnets.slice(0, first)]
 
-        // A proof binds the tip balances of its accounts, so no two batches
-        // waiting to land may share one, whichever subnet planned them.
+        // A batch is planned on the tip's nonces and balances of its
+        // accounts, which a batch still waiting to land would change, so no
+        // two such batches may share one, whichever subnet planned them.
         const claimed = this.lockedAccounts()
         const slots = Math.max(1, Math.floor(this.limits.provers))
         const planned: PlannedBatch[] = []
@@ -339,6 +353,9 @@ export class SettlementAggregator {
     }
 
     private async prove(batch: PlannedBatch): Promise<ProveOutcome> {
+        // With the "Proved" line, brackets the window in which an L1 move on
+        // one of its accounts lands while the batch is not yet sent.
+        log.info(`[L2PS Settlement] Proving a ${batch.plan.transfers.length}-transfer batch for ${batch.l2psUid}`)
         const since = this.deps.now()
         try {
             const proof = await this.deps.prove(batch.plan)
@@ -437,6 +454,8 @@ export class SettlementAggregator {
             submittedAt: this.deps.head(),
             alone: batch.alone,
             bound: batch.bound,
+            transfers: batch.plan.transfers,
+            changes: batch.plan.changes,
         })
     }
 
@@ -587,12 +606,18 @@ export class SettlementAggregator {
             }
             this.inFlight.delete(batch.l1TxHash)
             // An unseen or expired batch says nothing about its transfers.
-            if (
-                status.state === "failed" &&
-                !NOT_THE_TRANSFERS.has(status.code ?? "") &&
-                !(await this.tipMoved(batch))
-            ) {
-                await this.blameFailure(batch.rowHashes, batch.alone, "l1")
+            if (status.state === "failed" && !NOT_THE_TRANSFERS.has(status.code ?? "")) {
+                const explained = await this.explainFailure(batch)
+                if (explained === null) {
+                    await this.blameFailure(batch.rowHashes, batch.alone, "l1")
+                } else {
+                    for (const row of explained.drop) {
+                        await this.drop(
+                            row,
+                            "sender's L1 balance no longer covers the transfers it signed in this batch; sign the transfer again",
+                        )
+                    }
+                }
             }
             log.warning(
                 `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... for ${batch.l2psUid}: ${why}${status.message ? ` (${status.message})` : ""}`,
@@ -601,27 +626,52 @@ export class SettlementAggregator {
     }
 
     /**
-     * Whether a failed batch's accounts are no longer at the balances and
-     * nonces it was proved on. A failed settlement edits none of them, so a
-     * change came from another transaction and the proof was stale, through
-     * no fault of the transfers. Unknown counts as moved.
+     * What at the tip explains a failed batch, or null when nothing does and
+     * the failure counts against its transfers. A failed settlement edits
+     * none of its accounts, so the tip shows what another transaction did:
+     * a signer's L2PS nonce spent by another batch (its transfers then fail
+     * on their spent nonce at the next plan), or an account whose balance no
+     * longer covers its net debit. For the latter the batch is re-planned on
+     * the tip, and the transfers of such a signer the plan cannot keep are
+     * returned to drop: the signer spent what they would draw on. Balance
+     * moves that still cover explain nothing: the proof binds no balance.
+     * Unknown (after a restart, or an unreadable tip) explains the failure.
      */
-    private async tipMoved(batch: InFlightBatch): Promise<boolean> {
-        if (!batch.bound) return true
+    private async explainFailure(batch: InFlightBatch): Promise<{ drop: L2PSMempoolTx[] } | null> {
+        if (!batch.bound || !batch.transfers || !batch.changes) return { drop: [] }
         let now: Map<string, TipAccount>
         try {
-            now = await this.deps.tip(batch.bound.keys())
+            now = await this.deps.tip(batch.l2psUid, batch.bound.keys())
         } catch (error) {
             log.warning(
                 `[L2PS Settlement] Could not read the tip for failed batch ${batch.l1TxHash.slice(0, 16)}...: ${getErrorMessage(error)}`,
             )
-            return true
+            return { drop: [] }
         }
-        for (const [account, was] of batch.bound) {
-            const is = now.get(account)
-            if (!is || is.balance !== was.balance || is.nonce !== was.nonce) return true
+        for (const t of batch.transfers) {
+            if ((now.get(t.from)?.nonce ?? 0n) !== (batch.bound.get(t.from)?.nonce ?? 0n)) {
+                return { drop: [] }
+            }
         }
-        return false
+        const uncovered = new Set(
+            batch.changes
+                .filter(c => c.delta < 0n && (now.get(c.account)?.balance ?? 0n) + c.delta < 0n)
+                .map(c => c.account),
+        )
+        if (uncovered.size === 0) return null
+        const balances = new Map<string, bigint>()
+        const nonces = new Map<string, bigint>()
+        for (const [account, state] of now) {
+            balances.set(account, state.balance)
+            nonces.set(account, state.nonce)
+        }
+        const kept = new Set(this.deps.plan(batch.transfers, balances, nonces).transfers.map(t => t.txHash))
+        const rowOf = new Map(batch.rowHashes.map(hash => [hash, { hash } as L2PSMempoolTx]))
+        const drop = batch.transfers
+            .filter(t => uncovered.has(t.from) && !kept.has(t.txHash))
+            .map(t => rowOf.get(t.txHash))
+            .filter((row): row is L2PSMempoolTx => !!row)
+        return { drop }
     }
 
     private lockedAccounts(): Set<string> {
@@ -737,15 +787,15 @@ export class SettlementAggregator {
         }
         if (opened.length === 0) return batches
 
-        const tip = await this.deps.tip(opened.flatMap(t => [t.from, t.to]))
+        const tip = await this.deps.tip(l2psUid, opened.flatMap(t => [t.from, t.to]))
         const minimumFee = await this.deps.minimumFee()
         const live: DecryptedTransfer[] = []
         for (const transfer of opened) {
-            const accountNonce = tip.get(transfer.from)?.nonce ?? 0n
-            if (transfer.nonce <= accountNonce) {
+            const l2psNonce = tip.get(transfer.from)?.nonce ?? 0n
+            if (transfer.nonce <= l2psNonce) {
                 await this.drop(
                     rowOf.get(transfer.txHash)!,
-                    `nonce ${transfer.nonce} already spent on L1 (account nonce ${accountNonce})`,
+                    `nonce ${transfer.nonce} already spent in this subnet (L2PS nonce ${l2psNonce})`,
                 )
                 continue
             }

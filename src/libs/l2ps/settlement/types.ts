@@ -23,12 +23,10 @@ export interface SettlementChange {
 export interface SettlementPlan {
     /** Transfers in the batch, in batch order (at most SETTLEMENT_TRANSFERS). */
     transfers: DecryptedTransfer[]
-    /** Left out: would overdraft, exceed the slots, or reuse a nonce. */
+    /** Left out: would overdraft, exceed the slots, or not be the signer's next L2PS nonce. */
     deferred: { transfer: DecryptedTransfer; reason: string }[]
     /** Sorted by account, unique; fees included in the senders' deltas. */
     changes: SettlementChange[]
-    /** Balances before the batch that the proof binds, by account. */
-    balancesBefore: Map<string, bigint>
 }
 
 /** snarkjs PLONK proof JSON, opaque outside the prover. */

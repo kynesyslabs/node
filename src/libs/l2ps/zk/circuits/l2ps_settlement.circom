@@ -5,22 +5,24 @@ include "comparators.circom";
 include "poseidon.circom";
 
 /*
- * L2PS settlement: the net change per account of a batch is exactly the
- * result of applying the signed transfers behind its commitments, in batch
- * order, with no overdraft and no overflow.
- * Spec: docs/design/l2ps-zk-settlement.md, "Circuit" and "Interface v1.1".
+ * L2PS settlement: the net change per account of a batch is exactly the sum
+ * of the signed transfers behind its commitments.
+ * Spec: docs/design/l2ps-zk-settlement.md, "Circuit" and "Interface v1.2".
  *
- * The statement's values (Interface v1's 1 + 5N + 6M signals) are private;
+ * The statement's values (Interface v1's 1 + 5N + 5M signals) are private;
  * the one public input is a Poseidon sponge over them, which the verifier
- * recomputes from its own values. One public input keeps the proving key
+ * recomputes from the transaction. One public input keeps the proving key
  * small and the prover off the per-input Lagrange work.
  *
- * Every value that enters the balance arithmetic is below 2^130, far from
- * the field order, so integer and field arithmetic agree wherever a range
- * check draws a conclusion from them. Witness values and running balances
- * are range-checked here; balances before the batch and net change
- * magnitudes are hashed as whole field elements, so they are exactly the
- * verifier's values, which it accepts only below 2^128.
+ * No balance is part of the statement: validators check in public that each
+ * account covers its net change when the batch applies, so L1 activity on a
+ * touched account while the batch proves does not make the proof stale.
+ *
+ * Amounts and fees are range-checked to 128 bits, so a net change, a sum of
+ * at most N credits and N debits, stays below 2^133 in magnitude, far from
+ * the field order. Net change magnitudes are hashed as whole field elements,
+ * so they are exactly the verifier's values, which it accepts only below
+ * 2^128; the delta equation then holds over the integers.
  */
 
 // x is a bit.
@@ -79,7 +81,6 @@ template L2PSSettlement(N, M) {
     signal input accountActive[M];
     signal input accountHi[M];
     signal input accountLo[M];
-    signal input balanceBefore[M];
     signal input deltaNegative[M];
     signal input deltaMagnitude[M];
     // The only public input: settlementPublicHash of the statement.
@@ -127,7 +128,6 @@ template L2PSSettlement(N, M) {
         accountIdle[j] <== 1 - accountActive[j];
         accountHi[j] * accountIdle[j] === 0;
         accountLo[j] * accountIdle[j] === 0;
-        balanceBefore[j] * accountIdle[j] === 0;
         deltaNegative[j] * accountIdle[j] === 0;
         deltaMagnitude[j] * accountIdle[j] === 0;
         negativeBit[j] = AssertBit();
@@ -135,13 +135,12 @@ template L2PSSettlement(N, M) {
     }
 
     // ---- Range checks ----
-    // The running balances and the delta equation reason about integers; they
-    // hold only while every operand is a small non-negative integer. A fee
-    // written as p - x would otherwise read as a negative number. The fee and
-    // nonce ranges also keep their packed public hash element injective.
-    // Balances before the batch, magnitudes and account limbs are hashed
-    // whole and range-checked by the verifier; the ordering below keeps
-    // accounts unique for any limbs.
+    // The delta equation reasons about integers; it holds only while every
+    // operand is a small non-negative integer. A fee written as p - x would
+    // otherwise read as a negative number. The fee and nonce ranges also keep
+    // their packed public hash element injective. Magnitudes and account
+    // limbs are hashed whole and range-checked by the verifier; the ordering
+    // below keeps accounts unique for any limbs.
     component amountRange[N];
     component feeRange[N];
     component nonceRange[N];
@@ -155,7 +154,7 @@ template L2PSSettlement(N, M) {
     }
 
     // ---- Accounts strictly increasing by (hi, lo) ----
-    // Unique accounts: one balance cannot be spent twice from two slots.
+    // Unique accounts: one account's debits cannot be split over two slots.
     // Compare lo when the hi limbs are equal, hi otherwise; next - this - 1
     // in [0, 2^128) is next > this for 128-bit operands. Uniqueness holds for
     // any limbs: along the active prefix each hi step adds at most 2^128 to
@@ -267,73 +266,45 @@ template L2PSSettlement(N, M) {
     }
     batchHash.out === commitmentsHash;
 
-    // ---- Running balances in batch order ----
-    // Each transfer debits amount + fee from the sender, then credits amount
-    // to the receiver; only the touched account changes, and its new value is
-    // range-checked, so every running balance stays in [0, 2^128) by
-    // induction from the balances before the batch, which are below 2^128. A
-    // self-transfer must afford the debit before its own credit.
-    signal balance[N + 1][M];
-    signal afterDebit[N][M];
+    // ---- Net change per account ----
+    // Credits minus debits over the transfers that pick the account: the
+    // sender pays amount + fee, the receiver gets amount, so a self-transfer
+    // nets -fee. With the net below 2^133 and the magnitude below 2^128 (the
+    // verifier's value) the equation holds over the integers, and magnitude 0
+    // has one encoding (not negative). An idle account is picked by nothing,
+    // so its net is 0, matching its forced zero magnitude.
     signal debitApplied[N][M];
     signal creditApplied[N][M];
-    component senderAfter[N];
-    component receiverAfter[N];
-    component senderAfterRange[N];
-    component receiverAfterRange[N];
-    for (var j = 0; j < M; j++) {
-        balance[0][j] <== balanceBefore[j];
-    }
-    for (var i = 0; i < N; i++) {
-        senderAfter[i] = Select(M);
-        receiverAfter[i] = Select(M);
-        for (var j = 0; j < M; j++) {
-            debitApplied[i][j] <== senderPick[i][j] * (amount[i] + fee[i]);
-            afterDebit[i][j] <== balance[i][j] - debitApplied[i][j];
-            senderAfter[i].sel[j] <== senderPick[i][j];
-            senderAfter[i].values[j] <== afterDebit[i][j];
-        }
-        senderAfterRange[i] = RangeCheck(128);
-        senderAfterRange[i].in <== senderAfter[i].out;
-        for (var j = 0; j < M; j++) {
-            creditApplied[i][j] <== receiverPick[i][j] * amount[i];
-            balance[i + 1][j] <== afterDebit[i][j] + creditApplied[i][j];
-            receiverAfter[i].sel[j] <== receiverPick[i][j];
-            receiverAfter[i].values[j] <== balance[i + 1][j];
-        }
-        receiverAfterRange[i] = RangeCheck(128);
-        receiverAfterRange[i].in <== receiverAfter[i].out;
-    }
-
-    // ---- Net change per account ----
-    // after - before = (1 - 2 * negative) * magnitude. With magnitude below
-    // 2^128 (the verifier's value) and both balances in [0, 2^128) the
-    // equation holds over the integers, and magnitude 0 has one encoding (not
-    // negative).
     component zeroMagnitude[M];
     signal negativeMagnitude[M];
     for (var j = 0; j < M; j++) {
+        var net = 0;
+        for (var i = 0; i < N; i++) {
+            debitApplied[i][j] <== senderPick[i][j] * (amount[i] + fee[i]);
+            creditApplied[i][j] <== receiverPick[i][j] * amount[i];
+            net += creditApplied[i][j] - debitApplied[i][j];
+        }
         zeroMagnitude[j] = IsZero();
         zeroMagnitude[j].in <== deltaMagnitude[j];
         deltaNegative[j] * zeroMagnitude[j].out === 0;
         negativeMagnitude[j] <== deltaNegative[j] * deltaMagnitude[j];
-        balance[N][j] - balanceBefore[j] === deltaMagnitude[j] - 2 * negativeMagnitude[j];
+        net === deltaMagnitude[j] - 2 * negativeMagnitude[j];
     }
 
     // ---- Public hash ----
-    // Interface v1.1: the statement packed into 2 + N + 4M field elements and
+    // Interface v1.2: the statement packed into 2 + N + 3M field elements and
     // absorbed 7 at a time, h = Poseidon8(h, e[7k .. 7k + 6]) from h = 0, the
     // last chunk padded with zeros:
     //   commitmentsHash,
     //   per transfer: fee + nonce * 2^128 + senderIndex * 2^192
     //                 + transferActive * 2^200,
-    //   per account: hi, lo, balanceBefore, deltaMagnitude,
+    //   per account: hi, lo, deltaMagnitude,
     //   sum over accounts of accountActive * 4^j + deltaNegative * 2 * 4^j.
     // The packing is injective because fee < 2^128 and nonce < 2^64 are
     // range-checked, senderIndex < M <= 126 by its selector, and the flags
     // are bits.
     assert(M <= 126);
-    var E = 2 + N + 4 * M;
+    var E = 2 + N + 3 * M;
     var CHUNKS = (E + 6) \ 7;
     signal packed[CHUNKS * 7];
     packed[0] <== commitmentsHash;
@@ -342,13 +313,12 @@ template L2PSSettlement(N, M) {
     }
     var flags = 0;
     for (var j = 0; j < M; j++) {
-        packed[1 + N + 4 * j] <== accountHi[j];
-        packed[1 + N + 4 * j + 1] <== accountLo[j];
-        packed[1 + N + 4 * j + 2] <== balanceBefore[j];
-        packed[1 + N + 4 * j + 3] <== deltaMagnitude[j];
+        packed[1 + N + 3 * j] <== accountHi[j];
+        packed[1 + N + 3 * j + 1] <== accountLo[j];
+        packed[1 + N + 3 * j + 2] <== deltaMagnitude[j];
         flags += accountActive[j] * (1 << (2 * j)) + deltaNegative[j] * (1 << (2 * j + 1));
     }
-    packed[1 + N + 4 * M] <== flags;
+    packed[1 + N + 3 * M] <== flags;
     for (var k = E; k < CHUNKS * 7; k++) {
         packed[k] <== 0;
     }

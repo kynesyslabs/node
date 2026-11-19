@@ -4,7 +4,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { CODE_ROOT, ZK_IDENTITY_VKEY } from "./context"
 import type { Prompter } from "./prompt"
-import type { ZkRunner } from "./zk"
+import { BUILT_FOR_VKEY_FILE, canonicalDigest, type ZkRunner } from "./zk"
 
 // Tools are found in a fixed list of system directories, never by a bare name
 // through PATH, so a writable directory early in PATH cannot substitute them.
@@ -126,6 +126,7 @@ export function writeZkBatch(root: string, size: ZkKeySet, parts = { zkey: true,
     if (parts.zkey) fs.writeFileSync(path.join(dir, `${name}.zkey`), "z")
     if (parts.wasm) fs.writeFileSync(path.join(dir, `${name}_js`, `${name}.wasm`), "w")
     if (parts.vkey) fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify(BATCH_VKEY))
+    if (parts.vkey) fs.writeFileSync(path.join(dir, BUILT_FOR_VKEY_FILE), canonicalDigest(JSON.stringify(BATCH_VKEY)))
 }
 
 /** Every key the ZK setup builds: both batch sizes and the settlement circuit. */

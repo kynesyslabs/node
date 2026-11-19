@@ -44,6 +44,9 @@ jest.mock("@/libs/l2ps/historyPayload", () => ({
 
 jest.mock("src/utilities/sharedState", () => ({ getSharedState: {} }))
 
+const readL2PSNonce = jest.fn(async (..._args: unknown[]) => 0)
+jest.mock("@/libs/l2ps/settlement/tipState", () => ({ readL2PSNonce }))
+
 mockLogger("src/utilities/logger")
 
 // Imported once the mocks are registered: a static import is evaluated first,
@@ -67,6 +70,62 @@ beforeEach(() => {
     getSummaryByUIDAndStatus.mockReset()
     getSummaryByUIDAndStatus.mockResolvedValue({ count: 0, oldestTimestamp: null, newestTimestamp: null })
     getSubnetTransactions.mockReset()
+})
+
+describe("getL2PSNonce", () => {
+    const ADDRESS = "0x" + "ab".repeat(32)
+    const call = async (data: unknown) => {
+        const response: any = {}
+        await l2psHandlers.getL2PSNonce(data as any, response)
+        return response
+    }
+
+    beforeEach(() => {
+        readL2PSNonce.mockReset()
+        readL2PSNonce.mockResolvedValue(0)
+    })
+
+    it("answers the account's L2PS nonce in the subnet, as a number", async () => {
+        readL2PSNonce.mockResolvedValue(7)
+        const response = await call({ l2psUid: "subnet-1", address: ADDRESS })
+        expect(response.result).toBe(200)
+        expect(response.response).toBe(7)
+        expect(readL2PSNonce).toHaveBeenCalledWith(ADDRESS, "subnet-1")
+    })
+
+    it("reads an address given without 0x or in upper case as the stored key", async () => {
+        await call({ l2psUid: "subnet-1", address: "AB".repeat(32) })
+        expect(readL2PSNonce).toHaveBeenCalledWith(ADDRESS, "subnet-1")
+    })
+
+    it("answers 0 for an account that never settled in the subnet", async () => {
+        const response = await call({ l2psUid: "subnet-1", address: ADDRESS })
+        expect(response.response).toBe(0)
+    })
+
+    it("refuses a missing or malformed uid or address before reading anything", async () => {
+        const bad = [
+            {},
+            { address: ADDRESS },
+            { l2psUid: "", address: ADDRESS },
+            { l2psUid: 5, address: ADDRESS },
+            { l2psUid: "a:b", address: ADDRESS },
+            { l2psUid: "x".repeat(129), address: ADDRESS },
+            { l2psUid: "subnet-1" },
+            { l2psUid: "subnet-1", address: "0x1234" },
+            { l2psUid: "subnet-1", address: { length: 66 } },
+            { l2psUid: "subnet-1", address: ADDRESS + "00" },
+        ]
+        for (const data of bad) expect((await call(data)).result).toBe(400)
+        expect(readL2PSNonce).not.toHaveBeenCalled()
+    })
+
+    it("answers 500 without the database's words when the read fails", async () => {
+        readL2PSNonce.mockRejectedValue(new Error("connection refused at 10.0.0.5"))
+        const response = await call({ l2psUid: "subnet-1", address: ADDRESS })
+        expect(response.result).toBe(500)
+        expect(JSON.stringify(response)).not.toContain("10.0.0.5")
+    })
 })
 
 describe("getL2PSMempoolInfo", () => {

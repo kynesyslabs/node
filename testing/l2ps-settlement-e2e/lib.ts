@@ -179,6 +179,16 @@ export async function accountOn(node: Node, address: string): Promise<{ balance:
     }
 }
 
+/** The account's L2PS nonce in this run's subnet, as `node` answers getL2PSNonce; null on any failure. */
+export async function l2psNonceOn(node: Node, address: string): Promise<number | null> {
+    try {
+        const r = await nodeCall(node, "getL2PSNonce", { l2psUid: UID, address })
+        return r.result === 200 && Number.isSafeInteger(r.response) ? r.response : null
+    } catch {
+        return null
+    }
+}
+
 /** Waits until every listed node is at or past `height`. */
 export async function waitHeight(height: number, nodes: Node[] = NODES, maxMs = 300_000): Promise<number[]> {
     const deadline = Date.now() + maxMs
@@ -230,25 +240,37 @@ export interface NodeState {
     node: string
     height: number
     blockHash: string | null
-    /** md5 over pubkey:balance:nonce of every gcr_main row. */
+    /** md5 over pubkey:balance:nonce:l2psNonce (this run's subnet) of every gcr_main row. */
     balancesDigest: string
     totalSupply: bigint
     accounts: number
     /** md5 per consensus table over every non-timestamp column, as "rows|md5". */
     tables: Record<string, string>
-    balances: Map<string, { balance: bigint; nonce: number }>
+    balances: Map<string, AccountState>
+}
+
+export interface AccountState {
+    balance: bigint
+    /** L1 nonce. */
+    nonce: number
+    /** L2PS nonce in this run's subnet. */
+    l2psNonce: number
 }
 
 function readNodeState(node: Node): Omit<NodeState, "height" | "blockHash"> {
-    const rows = psql(node.db, "select pubkey, balance::text, nonce from gcr_main order by pubkey")
-    const balances = new Map<string, { balance: bigint; nonce: number }>()
+    // UID is [a-z0-9_] (run.sh), safe inside the literal
+    const rows = psql(
+        node.db,
+        `select pubkey, balance::text, nonce, coalesce(("l2psNonces"->>'${UID}')::bigint, 0)::text from gcr_main order by pubkey`,
+    )
+    const balances = new Map<string, AccountState>()
     let total = 0n
     const lines: string[] = []
     for (const line of rows.split("\n").filter(Boolean)) {
-        const [pubkey, balance, nonce] = line.split("|")
-        balances.set(pubkey, { balance: BigInt(balance), nonce: Number(nonce) })
+        const [pubkey, balance, nonce, l2psNonce] = line.split("|")
+        balances.set(pubkey, { balance: BigInt(balance), nonce: Number(nonce), l2psNonce: Number(l2psNonce) })
         total += BigInt(balance)
-        lines.push(`${pubkey}:${balance}:${nonce}`)
+        lines.push(`${pubkey}:${balance}:${nonce}:${l2psNonce}`)
     }
     const balancesDigest = new Bun.CryptoHasher("md5").update(lines.join("\n")).digest("hex")
     const tables: Record<string, string> = {}
@@ -312,8 +334,9 @@ export function stateDifferences(states: NodeState[]): string[] {
         let named = 0
         for (const a of all) {
             const per = states.map(s => s.balances.get(a))
-            if (new Set(per.map(p => (p ? `${p.balance}/${p.nonce}` : "absent"))).size > 1 && named++ < 20) {
-                diffs.push(`account ${a}: ${per.map((p, k) => `${states[k].node}=${p ? `${p.balance}/${p.nonce}` : "absent"}`).join(" ")}`)
+            const show = (p?: AccountState) => (p ? `${p.balance}/${p.nonce}/${p.l2psNonce}` : "absent")
+            if (new Set(per.map(show)).size > 1 && named++ < 20) {
+                diffs.push(`account ${a}: ${per.map((p, k) => `${states[k].node}=${show(p)}`).join(" ")}`)
             }
         }
     }
@@ -332,15 +355,24 @@ export function stateSummary(states: NodeState[]) {
     }))
 }
 
+export interface Movement {
+    delta: bigint
+    /** L1 nonce. */
+    nonceDelta: number
+    /** L2PS nonce in this run's subnet. */
+    l2psNonceDelta: number
+}
+
 /** Balance and nonce change of every account that moved between two readings of one node. */
-export function changedAccounts(before: NodeState, after: NodeState): Map<string, { delta: bigint; nonceDelta: number }> {
-    const out = new Map<string, { delta: bigint; nonceDelta: number }>()
+export function changedAccounts(before: NodeState, after: NodeState): Map<string, Movement> {
+    const out = new Map<string, Movement>()
     const keys = new Set([...before.balances.keys(), ...after.balances.keys()])
+    const none: AccountState = { balance: 0n, nonce: 0, l2psNonce: 0 }
     for (const k of keys) {
-        const b = before.balances.get(k) ?? { balance: 0n, nonce: 0 }
-        const a = after.balances.get(k) ?? { balance: 0n, nonce: 0 }
-        if (a.balance !== b.balance || a.nonce !== b.nonce) {
-            out.set(k, { delta: a.balance - b.balance, nonceDelta: a.nonce - b.nonce })
+        const b = before.balances.get(k) ?? none
+        const a = after.balances.get(k) ?? none
+        if (a.balance !== b.balance || a.nonce !== b.nonce || a.l2psNonce !== b.l2psNonce) {
+            out.set(k, { delta: a.balance - b.balance, nonceDelta: a.nonce - b.nonce, l2psNonceDelta: a.l2psNonce - b.l2psNonce })
         }
     }
     return out
@@ -474,6 +506,74 @@ async function submitEnvelope(tag: string, w: Wallet, via: Node, signed: any, in
     } catch (error) {
         return { ...common, submittedAt, answeredAt: Date.now(), accepted: false, stage: "broadcast", message: `threw: ${String(error).slice(0, 500)}` }
     }
+}
+
+export interface L1Send {
+    hash: string
+    nonce: number
+    amount: bigint
+    /** What the signed transaction pays on top of its amount. */
+    fee: bigint
+    sentAt: number
+    accepted: boolean
+    message: string
+}
+
+/** An L1 native transfer built and signed by the SDK, sent through `confirm` + `broadcast`. */
+export async function sendL1(w: Wallet, via: Node, to: string, amount: bigint, nonce: number): Promise<L1Send> {
+    const sentAt = Date.now()
+    try {
+        const demos = await client(w, via)
+        const signed = await demos.pay(to, amount, { nonce })
+        const validity: any = await demos.confirm(signed)
+        const data = validity?.response?.data
+        // The fee the validating node stamped, else the one the SDK signed
+        const f = data?.transaction?.content?.transaction_fee ?? signed.content.transaction_fee ?? {}
+        const fee = BigInt(f.network_fee ?? 0) + BigInt(f.rpc_fee ?? 0) + BigInt(f.additional_fee ?? 0)
+        if (!data?.valid) {
+            return { hash: signed.hash, nonce, amount, fee, sentAt, accepted: false, message: String(data?.message ?? flatten(validity)) }
+        }
+        const sent: any = await demos.broadcast(validity)
+        const hash = data?.transaction?.hash ?? signed.hash
+        return { hash, nonce, amount, fee, sentAt, accepted: sent?.result === 200, message: flatten(sent?.response ?? sent) }
+    } catch (error) {
+        return { hash: "", nonce, amount, fee: 0n, sentAt, accepted: false, message: `threw: ${String(error).slice(0, 500)}` }
+    }
+}
+
+/** Polls `node` until the transaction is included or failed, or the deadline passes; the last status read. */
+export async function waitTx(node: Node, hash: string, maxMs: number): Promise<any> {
+    const deadline = Date.now() + maxMs
+    let st: any = null
+    while (Date.now() < deadline) {
+        st = await txStatus(node, hash)
+        if (st?.state === "included" || st?.state === "failed") return st
+        await sleep(1000)
+    }
+    return st
+}
+
+/**
+ * Waits for a member's log line, logged after `since`, that matches
+ * `pattern`; the match, or null at the deadline.
+ */
+export async function waitLogLine(member: Node, since: Date, pattern: RegExp, maxMs: number): Promise<RegExpMatchArray | null> {
+    const deadline = Date.now() + maxMs
+    while (Date.now() < deadline) {
+        const hits = logMatches(member, since, pattern)
+        if (hits.length > 0) return hits[0]
+        await sleep(1000)
+    }
+    return null
+}
+
+/** Every line of a member's log after `since` that matches `pattern`. */
+export function logMatches(member: Node, since: Date, pattern: RegExp): RegExpMatchArray[] {
+    const out = compose(["logs", "--no-color", "--no-log-prefix", "--since", since.toISOString(), member.name], 60_000).out
+    return out.split("\n").flatMap(line => {
+        const hit = line.match(pattern)
+        return hit ? [hit] : []
+    })
 }
 
 export interface Settlement {

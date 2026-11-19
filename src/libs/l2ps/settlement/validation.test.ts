@@ -9,11 +9,14 @@ import {
     MAX_SETTLEMENT_BATCHES_PER_BLOCK,
     parseSettlement,
     settlementBatchesOverCap,
+    settlementCoverageRefusal,
     settlementEdits,
     settlementNonceRefusal,
     settlementSignatureRefusal,
+    settlementStateRefusal,
 } from "./validation"
-import { CHAIN_ID, batchTx, key, recordOf, signedTransfer, vectors } from "./__fixtures__/settlementKit"
+import { CHAIN_ID, UID, batchTx, key, recordOf, signedTransfer, vectors } from "./__fixtures__/settlementKit"
+import type { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 const ALICE = key(1)
 const BOB = key(2)
@@ -97,6 +100,16 @@ describe("parseSettlement", () => {
         expect(parseSettlement(batchTx(record))).toMatchObject({ ok: false, reason: "unsupported settlement version 2" })
     })
 
+    it("refuses a subnet uid past 128 characters, which would become a stored nonce key", () => {
+        const record = recordOf([t1])
+        expect(parseSettlement(batchTx(record, { l2psUid: "u".repeat(129) }))).toMatchObject({
+            ok: false,
+            reason: "l2psBatch payload has no valid l2ps_uid",
+        })
+        const atLimit = parseSettlement(batchTx(record, { l2psUid: "u".repeat(128) }))
+        expect(atLimit.ok === false ? atLimit.reason : "").not.toBe("l2psBatch payload has no valid l2ps_uid")
+    })
+
     it("refuses a version no string can be made of, instead of throwing", () => {
         const record = recordOf([t1]) as any
         record.version = JSON.parse('{"toString": null}')
@@ -105,10 +118,10 @@ describe("parseSettlement", () => {
 })
 
 describe("settlementNonceRefusal", () => {
-    it("wants each signer's nonces consecutive from its account nonce + 1", () => {
+    it("wants each signer's nonces consecutive from its L2PS nonce + 1", () => {
         expect(settlementNonceRefusal(parsed(), () => 4n)).toBeNull()
-        expect(settlementNonceRefusal(parsed(), () => 3n)).toContain("next nonce 4")
-        expect(settlementNonceRefusal(parsed(), () => 5n)).toContain("next nonce 6")
+        expect(settlementNonceRefusal(parsed(), () => 3n)).toContain("next L2PS nonce 4")
+        expect(settlementNonceRefusal(parsed(), () => 5n)).toContain("next L2PS nonce 6")
     })
 
     it("refuses a signature for another chain", () => {
@@ -125,14 +138,81 @@ describe("settlementEdits", () => {
         const removes = balance.filter(e => e.operation === "remove")
         expect(removes).toEqual([expect.objectContaining({ account: ALICE.account, amount: "17" })])
         expect(balance.find(e => e.account === BOB.account)).toMatchObject({ operation: "add", amount: "11" })
-        expect(edits.filter(e => e.type === "nonce")).toEqual([
-            expect.objectContaining({ account: ALICE.account, operation: "add", amount: 2 }),
+        // The L2PS nonce of the batch's subnet, never the L1 nonce.
+        expect(edits.filter(e => e.type === "nonce")).toEqual([])
+        expect(edits.filter(e => e.type === "l2psNonce")).toEqual([
+            {
+                type: "l2psNonce",
+                operation: "add",
+                account: ALICE.account,
+                l2psUid: UID,
+                amount: 2,
+                txhash: "batchhash",
+                isRollback: false,
+            },
         ])
         const credited = balance
             .filter(e => e.account === BURN || e.account === TREASURY)
             .reduce((s, e) => s + BigInt(e.amount), 0n)
         expect(credited).toBe(6n)
         expect(edits.every(e => e.txhash === "batchhash")).toBe(true)
+    })
+})
+
+describe("settlementCoverageRefusal", () => {
+    // ALICE: -17 (amounts 11, fees 6), BOB: +11.
+    it("wants each account's balance to cover its net change, and only that", () => {
+        const balances = (alice: bigint) => (a: string) => (a === ALICE.account ? alice : 0n)
+        expect(settlementCoverageRefusal(parsed(), balances(17n))).toBeNull()
+        expect(settlementCoverageRefusal(parsed(), balances(16n))).toContain("does not cover its net change -17")
+    })
+
+    it("lets a transfer be paid from a credit of the same batch", () => {
+        // BOB pays ALICE 15 + 1 out of the 10 ALICE sends him first: BOB's
+        // net is -6, so 6 covers it although 15 + 1 is more than 6.
+        const out = signedTransfer({ from: ALICE, to: BOB.account, amount: 10n, fee: 1n, nonce: 1n })
+        const back = signedTransfer({ from: BOB, to: ALICE.account, amount: 15n, fee: 1n, nonce: 1n })
+        const settlement = parsed(recordOf([out, back]))
+        const delta = (a: string) => settlement.changes.find(c => c.account === a)!.delta
+        expect(delta(BOB.account)).toBe(-6n)
+        expect(delta(ALICE.account)).toBe(4n)
+        const balances = (bob: bigint) => (a: string) => (a === BOB.account ? bob : 0n)
+        expect(settlementCoverageRefusal(settlement, balances(6n))).toBeNull()
+        expect(settlementCoverageRefusal(settlement, balances(5n))).toContain("does not cover")
+    })
+})
+
+describe("settlementStateRefusal", () => {
+    const row = (fields: Partial<GCRMain>) => fields as GCRMain
+    const accounts = (alice: Partial<GCRMain>) => new Map([[ALICE.account, row(alice)]])
+
+    it("reads the L2PS nonce of the batch's subnet, never the L1 nonce", async () => {
+        // L1 nonce 4 would make 5 the next nonce; the L2PS nonce 0 wants 1.
+        const refusal = await settlementStateRefusal(parsed(), accounts({ nonce: 4, balance: 100n as never }))
+        expect(refusal).toContain("next L2PS nonce 1")
+        // Another subnet's L2PS nonce is no nonce here.
+        const other = await settlementStateRefusal(
+            parsed(),
+            accounts({ nonce: 0, balance: 100n as never, l2psNonces: { other_subnet: 4 } }),
+        )
+        expect(other).toContain("next L2PS nonce 1")
+    })
+
+    it("refuses an account that cannot cover its net change before checking the proof", async () => {
+        const refusal = await settlementStateRefusal(
+            parsed(),
+            accounts({ nonce: 0, balance: 16n as never, l2psNonces: { [UID]: 4 } }),
+        )
+        expect(refusal).toContain("does not cover its net change -17")
+    })
+
+    it("does not read a subnet uid off the prototype", async () => {
+        const settlement = { ...parsed(), l2psUid: "__proto__" }
+        const refusal = await settlementStateRefusal(
+            settlement,
+            accounts({ nonce: 0, balance: 100n as never, l2psNonces: {} }),
+        )
+        expect(refusal).toContain("next L2PS nonce 1")
     })
 })
 

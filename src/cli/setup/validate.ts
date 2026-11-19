@@ -13,9 +13,11 @@ const fail = <T>(error: string): Result<T> => ({ ok: false, error })
 // refuses would silently never join, so the setup must not accept it either.
 export const SUBNET_UID_PATTERN = /^[A-Za-z0-9_-]+$/
 
-// The loader takes any length, but the id becomes a directory name, and past
-// the filesystem's 255-byte limit the run would die on a raw mkdir error.
-export const SUBNET_UID_MAX = 255
+// Settlement batches and transfer signatures refuse a longer id
+// (L2PS_UID_MAX_LENGTH), so a subnet set up with one could never settle a
+// private transfer. A literal: the image's key build stage copies this file
+// without the settlement code.
+export const SUBNET_UID_MAX = 128
 
 export function validateUid(value: string): Result<string> {
     const uid = value.trim()
