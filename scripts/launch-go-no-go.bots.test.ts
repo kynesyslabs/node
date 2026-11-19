@@ -214,7 +214,7 @@ describe("launch bot allowlist", () => {
     }, 30_000)
 
     it("refuses a JSON-encoded genesis string the node's bot loader cannot read, in --plan and GO", async () => {
-        const reason = "genesis file is a JSON-encoded string; the node's bot loader parses it once and loads no bots from it"
+        const reason = "genesis file is a JSON-encoded string; the node's bot loader parses it once and fails at boot on it"
         const genesis = { properties: { id: 7, shardSize: 10 }, balances: [[a, "1000000000000"]] }
         const bots = join(dir, "bots-a.json")
         const operators = join(dir, "operators.json")

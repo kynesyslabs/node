@@ -13,7 +13,7 @@ export function botAllowlistReasons(
 ): string[] {
     if (genesis === null) return []
     const reasons = genesisIsJsonString
-        ? ["genesis file is a JSON-encoded string; the node's bot loader parses it once and loads no bots from it"]
+        ? ["genesis file is a JSON-encoded string; the node's bot loader parses it once and fails at boot on it"]
         : []
     if (expected === undefined) {
         return [...reasons, "pass --bots FILE containing the reviewed JSON array of bot addresses (use [] for no bots)"]
