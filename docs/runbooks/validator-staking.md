@@ -7,8 +7,13 @@ status: active
 
 # Validator Staking, Unstaking and Exit
 
-A validator seat is backed by a Demos Node NFT and carries no DEM: the stake
-is 0 and stake, unstake, exit and challenge transactions pay no gas.
+Once the `nftValidatorGating` fork is active (`forks.nftValidatorGating` in
+the genesis file; `null` means never), a validator seat is backed by a Demos
+Node NFT and carries no DEM: the stake is 0 and stake, unstake, exit and
+challenge transactions pay no gas. Before the fork, or on a chain that never
+schedules it, seats are DEM bonds (`bun run validator:stake --amount <DEM>`)
+and nothing below about NFTs applies. Staking transactions of either kind are
+accepted only while `tokenStaking` is active.
 The NFT stays in your Solana wallet; you prove you hold it with one signed
 Solana transaction, then stake from the node's identity. This runbook walks
 through the whole lifecycle: proof, stake, re-stake, unstake, exit, and what
@@ -20,11 +25,17 @@ the node's identity file (`.demos_identity`, or `--identity <file>`).
 ## Before you start
 
 - The node is running, synced, and reachable on its public URL.
-- `HELIUS_API_KEY` is set in `.env`. The node refuses to start without it; it
-verifies proofs against Solana and relays the staking page's lookups.
+- The node can reach Solana mainnet. It reads, in order, `SOLANA_RPC`, then
+`https://mainnet.helius-rpc.com` when `HELIUS_API_KEY` is set, then the
+comma-separated `VALIDATOR_SOLANA_RPCS`, or by default the free public
+endpoints `api.mainnet-beta.solana.com` and `solana-rpc.publicnode.com`. No
+key is required; the node starts without one and only warns at boot when no
+endpoint answers. Every validator reads Solana when it admits a stake or a
+challenge, so a node that cannot reach any endpoint leaves those transactions
+out of its blocks until it can.
 - The Solana wallet that holds the Node NFT, with a little SOL for one
 transaction fee. The mint must be on the node's allowlist
-(`data/nft-allowlist.json`).
+(`src/features/staking/nft-allowlist.json`).
 - `EXPOSED_URL` is set in `.env`. The stake records it as your validator's
 connection URL and refuses to run without a valid one. `--rpc` only picks
 the node the transaction is submitted through; without it the script takes
@@ -131,8 +142,8 @@ bun run validator:unstake
 ```
 
 The seat must be active with no unstake already requested. The status
-becomes `unstaking` and a lock of `UNSTAKE_LOCK_BLOCKS` blocks starts (1000
-on mainnet). During the lock the node keeps its seat and keeps signing. The
+becomes `unstaking` and a lock starts: `NFT_UNSTAKE_LOCK_BLOCKS` (20) blocks
+for an NFT seat, `UNSTAKE_LOCK_BLOCKS` (1000) for a DEM-bonded seat. During the lock the node keeps its seat and keeps signing. The
 NFT is still bound to the seat, so a transfer out of the wallet during the
 lock can still be challenged.
 
@@ -161,6 +172,10 @@ not count as leaving. Keep the NFT in the proving wallet for as long as you
 hold the seat; to hand the seat to a new address, move the NFT and let the
 new holder prove and stake, which evicts the old seat.
 
+A seat that still holds a DEM bond from before the fork is never evicted or
+taken over by an NFT proof; it leaves through unstake and exit, which refund
+the bond.
+
 ## Checking the seat
 
 Ask any node for `getValidatorInfo` with the validator address (the SDK
@@ -176,12 +191,10 @@ block numbers and the NFT mint, wallet and proof signature on record.
 | `proof ... names 0x..., not this node's address`                  | The proof was signed for another node address; sign a new one from this node's page or identity |
 | `NFT ... is not eligible`                                         | The mint is not on the allowlist                                                                |
 | `NFT ownership rejected: nft.owner no longer holds the NFT`       | The NFT left the proving wallet                                                                 |
-| `NFT proof could not be verified: ...`                            | No Solana endpoint answered; retry, check `HELIUS_API_KEY` or `SOLANA_RPC`                      |
+| `NFT proof could not be verified: ...`                            | No Solana endpoint answered; retry, check `SOLANA_RPC`, `VALIDATOR_SOLANA_RPCS` or `HELIUS_API_KEY` |
 | `A top-up cannot carry an NFT proof`                              | Drop `--nft-proof`; the seat already exists                                                     |
 | `An allowlisted node NFT proof is required to become a validator` | The node has no seat and the stake carried no proof                                             |
 | `Lock not elapsed`                                                | Exit sent before `unstake_available_at`; wait                                                   |
 | `Validator must be unstaking before exit`                         | Unstake first                                                                                   |
 | Staking page answers 404                                          | The node already holds a seat                                                                   |
 | Page shows no wallets                                             | On http, Phantom hides itself; use the tunnel above or another wallet                           |
-
-
