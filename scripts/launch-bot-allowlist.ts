@@ -14,6 +14,24 @@ export function botAllowlistReasons(
     }
     if (!Array.isArray(expected)) return ["--bots must contain a JSON array of addresses"]
     const reasons: string[] = []
+    const intended = inventoryAddresses(expected, reasons)
+    if (!Array.isArray(genesis?.balances)) {
+        return [...reasons, "bot allowlist needs a genesis balances array"]
+    }
+    const authorized = authorizedBots(genesis.balances, reasons)
+    for (const address of intended) {
+        if (!authorized.has(address)) {
+            reasons.push(`intended bot is not authorized: ${address}; needs a raw genesis balance >= 1000000000000`)
+        }
+    }
+    for (const address of authorized) {
+        if (!intended.has(address)) reasons.push(`unreviewed authorized bot: ${address}`)
+    }
+    return reasons
+}
+
+/** The valid, distinct --bots addresses; adds a reason for each invalid or repeated entry. */
+function inventoryAddresses(expected: unknown[], reasons: string[]): Set<string> {
     const intended = new Set<string>()
     for (const address of expected) {
         if (typeof address !== "string" || !/^0x[0-9a-f]{64}$/.test(address)) {
@@ -24,30 +42,28 @@ export function botAllowlistReasons(
             intended.add(address)
         }
     }
-    if (!Array.isArray(genesis?.balances)) {
-        return [...reasons, "bot allowlist needs a genesis balances array"]
-    }
+    return intended
+}
+
+/** The addresses the startup loader authorizes; adds a reason for each malformed entry. */
+function authorizedBots(balances: unknown[], reasons: string[]): Set<string> {
     const authorized = new Set<string>()
-    for (const entry of genesis.balances) {
+    for (const entry of balances) {
         if (!Array.isArray(entry) || typeof entry[0] !== "string") {
             reasons.push("bot allowlist cannot read a malformed genesis balance entry")
             continue
         }
-        const raw = entry[1]
-        if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "bigint") continue
-        try {
-            if (BigInt(raw) >= 1_000_000_000_000n) authorized.add(entry[0])
-        } catch {
-            // The startup loader also skips amounts BigInt cannot parse.
-        }
+        if (meetsBotThreshold(entry[1])) authorized.add(entry[0])
     }
-    for (const address of intended) {
-        if (!authorized.has(address)) {
-            reasons.push(`intended bot is not authorized: ${address}; needs a raw genesis balance >= 1000000000000`)
-        }
+    return authorized
+}
+
+function meetsBotThreshold(raw: unknown): boolean {
+    if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "bigint") return false
+    try {
+        return BigInt(raw) >= 1_000_000_000_000n
+    } catch {
+        // The startup loader also skips amounts BigInt cannot parse.
+        return false
     }
-    for (const address of authorized) {
-        if (!intended.has(address)) reasons.push(`unreviewed authorized bot: ${address}`)
-    }
-    return reasons
 }

@@ -1579,6 +1579,19 @@ function readJson(file: string): any {
     return JSON.parse(fs.readFileSync(file, "utf8"))
 }
 
+const UNREADABLE_BOTS = Symbol("unreadable --bots file")
+
+/** The parsed --bots file, undefined without one; prints why and returns UNREADABLE_BOTS when it cannot be read. */
+function readBotAllowlist(file: string | null): unknown {
+    if (!file) return undefined
+    try {
+        return readJson(file)
+    } catch (e) {
+        console.error(`--bots: ${(e as Error).message}`)
+        return UNREADABLE_BOTS
+    }
+}
+
 async function runPlan(
     args: CliArgs,
     genesis: any,
@@ -1742,15 +1755,8 @@ async function main(): Promise<number> {
         return 2
     }
     const operators = operatorsRaw as Record<string, unknown> | null
-    let botAllowlist: unknown
-    if (args.bots) {
-        try {
-            botAllowlist = readJson(args.bots)
-        } catch (e) {
-            console.error(`--bots: ${(e as Error).message}`)
-            return 2
-        }
-    }
+    const botAllowlist = readBotAllowlist(args.bots)
+    if (botAllowlist === UNREADABLE_BOTS) return 2
 
     if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState, botAllowlist)
 
