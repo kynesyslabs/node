@@ -24,8 +24,11 @@ export function keylessWeb2IdentityActive(height = getSharedState.lastBlockNumbe
  * null when the rule does not refuse it.
  */
 export function keylessWeb2AssignRefusal(context: unknown): string | null {
-    if (typeof context !== "string" || !KEYED_WEB2_CONTEXTS.has(context)) return null
     if (!keylessWeb2IdentityActive()) return null
+    // Apply indexes the identity map with String(context), so a non-string
+    // such as ["github"] would otherwise land in a closed context.
+    if (typeof context !== "string") return "a web2 identity context must be a string"
+    if (!KEYED_WEB2_CONTEXTS.has(context)) return null
     return (
         `${context} accounts link through TLSNotary (tlsn_identity_assign) on this network; ` +
         "the web2 proof path is closed for them"

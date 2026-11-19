@@ -548,9 +548,10 @@ export type ReferenceBlockRoom10Config = BaseForkConfig
  * keys. A notarized presentation is checked against keys the genesis pins,
  * with no network call, so validators need no third-party credentials.
  * Telegram links (bot-signed attestation), every identity remove and the
- * links already stored are unchanged. Judged at the height of the block the
- * transaction lands in. Dormant by default; a mainnet genesis sets 0. No
- * payload beyond the base.
+ * links already stored are unchanged. Judged at the chain tip, the parent of
+ * the block the transaction lands in, like `tlsnVerified`: a height H refuses
+ * from block H + 1. Dormant by default; a mainnet genesis sets 0. No payload
+ * beyond the base.
  */
 export type KeylessWeb2IdentityConfig = BaseForkConfig
 

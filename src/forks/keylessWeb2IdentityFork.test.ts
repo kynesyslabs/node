@@ -239,6 +239,17 @@ describe("apply of a web2 link", () => {
         })
     }
 
+    it("refuses a non-string context once active instead of coercing it into a closed one", async () => {
+        forkAt(0)
+        const gcr = account()
+        const before = JSON.stringify(gcr)
+        const edit = await identityEdit(await web2Assign("github"))
+        edit.data.context = ["github"]
+        const r = await applyWeb2IdentityAdd(edit, gcr)
+        expect(r).toEqual({ success: false, message: "a web2 identity context must be a string" })
+        expect(JSON.stringify(gcr)).toBe(before)
+    })
+
     it("stores a Telegram link once active", async () => {
         forkAt(0)
         const gcr = account()

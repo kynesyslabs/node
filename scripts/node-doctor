@@ -637,13 +637,13 @@ check_extra_env_files() {
 	fi
 }
 
-# The range the node accepts for properties.shardSize, mirrored from
-# src/libs/consensus/genesisShardSize.ts (no Bun on a Docker host); a test
-# keeps the two equal.
 # Set by check_genesis_file when the genesis schedules keylessWeb2Identity
 # at 0: no web2 link on that chain needs a validator's provider credentials.
 GENESIS_KEYLESS_WEB2_IDENTITY=0
 
+# The range the node accepts for properties.shardSize, mirrored from
+# src/libs/consensus/genesisShardSize.ts (no Bun on a Docker host); a test
+# keeps the two equal.
 GENESIS_SHARD_SIZE_MIN=3
 GENESIS_SHARD_SIZE_MAX=100
 
