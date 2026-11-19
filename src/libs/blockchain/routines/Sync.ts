@@ -60,6 +60,7 @@ import {
 } from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import Mempool from "../mempool"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
@@ -1228,7 +1229,7 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
         }
         return highestAssigned
     } catch (e) {
-        const reason = e instanceof Error ? e.message : String(e)
+        const reason = getErrorMessage(e)
         // On a fresh node the table may not exist yet, so nothing has drifted.
         if (isMissingTableError(e)) {
             log.debug(

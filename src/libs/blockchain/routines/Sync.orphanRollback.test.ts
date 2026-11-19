@@ -216,7 +216,7 @@ describe("a drift probe that cannot run", () => {
         getRawOne.mockRejectedValueOnce(error)
 
         await expect(assertNoUnreconciledGcrState()).rejects.toThrow(/orphaned GCR state/)
-        expect(logger.warning).toHaveBeenCalled()
+        expect(logger.warning).toHaveBeenCalledWith(expect.stringContaining(`: ${error.message}`))
         expect(applyTransactions).not.toHaveBeenCalled()
         // The drift is unknown, not proven: nothing is latched.
         expect(unreconciledGcrBlockNumber()).toBeNull()
@@ -226,6 +226,18 @@ describe("a drift probe that cannot run", () => {
         expect(getRawOne).toHaveBeenCalledTimes(2)
         expect(applyTransactions).toHaveBeenCalledTimes(1)
         expect(log).toEqual(["begin", "write", "delete 21", "delete 22", "commit", "afterCommit"])
+    })
+
+    it("says what failed when the rejection is not an Error", async () => {
+        getRawOne.mockRejectedValueOnce({ code: "ECONNRESET", syscall: "read" })
+
+        await expect(assertNoUnreconciledGcrState()).rejects.toThrow(
+            '{"code":"ECONNRESET","syscall":"read"}',
+        )
+        const warning = String((logger.warning as any).mock.calls[0][0])
+        expect(warning).toContain('{"code":"ECONNRESET","syscall":"read"}')
+        expect(warning).not.toContain("[object Object]")
+        expect(unreconciledGcrBlockNumber()).toBeNull()
     })
 })
 
