@@ -3,17 +3,22 @@
  * src/libs/blockchain/routines/loadGenesisIdentities.ts; changing the node's
  * rule requires a separate network decision. No snapshot or unit conversion
  * contributes to the loader's set, and address matching is exact.
+ * genesisIsJsonString: the file's first JSON.parse gave a string, which the
+ * launch tool parses again but the loader does not.
  */
 export function botAllowlistReasons(
     genesis: { balances?: unknown } | null,
     expected: unknown,
+    genesisIsJsonString = false,
 ): string[] {
     if (genesis === null) return []
+    const reasons = genesisIsJsonString
+        ? ["genesis file is a JSON-encoded string; the node's bot loader parses it once and loads no bots from it"]
+        : []
     if (expected === undefined) {
-        return ["pass --bots FILE containing the reviewed JSON array of bot addresses (use [] for no bots)"]
+        return [...reasons, "pass --bots FILE containing the reviewed JSON array of bot addresses (use [] for no bots)"]
     }
-    if (!Array.isArray(expected)) return ["--bots must contain a JSON array of addresses"]
-    const reasons: string[] = []
+    if (!Array.isArray(expected)) return [...reasons, "--bots must contain a JSON array of addresses"]
     const intended = inventoryAddresses(expected, reasons)
     if (!Array.isArray(genesis?.balances)) {
         return [...reasons, "bot allowlist needs a genesis balances array"]

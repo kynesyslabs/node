@@ -213,6 +213,46 @@ describe("launch bot allowlist", () => {
         }
     }, 30_000)
 
+    it("refuses a JSON-encoded genesis string the node's bot loader cannot read, in --plan and GO", async () => {
+        const reason = "genesis file is a JSON-encoded string; the node's bot loader parses it once and loads no bots from it"
+        const genesis = { properties: { id: 7, shardSize: 10 }, balances: [[a, "1000000000000"]] }
+        const bots = join(dir, "bots-a.json")
+        const operators = join(dir, "operators.json")
+        writeFileSync(bots, JSON.stringify([a]))
+        writeFileSync(operators, "{}")
+        const run = (contents: string, plan: boolean) => {
+            writeFileSync(file, contents)
+            const result = Bun.spawnSync([process.execPath, "--tsconfig-override", join(import.meta.dir, "../tsconfig.json"),
+                join(import.meta.dir, "launch-go-no-go.ts"), ...(plan ? ["--plan"] : []), "--genesis", file,
+                "--snapshot", dir, "--operators", operators, "--bots", bots, "--json", "--timeout", "2000"],
+            { cwd: dir, stdout: "pipe", stderr: "pipe" })
+            expect(result.exitCode).toBe(1)
+            const out = result.stdout.toString()
+            const json = JSON.parse(out.slice(out.indexOf("{")))
+            // The bot allowlist check in --plan, the bot reasons in GO
+            return plan
+                ? json.checks.find((c: any) => c.name === "bot allowlist").details
+                : json.reasons.filter((r: string) => /bot loader|--bots|intended bot|authorized bot|bot allowlist/.test(r))
+        }
+        for (const plan of [true, false]) {
+            expect(run(JSON.stringify(JSON.stringify(genesis)), plan)).toEqual([reason])
+            expect(run(JSON.stringify(genesis), plan)).toEqual([])
+        }
+
+        // The loader the check stands for cannot read the refused file
+        writeFileSync(file, JSON.stringify(JSON.stringify(genesis)))
+        process.env.DEMOS_GENESIS_FILE = file
+        await expect(loadGenesisIdentities()).rejects.toThrow()
+
+        const input = { genesis, botAllowlist: [a], blockZero: null, shardSize: 10, operators: null }
+        for (const genesisIsJsonString of [true, false]) {
+            const planDetails = launchPlanChecks({ ...input, genesisIsJsonString }).find(c => c.name === "bot allowlist")?.details
+            const liveReasons = checkLaunch({ ...input, probes: [], genesisIsJsonString }).reasons
+            expect(planDetails).toEqual(genesisIsJsonString ? [reason] : [])
+            expect(liveReasons.includes(reason)).toBe(genesisIsJsonString)
+        }
+    }, 120_000)
+
     it("reports unreadable or malformed bot inventories without a stack trace", () => {
         writeFileSync(file, JSON.stringify({ properties: { id: 7, shardSize: 10 }, balances: [] }))
         const bots = join(dir, "invalid-bots.json")

@@ -1127,6 +1127,8 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
     genesis: { forks?: unknown; validators?: unknown; properties?: unknown; balances?: unknown } | null
     /** Reviewed bot addresses from --bots, including [] for a launch without bots. */
     botAllowlist?: unknown
+    /** The genesis file holds a JSON string, which the node's bot loader does not parse again. */
+    genesisIsJsonString?: boolean
     /** Block 0's validators as the node seeds them; required with a genesis. */
     blockZero: BlockZeroValidators | null
     /** The launch set when there is no genesis (peerlist or --rpc). */
@@ -1150,6 +1152,7 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const {
         genesis,
         botAllowlist,
+        genesisIsJsonString,
         blockZero,
         launchValidators,
         genesisFileBlockHash,
@@ -1174,7 +1177,7 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
         ...mainnetGenesisReasons(genesis),
         ...treasuryReasons(genesis, expectedTreasury),
         ...notaryKeysReasons(genesis, expectedNotaryKeys),
-        ...botAllowlistReasons(genesis, botAllowlist),
+        ...botAllowlistReasons(genesis, botAllowlist, genesisIsJsonString),
     )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
@@ -1204,6 +1207,7 @@ export interface PlanCheck {
 export interface LaunchPlanInput {
     genesis: { forks?: unknown; properties?: unknown; balances?: unknown } | null
     botAllowlist?: unknown
+    genesisIsJsonString?: boolean
     blockZero: BlockZeroValidators | null
     shardSize: number
     operators: Record<string, unknown> | null
@@ -1257,7 +1261,7 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
             "genesis file",
             (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),
         ),
-        check("bot allowlist", botAllowlistReasons(input.genesis, input.botAllowlist)),
+        check("bot allowlist", botAllowlistReasons(input.genesis, input.botAllowlist, input.genesisIsJsonString)),
         check("block 0 validator set", input.blockZero ? input.blockZero.reasons : ["no block 0 validator set"]),
         check(
             "launch validators",
@@ -1601,6 +1605,7 @@ async function runPlan(
     manifestSha256: string | null,
     snapshotForkState: ForkStateEntry[] | null,
     botAllowlist: unknown,
+    genesisIsJsonString: boolean,
 ): Promise<number> {
     if (!args.genesis || !args.snapshot || !args.operators) {
         console.error(`--plan needs --genesis, --snapshot and --operators\n${usage()}`)
@@ -1616,6 +1621,7 @@ async function runPlan(
     const checks = launchPlanChecks({
         genesis,
         botAllowlist,
+        genesisIsJsonString,
         blockZero,
         shardSize,
         operators,
@@ -1696,12 +1702,15 @@ async function main(): Promise<number> {
     const targets = new Map<string, string>()
     let launch: string[] = []
     let genesis: any = null
+    let genesisIsJsonString = false
     let blockZero: BlockZeroValidators | null = null
     let manifestSha256: string | null = null
     let snapshotForkState: ForkStateEntry[] | null = null
     if (args.genesis) {
         const { readGenesisFile, snapshotManifestSha256, snapshotManifestForkState } = await import("./genesis-hash")
         genesis = readGenesisFile(args.genesis)
+        // readGenesisFile parses a JSON string a second time; the node's bot loader does not
+        genesisIsJsonString = typeof JSON.parse(fs.readFileSync(args.genesis, "utf8")) === "string"
         // The node takes shardSize from block 0 and nowhere else; a flag
         // that moved q here would judge a quorum the chain does not use
         const { readGenesisShardSize } = await import("src/libs/consensus/genesisShardSize")
@@ -1758,7 +1767,11 @@ async function main(): Promise<number> {
     const botAllowlist = readBotAllowlist(args.bots)
     if (botAllowlist === UNREADABLE_BOTS) return 2
 
-    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState, botAllowlist)
+    if (args.plan) {
+        return await runPlan(
+            args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState, botAllowlist, genesisIsJsonString,
+        )
+    }
 
     let expectations = {}
     if (genesis) {
@@ -1803,6 +1816,7 @@ async function main(): Promise<number> {
         shardSize,
         genesis,
         botAllowlist,
+        genesisIsJsonString,
         blockZero,
         launchValidators: launch,
         probes: [...merged.values()],

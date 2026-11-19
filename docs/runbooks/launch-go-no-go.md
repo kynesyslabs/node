@@ -125,6 +125,8 @@ raw genesis allocations at least `1_000_000_000_000`; see the
 [authorization rule and operator paths](../mainnet/genesis.md#bot-authorization-launch-decision-and-gate).
 An omitted inventory is NO-GO (exit 1); a missing file or invalid JSON is
 bad input (exit 2). The inventory is required in both plan and live mode.
+A genesis file stored as a JSON-encoded string fails the bot allowlist
+check: the node's bot loader parses the file once and cannot read it.
 
 ## Go/no-go check
 
