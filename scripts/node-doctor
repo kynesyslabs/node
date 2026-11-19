@@ -640,6 +640,10 @@ check_extra_env_files() {
 # The range the node accepts for properties.shardSize, mirrored from
 # src/libs/consensus/genesisShardSize.ts (no Bun on a Docker host); a test
 # keeps the two equal.
+# Set by check_genesis_file when the genesis schedules keylessWeb2Identity
+# at 0: no web2 link on that chain needs a validator's provider credentials.
+GENESIS_KEYLESS_WEB2_IDENTITY=0
+
 GENESIS_SHARD_SIZE_MIN=3
 GENESIS_SHARD_SIZE_MAX=100
 
@@ -739,6 +743,14 @@ def main():
         return
     out("PASS", "genesis file", genesis_file)
 
+    # Not a check of its own: tells check_web2_identity_credentials whether
+    # this chain links GitHub, Discord and Twitter accounts without them.
+    forks = genesis.get("forks")
+    keyless = forks.get("keylessWeb2Identity") if isinstance(forks, dict) else None
+    height = keyless.get("activationHeight") if isinstance(keyless, dict) else None
+    if type(height) is int and height == 0:
+        out("FACT", "keylessWeb2Identity", "0")
+
     props = genesis.get("properties")
     shard = props.get("shardSize") if isinstance(props, dict) else None
     if isinstance(shard, float) and shard.is_integer():
@@ -830,6 +842,10 @@ check_genesis_file() {
 	local mode=env level item detail
 	[[ -n "${COMPOSE_CONFIG_JSON}" ]] && mode=compose
 	while IFS=$'\t' read -r level item detail; do
+		if [[ "${level}" == FACT ]]; then
+			[[ "${item}" == keylessWeb2Identity ]] && GENESIS_KEYLESS_WEB2_IDENTITY=1
+			continue
+		fi
 		prod_line "${level}" "${item}" "${detail}"
 	done < <(python3 -c "${GENESIS_CHECK_PY}" "${mode}" \
 		"$(node_env DEMOS_GENESIS_FILE)" "$(node_env DEMOS_SNAPSHOT_DIR)" \
@@ -875,9 +891,11 @@ check_genesis_schedule() {
 }
 
 # The provider credentials the node verifies web2 identity links with. No
-# node setting refuses those links, so a mainnet validator always takes
-# them: without a credential it refuses every link of that provider (proof
-# fetch, or the Twitter/X bot check) that validators holding one admit.
+# node setting refuses those links, so a validator of a chain that takes
+# them needs every one: without a credential it refuses every link of that
+# provider (proof fetch, or the Twitter/X bot check) that validators holding
+# one admit. Under keylessWeb2Identity those providers link only through
+# TLSNotary, which no credential takes part in.
 WEB2_IDENTITY_CREDENTIALS=(
 	"GITHUB_TOKEN:GitHub identity links"
 	"DISCORD_BOT_TOKEN:Discord identity links"
@@ -885,6 +903,12 @@ WEB2_IDENTITY_CREDENTIALS=(
 )
 check_web2_identity_credentials() {
 	local entry key what v
+	if [[ ${GENESIS_KEYLESS_WEB2_IDENTITY} -eq 1 ]]; then
+		for entry in "${WEB2_IDENTITY_CREDENTIALS[@]}"; do
+			prod_line PASS "${entry%%:*}" "not needed: the genesis schedules keylessWeb2Identity at 0, so ${entry#*:} go through TLSNotary only"
+		done
+		return
+	fi
 	for entry in "${WEB2_IDENTITY_CREDENTIALS[@]}"; do
 		key="${entry%%:*}"
 		what="${entry#*:}"
@@ -910,6 +934,8 @@ check_web2_identity_credentials() {
 # revoked, it makes the node refuse every GitHub identity link (#1027).
 check_github_token() {
 	local token out code
+	# No GitHub link reaches the token on such a chain.
+	[[ ${GENESIS_KEYLESS_WEB2_IDENTITY} -eq 1 ]] && return 0
 	token=$(node_env GITHUB_TOKEN)
 	# An empty one is already a FAIL of check_web2_identity_credentials.
 	[[ -n "${token//[[:space:]]/}" ]] || return 0

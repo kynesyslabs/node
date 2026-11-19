@@ -52,9 +52,11 @@ export interface ParsedHttpResponse {
 }
 
 /**
- * Supported TLSN identity contexts
+ * Supported TLSN identity contexts. Twitter links only under
+ * `keylessWeb2Identity`, through the verified path; the structure-only path
+ * below refuses it.
  */
-export type TLSNIdentityContext = "github" | "discord" | "telegram"
+export type TLSNIdentityContext = "github" | "discord" | "telegram" | "twitter"
 
 /**
  * Extracted user data (generic for all platforms)

@@ -537,6 +537,24 @@ export type StorageFeeSettlementConfig = BaseForkConfig
 export type ReferenceBlockRoom10Config = BaseForkConfig
 
 /**
+ * `keylessWeb2Identity` fork: a `web2_identity_assign` for github, discord
+ * or twitter is refused at admission and at apply; those accounts link only
+ * through `tlsn_identity_assign`, whose endpoint table gains twitter.
+ *
+ * The web2 path made every validator fetch the proof (gist, tweet, Discord
+ * message) with its own GitHub, Discord and RapidAPI credentials. A
+ * validator without them refused links its peers admitted and cost the
+ * network consensus rounds, so every operator had to hold third-party API
+ * keys. A notarized presentation is checked against keys the genesis pins,
+ * with no network call, so validators need no third-party credentials.
+ * Telegram links (bot-signed attestation), every identity remove and the
+ * links already stored are unchanged. Judged at the height of the block the
+ * transaction lands in. Dormant by default; a mainnet genesis sets 0. No
+ * payload beyond the base.
+ */
+export type KeylessWeb2IdentityConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -706,6 +724,7 @@ export type ForkName =
     | "storageFeeSettlement"
     | "referenceBlockRoom10"
     | "tlsnVerified"
+    | "keylessWeb2Identity"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -746,6 +765,7 @@ export interface ForkConfigByName {
     storageFeeSettlement: StorageFeeSettlementConfig
     referenceBlockRoom10: ReferenceBlockRoom10Config
     tlsnVerified: TlsnVerifiedConfig
+    keylessWeb2Identity: KeylessWeb2IdentityConfig
 }
 
 /**
@@ -1102,6 +1122,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "TLSNotary presentations are verified by the node in the pinned wasm verifier " +
             "against the notary keys of the fork payload.",
     },
+    keylessWeb2Identity: {
+        // Dormant by default: it refuses links a running chain admits, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "GitHub, Discord and Twitter accounts link only through TLSNotary; the web2 " +
+            "proof path that needed validator API keys refuses them.",
+    },
 }
 
 /**
@@ -1146,5 +1174,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
         referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
         tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
+        keylessWeb2Identity: { ...DEFAULT_FORK_CONFIG.keylessWeb2Identity },
     }
 }

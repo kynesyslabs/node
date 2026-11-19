@@ -769,3 +769,51 @@ describe("node-doctor --production genesis fork schedule", () => {
         ])
     }, 30_000)
 })
+
+describe("node-doctor --production web2 identity credentials under keylessWeb2Identity", () => {
+    let dir: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-keyless-"))
+        fs.symlinkSync(PYTHON3, path.join(dir, "python3"))
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    function genesisWith(keyless: unknown): string {
+        const file = path.join(dir, "genesis.json")
+        const forks = keyless === undefined ? {} : { keylessWeb2Identity: keyless }
+        fs.writeFileSync(file, JSON.stringify({ properties: { id: 4242, shardSize: 3 }, forks }))
+        return file
+    }
+
+    /** The credential lines after check_genesis_file read `file`, every credential empty. */
+    function credentialLines(file: string, token = ""): string[] {
+        const settings = { DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir, GITHUB_TOKEN: token }
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ")
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; check_genesis_file >/dev/null; check_web2_identity_credentials; check_github_token`],
+            { env: { PATH: dir } },
+        )
+        return run.stdout.toString().trim().split("\n")
+    }
+
+    it("reports the credentials as not needed when the genesis schedules the fork at 0", () => {
+        const lines = credentialLines(genesisWith({ activationHeight: 0 }), "ghp_expired")
+        expect(lines).toEqual([
+            "PASS GITHUB_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so GitHub identity links go through TLSNotary only",
+            "PASS DISCORD_BOT_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so Discord identity links go through TLSNotary only",
+            "PASS RAPID_API_KEY: not needed: the genesis schedules keylessWeb2Identity at 0, so Twitter/X identity links go through TLSNotary only",
+        ])
+    })
+
+    it("still fails empty credentials when the fork is absent, unscheduled or later", () => {
+        for (const keyless of [undefined, { activationHeight: null }, { activationHeight: 10 }, { activationHeight: "0" }]) {
+            const lines = credentialLines(genesisWith(keyless))
+            expect([keyless, lines.filter(l => l.startsWith("FAIL")).map(l => l.split(":")[0])]).toEqual([
+                keyless,
+                ["FAIL GITHUB_TOKEN", "FAIL DISCORD_BOT_TOKEN", "FAIL RAPID_API_KEY"],
+            ])
+        }
+    })
+})

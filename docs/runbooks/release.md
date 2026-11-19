@@ -700,6 +700,20 @@ this restart is a fallback there.
     under the L1 nonce could settle again. Start it from a fresh genesis.
     The launch rehearsal restarts from a fresh genesis on this release;
     mainnet starts with it at block 0.
+  - New fork `keylessWeb2Identity`, at height 0 in the mainnet set (30
+    forks at 0). Under it `web2_identity_assign` with context `github`,
+    `discord` or `twitter` is refused at admission and at apply; those
+    accounts link only through `tlsn_identity_assign`, whose endpoint
+    table gains `twitter`
+    (`GET https://api.x.com/2/users/me`, account from `data.username` and
+    the decimal-string `data.id`). Telegram links, every identity remove and
+    the links already stored are unchanged, and a TLSN Twitter link earns
+    the Twitter points a web2 one does. Validators of such a network need no
+    `GITHUB_TOKEN`, `DISCORD_BOT_TOKEN` or `RAPID_API_KEY`, and
+    `node-doctor --production` reports them as not needed when the genesis
+    it reads schedules the fork at 0. Clients need an SDK whose TLSN link
+    accepts the `twitter` context. A network that does not schedule the
+    fork keeps the previous behaviour.
 
 ## Known limits
 
