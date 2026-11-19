@@ -195,6 +195,23 @@ describe("applyAllOrNothing", () => {
         expect(passed.slots.has("s1")).toBe(false)
     })
 
+    it("carries a set kept beside the maps through a commit unchanged", async () => {
+        // As handleGCR keeps its settlement placeholders beside the maps.
+        type WithSet = Caches & { placeholders?: Set<string> }
+        const placeholders = new Set(["a", "z"])
+        const base: WithSet = { ...caches(), placeholders }
+        const result = await applyAllOrNothing<WithSet, Edit>(
+            base,
+            [{ type: "balance", account: "a", amount: -30n }],
+            handler,
+        )
+
+        expect(result.success).toBe(true)
+        expect(base.accounts.get("a")!.balance).toBe(70n)
+        expect(base.placeholders).toBe(placeholders)
+        expect([...placeholders]).toEqual(["a", "z"])
+    })
+
     it("refuses to enumerate a shadow rather than show a partial view", async () => {
         const result = await applyAllOrNothing<Caches, Edit>(
             caches(),

@@ -48,7 +48,8 @@ export async function judgeBlockTransactions(
     // account nonce, so leaving one out changes no other tx's verdict. Only
     // batches count toward the cap, so only they are ordered; one the order
     // cannot place is left out rather than stalling this forger.
-    const batches = judged.txs.filter(tx => tx.content?.type === "l2psBatch")
+    // The SDK's type union has no node-only system type.
+    const batches = judged.txs.filter(tx => (tx.content?.type as string) === "l2psBatch")
     const unorderable = new Set(
         batches.filter(tx => !canonicallyOrderable(tx)).map(tx => tx.hash),
     )

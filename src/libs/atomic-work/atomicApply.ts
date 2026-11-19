@@ -10,8 +10,17 @@
  * succeeded, and a failure is handled by throwing the shadow away.
  */
 
-/** Whatever set of per-kind entity maps the host keeps for a block. */
-export type EntityCaches<C> = { [K in keyof C]: Map<string, any> }
+/**
+ * Whatever set of per-kind entity maps the host keeps for a block.
+ *
+ * A member may also be a set of keys the host keeps beside the maps (handleGCR's
+ * settlement placeholders). The shadow wraps it like a map, which holds only
+ * while no edit handler reads or writes it: its wrapper then stays empty and
+ * commit leaves the set as it was.
+ */
+export type EntityCaches<C> = {
+    [K in keyof C]: Map<string, any> | ReadonlySet<string>
+}
 
 export interface EditOutcome {
     success: boolean
@@ -180,7 +189,8 @@ function shadowOf<C extends EntityCaches<C>>(
     const shadows: ShadowMap<unknown>[] = []
     const view: Record<string, Map<string, unknown>> = {}
     for (const name of Object.keys(base) as (keyof C & string)[]) {
-        const shadow = new ShadowMap<unknown>(base[name])
+        // A set member is wrapped as if it were a map; see EntityCaches.
+        const shadow = new ShadowMap<unknown>(base[name] as Map<string, unknown>)
         shadows.push(shadow)
         view[name] = shadow
     }
