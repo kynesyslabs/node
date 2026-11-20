@@ -91,6 +91,17 @@ describe("nodeHoldsSeat", () => {
         expect(anchor.validatorInfo).toHaveBeenCalledTimes(2)
     })
 
+    it("keys the cached answer by address, so another address reads the anchor", async () => {
+        const { nodeHoldsSeat } = await load()
+        const OTHER = "0x" + "b".repeat(64)
+        anchor.validatorInfo.mockResolvedValue({ address: ME, status: "2" })
+        expect(await nodeHoldsSeat(ME)).toBe(true)
+        anchor.validatorInfo.mockResolvedValue(null)
+        expect(await nodeHoldsSeat(OTHER)).toBe(false)
+        expect(await nodeHoldsSeat(OTHER.toUpperCase().replace("0X", "0x"))).toBe(false)
+        expect(anchor.validatorInfo).toHaveBeenCalledTimes(2)
+    })
+
     it("reads an exited row as no seat", async () => {
         const { nodeHoldsSeat } = await load()
         anchor.validatorInfo.mockResolvedValue({ address: ME, status: "4" })

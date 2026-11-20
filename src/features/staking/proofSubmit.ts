@@ -51,7 +51,7 @@ async function anchorClient(): Promise<Demos> {
     return demos
 }
 
-let seatCache: { at: number; holds: boolean } | null = null
+let seatCache: { at: number; address: string; holds: boolean } | null = null
 
 export function resetAnchorCacheForTesting(): void {
     seatCache = null
@@ -65,7 +65,14 @@ export function resetAnchorCacheForTesting(): void {
  * anchor instead of being kept for SEAT_CACHE_MS as "no seat".
  */
 export async function nodeHoldsSeat(ownAddress: string): Promise<boolean> {
-    if (seatCache !== null && Date.now() - seatCache.at < SEAT_CACHE_MS) return seatCache.holds
+    const address = ownAddress.toLowerCase()
+    if (
+        seatCache !== null &&
+        seatCache.address === address &&
+        Date.now() - seatCache.at < SEAT_CACHE_MS
+    ) {
+        return seatCache.holds
+    }
     const demos = await anchorClient()
     let info: unknown
     try {
@@ -81,7 +88,7 @@ export async function nodeHoldsSeat(ownAddress: string): Promise<boolean> {
     } else {
         throw new AnchorUnreachableError(`getValidatorInfo: unexpected reply ${describeReply(info)}`)
     }
-    seatCache = { at: Date.now(), holds }
+    seatCache = { at: Date.now(), address, holds }
     return holds
 }
 
