@@ -1421,7 +1421,8 @@ let driftWarnedHeight: number | null = null
  * Before the first fast sync succeeds, sync applies without the lock, so the
  * check is left to sync then.
  *
- * @throws AbortConsensusError when the durable check finds drift it cannot undo
+ * @throws AbortConsensusError when the durable check finds drift it cannot
+ *   undo, or when the drift check cannot run (database error)
  */
 async function gcrDriftBlocksRound(blockRef: number): Promise<boolean> {
     if (

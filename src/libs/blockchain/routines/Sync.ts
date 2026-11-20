@@ -60,6 +60,7 @@ import {
 } from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import Mempool from "../mempool"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
@@ -132,6 +133,14 @@ class ForkedPeerError extends Error {
     ) {
         super(message)
         this.name = "ForkedPeerError"
+    }
+}
+
+/** The local check for orphaned GCR state could not run. */
+export class GcrDriftProbeError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options)
+        this.name = "GcrDriftProbeError"
     }
 }
 
@@ -1072,6 +1081,10 @@ export function unreconciledGcrBlockNumber(): number | null {
  * still holds the orphaned edits. So we also check durable state — GCR edits
  * are stamped with the block that produced them, and an assignment above the
  * chain tip can only mean its block never landed.
+ *
+ * @throws when state has drifted and cannot be rolled back, or when the
+ *   drift check cannot run (database error). In the second case the drift
+ *   is unknown, so nothing is latched and the next call checks again.
  */
 export async function assertNoUnreconciledGcrState(): Promise<void> {
     if (unreconciledGcrBlock !== null) {
@@ -1187,10 +1200,29 @@ export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
     return true
 }
 
+/** Postgres SQLSTATE undefined_table: "relation ... does not exist". */
+const PG_UNDEFINED_TABLE = "42P01"
+
+/**
+ * TypeORM's QueryFailedError copies the pg error's fields onto itself and
+ * keeps the original as driverError; either may carry the SQLSTATE.
+ */
+function isMissingTableError(e: unknown): boolean {
+    const err = e as { code?: unknown; driverError?: { code?: unknown } } | null
+    return (
+        err?.code === PG_UNDEFINED_TABLE ||
+        err?.driverError?.code === PG_UNDEFINED_TABLE
+    )
+}
+
 /**
  * Highest block stamped on a GCR assignment that sits above the chain tip,
  * or null when GCR state and chain history agree. Stamps commit with their
  * block, so a stamp above the tip was left by an older binary.
+ *
+ * @throws {GcrDriftProbeError} when the check cannot run for any reason but
+ *   a missing table: the drift is then unknown, and nothing may be applied
+ *   on top of it
  */
 async function findOrphanedGcrBlock(): Promise<number | null> {
     try {
@@ -1208,14 +1240,25 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
         }
         return highestAssigned
     } catch (e) {
-        // Never let the drift probe itself block syncing — on a fresh node the
-        // table may not exist yet.
-        log.debug(
-            `[applySyncedBlock] could not check for orphaned GCR state: ${
-                e instanceof Error ? e.message : String(e)
-            }`,
+        const reason = getErrorMessage(e)
+        // On a fresh node the table may not exist yet, so nothing has drifted.
+        if (isMissingTableError(e)) {
+            log.debug(
+                `[applySyncedBlock] could not check for orphaned GCR state: ${reason}`,
+            )
+            return null
+        }
+        // Anything else (a lost connection, a statement timeout, an exhausted
+        // pool) leaves the drift unknown, not absent. Refuse this apply but do
+        // not latch: the next attempt probes again.
+        log.warning(
+            `[applySyncedBlock] could not check for orphaned GCR state; not applying until it can: ${reason}`,
         )
-        return null
+        throw new GcrDriftProbeError(
+            "[applySyncedBlock] refusing to apply: the check for orphaned GCR " +
+                `state failed: ${reason}`,
+            { cause: e },
+        )
     }
 }
 
@@ -1741,6 +1784,15 @@ async function requestBlocks(): Promise<boolean> {
 
                 // Retry the current batch with new peer
                 continue
+            }
+
+            // The local drift check failed: stop this round without
+            // cooling the peer down.
+            if (error instanceof GcrDriftProbeError) {
+                log.error(
+                    `[requestBlocks] Local drift check failed; stopping this sync round without blaming peer ${peer.identity}: ${error.message}`,
+                )
+                return false
             }
 
             // Unknown error - log and break
