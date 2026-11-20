@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import "dotenv/config"
 import { existsSync, readFileSync } from "node:fs"
+import { resolve } from "node:path"
 
 import {
     Connection,
@@ -10,11 +11,20 @@ import {
 } from "@solana/web3.js"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { demToOs } from "@kynesyslabs/demosdk/utils"
+import * as dotenv from "dotenv"
 
 import { parseNodeUrl } from "../src/config/nodeUrl"
 import { MEMO_PROGRAM_IDS, PROOF_MEMO_PREFIX } from "../src/features/staking/proofBytes"
 import { PUBLIC_SOLANA_RPC, proveNft } from "./solana-proof"
 import { ACCEPTED_SECRET_FORMATS, loadSolanaSigner, type SolanaSigner } from "./solana-signer"
+
+// dotenv/config above does not override an exported value, so an exported
+// IDENTITY_FILE that differs from .env's is still told apart from .env's.
+// .env is parsed again on its own to know which value is .env's.
+const EXPORTED_IDENTITY_FILE = process.env.IDENTITY_FILE
+const DOTENV = dotenv.config({ processEnv: {}, quiet: true })
+// A missing .env (ENOENT) is no .env; any other read error is refused.
+const DOTENV_ERROR = DOTENV.error as NodeJS.ErrnoException | undefined
 
 const PEERLIST_FILE = "demos_peerlist.json"
 const DEFAULT_IDENTITY_FILE = ".demos_identity"
@@ -115,6 +125,41 @@ function firstPeerlistRpc(): string {
         return url
     }
     exitWith(`${PEERLIST_FILE} has no usable entries. Pass --rpc <url>.`)
+}
+
+/**
+ * --identity, else an exported IDENTITY_FILE, else .demos_identity.
+ * An IDENTITY_FILE naming another file in .env alone is refused, whatever
+ * files exist: `./run` without -i exports it empty, so the node runs as
+ * .demos_identity, while docker compose passes .env's value. An exported
+ * value equal to .env's counts as .env's. Under Bun, which loads .env into
+ * the environment (and .env.local, with variable expansion), a non-default
+ * value needs --identity, exported or not.
+ */
+function pickIdentity(
+    flag: string | undefined,
+    underBun = Boolean(process.versions.bun),
+): string {
+    if (flag !== undefined) return flag
+    if (DOTENV_ERROR && DOTENV_ERROR.code !== "ENOENT") {
+        exitWith(
+            `.env could not be read (${DOTENV_ERROR.message}); ` +
+                "pass --identity <file>",
+        )
+    }
+    const fromEnv = DOTENV.parsed?.IDENTITY_FILE
+    const exported = EXPORTED_IDENTITY_FILE
+    if (!underBun && exported && exported !== fromEnv) return exported
+    const named = [fromEnv, underBun ? exported : undefined].find(
+        v => v && resolve(v) !== resolve(DEFAULT_IDENTITY_FILE),
+    )
+    if (!named) return DEFAULT_IDENTITY_FILE
+    const source = named === fromEnv ? ".env" : "the environment"
+    exitWith(
+        `${source} sets IDENTITY_FILE=${named}; the node uses that file or ` +
+            `${DEFAULT_IDENTITY_FILE} depending on how it is started; ` +
+            "pass --identity <file> with the file the node runs as.",
+    )
 }
 
 function loadMnemonic(file: string): string {
@@ -562,7 +607,7 @@ async function main(): Promise<void> {
             : PUBLIC_SOLANA_RPC)
 
     globalThis.validatorCtx = {
-        identity: flags.identity ?? DEFAULT_IDENTITY_FILE,
+        identity: pickIdentity(flags.identity),
         rpc: flags.rpc ?? firstPeerlistRpc(),
         solanaRpc: solanaRpc || PUBLIC_SOLANA_RPC,
         flags,
