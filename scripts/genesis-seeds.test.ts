@@ -34,6 +34,12 @@ describe("parseSeatUrl", () => {
         expect(parseSeatUrl(" https://v1.example:53550/ ", new Set())).toBe("https://v1.example:53550")
         expect(parseSeatUrl("http://10.0.0.5:53550", new Set())).toBe("http://10.0.0.5:53550")
     })
+    it("writes the canonical spelling, so equal endpoints compare equal", () => {
+        expect(parseSeatUrl("HTTPS://V1.Example:53550", new Set())).toBe("https://v1.example:53550")
+        expect(parseSeatUrl("https://v1.example:443/", new Set())).toBe("https://v1.example")
+        expect(() => parseSeatUrl("https://V1.example:443", new Set(["https://v1.example"]))).toThrow("another seat")
+        expect(() => parseSeatUrl("https://v1.example/?a=1", new Set())).toThrow("query or fragment")
+    })
     it("refuses an empty URL, a non-http URL, a bad port and a URL another seat has", () => {
         expect(() => parseSeatUrl("  ", new Set())).toThrow("EXPOSED_URL")
         expect(() => parseSeatUrl("ws://v1.example", new Set())).toThrow("http or https")

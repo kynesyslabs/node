@@ -69,10 +69,15 @@ export function parseSelection(input: string, count: number): number[] {
  * a seat is not written without one.
  */
 export function parseSeatUrl(input: string, taken: ReadonlySet<string>): string {
-    const url = input.trim().replace(/\/+$/, "")
-    if (url === "") throw new Error("a seat needs the EXPOSED_URL of the node that runs it")
-    const problem = connectionUrlProblem(url)
-    if (problem) throw new Error(`${url} ${problem}`)
+    const raw = input.trim()
+    if (raw === "") throw new Error("a seat needs the EXPOSED_URL of the node that runs it")
+    const problem = connectionUrlProblem(raw)
+    if (problem) throw new Error(`${raw} ${problem}`)
+    const parsed = new URL(raw)
+    if (parsed.search !== "" || parsed.hash !== "") throw new Error(`${raw} carries a query or fragment`)
+    // The canonical spelling (lower-case scheme and host, no default port, no
+    // trailing slash) is what launch checks parse and what tells two seats apart.
+    const url = parsed.origin + parsed.pathname.replace(/\/+$/, "")
     if (taken.has(url)) throw new Error(`${url} is already the URL of another seat`)
     return url
 }
