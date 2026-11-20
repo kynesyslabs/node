@@ -180,6 +180,12 @@ SUITE_FILES=(
     src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
+    # XM contract reads, XM results and XM/DemosWork request logs
+    src/features/multichain/XMDispatcher.test.ts
+    src/features/multichain/routines/errorKind.test.ts
+    src/features/multichain/routines/executors/contract_read.test.ts
+    src/features/multichain/routines/executors/executorLogs.test.ts
+    src/libs/network/routines/transactions/demosWork/handleDemosWorkRequest.test.ts
 )
 
 list_suite_files() {

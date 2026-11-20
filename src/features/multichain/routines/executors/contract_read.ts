@@ -1,32 +1,42 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
-import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
+import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 // import handleAptosContractRead from "./aptos_contract_read"
 import { handleAptosContractReadRest } from "./aptos_contract_read"
 import log from "@/utilities/logger"
+import { logField } from "../errorKind"
 
+/**
+ * Reads a contract. An EVM read uses only the node's configured RPC for the
+ * chain, on a connection of its own: the SDK's per-chain instance, which pay
+ * and contract_write broadcast through, is never created or replaced here.
+ */
 export default async function handleContractRead(
     operation: IOperation,
     chainID: number,
 ) {
-    log.debug("[XM Method] Read contract")
+    log.debug(
+        `[XM Method] Read contract on ${logField(operation.chain)}.${logField(operation.subchain)}`,
+    )
     // Mainly EVM but let's let it open for weird chains
     // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
     // and sending back the chain response as it is
     if (operation.is_evm) {
-        // log.debug(evmProviders)
-        const providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-        const evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
-        log.debug(
-            `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
-        )
-        log.debug(`[XM Method]: providerUrl: ${providerUrl}`)
-        await evmInstance.connect()
-        log.debug("params: \n")
-        log.debug(operation.task.params)
-        log.debug("\n end params: \n")
+        // NOTE Own keys only: a chain or subchain such as "constructor" or
+        // "__proto__" must not resolve to an inherited property
+        const subchains = Object.hasOwn(evmProviders, operation.chain)
+            ? evmProviders[operation.chain]
+            : {}
+        const providerUrl = Object.hasOwn(subchains, operation.subchain)
+            ? subchains[operation.subchain]
+            : undefined
+        if (typeof providerUrl !== "string" || providerUrl === "") {
+            return {
+                result: "error",
+                error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
+            }
+        }
         const params = operation.task.params // REVIEW Error handling
-        log.debug("parsed params: " + params)
         if (!params.address) {
             log.debug("Missing address")
             return {
@@ -48,25 +58,28 @@ export default async function handleContractRead(
                 error: "Missing contract method",
             }
         }
-        // Getting a contract instance using the evm library
-        log.debug("getting contract instance")
-        const contractInstance = await evmInstance.getContractInstance(
-            params.address,
-            params.abi,
-        )
-        const methodParams = JSON.parse(params.params)
-        log.debug("calling SC method: " + params.method)
-        log.debug("calling SC with args: " + params.params)
-        log.debug("params.params contents:", methodParams)
-        // Convert the object values into an array
-        const argsArray = Object.values(methodParams)
-        const result = await contractInstance[params.method](...argsArray) // REVIEW Big IF
-        log.debug("result from EVM read call received")
-        //console.log(result.toString())
-        //console.log("end result")
-        return {
-            result: result,
-            status: true,
+        const evmInstance = new EVM(providerUrl, chainID)
+        try {
+            await evmInstance.connect()
+            // Getting a contract instance using the evm library
+            const contractInstance = await evmInstance.getContractInstance(
+                params.address,
+                params.abi,
+            )
+            const methodParams = JSON.parse(params.params)
+            // Convert the object values into an array
+            const argsArray = Object.values(methodParams)
+            // Only a function of the given ABI is called
+            const result = await contractInstance.getFunction(params.method)(
+                ...argsArray,
+            )
+            log.debug("result from EVM read call received")
+            return {
+                result: result,
+                status: true,
+            }
+        } finally {
+            evmInstance.provider?.destroy?.()
         }
     } else if (operation.chain === "aptos") {
         // Handle Aptos contract reads using dedicated handler
