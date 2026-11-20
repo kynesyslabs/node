@@ -16,6 +16,7 @@ export default async function ensureCandidateBlockFormed(
 ): Promise<boolean> {
     let success = false
     if (!getSharedState.candidateBlock) {
+        if (!getSharedState.runMainLoop) return false
         log.info(
             "Candidate block not formed yet, forcing the consensus routine...",
         )

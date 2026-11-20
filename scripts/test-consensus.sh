@@ -38,6 +38,7 @@ SUITE_FILES=(
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
+    src/libs/blockchain/chainBlocks.storedHead.test.ts
     src/libs/blockchain/chainTransactions.insert.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
@@ -133,7 +134,9 @@ SUITE_FILES=(
     src/model/datasource.test.ts
     src/model/dbPreflight.test.ts
     src/utilities/nodeVersion.test.ts
+    src/utilities/shutdownExitStatus.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts
+    testing/monitoring/metricsExposure.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
@@ -226,7 +229,7 @@ count=0
 while IFS= read -r file; do
     count=$((count + 1))
     echo "::group::$file ($(runner_for "$file"))"
-    if [ "$(runner_for "$file")" = jest ]; then
+    if [[ "$(runner_for "$file")" = jest ]]; then
         npx jest --maxWorkers=1 "$file" < /dev/null
     else
         bun test "./$file" < /dev/null
@@ -237,7 +240,13 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
-done < <(list_suite_files | sort -u)
+done < <(
+    if [[ "$#" -gt 0 ]]; then
+        printf '%s\n' "$@"
+    else
+        list_suite_files | sort -u
+    fi
+)
 
 echo "consensus suites: $count files, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then

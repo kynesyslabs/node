@@ -98,7 +98,9 @@ beforeEach(() => {
     log = []
     stamped = ORPHANS
     nonceIntegrity(null)
+    getSharedState.runMainLoop = true
     spyOn(Chain, "getLastBlockNumber").mockResolvedValue(TIP)
+    spyOn(Chain, "getLastStoredBlockNumber").mockResolvedValue(TIP)
     spyOn(Datasource, "getInstance").mockResolvedValue(fakeDatasource as any)
     spyOn(Mempool, "getTransactionsByHashes").mockImplementation(async () => bodies())
     applyTransactions.mockReset()
@@ -112,6 +114,15 @@ beforeEach(() => {
 })
 
 describe("rolling back orphaned GCR state", () => {
+    it("does not write an undo or delete stamps once shutdown starts", async () => {
+        getSharedState.runMainLoop = false
+
+        expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(deleteAssigned).not.toHaveBeenCalled()
+        expect(log).toEqual([])
+    })
+
     it("writes the undos and drops the stamps in one transaction when every rollback applies", async () => {
         applyTransactions.mockResolvedValue({
             successfulTxs: ORPHANS.map(o => o.hash),
