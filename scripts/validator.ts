@@ -359,7 +359,24 @@ async function cmdNftProof(): Promise<void> {
     }
     const signature = await sendNftProof(keypair, new PublicKey(mint), demosAddress, demos)
     console.log("Stake with:")
-    console.log(`  bun run validator:stake --nft-proof ${signature}`)
+    console.log(`  ${stakeCommand(signature, flags)}`)
+}
+
+function shellWord(value: string): string {
+    return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`
+}
+
+/**
+ * The stake command for a proof just sent. It keeps the identity and the
+ * endpoints the proof was made with: the memo names that identity's
+ * address, so a stake signed by the default identity would be refused.
+ */
+export function stakeCommand(signature: string, flags: Record<string, string>): string {
+    const words = ["bun", "run", "validator:stake", "--nft-proof", signature]
+    for (const key of ["identity", "rpc", "solana-rpc"]) {
+        if (flags[key] !== undefined) words.push(`--${key}`, shellWord(flags[key]))
+    }
+    return words.join(" ")
 }
 
 /**

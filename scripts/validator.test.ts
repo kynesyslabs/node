@@ -191,6 +191,24 @@ describe("validator.ts peer list handling", () => {
     }
 })
 
+describe("validator.ts stakeCommand", () => {
+    it("keeps the identity and endpoints of the proof, quoted for a shell", async () => {
+        const { stakeCommand } = await import("./validator")
+        expect(stakeCommand("5ig", {})).toBe("bun run validator:stake --nft-proof 5ig")
+        expect(
+            stakeCommand("5ig", {
+                identity: "/keys/my node's id",
+                rpc: "http://10.0.0.2:53550",
+                "solana-rpc": "https://rpc.example/?api-key=a&b",
+                keypair: "solana.json",
+            }),
+        ).toBe(
+            "bun run validator:stake --nft-proof 5ig --identity '/keys/my node'\\''s id' " +
+                "--rpc http://10.0.0.2:53550 --solana-rpc 'https://rpc.example/?api-key=a&b'",
+        )
+    })
+})
+
 describe("validator.ts --amount", () => {
     it("keeps a bonded stake on a network without nftValidatorGating, or one that does not say", async () => {
         const { amountRefusal } = await import("./validator")
