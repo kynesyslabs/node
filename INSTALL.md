@@ -388,7 +388,7 @@ If running behind NAT, port-forward `RPC_PORT` (53550), `OMNI_PORT` (53551) and 
 
 **2. Provide a bootstrap peer list.**
 
-The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key and public URL out: the node adds itself, and a listed URL that is dialed and answers with this node's identity refuses boot. Remove such an entry before restarting. On a validator network list every other validator.
+The bootstrap peer list file is stored in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key and public URL out: the node adds itself, and a listed URL that is dialed and answers with this node's identity refuses boot. Remove such an entry before restarting. On a validator network list every other validator.
 
 Run this from the checkout, with `STATE_VOLUME` and `HELPER_IMAGE` set as in [step 3](#run-a-released-image-validators) of the released-image install (a source build sets them the same way):
 
@@ -409,7 +409,7 @@ docker run --rm --entrypoint sh \
 
 Do not start the node yet: it needs the genesis pins of step 3 first.
 
-Use the keys and URLs the release announcement lists (or, on testnet, the current bootstrap nodes from the team). The node will merge any peers it learns from these into the file as it runs.
+Use the keys and URLs the release announcement lists (or, on testnet, the current bootstrap nodes from the team). Keep at least one reachable bootstrap validator in this file across restarts; the node merges learned peers in memory but does not write them back to `demos_peerlist.json`.
 
 **3. Pin the network's genesis.**
 

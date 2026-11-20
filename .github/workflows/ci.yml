@@ -55,6 +55,7 @@ jobs:
       # Every rehearsal unit test: the halt/ride judge and its fixtures, the
       # drill genesis and the input staging
       - run: bun test testing/forks/rehearsal/
+      - run: bun test testing/forks/runbookCommands.test.ts
       # run.sh's lockstep wait, database reads, postgres gate and judge hand-off
       # against a fake curl/docker, including run.sh executed from the top
       - run: bash testing/devnet/quorum-drills/lockstep-stub.test.sh
