@@ -38,6 +38,7 @@ import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { nftGatingActive, nftGatingAtTip } from "@/forks/nftValidatorGatingGate"
+import { SOLANA_SEAT_TX_TYPES, seatPoolRefusal } from "src/features/staking/seatAdmission"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
@@ -701,6 +702,11 @@ export default class Mempool {
             }
         }
 
+        const seatRefusal = await this.seatPoolCapRefusal(transaction)
+        if (seatRefusal !== null) {
+            return { confirmationBlock: null, error: seatRefusal }
+        }
+
         if (blockRef === undefined) {
             blockRef = this.nextBlockRef()
         }
@@ -994,6 +1000,22 @@ export default class Mempool {
             ? transactionalEntityManager.getRepository(this.repo.target)
             : this.repo
         return await repo.delete({ hash: In(hashes) })
+    }
+
+    /**
+     * Why `tx`, a gasless seat transaction under `nftValidatorGating`, may
+     * not join the pool beside its sender's others, or null. Each one is
+     * read from Solana again at every merge, so a sender holding many costs
+     * every node that many reads per round. The merge does not apply it:
+     * every committee member must end a merge with the same pool.
+     */
+    private static async seatPoolCapRefusal(tx: Transaction): Promise<string | null> {
+        const type = tx.content?.type as string | undefined
+        if (!type || !SOLANA_SEAT_TX_TYPES.has(type) || !nftGatingAtTip()) return null
+        const from = tx.content?.from
+        if (typeof from !== "string" || from === "") return null
+        const pending = await this.listPendingBySenders([from])
+        return seatPoolRefusal(pending.map(row => row.type))
     }
 
     /**

@@ -38,6 +38,10 @@ import {
     nftGatingActive,
     SEAT_TX_TYPES,
 } from "@/forks/nftValidatorGatingGate"
+import {
+    SOLANA_SEAT_TX_TYPES,
+    seatRateRefusal,
+} from "src/features/staking/seatAdmission"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -268,7 +272,7 @@ export async function confirmTransaction(
     // becomes part of the signed hash, so peers compute the same hash.
     let dispatchResult: { ok: true } | { ok: false; message: string }
     try {
-        dispatchResult = await runTypeDispatcher(tx)
+        dispatchResult = await runTypeDispatcher(tx, nftGatingActive(referenceBlock))
     } catch (e) {
         dispatchResult = {
             ok: false,
@@ -292,8 +296,17 @@ export async function confirmTransaction(
 
 async function runTypeDispatcher(
     tx: Transaction,
+    nftGating: boolean,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
     const type = (tx?.content?.type ?? "") as string
+    // Counted here, after the signature and nonce checks, so only the key
+    // holder can spend a sender's allowance, and before the Solana reads.
+    if (nftGating && SOLANA_SEAT_TX_TYPES.has(type)) {
+        const raw = tx.content.from
+        const from = typeof raw === "string" ? raw : forgeToHex(raw)
+        const refusal = seatRateRefusal(from)
+        if (refusal) return { ok: false, message: refusal }
+    }
     if (
         type === "validatorStake" ||
         type === "validatorUnstake" ||

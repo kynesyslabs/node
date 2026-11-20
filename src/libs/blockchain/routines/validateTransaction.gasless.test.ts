@@ -45,6 +45,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { PEER, SENDER, chainIs, demos, handMade, onTheWire } from "src/libs/blockchain/validation/editBinding.fixtures"
 
 const { confirmTransaction } = await import("./validateTransaction")
+const { resetSeatAdmissionForTesting, SEAT_TX_RATE_LIMIT } = await import("src/features/staking/seatAdmission")
 
 const FEE_ERROR = "[FEE ERROR]"
 let savedForks: ForkConfigByName
@@ -53,6 +54,7 @@ const confirm = async (tx: Transaction) =>
     (await confirmTransaction(tx as never, SENDER)).data.message
 
 beforeEach(() => {
+    resetSeatAdmissionForTesting()
     savedForks = getSharedState.forkConfig
     chainIs(true, 0)
     getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
@@ -100,6 +102,24 @@ describe("the fee gate for an account that cannot pay the fee", () => {
             expect(message).toContain("NFT proof is required")
         } finally {
             forks.nftValidatorGating = before
+        }
+    })
+
+    it("refuses a sender's seat transactions past the rate limit under nftValidatorGating, and not before", async () => {
+        const forks = getSharedState.forkConfig as unknown as Record<string, unknown>
+        const before = forks.nftValidatorGating
+        forks.nftValidatorGating = { activationHeight: 0 }
+        try {
+            for (let i = 0; i < SEAT_TX_RATE_LIMIT; i++) {
+                expect(await confirm(await seatStake())).toContain("NFT proof is required")
+            }
+            expect(await confirm(await seatStake())).toContain("Too many seat transactions")
+        } finally {
+            forks.nftValidatorGating = before
+        }
+        resetSeatAdmissionForTesting()
+        for (let i = 0; i <= SEAT_TX_RATE_LIMIT; i++) {
+            expect(await confirm(await bondedStake())).not.toContain("Too many seat transactions")
         }
     })
 })

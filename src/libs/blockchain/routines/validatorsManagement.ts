@@ -32,6 +32,12 @@ import {
     type SolanaCheck,
 } from "src/features/staking/solanaProof"
 import {
+    challengeVerdictKey,
+    refusedVerdict,
+    rememberRefused,
+    stakeVerdictKey,
+} from "src/features/staking/seatAdmission"
+import {
     DEFAULT_MIN_VALIDATOR_STAKE,
     UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
@@ -282,17 +288,20 @@ export default class ValidatorsManagement {
             return { valid: false, message: `NFT ${nft.mint} is not eligible` }
         }
         const validator = sender.startsWith("0x") ? sender : `0x${sender}`
+        const verdictKey = stakeVerdictKey(nft.proofTx, validator)
+        const held = refusedVerdict(verdictKey)
+        if (held !== null) return { valid: false, message: held }
         const proof = await verifyNftProof(nft, validator, txTimestampMs)
-        if (proof.status !== "valid") return fromCheck(proof, "NFT proof")
+        if (proof.status !== "valid") return judged(proof, "NFT proof", verdictKey)
         const owner = await verifyCurrentOwner(nft.mint, nft.owner)
-        if (owner.status !== "valid") return fromCheck(owner, "NFT ownership")
+        if (owner.status !== "valid") return judged(owner, "NFT ownership", verdictKey)
         // Another seat backed by this mint is evicted when the stake applies;
         // the new proof must be later than the one that seat was taken with.
         const holder = await GCR.getGCRValidatorByMint(nft.mint)
         if (holder && holder.address !== sender) {
             if (holder.nft_proof_tx) {
                 const order = await verifyProofSupersedes(proof.slot, holder.nft_proof_tx)
-                if (order.status !== "valid") return fromCheck(order, "NFT proof")
+                if (order.status !== "valid") return judged(order, "NFT proof", verdictKey)
             }
             return { valid: true, message: `NFT proof valid; evicts ${holder.address}` }
         }
@@ -336,12 +345,27 @@ export default class ValidatorsManagement {
                 message: `Challenge names proof ${payload.proofTx}, but the seat rests on ${target.nft_proof_tx}`,
             }
         }
+        // Apply refuses an eviction that would leave no committee, so the
+        // challenge is refused here before it costs a Solana read.
+        if (target.status === VALIDATOR_STATUS_ACTIVE) {
+            const floor = await activeFloorRefusal("Eviction")
+            if (floor) return { valid: false, message: floor }
+        }
+        const verdictKey = challengeVerdictKey(
+            payload.evidenceTx,
+            target.nft_proof_tx,
+            payload.validator,
+        )
+        const held = refusedVerdict(verdictKey)
+        if (held !== null) return { valid: false, message: held }
         const evidence = await verifyChallengeEvidence(payload.evidenceTx, {
             mint: target.nft_mint,
             owner: target.nft_owner,
             proofTx: target.nft_proof_tx,
         })
-        if (evidence.status !== "valid") return fromCheck(evidence, "Challenge evidence")
+        if (evidence.status !== "valid") {
+            return judged(evidence, "Challenge evidence", verdictKey)
+        }
         return { valid: true, message: "Challenge valid" }
     }
 
@@ -374,19 +398,10 @@ export default class ValidatorsManagement {
                 message: "Unstake already requested",
             }
         }
-        if (await stakeChecksActive()) {
-            const active = (
-                (await GCR.getGCRValidatorsAtBlock(
-                    await Chain.getLastBlockNumber(),
-                )) as unknown[]
-            ).length
-            const floor = quorumThreshold(getSharedState.shardSize)
-            if (active - 1 < floor) {
-                return {
-                    valid: false,
-                    message: `Unstake would leave ${active - 1} active validators, below the committee floor of ${floor}`,
-                }
-            }
+        // Apply holds an unstake to the floor under either fork.
+        if ((await stakeChecksActive()) || (await nftGating())) {
+            const floor = await activeFloorRefusal("Unstake")
+            if (floor) return { valid: false, message: floor }
         }
         return { valid: true, message: "Unstake valid" }
     }
@@ -501,6 +516,31 @@ export default class ValidatorsManagement {
         )
         // TODO: connection test (legacy TODO carried over).
     }
+}
+
+/**
+ * Why taking one validator out of the active set at the tip would leave
+ * fewer than the committee floor, or null.
+ */
+async function activeFloorRefusal(what: string): Promise<string | null> {
+    const active = (
+        (await GCR.getGCRValidatorsAtBlock(await Chain.getLastBlockNumber())) as unknown[]
+    ).length
+    const floor = quorumThreshold(getSharedState.shardSize)
+    if (active - 1 < floor) {
+        return `${what} would leave ${active - 1} active validators, below the committee floor of ${floor}`
+    }
+    return null
+}
+
+/**
+ * `fromCheck`, holding a refusal under `verdictKey` so the same proof or
+ * evidence is not read from Solana again while it stays refused.
+ */
+function judged(check: SolanaCheck, what: string, verdictKey: string): StakeTxResult {
+    const result = fromCheck(check, what)
+    if (!result.valid && !result.unreachable) rememberRefused(verdictKey, result.message)
+    return result
 }
 
 /** A tx verdict from a Solana check, keeping "unreachable" distinct from "invalid". */

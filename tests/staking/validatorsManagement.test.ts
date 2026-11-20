@@ -43,6 +43,8 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     default: {
         getGCRValidatorStatus: jest.fn(),
         getGCRValidatorByMint: jest.fn(async () => null),
+        // Ten active validators at the tip: one may leave above a floor of 7
+        getGCRValidatorsAtBlock: jest.fn(async () => Array.from({ length: 10 }, (_, i) => ({ address: `v${i}` }))),
     },
 }))
 
@@ -65,6 +67,7 @@ beforeAll(async () => {
     ;(getSharedState as unknown as { forkConfig: unknown }).forkConfig = {
         nftValidatorGating: { activationHeight: 0 },
     }
+    if (!getSharedState.hasShardSize) getSharedState.setShardSizeFromGenesis(10)
     ValidatorsManagement = (
         await import("@/libs/blockchain/routines/validatorsManagement")
     ).default
@@ -262,6 +265,20 @@ describe("ValidatorsManagement.manageValidatorUnstakeTx", () => {
             unstakeTx(),
         )
         expect(r.valid).toBe(true)
+    })
+
+    it("rejects an unstake that would take the active set below the committee floor", async () => {
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: VALIDATOR_STATUS_ACTIVE,
+            unstake_requested_at: null,
+        } as never)
+        asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(Array.from({ length: 7 }, () => ({})) as never)
+        const r = await ValidatorsManagement.manageValidatorUnstakeTx(unstakeTx())
+        expect(r.valid).toBe(false)
+        expect(r.message).toBe("Unstake would leave 6 active validators, below the committee floor of 7")
+        asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(Array.from({ length: 8 }, () => ({})) as never)
+        expect((await ValidatorsManagement.manageValidatorUnstakeTx(unstakeTx())).valid).toBe(true)
     })
 
     it("rejects an unstake from a non-validator", async () => {

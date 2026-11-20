@@ -20,12 +20,14 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
         getGCRValidatorStatus: jest.fn(),
         getAccountBalance: jest.fn(),
         getGCRValidatorByMint: jest.fn(),
+        getGCRValidatorsAtBlock: jest.fn(),
     },
 }))
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
+    // A committee of 10 has a floor of 7 active validators
+    getSharedState: { shardSize: 10, networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
@@ -54,6 +56,7 @@ jest.mock("@/features/staking/solanaProof", () => ({
 }))
 
 import GCR from "@/libs/blockchain/gcr/gcr"
+import { resetSeatAdmissionForTesting } from "@/features/staking/seatAdmission"
 import {
     DEFAULT_MIN_VALIDATOR_STAKE,
     VALIDATOR_STATUS_ACTIVE,
@@ -116,8 +119,12 @@ const seat = (over: Record<string, unknown> = {}) => ({
     ...over,
 })
 
+const activeSet = (n: number) => Array.from({ length: n }, (_, i) => ({ address: `v${i}` }))
+
 beforeEach(() => {
     jest.clearAllMocks()
+    resetSeatAdmissionForTesting()
+    asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(activeSet(10) as never)
     allowlisted.clear()
     allowlisted.add(MINT).add(MINT2)
     asMock(GCR.getAccountBalance).mockResolvedValue(BigInt(MIN) * 10n as never)
@@ -165,6 +172,7 @@ describe("taking a seat", () => {
         expect(stale.valid).toBe(false)
         expect(stale.message).toContain("not later than the seat's proof")
 
+        resetSeatAdmissionForTesting()
         solana.order.mockResolvedValue({ status: "unreachable", reason: "all endpoints down" })
         const down = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(down.valid).toBe(false)
@@ -185,6 +193,7 @@ describe("taking a seat", () => {
         expect(bad.unreachable).toBeUndefined()
         expect(bad.message).toContain("memo names another")
 
+        resetSeatAdmissionForTesting()
         solana.proof.mockResolvedValue({ status: "unreachable", reason: "all endpoints down" })
         const down = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(down.valid).toBe(false)
@@ -267,8 +276,82 @@ describe("challenging a seat", () => {
         expect(bad.valid).toBe(false)
         expect(bad.unreachable).toBeUndefined()
 
+        resetSeatAdmissionForTesting()
         solana.evidence.mockResolvedValue({ status: "unreachable", reason: "down" })
         const down = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
         expect(down.unreachable).toBe(true)
+    })
+})
+
+describe("refused verdicts held at admission", () => {
+    it("refuses the same proof for the same validator again without reading Solana", async () => {
+        solana.proof.mockResolvedValue({ status: "invalid", reason: "memo names another" })
+        const first = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
+        expect(first.valid).toBe(false)
+        solana.proof.mockResolvedValue({ status: "valid", slot: 10 })
+        const again = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
+        expect(again).toEqual({ valid: false, message: first.message })
+        expect(solana.proof).toHaveBeenCalledTimes(1)
+    })
+
+    it("reads Solana again for another proof", async () => {
+        solana.proof.mockResolvedValue({ status: "invalid", reason: "memo names another" })
+        await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
+        solana.proof.mockResolvedValue({ status: "valid", slot: 10 })
+        const other = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft: { ...nft, proofTx: SIG2 } }))
+        expect(other.valid).toBe(true)
+        expect(solana.proof).toHaveBeenCalledTimes(2)
+    })
+
+    it("holds a refused ownership check under the proof as well", async () => {
+        solana.owner.mockResolvedValue({ status: "invalid", reason: "no longer holds" })
+        await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
+        const again = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
+        expect(again.message).toContain("no longer holds")
+        expect(solana.proof).toHaveBeenCalledTimes(1)
+        expect(solana.owner).toHaveBeenCalledTimes(1)
+    })
+
+    it("never holds an unanswered proof: the next attempt reads Solana and can pass", async () => {
+        solana.proof.mockResolvedValue({ status: "unreachable", reason: "all endpoints down" })
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))).unreachable).toBe(true)
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))).unreachable).toBe(true)
+        solana.proof.mockResolvedValue({ status: "valid", slot: 10 })
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))).valid).toBe(true)
+        expect(solana.proof).toHaveBeenCalledTimes(3)
+    })
+
+    it("refuses the same challenge again without reading Solana, and never holds unanswered evidence", async () => {
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        solana.evidence.mockResolvedValue({ status: "invalid", reason: "not later than the proof" })
+        const first = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
+        const again = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
+        expect(again).toEqual({ valid: false, message: first.message })
+        expect(solana.evidence).toHaveBeenCalledTimes(1)
+
+        // Other evidence against the same seat is a new question
+        solana.evidence.mockResolvedValue({ status: "unreachable", reason: "down" })
+        expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER, SIG2))).unreachable).toBe(true)
+        solana.evidence.mockResolvedValue({ status: "valid", slot: 12 })
+        expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER, SIG2))).valid).toBe(true)
+        expect(solana.evidence).toHaveBeenCalledTimes(3)
+    })
+})
+
+describe("the active-set floor at challenge admission", () => {
+    it("refuses a challenge whose eviction would take the active set below the floor, before any Solana read", async () => {
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(activeSet(7) as never)
+        const r = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
+        expect(r).toEqual({ valid: false, message: "Eviction would leave 6 active validators, below the committee floor of 7" })
+        expect(solana.evidence).not.toHaveBeenCalled()
+        asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(activeSet(8) as never)
+        expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).valid).toBe(true)
+    })
+
+    it("admits a challenge to an unstaking seat at the floor, which leaves the active set alone", async () => {
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ status: VALIDATOR_STATUS_UNSTAKING }) as never)
+        asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(activeSet(7) as never)
+        expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).valid).toBe(true)
     })
 })

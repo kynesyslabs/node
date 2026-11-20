@@ -13,7 +13,9 @@ Node NFT and carries no DEM: the stake is 0 and stake, unstake, exit and
 challenge transactions pay no gas. Before the fork, or on a chain that never
 schedules it, seats are DEM bonds (`bun run validator:stake --amount <DEM>`)
 and nothing below about NFTs applies. Staking transactions of either kind are
-accepted only while `tokenStaking` is active.
+accepted only while `tokenStaking` is active. Mainnet schedules both at
+block 0: its genesis validators are seated by their NFTs, and anyone with an
+allowlisted NFT can take a seat from block 1.
 The NFT stays in your Solana wallet; you prove you hold it with one signed
 Solana transaction, then stake from the node's identity. This runbook walks
 through the whole lifecycle: proof, stake, re-stake, unstake, exit, and what
@@ -124,6 +126,11 @@ wallet must still hold the NFT when the stake is confirmed.
 If another validator's seat is backed by the same NFT, your stake evicts it:
 the newer proof wins. The reverse also holds, so keep the NFT where it is.
 
+Seat transactions pay no gas, so each node holds a sender to 3 stakes or
+challenges a minute and 2 waiting in its pool, and a proof Solana refused
+stays refused on that node for 10 minutes without another read. After a
+refused proof, sign a new one rather than resending the same signature.
+
 ### Re-stake
 
 The same command without a proof re-stakes an existing seat:
@@ -141,7 +148,9 @@ unstake and makes the seat active again.
 bun run validator:unstake
 ```
 
-The seat must be active with no unstake already requested. The status
+The seat must be active with no unstake already requested, and the active
+set must keep at least the committee floor (2/3 + 1 of `shardSize`, 7 on
+mainnet) without it. The status
 becomes `unstaking` and a lock starts: `NFT_UNSTAKE_LOCK_BLOCKS` (20) blocks
 for an NFT seat, `UNSTAKE_LOCK_BLOCKS` (1000) for a DEM-bonded seat. During the lock the node keeps its seat and keeps signing. The
 NFT is still bound to the seat, so a transfer out of the wallet during the
@@ -167,7 +176,9 @@ bun run validator:challenge --validator <0x...> --transfer <solana signature>
 ```
 
 The node verifies the transfer on Solana and the seat closes at once, with
-no lock. Moving the NFT between two token accounts of the same wallet does
+no lock, unless closing it would leave the active set below the committee
+floor: then the challenge is refused and the seat stays until another
+validator enters, after which the same challenge can be sent again. Moving the NFT between two token accounts of the same wallet does
 not count as leaving. Keep the NFT in the proving wallet for as long as you
 hold the seat; to hand the seat to a new address, move the NFT and let the
 new holder prove and stake, which evicts the old seat.
@@ -195,6 +206,9 @@ block numbers and the NFT mint, wallet and proof signature on record.
 | `A top-up cannot carry an NFT proof`                              | Drop `--nft-proof`; the seat already exists                                                     |
 | `An allowlisted node NFT proof is required to become a validator` | The node has no seat and the stake carried no proof                                             |
 | `Lock not elapsed`                                                | Exit sent before `unstake_available_at`; wait                                                   |
+| `... would leave N active validators, below the committee floor of 7` | The unstake or eviction would leave too few validators for a committee; wait for another seat |
+| `Too many seat transactions from ...`                             | More than 3 stakes or challenges from this address in a minute; wait                            |
+| `Sender already holds 2 seat transactions in the pool`            | Wait for the pending ones to be included or dropped                                             |
 | `Validator must be unstaking before exit`                         | Unstake first                                                                                   |
 | Staking page answers 404                                          | The node already holds a seat                                                                   |
 | Page shows no wallets                                             | On http, Phantom hides itself; use the tunnel above or another wallet                           |
