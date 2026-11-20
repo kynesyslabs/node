@@ -832,6 +832,12 @@ this restart is a fallback there.
     the old file first (`validator.ts unstake` and `exit` still accept it;
     `stake` and `nft-proof` refuse it), then stakes again under the retyped
     phrase.
+  - The RPC methods `login_request` and `login_response` and their
+    OmniProtocol opcodes `0x50` and `0x51` are no longer served; an RPC call
+    to either gets the unknown-method answer (501). The SDK does not call
+    them. The OmniProtocol framer waits for the rest of a partial auth block
+    instead of refusing the frame, and the secretary ignores a validator
+    phase it does not know.
 
 ## Known limits
 
