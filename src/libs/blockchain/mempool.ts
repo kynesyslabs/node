@@ -38,9 +38,15 @@ import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { nftGatingActive, nftGatingAtTip } from "@/forks/nftValidatorGatingGate"
-import { SOLANA_SEAT_TX_TYPES, seatPoolRefusal } from "src/features/staking/seatAdmission"
+import {
+    SEAT_JUDGE_TIMEOUT_MS,
+    SEAT_TXS_JUDGED_PER_BATCH,
+    SOLANA_SEAT_TX_TYPES,
+    seatPoolRefusal,
+} from "src/features/staking/seatAdmission"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
+import type { StakingTxResult } from "src/libs/network/routines/transactions/handleStakingTx"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
 import {
     EvictionCandidate,
@@ -1031,26 +1037,82 @@ export default class Mempool {
     public static async dropRefusedSeatTransactions(): Promise<string[]> {
         if (!nftGatingAtTip()) return []
         const { isStakingTxType } = await import("src/features/staking/types")
-        const { handleStakingTx } = await import(
-            "src/libs/network/routines/transactions/handleStakingTx"
-        )
         const locked = this.lockedHashes()
         const seats = (await this.getMempool()).filter(
             tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
         )
-        const verdicts = await Promise.all(
-            seats.map(tx => handleStakingTx(tx, { fresh: true })),
-        )
-        const refused = seats.filter((_, i) => !verdicts[i].success && !verdicts[i].unreachable)
+        const verdicts = await this.judgeSeatTransactions(seats)
+        const refused = seats.filter((_, i) => {
+            const verdict = verdicts[i]
+            return verdict !== null && !verdict.success && !verdict.unreachable
+        })
         for (const tx of refused) {
             log.error(
-                `[Mempool] Dropping own tx ${tx.hash}: ${verdicts[seats.indexOf(tx)].message}`,
+                `[Mempool] Dropping own tx ${tx.hash}: ${verdicts[seats.indexOf(tx)]?.message}`,
             )
         }
-        if (refused.length > 0) {
-            await this.removeTransactionsByHashes(refused.map(tx => tx.hash))
-        }
-        return refused.map(tx => tx.hash)
+        // The lock can be taken while Solana is read; its txs stay.
+        const lockedNow = this.lockedHashes()
+        const drop = refused.map(tx => tx.hash).filter(hash => !lockedNow.has(hash))
+        if (drop.length > 0) await this.removeTransactionsByHashes(drop)
+        return drop
+    }
+
+    private static seatRejudge: Promise<string[]> | null = null
+
+    /**
+     * Starts dropRefusedSeatTransactions unless one is still running, and
+     * does not wait for it: the round's peer exchange must not wait on
+     * Solana. What it refuses leaves the pool when its reads come back, as
+     * the same txs leave peers' merges.
+     */
+    public static startSeatRejudge(): Promise<string[]> {
+        if (this.seatRejudge !== null) return this.seatRejudge
+        const running = this.dropRefusedSeatTransactions()
+            .catch((e: unknown) => {
+                log.warning(
+                    `[Mempool] Seat re-judge failed: ${e instanceof Error ? e.message : String(e)}`,
+                )
+                return [] as string[]
+            })
+            .finally(() => {
+                this.seatRejudge = null
+            })
+        this.seatRejudge = running
+        return running
+    }
+
+    /**
+     * Fresh staking verdicts on the first SEAT_TXS_JUDGED_PER_BATCH of
+     * `seats`, each unanswered after SEAT_JUDGE_TIMEOUT_MS; null for the
+     * rest, which are not judged this round.
+     */
+    private static async judgeSeatTransactions(
+        seats: Transaction[],
+    ): Promise<Array<StakingTxResult | null>> {
+        const { handleStakingTx } = await import(
+            "src/libs/network/routines/transactions/handleStakingTx"
+        )
+        return Promise.all(
+            seats.map((tx, i) => {
+                if (i >= SEAT_TXS_JUDGED_PER_BATCH) return null
+                let timer: ReturnType<typeof setTimeout> | undefined
+                const late = new Promise<StakingTxResult>(resolve => {
+                    timer = setTimeout(
+                        () =>
+                            resolve({
+                                success: false,
+                                unreachable: true,
+                                message: `no staking verdict within ${SEAT_JUDGE_TIMEOUT_MS}ms`,
+                            }),
+                        SEAT_JUDGE_TIMEOUT_MS,
+                    )
+                })
+                return Promise.race([handleStakingTx(tx, { fresh: true }), late]).finally(
+                    () => clearTimeout(timer),
+                )
+            }),
+        )
     }
 
     /**
@@ -1356,23 +1418,26 @@ export default class Mempool {
         // it unbuildable at that height.
         if (nftGatingAtTip() && !options.rebuild) {
             const { isStakingTxType } = await import("src/features/staking/types")
-            const { handleStakingTx } = await import(
-                "src/libs/network/routines/transactions/handleStakingTx"
-            )
             const locked = this.lockedHashes()
-            // Solana is asked for every staking tx at once, so a batch of
-            // unanswerable proofs costs one timeout, not one per tx.
-            const verdicts = await Promise.all(
-                validTransactions.map(tx =>
-                    isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash)
-                        ? handleStakingTx(tx, { fresh: true })
-                        : null,
-                ),
+            const seats = validTransactions.filter(
+                tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
             )
+            // Solana is asked for every judged seat tx at once, so a batch of
+            // unanswerable proofs costs one timeout, not one per tx.
+            const seatVerdicts = await this.judgeSeatTransactions(seats)
+            const verdictOf = new Map(seats.map((tx, i) => [tx, seatVerdicts[i]]))
             const policyVerified: Transaction[] = []
-            verdicts.forEach((verdict, i) => {
-                const tx = validTransactions[i]
-                if (verdict === null || verdict.success) {
+            validTransactions.forEach(tx => {
+                if (!verdictOf.has(tx)) {
+                    policyVerified.push(tx)
+                    return
+                }
+                const verdict = verdictOf.get(tx)
+                if (verdict === null || verdict === undefined) {
+                    log.warning(
+                        `[Mempool.receive] Leaving out tx ${tx.hash} for now: over ${SEAT_TXS_JUDGED_PER_BATCH} seat transactions in one batch`,
+                    )
+                } else if (verdict.success) {
                     policyVerified.push(tx)
                 } else if (verdict.unreachable) {
                     log.warning(

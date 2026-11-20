@@ -20,6 +20,21 @@ export const SEAT_TX_RATE_WINDOW_MS = 60_000
 export const MAX_PENDING_SEAT_TXS_PER_SENDER = 2
 
 /**
+ * Seat transactions one merge, one received batch or one own-pool re-judge
+ * reads Solana for. The merge is not held to the per-sender pool cap, so
+ * without this a peer could make every member read Solana for any number of
+ * them in one round. The rest are left out for the round, not dropped.
+ */
+export const SEAT_TXS_JUDGED_PER_BATCH = 16
+
+/**
+ * How long a batch waits for its seat verdicts. A verdict not back by then
+ * counts as unanswered. Shorter than the merge's peer call timeout (10 s),
+ * so a slow Solana cannot make the peer that sent the batch give up on us.
+ */
+export const SEAT_JUDGE_TIMEOUT_MS = 6_000
+
+/**
  * How long a proof or a challenge a healthy endpoint refused stays refused
  * without another read. Bounded rather than kept for good: a refusal can
  * depend on what Solana and the seat table hold now (the wallet holding the
@@ -27,16 +42,26 @@ export const MAX_PENDING_SEAT_TXS_PER_SENDER = 2
  */
 export const REFUSED_VERDICT_TTL_MS = 10 * 60_000
 
-/** Keys are chosen by senders, so each map is emptied once it grows past this. */
+/**
+ * Keys are chosen by senders, so each map holds at most this many. Past it
+ * the expired entries go, then the least recently written ones: emptying the
+ * map would let 10k made-up senders reset every sender's rate limit.
+ */
 export const SEAT_ADMISSION_CACHE_CAP = 10_000
 
 const attempts = new Map<string, number[]>()
 const refused = new Map<string, { until: number; reason: string }>()
 
 function bounded<V>(map: Map<string, V>, key: string, value: V, expired: (v: V) => boolean): void {
-    if (!map.has(key) && map.size >= SEAT_ADMISSION_CACHE_CAP) {
+    // Re-inserted, so a map's insertion order is its write order.
+    map.delete(key)
+    if (map.size >= SEAT_ADMISSION_CACHE_CAP) {
         for (const [k, v] of map) if (expired(v)) map.delete(k)
-        if (map.size >= SEAT_ADMISSION_CACHE_CAP) map.clear()
+        while (map.size >= SEAT_ADMISSION_CACHE_CAP) {
+            const oldest = map.keys().next()
+            if (oldest.done) break
+            map.delete(oldest.value)
+        }
     }
     map.set(key, value)
 }
@@ -50,7 +75,7 @@ export function seatRateRefusal(sender: string, now: number = Date.now()): strin
     const key = sender.toLowerCase()
     const recent = (attempts.get(key) ?? []).filter(at => now - at < SEAT_TX_RATE_WINDOW_MS)
     if (recent.length >= SEAT_TX_RATE_LIMIT) {
-        attempts.set(key, recent)
+        bounded(attempts, key, recent, () => false)
         return (
             `Too many seat transactions from ${key}: at most ${SEAT_TX_RATE_LIMIT} ` +
             `every ${SEAT_TX_RATE_WINDOW_MS / 1000}s`

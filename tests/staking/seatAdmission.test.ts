@@ -42,6 +42,20 @@ describe("seat transaction rate", () => {
         for (let i = 0; i < SEAT_ADMISSION_CACHE_CAP + 5; i++) seatRateRefusal(`0x${i}`, T0 + SEAT_TX_RATE_WINDOW_MS)
         expect(seatRateRefusal("0xnew", T0 + SEAT_TX_RATE_WINDOW_MS)).toBeNull()
     })
+
+    it("evicts the least recently seen senders past the cap, not every sender at once", () => {
+        for (let i = 0; i < SEAT_TX_RATE_LIMIT; i++) seatRateRefusal("0xbusy", T0)
+        // Fresh senders flood the map while the busy one keeps retrying.
+        for (let i = 0; i < 2 * SEAT_ADMISSION_CACHE_CAP; i++) {
+            seatRateRefusal(`0xflood${i}`, T0 + 1)
+            if (i % 1000 === 0) expect(seatRateRefusal("0xbusy", T0 + 1)).not.toBeNull()
+        }
+        expect(seatRateRefusal("0xbusy", T0 + 2)).not.toBeNull()
+        // The oldest flood senders were evicted, the newest are still counted.
+        expect(seatRateRefusal(`0xflood${2 * SEAT_ADMISSION_CACHE_CAP - 1}`, T0 + 2)).toBeNull()
+        expect(seatRateRefusal(`0xflood${2 * SEAT_ADMISSION_CACHE_CAP - 1}`, T0 + 2)).toBeNull()
+        expect(seatRateRefusal(`0xflood${2 * SEAT_ADMISSION_CACHE_CAP - 1}`, T0 + 2)).not.toBeNull()
+    })
 })
 
 describe("seat transactions held in the pool", () => {
@@ -81,5 +95,8 @@ describe("refused verdicts", () => {
     it("stay bounded when senders fill the cache with fresh keys", () => {
         for (let i = 0; i < SEAT_ADMISSION_CACHE_CAP + 5; i++) rememberRefused(stakeVerdictKey(`s${i}`, "0xab"), "no", T0)
         expect(refusedVerdict(stakeVerdictKey(`s${SEAT_ADMISSION_CACHE_CAP + 4}`, "0xab"), T0)).toBe("no")
+        // Only the oldest went to make room.
+        expect(refusedVerdict(stakeVerdictKey("s4", "0xab"), T0)).toBeNull()
+        expect(refusedVerdict(stakeVerdictKey("s5", "0xab"), T0)).toBe("no")
     })
 })

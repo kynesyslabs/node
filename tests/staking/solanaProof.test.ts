@@ -18,13 +18,18 @@ const withSolana = jest.fn(async (_what: string, read: (c: unknown) => Promise<u
     return read(connection)
 })
 class SolanaUnreachableError extends Error {}
+class SolanaAbsentError extends Error {}
+// The shared result cache and the limiter are covered in solanaRpc.test.ts.
 jest.mock("@/features/staking/solanaRpc", () => ({
     __esModule: true,
     withSolana,
+    sharedSolanaRead: (_key: string, read: () => Promise<unknown>) => read(),
+    SolanaAbsentError,
     SolanaUnreachableError,
 }))
 
 import {
+    CACHE_CAP,
     resetSolanaProofCacheForTesting,
     UNREACHABLE_CACHE_MS,
     verifyChallengeEvidence,
@@ -310,5 +315,17 @@ describe("a fresh read (merge and block building)", () => {
         expect((await verifyCurrentOwner(MINT, OWNER, fresh)).status).toBe("valid")
         expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("valid")
         expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(3)
+    })
+})
+
+describe("the outage marks past the cache cap", () => {
+    it("lose only the oldest mark, not every mark at once", async () => {
+        // A made-up owner fails inside the read, as an outage does.
+        for (let i = 0; i <= CACHE_CAP; i++) await verifyCurrentOwner(MINT, `o${i}`)
+        expect(withSolana).toHaveBeenCalledTimes(CACHE_CAP + 1)
+        await verifyCurrentOwner(MINT, `o${CACHE_CAP - 1}`)
+        expect(withSolana).toHaveBeenCalledTimes(CACHE_CAP + 1)
+        await verifyCurrentOwner(MINT, "o0")
+        expect(withSolana).toHaveBeenCalledTimes(CACHE_CAP + 2)
     })
 })

@@ -7,7 +7,12 @@ import type {
 } from "@solana/web3.js"
 import { PublicKey } from "@solana/web3.js"
 import type { ValidatorNftProof } from "./types"
-import { SolanaUnreachableError, withSolana } from "./solanaRpc"
+import {
+    SolanaAbsentError,
+    SolanaUnreachableError,
+    sharedSolanaRead,
+    withSolana,
+} from "./solanaRpc"
 
 /**
  * Verification of the Solana side of validator gating: the proof a wallet
@@ -53,11 +58,20 @@ export const UNREACHABLE_CACHE_MS = 60_000
 type Unreachable = { status: "unreachable"; reason: string }
 const unreachableUntil = new Map<string, { until: number; result: Unreachable }>()
 
-/** Keys are chosen by senders, so each cache is emptied once it grows past this. */
+/**
+ * Keys are chosen by senders, so each cache holds at most this many, losing
+ * its oldest entry past it. Emptying it instead would let a flood of made-up
+ * proofs lift every outage mark at once.
+ */
 export const CACHE_CAP = 10_000
 
 function remember<K, V>(cache: Map<K, V>, key: K, value: V): void {
-    if (cache.size >= CACHE_CAP) cache.clear()
+    cache.delete(key)
+    while (cache.size >= CACHE_CAP) {
+        const oldest = cache.keys().next()
+        if (oldest.done) break
+        cache.delete(oldest.value)
+    }
     cache.set(key, value)
 }
 
@@ -151,14 +165,15 @@ async function fetchParsed(
     what: string,
 ): Promise<ParsedTransactionWithMeta> {
     // An endpoint with pruned history answers null; the next one is asked.
-    return withSolana(what, async (connection: Connection) => {
-        const tx = await connection.getParsedTransaction(signature, {
-            commitment: "finalized",
-            maxSupportedTransactionVersion: 0,
-        })
-        if (tx === null) throw new Error("not found")
-        return tx
-    }
+    return sharedSolanaRead(`tx:${signature}`, () =>
+        withSolana(what, async (connection: Connection) => {
+            const tx = await connection.getParsedTransaction(signature, {
+                commitment: "finalized",
+                maxSupportedTransactionVersion: 0,
+            })
+            if (tx === null) throw new SolanaAbsentError("not found")
+            return tx
+        }),
     )
 }
 
@@ -245,11 +260,13 @@ export async function verifyCurrentOwner(
     const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
     try {
-        const accounts = await withSolana("getParsedTokenAccountsByOwner", connection =>
-            connection.getParsedTokenAccountsByOwner(
-                new PublicKey(owner),
-                { mint: new PublicKey(mint) },
-                "finalized",
+        const accounts = await sharedSolanaRead(key, () =>
+            withSolana("getParsedTokenAccountsByOwner", connection =>
+                connection.getParsedTokenAccountsByOwner(
+                    new PublicKey(owner),
+                    { mint: new PublicKey(mint) },
+                    "finalized",
+                ),
             ),
         )
         const held = accounts.value.some(account => {

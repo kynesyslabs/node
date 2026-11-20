@@ -130,7 +130,10 @@ Seat transactions pay no gas, so each node holds a sender to 3 stakes or
 challenges a minute and 2 waiting in its pool, and a proof Solana refused
 stays refused on that node for 10 minutes without another read. These holds
 apply to pool admission only: every validator that merges the transaction
-reads Solana again, so the committee judges it as the chain is now. After a
+reads Solana again, so the committee judges it as the chain is now. A node
+runs at most 8 Solana reads at once, shares one read of the same record
+for about a round, and judges at most 16 seat transactions per merge; a
+seat transaction past either bound waits for a later round. After a
 refused proof, sign a new one rather than resending the same signature.
 
 ### Re-stake

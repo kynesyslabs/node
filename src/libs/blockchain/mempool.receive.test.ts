@@ -128,6 +128,7 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 import Mempool from "./mempool"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "src/utilities/sharedState"
+import { SEAT_JUDGE_TIMEOUT_MS, SEAT_TXS_JUDGED_PER_BATCH } from "src/features/staking/seatAdmission"
 
 // lastBlock=100, referenceBlockRoom=1: deep window cutoff 100 - 5*1 = 95.
 let mempoolRows: Array<{ hash: string }> = []
@@ -355,6 +356,91 @@ describe("Mempool.dropRefusedSeatTransactions", () => {
             { fresh: true },
             { fresh: true },
         ])
+    })
+})
+
+describe("bounded seat judgement", () => {
+    const seat = (hash: string) => {
+        const t = tx(hash, 100)
+        t.content = { ...t.content, type: "validatorStake" }
+        return t
+    }
+    const many = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => seat(`${prefix}${i}`))
+
+    beforeEach(() => {
+        resetReceiveState()
+        nftGatingOn = true
+        handleStakingTx.mockClear()
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        handleStakingTx.mockImplementation(async (t: { hash: string }) => seatVerdicts.get(t.hash))
+        jest.useRealTimers()
+    })
+
+    it("judges at most SEAT_TXS_JUDGED_PER_BATCH seat txs of a received batch and leaves the rest out", async () => {
+        const seats = many("0xr", SEAT_TXS_JUDGED_PER_BATCH + 4)
+        for (const t of seats) seatVerdicts.set(t.hash, { success: true, message: "ok" })
+        await Mempool.receive([...seats, tx("0xpay", 100)])
+        expect(handleStakingTx).toHaveBeenCalledTimes(SEAT_TXS_JUDGED_PER_BATCH)
+        expect(insertedRows.map(r => r.hash).sort()).toEqual(
+            [...seats.slice(0, SEAT_TXS_JUDGED_PER_BATCH).map(t => t.hash), "0xpay"].sort(),
+        )
+    })
+
+    it("re-judges at most SEAT_TXS_JUDGED_PER_BATCH own seat txs and keeps the rest", async () => {
+        const seats = many("0xo", SEAT_TXS_JUDGED_PER_BATCH + 4)
+        for (const t of seats) seatVerdicts.set(t.hash, { success: false, message: "moved" })
+        const deleted: string[] = []
+        ;(Mempool as any).repo = {
+            find: jest.fn(async () => seats),
+            delete: jest.fn(async (where: { hash: { _value: string[] } }) => {
+                deleted.push(...where.hash._value)
+            }),
+        }
+        await Mempool.dropRefusedSeatTransactions()
+        expect(handleStakingTx).toHaveBeenCalledTimes(SEAT_TXS_JUDGED_PER_BATCH)
+        expect(deleted).toEqual(seats.slice(0, SEAT_TXS_JUDGED_PER_BATCH).map(t => t.hash))
+    })
+
+    it("counts a verdict not back within SEAT_JUDGE_TIMEOUT_MS as unanswered and keeps its tx", async () => {
+        jest.useFakeTimers()
+        handleStakingTx.mockImplementation(async (t: { hash: string }) =>
+            t.hash === "0xslow" ? new Promise(() => {}) : seatVerdicts.get(t.hash),
+        )
+        seatVerdicts.set("0xgone", { success: false, message: "moved" })
+        const deleted: string[] = []
+        ;(Mempool as any).repo = {
+            find: jest.fn(async () => [seat("0xslow"), seat("0xgone")]),
+            delete: jest.fn(async (where: { hash: { _value: string[] } }) => {
+                deleted.push(...where.hash._value)
+            }),
+        }
+        const done = Mempool.dropRefusedSeatTransactions()
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        jest.advanceTimersByTime(SEAT_JUDGE_TIMEOUT_MS)
+        expect(await done).toEqual(["0xgone"])
+        expect(deleted).toEqual(["0xgone"])
+    })
+
+    it("runs one own-pool re-judge at a time, and the round does not wait for it", async () => {
+        let finish: () => void = () => {}
+        handleStakingTx.mockImplementation(
+            () => new Promise(resolve => (finish = () => resolve({ success: true, message: "ok" }))),
+        )
+        ;(Mempool as any).repo = { find: jest.fn(async () => [seat("0xmine")]), delete: jest.fn() }
+        const first = Mempool.startSeatRejudge()
+        const second = Mempool.startSeatRejudge()
+        expect(second).toBe(first)
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        expect(handleStakingTx).toHaveBeenCalledTimes(1)
+        finish()
+        expect(await first).toEqual([])
+        const next = Mempool.startSeatRejudge()
+        expect(next).not.toBe(first)
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        finish()
+        await next
     })
 })
 
