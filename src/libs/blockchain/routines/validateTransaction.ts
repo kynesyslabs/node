@@ -40,6 +40,7 @@ import {
 } from "@/forks/nftValidatorGatingGate"
 import {
     SOLANA_SEAT_TX_TYPES,
+    recordSeatVerdict,
     seatRateRefusal,
 } from "src/features/staking/seatAdmission"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
@@ -318,6 +319,7 @@ async function runTypeDispatcher(
         const r = await handleStakingTx(
             tx as unknown as Parameters<typeof handleStakingTx>[0],
         )
+        if (typeof tx.hash === "string") recordSeatVerdict(tx.hash, r)
         return r.success ? { ok: true } : { ok: false, message: r.message }
     }
     if (type === "networkUpgrade" || type === "networkUpgradeVote") {

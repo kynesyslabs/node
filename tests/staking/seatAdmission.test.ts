@@ -6,9 +6,11 @@ import {
     SEAT_TX_RATE_LIMIT,
     SEAT_TX_RATE_WINDOW_MS,
     challengeVerdictKey,
+    recordSeatVerdict,
     refusedVerdict,
     rememberRefused,
     resetSeatAdmissionForTesting,
+    seatAdmittedHere,
     seatPoolRefusal,
     seatRateRefusal,
     stakeVerdictKey,
@@ -98,5 +100,23 @@ describe("refused verdicts", () => {
         // Only the oldest went to make room.
         expect(refusedVerdict(stakeVerdictKey("s4", "0xab"), T0)).toBeNull()
         expect(refusedVerdict(stakeVerdictKey("s5", "0xab"), T0)).toBe("no")
+    })
+})
+
+describe("this node's seat verdicts", () => {
+    it("admit on success, withdraw on a refusal, and ignore an unanswered read", () => {
+        expect(seatAdmittedHere("0xtx")).toBe(false)
+        recordSeatVerdict("0xtx", { success: true })
+        expect(seatAdmittedHere("0xtx")).toBe(true)
+        recordSeatVerdict("0xtx", { success: false, unreachable: true })
+        expect(seatAdmittedHere("0xtx")).toBe(true)
+        recordSeatVerdict("0xtx", { success: false })
+        expect(seatAdmittedHere("0xtx")).toBe(false)
+    })
+
+    it("hold at most the cap, forgetting the oldest", () => {
+        for (let i = 0; i <= SEAT_ADMISSION_CACHE_CAP; i++) recordSeatVerdict(`0x${i}`, { success: true })
+        expect(seatAdmittedHere("0x0")).toBe(false)
+        expect(seatAdmittedHere(`0x${SEAT_ADMISSION_CACHE_CAP}`)).toBe(true)
     })
 })

@@ -140,8 +140,8 @@ reads Solana again, so the committee judges it as the chain is now. A node
 runs at most 8 Solana reads at once, shares one read of the same record
 for about a round, and judges at most 16 seat transactions per merge (the
 16 with the lowest hashes, so every member judges the same ones). A block
-takes at most 16 seat transactions, again the lowest hashes; a seat
-transaction past any of
+takes at most 16 seat transactions, again the lowest hashes, and only ones
+the validator judged admissible itself; a seat transaction past any of
 these bounds waits for a later round. After a
 refused proof, sign a new one rather than resending the same signature.
 

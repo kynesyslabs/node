@@ -131,7 +131,28 @@ export function rememberRefused(key: string, reason: string, now: number = Date.
     bounded(refused, key, { until: now + REFUSED_VERDICT_TTL_MS, reason }, v => v.until <= now)
 }
 
+const admitted = new Map<string, true>()
+
+/**
+ * Note this node's own verdict on seat tx `hash`. A round's candidate takes
+ * an unlocked seat tx only once this node admitted it itself (at RPC
+ * intake, from gossip, in a merge or a re-judge), never on a peer's word or
+ * on a pool row kept across a restart. An unanswered read changes nothing.
+ */
+export function recordSeatVerdict(
+    hash: string,
+    verdict: { success: boolean; unreachable?: boolean },
+): void {
+    if (verdict.success) bounded(admitted, hash, true as const, () => false)
+    else if (!verdict.unreachable) admitted.delete(hash)
+}
+
+export function seatAdmittedHere(hash: string): boolean {
+    return admitted.has(hash)
+}
+
 export function resetSeatAdmissionForTesting(): void {
     attempts.clear()
     refused.clear()
+    admitted.clear()
 }

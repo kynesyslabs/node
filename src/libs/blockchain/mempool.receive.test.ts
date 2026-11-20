@@ -128,7 +128,13 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 import Mempool from "./mempool"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "src/utilities/sharedState"
-import { SEAT_JUDGE_TIMEOUT_MS, SEAT_TXS_JUDGED_PER_BATCH } from "src/features/staking/seatAdmission"
+import {
+    SEAT_JUDGE_TIMEOUT_MS,
+    SEAT_TXS_JUDGED_PER_BATCH,
+    recordSeatVerdict,
+    resetSeatAdmissionForTesting,
+    seatAdmittedHere,
+} from "src/features/staking/seatAdmission"
 
 // lastBlock=100, referenceBlockRoom=1: deep window cutoff 100 - 5*1 = 95.
 let mempoolRows: Array<{ hash: string }> = []
@@ -362,6 +368,10 @@ describe("a gossiped seat transaction", () => {
         expect(await Mempool.gossipSeatRefusal(seatTx("0xinvented"))).toBe("NFT proof invalid")
         expect(await Mempool.gossipSeatRefusal(seatTx("0xdown"))).toBe("timed out")
         expect(handleStakingTx.mock.calls.map(c => c[1])).toEqual([{ fresh: true }, { fresh: true }, { fresh: true }])
+        // Only the confirmed one may enter a candidate of this node.
+        expect(seatAdmittedHere("0xheld")).toBe(true)
+        expect(seatAdmittedHere("0xinvented")).toBe(false)
+        expect(seatAdmittedHere("0xdown")).toBe(false)
     })
 
     it("is not judged before nftValidatorGating, nor is any other type", async () => {
@@ -381,10 +391,30 @@ describe("the round's seat transactions", () => {
         nftGatingOn = true
         locked = new Set()
         ;(Mempool as any).lockedHashes = () => new Set(locked)
+        resetSeatAdmissionForTesting()
+        for (const hash of hashes(SEAT_TXS_JUDGED_PER_BATCH + 2)) recordSeatVerdict(hash, { success: true })
     })
     afterEach(() => {
         nftGatingOn = false
         ;(Mempool as any).lockedHashes = realLockedHashes
+        resetSeatAdmissionForTesting()
+    })
+
+    it("take only what this node admitted itself, leaving the rest pooled", async () => {
+        const seats = hashes(3)
+        recordSeatVerdict(seats[1], { success: false, message: "NFT proof invalid" } as any)
+        recordSeatVerdict(seats[2], { success: false, unreachable: true })
+        const kept = (await Mempool.boundSeatTransactions([...seats, "0xfeed"].map(seatTx))).map(t => t.hash)
+        // A refusal withdraws the admission; an unanswered read leaves it.
+        expect(kept).toEqual([seats[0], seats[2]])
+    })
+
+    it("take a seat tx a merge admitted", async () => {
+        resetSeatAdmissionForTesting()
+        resetSeatRejudge()
+        seatVerdicts.set("0xmerged", { success: true, message: "ok" })
+        await Mempool.receive([seatTx("0xmerged")])
+        expect((await Mempool.boundSeatTransactions([seatTx("0xmerged")])).map(t => t.hash)).toEqual(["0xmerged"])
     })
 
     it("are the lowest hashes of the pool, whichever member holds more of them", async () => {
