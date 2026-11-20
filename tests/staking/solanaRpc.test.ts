@@ -19,6 +19,7 @@ import {
     SolanaAbsentError,
     SolanaNotFoundError,
     SolanaUnreachableError,
+    askEverySolana,
     resetSolanaConnectionsForTesting,
     resolveSolanaEndpoints,
     sharedSolanaRead,
@@ -168,5 +169,33 @@ describe("sharedSolanaRead", () => {
         await expect(sharedSolanaRead("down", read)).rejects.toBeInstanceOf(SolanaUnreachableError)
         await expect(sharedSolanaRead("down", read)).rejects.toBeInstanceOf(SolanaUnreachableError)
         expect(read).toHaveBeenCalledTimes(2)
+    })
+})
+
+describe("askEverySolana", () => {
+    beforeEach(() => {
+        jest.useFakeTimers()
+        resetSolanaConnectionsForTesting()
+    })
+
+    it("waits for every endpoint and returns each answer and each failure", async () => {
+        const read = (c: Connection) =>
+            c.rpcEndpoint.startsWith("https://a.")
+                ? Promise.resolve("a")
+                : c.rpcEndpoint.startsWith("https://b.")
+                  ? Promise.reject(new Error("429"))
+                  : never()
+        const pending = askEverySolana("read", read)
+        for (let i = 0; i < 5; i++) await Promise.resolve()
+        expect(solanaReadLoadForTesting().running).toBe(1)
+        jest.advanceTimersByTime(SOLANA_RPC_TIMEOUT_MS)
+        const poll = await pending
+        const endpoints = resolveSolanaEndpoints().length
+        expect(poll.endpoints).toBe(endpoints)
+        expect(poll.answers).toEqual(["a"])
+        expect(poll.failures).toHaveLength(endpoints - 1)
+        expect(poll.failures.some(f => f.includes("b.example: 429"))).toBe(true)
+        expect(poll.failures.filter(f => f.includes("timed out"))).toHaveLength(endpoints - 2)
+        expect(solanaReadLoadForTesting().running).toBe(0)
     })
 })

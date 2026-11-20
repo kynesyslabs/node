@@ -1,6 +1,7 @@
 import type {
     Connection,
     ParsedInstruction,
+    ParsedTransactionMeta,
     ParsedTransactionWithMeta,
     PartiallyDecodedInstruction,
     TokenBalance,
@@ -10,8 +11,10 @@ import type { ValidatorNftProof } from "./types"
 import {
     SolanaAbsentError,
     SolanaUnreachableError,
+    askEverySolana,
     sharedSolanaRead,
     withSolana,
+    type SolanaPoll,
 } from "./solanaRpc"
 
 /**
@@ -48,7 +51,7 @@ const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/
 type InspectedProof =
     | { status: "invalid"; reason: string }
     | { status: "unreachable"; reason: string }
-    | { status: "valid"; slot: number; named: string; blockTime: number | null }
+    | { status: "valid"; slot: number; named: string; blockTime: number }
 
 /** Inspections by signature, mint and owner. A verdict is kept for good. */
 const proofCache = new Map<string, InspectedProof>()
@@ -160,19 +163,34 @@ export function balanceOf(
     return total.toString()
 }
 
-async function fetchParsed(
-    signature: string,
-    what: string,
-): Promise<ParsedTransactionWithMeta> {
-    // An endpoint with pruned history answers null; the next one is asked.
+/** A finalized transaction with everything the rules below read from it. */
+type FullTransaction = ParsedTransactionWithMeta & {
+    meta: ParsedTransactionMeta & { preTokenBalances: TokenBalance[]; postTokenBalances: TokenBalance[] }
+    blockTime: number
+}
+
+async function fetchParsed(signature: string, what: string): Promise<FullTransaction> {
+    // An endpoint with pruned history answers null, or the transaction
+    // without its metadata, balances or block time. That is no answer: the
+    // next endpoint is asked, and if none has it the read is unreachable
+    // rather than a refusal another node, asking a fuller endpoint, would
+    // not give.
     return sharedSolanaRead(`tx:${signature}`, () =>
-        withSolana(what, async (connection: Connection) => {
+        withSolana(what, async (connection: Connection): Promise<FullTransaction> => {
             const tx = await connection.getParsedTransaction(signature, {
                 commitment: "finalized",
                 maxSupportedTransactionVersion: 0,
             })
             if (tx === null) throw new SolanaAbsentError("not found")
-            return tx
+            if (
+                !tx.meta ||
+                !Array.isArray(tx.meta.preTokenBalances) ||
+                !Array.isArray(tx.meta.postTokenBalances) ||
+                typeof tx.blockTime !== "number"
+            ) {
+                throw new SolanaAbsentError("answered without metadata, token balances or block time")
+            }
+            return tx as FullTransaction
         }),
     )
 }
@@ -210,7 +228,6 @@ export async function verifyNftProof(
     if (inspected.named !== (expected.startsWith("0x") ? expected : `0x${expected}`)) {
         return invalid(`proof memo names ${inspected.named}, not ${validatorAddress}`)
     }
-    if (inspected.blockTime === null) return invalid("proof has no block time")
     const txSeconds = Math.floor(txTimestampMs / 1000)
     const maxAge = maxAgeSeconds
     if (inspected.blockTime > txSeconds + PROOF_CLOCK_SKEW_SECONDS) {
@@ -224,13 +241,12 @@ export async function verifyNftProof(
 
 /** The rules on the proof transaction itself, independent of who stakes with it. */
 async function inspectProof(proof: ValidatorNftProof): Promise<InspectedProof> {
-    let tx: ParsedTransactionWithMeta
+    let tx: FullTransaction
     try {
         tx = await fetchParsed(proof.proofTx, "getParsedTransaction(proof)")
     } catch (e) {
         return unreachable(e)
     }
-    if (tx.meta === null || tx.meta === undefined) return invalid("proof has no metadata")
     if (tx.meta.err !== null) return invalid("proof transaction failed on Solana")
     if (!signedBy(tx, proof.owner)) return invalid("proof is not signed by nft.owner")
     if (balanceOf(tx.meta.postTokenBalances, proof.mint, proof.owner) !== "1") {
@@ -246,11 +262,30 @@ async function inspectProof(proof: ValidatorNftProof): Promise<InspectedProof> {
         status: "valid",
         slot: tx.slot,
         named: named.startsWith("0x") ? named : `0x${named}`,
-        blockTime: typeof tx.blockTime === "number" ? tx.blockTime : null,
+        blockTime: tx.blockTime,
     }
 }
 
-/** Whether `owner` holds `mint` now, at finalized commitment. */
+type TokenAccounts = Awaited<ReturnType<Connection["getParsedTokenAccountsByOwner"]>>
+
+function holdsOne(accounts: TokenAccounts): boolean {
+    return accounts.value.some(account => {
+        const info = account.account.data.parsed?.info as
+            | { tokenAmount?: { amount?: string } }
+            | undefined
+        return info?.tokenAmount?.amount === "1"
+    })
+}
+
+/**
+ * Whether `owner` holds `mint` now, at finalized commitment. Every endpoint
+ * is asked: a lagging or pruned one answers an empty account list, and
+ * taking that first answer as "no longer holds" would refuse a seat that
+ * nodes with other endpoints accept. So the verdict is valid or invalid
+ * only when every endpoint that answered agrees, and invalid also needs at
+ * least two answers (one when one endpoint is configured); anything else is
+ * unreachable and judged again later.
+ */
 export async function verifyCurrentOwner(
     mint: string,
     owner: string,
@@ -259,29 +294,41 @@ export async function verifyCurrentOwner(
     const key = `owner:${mint}:${owner}`
     const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
+    let poll: SolanaPoll<TokenAccounts>
     try {
-        const accounts = await sharedSolanaRead(key, () =>
-            withSolana("getParsedTokenAccountsByOwner", connection =>
+        poll = await sharedSolanaRead(key, async () => {
+            const asked = await askEverySolana("getParsedTokenAccountsByOwner", connection =>
                 connection.getParsedTokenAccountsByOwner(
                     new PublicKey(owner),
                     { mint: new PublicKey(mint) },
                     "finalized",
                 ),
-            ),
-        )
-        const held = accounts.value.some(account => {
-            const info = account.account.data.parsed?.info as
-                | { tokenAmount?: { amount?: string } }
-                | undefined
-            return info?.tokenAmount?.amount === "1"
+            )
+            // Nothing answered: a transport failure, not shared past this read.
+            if (asked.answers.length === 0) {
+                throw new SolanaUnreachableError(
+                    `getParsedTokenAccountsByOwner: ${asked.failures.join("; ")}`,
+                )
+            }
+            return asked
         })
-        answered(key)
-        return held
-            ? { status: "valid", slot: accounts.context.slot }
-            : invalid("nft.owner no longer holds the NFT")
     } catch (e) {
         return markUnreachable(key, unreachable(e))
     }
+    const holding = poll.answers.map(holdsOne)
+    if (holding.every(Boolean)) {
+        answered(key)
+        return { status: "valid", slot: Math.max(...poll.answers.map(a => a.context.slot)) }
+    }
+    const needed = Math.min(2, poll.endpoints)
+    if (holding.every(held => !held) && poll.answers.length >= needed) {
+        answered(key)
+        return invalid("nft.owner no longer holds the NFT")
+    }
+    const why = holding.some(Boolean)
+        ? `endpoints disagree on whether nft.owner holds the NFT (${holding.filter(Boolean).length} of ${holding.length} say it does)`
+        : `only ${poll.answers.length} of ${poll.endpoints} endpoints answered that nft.owner no longer holds the NFT; ${needed} must agree`
+    return markUnreachable(key, { status: "unreachable", reason: why })
 }
 
 /**
@@ -298,8 +345,8 @@ export async function verifyChallengeEvidence(
     const key = `evidence:${evidenceTx}:${recorded.proofTx}`
     const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
-    let proof: ParsedTransactionWithMeta
-    let evidence: ParsedTransactionWithMeta
+    let proof: FullTransaction
+    let evidence: FullTransaction
     try {
         proof = await fetchParsed(recorded.proofTx, "getParsedTransaction(proof)")
         evidence = await fetchParsed(evidenceTx, "getParsedTransaction(evidence)")
@@ -307,9 +354,6 @@ export async function verifyChallengeEvidence(
         return markUnreachable(key, unreachable(e))
     }
     answered(key)
-    if (evidence.meta === null || evidence.meta === undefined) {
-        return invalid("evidence has no metadata")
-    }
     if (evidence.meta.err !== null) return invalid("evidence transaction failed on Solana")
     if (evidence.slot <= proof.slot) return invalid("evidence is not later than the proof")
     const before = balanceOf(evidence.meta.preTokenBalances, recorded.mint, recorded.owner)
@@ -333,7 +377,7 @@ export async function verifyProofSupersedes(
     const key = `supersedes:${recordedProofTx}`
     const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
-    let recorded: ParsedTransactionWithMeta
+    let recorded: FullTransaction
     try {
         recorded = await fetchParsed(recordedProofTx, "getParsedTransaction(recorded proof)")
     } catch (e) {

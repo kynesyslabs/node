@@ -19,10 +19,21 @@ const withSolana = jest.fn(async (_what: string, read: (c: unknown) => Promise<u
 })
 class SolanaUnreachableError extends Error {}
 class SolanaAbsentError extends Error {}
+// verifyCurrentOwner asks every endpoint; by default the one `connection`.
+let ownerEndpoints: () => unknown[] = () => [connection]
+const askEverySolana = jest.fn(async (_what: string, read: (c: unknown) => Promise<unknown>) => {
+    const settled = await Promise.allSettled(ownerEndpoints().map(c => read(c)))
+    return {
+        answers: settled.flatMap(r => (r.status === "fulfilled" ? [r.value] : [])),
+        failures: settled.flatMap(r => (r.status === "rejected" ? [String(r.reason)] : [])),
+        endpoints: settled.length,
+    }
+})
 // The shared result cache and the limiter are covered in solanaRpc.test.ts.
 jest.mock("@/features/staking/solanaRpc", () => ({
     __esModule: true,
     withSolana,
+    askEverySolana,
     sharedSolanaRead: (_key: string, read: () => Promise<unknown>) => read(),
     SolanaAbsentError,
     SolanaUnreachableError,
@@ -91,6 +102,7 @@ beforeEach(() => {
     reads.length = 0
     resetSolanaProofCacheForTesting()
     connection.getParsedTransaction.mockResolvedValue(parsedTx())
+    ownerEndpoints = () => [connection]
 })
 
 describe("verifyNftProof", () => {
@@ -106,12 +118,23 @@ describe("verifyNftProof", () => {
         ["no memo", parsedTx({ memos: [] }), "exactly one"],
         ["two memos", parsedTx({ memos: [`demos-validator:${VALIDATOR}`, `demos-validator:${VALIDATOR}`] }), "exactly one"],
         ["memo not an address", parsedTx({ memos: ["demos-validator:hello"] }), "does not name"],
-        ["no block time", parsedTx({ blockTime: null }), "no block time"],
     ])("rejects a proof that is %s", async (_label, tx, reason) => {
         connection.getParsedTransaction.mockResolvedValue(tx)
         const r = await verifyNftProof({ mint: MINT, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)
         expect(r.status).toBe("invalid")
         expect((r as { reason: string }).reason).toContain(reason)
+    })
+
+    it.each([
+        ["without a block time", parsedTx({ blockTime: null })],
+        ["without metadata", { ...parsedTx(), meta: null }],
+        ["without token balances", { ...parsedTx(), meta: { err: null, preTokenBalances: undefined, postTokenBalances: undefined } }],
+    ])("reads a proof answered %s as unreachable, not refused, and caches nothing", async (_label, tx) => {
+        connection.getParsedTransaction.mockResolvedValue(tx)
+        const proof = { mint: MINT, owner: OWNER, proofTx: SIG }
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS)).status).toBe("unreachable")
+        connection.getParsedTransaction.mockResolvedValue(parsedTx())
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS, undefined, { fresh: true })).status).toBe("valid")
     })
 
     it("rejects a proof whose memo names another validator", async () => {
@@ -322,10 +345,75 @@ describe("the outage marks past the cache cap", () => {
     it("lose only the oldest mark, not every mark at once", async () => {
         // A made-up owner fails inside the read, as an outage does.
         for (let i = 0; i <= CACHE_CAP; i++) await verifyCurrentOwner(MINT, `o${i}`)
-        expect(withSolana).toHaveBeenCalledTimes(CACHE_CAP + 1)
+        expect(askEverySolana).toHaveBeenCalledTimes(CACHE_CAP + 1)
         await verifyCurrentOwner(MINT, `o${CACHE_CAP - 1}`)
-        expect(withSolana).toHaveBeenCalledTimes(CACHE_CAP + 1)
+        expect(askEverySolana).toHaveBeenCalledTimes(CACHE_CAP + 1)
         await verifyCurrentOwner(MINT, "o0")
-        expect(withSolana).toHaveBeenCalledTimes(CACHE_CAP + 2)
+        expect(askEverySolana).toHaveBeenCalledTimes(CACHE_CAP + 2)
+    })
+})
+
+describe("verifyCurrentOwner across endpoints", () => {
+    const holds = { context: { slot: 7 }, value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: "1" } } } } } }] }
+    const empty = { context: { slot: 6 }, value: [] }
+    const endpoint = (answer: unknown) => ({
+        getParsedTokenAccountsByOwner: jest.fn(async () => {
+            if (answer instanceof Error) throw answer
+            return answer
+        }),
+    })
+    const use = (...answers: unknown[]) => {
+        const list = answers.map(endpoint)
+        ownerEndpoints = () => list
+    }
+
+    it("is valid when every endpoint that answered sees the NFT held", async () => {
+        use(holds, { ...holds, context: { slot: 9 } }, new Error("429"))
+        expect(await verifyCurrentOwner(MINT, OWNER)).toEqual({ status: "valid", slot: 9 })
+    })
+
+    it("refuses only when at least two endpoints answered and all say it is gone", async () => {
+        use(empty, empty, new Error("429"))
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("invalid")
+    })
+
+    it("is unreachable when a lagging endpoint answers empty while another sees the NFT held", async () => {
+        use(empty, holds)
+        const r = await verifyCurrentOwner(MINT, OWNER)
+        expect(r.status).toBe("unreachable")
+        expect((r as { reason: string }).reason).toContain("disagree")
+    })
+
+    it("is unreachable when only one of several endpoints answered that the NFT is gone", async () => {
+        use(empty, new Error("429"), new Error("timeout"))
+        const r = await verifyCurrentOwner(MINT, OWNER)
+        expect(r.status).toBe("unreachable")
+        expect((r as { reason: string }).reason).toContain("only 1 of 3")
+    })
+
+    it("takes the one answer as the verdict when one endpoint is configured", async () => {
+        use(empty)
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("invalid")
+    })
+
+    it("is unreachable when no endpoint answered", async () => {
+        use(new Error("429"), new Error("timeout"))
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("unreachable")
+    })
+})
+
+describe("evidence and superseding proofs from a partial answer", () => {
+    const recorded = { mint: MINT, owner: OWNER, proofTx: SIG }
+
+    it("reads evidence answered without its balances as unreachable, not refused", async () => {
+        connection.getParsedTransaction.mockImplementation(async (sig: string) =>
+            sig === SIG ? parsedTx({ slot: 100 }) : { ...parsedTx({ slot: 200 }), meta: { err: null } },
+        )
+        expect((await verifyChallengeEvidence(SIG2, recorded)).status).toBe("unreachable")
+    })
+
+    it("reads a recorded proof answered without metadata as unreachable, not refused", async () => {
+        connection.getParsedTransaction.mockResolvedValue({ ...parsedTx({ slot: 100 }), meta: null })
+        expect((await verifyProofSupersedes(101, SIG)).status).toBe("unreachable")
     })
 })

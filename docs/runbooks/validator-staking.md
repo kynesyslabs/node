@@ -34,7 +34,10 @@ endpoints `api.mainnet-beta.solana.com` and `solana-rpc.publicnode.com`. No
 key is required; the node starts without one and only warns at boot when no
 endpoint answers. Every validator reads Solana when it admits a stake or a
 challenge, so a node that cannot reach any endpoint leaves those transactions
-out of its blocks until it can.
+out of its blocks until it can. Whether a wallet still holds its NFT is asked
+of every endpoint: the node refuses a seat for it only when at least two
+endpoints answered (one if only one is configured) and all of them agree, so
+configure two or more.
 - The Solana wallet that holds the Node NFT, with a little SOL for one
 transaction fee. The mint must be on the node's allowlist
 (`src/features/staking/nft-allowlist.json`).

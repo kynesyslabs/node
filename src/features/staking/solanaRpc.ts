@@ -274,6 +274,46 @@ export async function withSolana<T>(
     })
 }
 
+/** What every endpoint said to one read: each answer, and why the others gave none. */
+export interface SolanaPoll<T> {
+    answers: T[]
+    failures: string[]
+    endpoints: number
+}
+
+/**
+ * Run `read` against every endpoint and wait for all of them (each bounded
+ * by the read timeout), for a read whose answer depends on how current the
+ * endpoint is, such as who holds a token now. withSolana's first answer is
+ * enough for a finalized transaction, which reads the same everywhere; it
+ * is not for state a lagging or pruned endpoint reports as empty.
+ */
+export async function askEverySolana<T>(
+    what: string,
+    read: (connection: Connection) => Promise<T>,
+): Promise<SolanaPoll<T>> {
+    return limited(what, async () => {
+        const endpoints = resolveSolanaEndpoints()
+        const settled = await Promise.allSettled(
+            endpoints.map(url =>
+                withTimeout(read(connectionFor(url)), SOLANA_RPC_TIMEOUT_MS, what),
+            ),
+        )
+        const answers: T[] = []
+        const failures: string[] = []
+        settled.forEach((result, i) => {
+            if (result.status === "fulfilled") {
+                answers.push(result.value)
+                return
+            }
+            const message = `${describeEndpoint(endpoints[i])}: ${describeError(result.reason)}`
+            log.warning(`[SOLANA] ${what} failed at ${message}`)
+            failures.push(message)
+        })
+        return { answers, failures, endpoints: endpoints.length }
+    })
+}
+
 /** One `getSlot` per endpoint, all at once, for the boot report. */
 export async function probeSolanaEndpoints(): Promise<{ url: string; ok: boolean }[]> {
     return Promise.all(
