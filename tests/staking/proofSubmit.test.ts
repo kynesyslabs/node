@@ -12,7 +12,26 @@ jest.mock("src/utilities/sharedState", () => ({
 const withSolana = jest.fn<(what: string, read: unknown) => Promise<unknown>>()
 jest.mock("@/features/staking/solanaRpc", () => ({ __esModule: true, withSolana }))
 
+// The anchor's replies, scripted per test.
+const anchor = {
+    validatorInfo: jest.fn<() => Promise<unknown>>(),
+    nodeCall: jest.fn<() => Promise<unknown>>(),
+}
+jest.mock("@kynesyslabs/demosdk/websdk", () => ({
+    __esModule: true,
+    Demos: class {
+        async connect() {}
+        getValidatorInfo() {
+            return anchor.validatorInfo()
+        }
+        nodeCall() {
+            return anchor.nodeCall()
+        }
+    },
+}))
+
 import { resolveAnchorRpc } from "@/features/staking/proofSubmit"
+import { AnchorUnreachableError } from "@/features/staking/validationHandlers"
 
 const peers = (map: Record<string, unknown>) => () => JSON.stringify(map)
 
@@ -45,5 +64,72 @@ describe("sendProofToSolana", () => {
             accepted: false,
             message: "sendRawTransaction(proof): helius: blockhash not found",
         })
+    })
+})
+
+describe("nodeHoldsSeat", () => {
+    const ME = "0x" + "a".repeat(64)
+    const load = async () => {
+        const m = await import("@/features/staking/proofSubmit")
+        m.resetAnchorCacheForTesting()
+        anchor.validatorInfo.mockReset()
+        return m
+    }
+
+    it("caches a row with a status, and an explicit null, as definite answers", async () => {
+        const { nodeHoldsSeat, resetAnchorCacheForTesting } = await load()
+        anchor.validatorInfo.mockResolvedValue({ address: ME, status: "2" })
+        expect(await nodeHoldsSeat(ME)).toBe(true)
+        anchor.validatorInfo.mockResolvedValue(null)
+        expect(await nodeHoldsSeat(ME)).toBe(true)
+        expect(anchor.validatorInfo).toHaveBeenCalledTimes(1)
+
+        resetAnchorCacheForTesting()
+        expect(await nodeHoldsSeat(ME)).toBe(false)
+        anchor.validatorInfo.mockResolvedValue({ address: ME, status: "2" })
+        expect(await nodeHoldsSeat(ME)).toBe(false)
+        expect(anchor.validatorInfo).toHaveBeenCalledTimes(2)
+    })
+
+    it("reads an exited row as no seat", async () => {
+        const { nodeHoldsSeat } = await load()
+        anchor.validatorInfo.mockResolvedValue({ address: ME, status: "4" })
+        expect(await nodeHoldsSeat(ME)).toBe(false)
+    })
+
+    for (const [name, reply] of [
+        ["an error body", { error: "failed to load validators" }],
+        ["a row without a status", { address: ME }],
+        ["undefined", undefined],
+        ["a string", "not found"],
+    ] as const) {
+        it(`reports ${name} as an unreachable anchor and caches nothing`, async () => {
+            const { nodeHoldsSeat } = await load()
+            anchor.validatorInfo.mockResolvedValue(reply)
+            await expect(nodeHoldsSeat(ME)).rejects.toBeInstanceOf(AnchorUnreachableError)
+            anchor.validatorInfo.mockResolvedValue({ address: ME, status: "3" })
+            expect(await nodeHoldsSeat(ME)).toBe(true)
+            expect(anchor.validatorInfo).toHaveBeenCalledTimes(2)
+        })
+    }
+
+    it("reports a failed call as an unreachable anchor and caches nothing", async () => {
+        const { nodeHoldsSeat } = await load()
+        anchor.validatorInfo.mockRejectedValue(new Error("ECONNRESET"))
+        await expect(nodeHoldsSeat(ME)).rejects.toBeInstanceOf(AnchorUnreachableError)
+        anchor.validatorInfo.mockResolvedValue(null)
+        expect(await nodeHoldsSeat(ME)).toBe(false)
+    })
+})
+
+describe("mintHolder", () => {
+    it("answers the holder or null, and reports any other reply as an unreachable anchor", async () => {
+        const { mintHolder } = await import("@/features/staking/proofSubmit")
+        anchor.nodeCall.mockResolvedValueOnce({ address: "0xabc", status: "2" })
+        expect(await mintHolder("M")).toBe("0xabc")
+        anchor.nodeCall.mockResolvedValueOnce(null)
+        expect(await mintHolder("M")).toBeNull()
+        anchor.nodeCall.mockResolvedValueOnce({ error: "failed to load validator" })
+        await expect(mintHolder("M")).rejects.toBeInstanceOf(AnchorUnreachableError)
     })
 })

@@ -57,34 +57,57 @@ export function resetAnchorCacheForTesting(): void {
     seatCache = null
 }
 
-/** Whether this node's address holds an active or unstaking seat at the anchor's head. */
+/**
+ * Whether this node's address holds an active or unstaking seat at the
+ * anchor's head. Only a definite answer is cached: a validator row with a
+ * status, or null for no row. Any other reply (an error body, a row without
+ * a status) says nothing about the seat, so it is reported as an unreachable
+ * anchor instead of being kept for SEAT_CACHE_MS as "no seat".
+ */
 export async function nodeHoldsSeat(ownAddress: string): Promise<boolean> {
     if (seatCache !== null && Date.now() - seatCache.at < SEAT_CACHE_MS) return seatCache.holds
     const demos = await anchorClient()
-    let info: { status?: string } | null
+    let info: unknown
     try {
-        info = (await demos.getValidatorInfo(ownAddress)) as { status?: string } | null
+        info = await demos.getValidatorInfo(ownAddress)
     } catch (e) {
         throw new AnchorUnreachableError(`getValidatorInfo: ${e instanceof Error ? e.message : String(e)}`)
     }
-    const holds = info !== null && typeof info.status === "string" && SEAT_HOLDING_STATUSES.has(info.status)
+    let holds: boolean
+    if (info === null) {
+        holds = false
+    } else if (isRecord(info) && typeof info.status === "string") {
+        holds = SEAT_HOLDING_STATUSES.has(info.status)
+    } else {
+        throw new AnchorUnreachableError(`getValidatorInfo: unexpected reply ${describeReply(info)}`)
+    }
     seatCache = { at: Date.now(), holds }
     return holds
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function describeReply(value: unknown): string {
+    return (JSON.stringify(value) ?? String(value)).slice(0, 200)
 }
 
 /** The address whose seat `mint` currently backs at the anchor's head, or null. */
 export async function mintHolder(mint: string): Promise<string | null> {
     const demos = await anchorClient()
+    let info: unknown
     try {
         // A node call rather than an SDK helper: the SDK releases this node
         // builds with do not carry one.
-        const info = (await demos.nodeCall("getValidatorByMint", { mint })) as {
-            address?: string
-        } | null
-        return info && typeof info.address === "string" ? info.address : null
+        info = await demos.nodeCall("getValidatorByMint", { mint })
     } catch (e) {
         throw new AnchorUnreachableError(`getValidatorByMint: ${e instanceof Error ? e.message : String(e)}`)
     }
+    // Same rule as nodeHoldsSeat: an error body is not "no holder"
+    if (info === null) return null
+    if (isRecord(info) && typeof info.address === "string") return info.address
+    throw new AnchorUnreachableError(`getValidatorByMint: unexpected reply ${describeReply(info)}`)
 }
 
 /**
