@@ -162,7 +162,7 @@ function pickIdentity(
     )
 }
 
-function loadMnemonic(file: string): string {
+function loadMnemonic(file: string, requireCanonical = false): string {
     if (!existsSync(file)) {
         exitWith(`identity file not found: ${file}`)
     }
@@ -170,14 +170,23 @@ function loadMnemonic(file: string): string {
     if (!mnemonic) {
         exitWith(`identity file is empty: ${file}`)
     }
+    // The node refuses a phrase that is not in canonical form, so do not stake
+    // under a key it will never run as. unstake and exit still accept such a
+    // phrase so a stake made under the old key can be unstaked and exited.
+    if (requireCanonical && mnemonic.normalize("NFKD") !== mnemonic) {
+        exitWith(
+            "Invalid mnemonic: the phrase is not in canonical form (full-width letters, ideographic or no-break spaces). " +
+                "Retype it in plain lowercase ASCII letters with ASCII spaces between the words",
+        )
+    }
     return mnemonic
 }
 
-async function connect(): Promise<Demos> {
+async function connect(requireCanonical = false): Promise<Demos> {
     const { rpc, identity } = globalThis.validatorCtx
     const demos = new Demos()
     await demos.connect(rpc)
-    await demos.connectWallet(loadMnemonic(identity))
+    await demos.connectWallet(loadMnemonic(identity, requireCanonical))
 
     console.log("------------------------------------------")
     console.log(`Identity:        ${identity}`)
@@ -395,7 +404,7 @@ async function cmdNftProof(): Promise<void> {
     if (!mint) exitWith("usage: validator nft-proof --mint <MINT> --keypair <key file> [--account <n>] [--demos-address <0x...>]")
     if (!keypairFile) exitWith(`--keypair <key file> is required (${ACCEPTED_SECRET_FORMATS})`)
     const keypair = loadSolanaKeypair(keypairFile)
-    const demos = await connect()
+    const demos = await connect(true)
     const demosAddress = flags["demos-address"] ?? demos.getAddress()
     if (!sameAddress(demosAddress, demos.getAddress())) {
         console.log(
@@ -495,7 +504,7 @@ async function cmdStakeDem(amountDem: string): Promise<void> {
     if (BigInt(amountOs) <= 0n) {
         exitWith(`stake amount must be greater than 0 (got ${amountDem} DEM)`)
     }
-    const demos = await connect()
+    const demos = await connect(true)
     const refused = amountRefusal("stake", amountDem, await nftGatingActiveOn(demos))
     if (refused) exitWith(refused)
     const tx = await DemosTransactions.stake(amountOs, globalThis.validatorCtx.rpc, demos)
@@ -514,7 +523,7 @@ async function cmdStake(): Promise<void> {
         )
     }
 
-    const demos = await connect()
+    const demos = await connect(true)
     const address = demos.getAddress()
 
     // A new seat needs the NFT proof; a top-up carries none. The proof is
