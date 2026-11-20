@@ -43,7 +43,7 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
+    getSharedState: { shardSize: 10, networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 import Chain from "@/libs/blockchain/chain"
@@ -75,11 +75,17 @@ interface FakeRow {
     unstake_available_at: number | null
 }
 
-function createMockRepo(seed: FakeRow | null = null) {
+/** One row under test, beside `othersActive` active validators that keep the committee floor. */
+function createMockRepo(seed: FakeRow | null = null, othersActive = 10) {
     const store: FakeRow | null = seed ? { ...seed } : null
     const state = { row: store }
+    const others = Array.from({ length: othersActive }, (_, i) => ({ address: `other-${i}`, status: VALIDATOR_STATUS_ACTIVE }))
     return {
         state,
+        find: jest.fn(async ({ where }: { where: { status: string } }) => [
+            ...(state.row && state.row.status === where.status ? [state.row] : []),
+            ...others.filter(o => o.status === where.status),
+        ]),
         findOneBy: jest.fn(async ({ address }: { address: string }) =>
             state.row && state.row.address === address ? state.row : null,
         ),
@@ -239,6 +245,20 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(repo.state.row?.unstake_available_at).toBe(
                 100 + NFT_UNSTAKE_LOCK_BLOCKS,
             )
+        })
+
+        it("refuses an unstake that takes the active set below the committee floor", async () => {
+            // 7 active of a committee of 10 is the floor: one leaving would halt the chain
+            const repo = createMockRepo(validatorRow(), 6)
+            const r = await GCRValidatorStakeRoutines.apply(
+                stakeEdit({ operation: "unstake", amount: "0" }) as any,
+                repo as any,
+                100,
+            )
+            expect(r.success).toBe(false)
+            expect(r.message).toBe("Unstake would leave 6 active validators, below the committee floor of 7")
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+            expect(repo.save).not.toHaveBeenCalled()
         })
 
         it("fails when the validator row does not exist", async () => {

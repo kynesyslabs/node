@@ -55,13 +55,14 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     default: {
         getGCRValidatorStatus: jest.fn(),
         getGCRValidatorByMint: jest.fn(async () => null),
+        getGCRValidatorsAtBlock: jest.fn(async () => Array.from({ length: 10 }, (_, i) => ({ address: `v${i}` }))),
     },
 }))
 
 // sharedState pulls in the whole framework — substitute a minimal stand-in.
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
+    getSharedState: { shardSize: 10, networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 // Pin the flat fee breakdown (prod: networkFee + rpcFee + additionalFee =
@@ -124,6 +125,11 @@ function createRepo() {
         findBy: jest.fn(async ({ nft_mint }: { nft_mint: string }) =>
             [...rows.values()].filter(row => row.nft_mint === nft_mint),
         ),
+        // The rest of the active set, which keeps the committee floor when this validator leaves
+        find: jest.fn(async ({ where }: { where: { status: string } }) => [
+            ...[...rows.values()].filter(row => row.status === where.status),
+            ...Array.from({ length: 10 }, (_, i) => ({ address: `v${i}`, status: "2" })).filter(row => row.status === where.status),
+        ]),
         save: jest.fn(async (row: Row) => {
             rows.set(row.address, { ...row })
             return rows.get(row.address)!

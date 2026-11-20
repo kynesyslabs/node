@@ -19,7 +19,8 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: { minValidatorStake: "1000" }, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
+    // A committee of 4 has a floor of 3 active validators
+    getSharedState: { shardSize: 4, networkParameters: { minValidatorStake: "1000" }, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 const allowlisted = new Set<string>()
@@ -63,6 +64,9 @@ function repo(seed: Row[] = []) {
         findOneBy: jest.fn(async ({ address }: { address: string }) => rows.get(address) ?? null),
         findBy: jest.fn(async ({ nft_mint }: { nft_mint: string }) =>
             [...rows.values()].filter(r => r.nft_mint === nft_mint),
+        ),
+        find: jest.fn(async ({ where }: { where: { status: string } }) =>
+            [...rows.values()].filter(r => r.status === where.status),
         ),
         save: jest.fn(async (row: Row) => {
             rows.set(row.address, { ...row })
@@ -237,6 +241,78 @@ describe("evicting a seat", () => {
         const out = await Routines.apply(evict(A) as any, r as any, 100)
         expect(out.success).toBe(false)
         expect(out.message).toContain("rests on")
+        expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+    })
+})
+
+describe("the active-set floor at apply", () => {
+    const C = "c".repeat(64)
+    const D = "d".repeat(64)
+    const E = "e".repeat(64)
+    const evict = (account: string) => ({
+        type: "validatorStake",
+        isRollback: false,
+        account,
+        operation: "evict",
+        amount: "0",
+        evidenceTx: SIG2,
+        proofTx: SIG,
+        txhash: "0xtx",
+    })
+    const unstake = (account: string) => stake(account, { operation: "unstake", nft: undefined })
+    /** n active seats, A first, each on its own proof so none shares a mint check. */
+    const seats = (n: number) => repo([A, B, C, D, E].slice(0, n).map(a => row(a)))
+
+    it("refuses an eviction that leaves fewer active validators than the floor", async () => {
+        const r = seats(3)
+        const out = await Routines.apply(evict(A) as any, r as any, 100)
+        expect(out.success).toBe(false)
+        expect(out.message).toBe("Eviction would leave 2 active validators, below the committee floor of 3")
+        expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+        expect(r.save).not.toHaveBeenCalled()
+    })
+
+    it("evicts an active seat when the floor still holds after it", async () => {
+        const r = seats(4)
+        expect((await Routines.apply(evict(A) as any, r as any, 100)).success).toBe(true)
+        expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_EXITED)
+    })
+
+    it("evicts an unstaking seat at the floor, since it is already out of the active set", async () => {
+        const r = repo([row(A, { status: VALIDATOR_STATUS_UNSTAKING, unstake_available_at: 500 }), row(B), row(C), row(D)])
+        expect((await Routines.apply(evict(A) as any, r as any, 100)).success).toBe(true)
+        expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_EXITED)
+    })
+
+    it("counts the seats staged earlier in the block", async () => {
+        const r = seats(4)
+        const staged = new Map([[B, { ...row(B), status: VALIDATOR_STATUS_UNSTAKING }]])
+        const out = await Routines.apply(evict(A) as any, r as any, 100, { stagedRows: staged as any })
+        expect(out.message).toBe("Eviction would leave 2 active validators, below the committee floor of 3")
+    })
+
+    it("refuses an unstake below the floor with stakeApplyChecks unscheduled", async () => {
+        const r = seats(3)
+        const out = await Routines.apply(unstake(A) as any, r as any, 100)
+        expect(out.success).toBe(false)
+        expect(out.message).toBe("Unstake would leave 2 active validators, below the committee floor of 3")
+        expect(r.rows.get(A)?.unstake_requested_at).toBeNull()
+        const above = seats(4)
+        expect((await Routines.apply(unstake(A) as any, above as any, 100)).success).toBe(true)
+        expect(above.rows.get(A)?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
+    })
+
+    it("lets an exit through at the floor, since the seat left the active set at unstake", async () => {
+        const r = repo([row(A, { status: VALIDATOR_STATUS_UNSTAKING, unstake_requested_at: 1, unstake_available_at: 50 }), row(B), row(C)])
+        const out = await Routines.apply(stake(A, { operation: "exit", nft: undefined }) as any, r as any, 100)
+        expect(out.success).toBe(true)
+        expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_EXITED)
+    })
+
+    it("lets a mint move to a new validator at the floor: one seat closes as one opens", async () => {
+        const r = repo([row(B), row(C, { nft_mint: MINT2 }), row(D, { nft_mint: "1".repeat(44) })])
+        expect((await Routines.apply(stake(A) as any, r as any, 100)).success).toBe(true)
+        expect(r.rows.get(B)?.status).toBe(VALIDATOR_STATUS_EXITED)
         expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_ACTIVE)
     })
 })

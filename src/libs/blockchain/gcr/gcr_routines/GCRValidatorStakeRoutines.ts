@@ -461,6 +461,28 @@ async function countActive(
     return active.size
 }
 
+/**
+ * Why closing `closing` active seats while opening `opening` would leave the
+ * active set below the committee floor, or null. A change that does not
+ * shrink the set is never refused, so a network already below the floor
+ * can still rebind a mint or take new seats.
+ */
+async function activeFloorRefusal(
+    repo: Repository<Validators>,
+    stagedRows: Map<string, Validators | null> | undefined,
+    closing: number,
+    opening: number,
+    what: string,
+): Promise<string | null> {
+    if (closing <= opening) return null
+    const floor = quorumThreshold(getSharedState.shardSize)
+    const remaining = (await countActive(repo, stagedRows)) - closing + opening
+    if (remaining < floor) {
+        return `${what} would leave ${remaining} active validators, below the committee floor of ${floor}`
+    }
+    return null
+}
+
 async function guardedUnstake(
     repo: Repository<Validators>,
     existing: Validators | null,
@@ -483,14 +505,8 @@ async function guardedUnstake(
     }
     // An unstaking validator leaves the pool at once, and below the floor
     // no committee forms: the chain would halt with no way to stake back in.
-    const floor = quorumThreshold(getSharedState.shardSize)
-    const remaining = (await countActive(repo, stagedRows)) - 1
-    if (remaining < floor) {
-        return {
-            success: false,
-            message: `Unstake would leave ${remaining} active validators, below the committee floor of ${floor}`,
-        }
-    }
+    const floor = await activeFloorRefusal(repo, stagedRows, 1, 0, "Unstake")
+    if (floor) return { success: false, message: floor }
     return applyUnstake(repo, existing, currentBlock, lockBlocks)
 }
 
@@ -562,32 +578,27 @@ async function applyNftGated(
     const stakeChecks = isForkActive("stakeApplyChecks", currentBlock)
     switch (edit.operation as string) {
         case "stake":
-            return applyNftStake(repo, existing, account, edit, currentBlock)
+            return applyNftStake(repo, existing, account, edit, currentBlock, context)
         case "unstake":
-            if (stakeChecks) {
-                return guardedUnstake(
-                    repo,
-                    existing,
-                    currentBlock,
-                    context.stagedRows,
-                    NFT_UNSTAKE_LOCK_BLOCKS,
-                )
-            }
-            // An eviction earlier in the block may have closed the seat
-            // admission saw; unstaking must not reopen it.
-            if (existing && existing.status !== VALIDATOR_STATUS_ACTIVE) {
-                return {
-                    success: false,
-                    message: `Cannot unstake — not active (status=${existing.status})`,
-                }
-            }
-            return applyUnstake(repo, existing, currentBlock, NFT_UNSTAKE_LOCK_BLOCKS)
+            // Held to the floor with or without stakeApplyChecks: a seat
+            // costs nothing to take, so nothing else keeps the set from
+            // emptying. guardedUnstake also refuses a seat an eviction
+            // earlier in the block closed.
+            return guardedUnstake(
+                repo,
+                existing,
+                currentBlock,
+                context.stagedRows,
+                NFT_UNSTAKE_LOCK_BLOCKS,
+            )
+        // An exit only closes a seat that already left the active set
+        // when it unstaked, so it never moves the floor.
         case "exit":
             return stakeChecks
                 ? refundingExit(repo, existing, currentBlock, context.account)
                 : applyExit(repo, existing, currentBlock, false)
         case "evict":
-            return applyEvict(repo, existing, edit)
+            return applyEvict(repo, existing, edit, context)
         default:
             return { success: false, message: `Unknown op: ${edit.operation}` }
     }
@@ -637,6 +648,7 @@ async function takeSeatNft(
     account: string,
     edit: GCREditValidatorStake,
     currentBlock: number,
+    context: StakeApplyContext,
 ): Promise<GCRResult | null> {
     const nft = (edit as NftStakeEdit).nft
     if (!nft || !nft.mint || !nft.owner || !nft.proofTx) {
@@ -658,6 +670,15 @@ async function takeSeatNft(
         const bonded = bondedSeatRefusal(other)
         if (bonded) return { success: false, message: bonded }
     }
+    const closing = holders.filter(other => other.status === VALIDATOR_STATUS_ACTIVE).length
+    const floor = await activeFloorRefusal(
+        repo,
+        context.stagedRows,
+        closing,
+        1,
+        `Rebinding NFT ${nft.mint}`,
+    )
+    if (floor) return { success: false, message: floor }
     for (const other of holders) {
         closeSeat(other)
         await repo.save(other)
@@ -680,6 +701,7 @@ async function applyNftStake(
     account: string,
     edit: GCREditValidatorStake,
     currentBlock: number,
+    context: StakeApplyContext,
 ): Promise<GCRResult> {
     const amount = parseAmount(edit.amount)
     if (amount === null) return { success: false, message: "Invalid stake amount" }
@@ -714,7 +736,7 @@ async function applyNftStake(
             message: "connectionUrl required to enter the validator set",
         }
     }
-    const refused = await takeSeatNft(repo, account, edit, currentBlock)
+    const refused = await takeSeatNft(repo, account, edit, currentBlock, context)
     if (refused) return refused
 
     const row =
@@ -742,12 +764,15 @@ async function applyNftStake(
 
 /**
  * A challenge proved the NFT left its wallet: the seat is closed at once,
- * unless it was retaken with another proof since the challenge was judged.
+ * unless it was retaken with another proof since the challenge was judged,
+ * or closing it would leave too few validators for a committee. The seat
+ * then stays until another validator enters and the challenge is sent again.
  */
 async function applyEvict(
     repo: Repository<Validators>,
     existing: Validators | null,
     edit: GCREditValidatorStake,
+    context: StakeApplyContext,
 ): Promise<GCRResult> {
     if (!existing) {
         return { success: false, message: "Validator not found" }
@@ -767,6 +792,14 @@ async function applyEvict(
     }
     const bonded = bondedSeatRefusal(existing)
     if (bonded) return { success: false, message: bonded }
+    const floor = await activeFloorRefusal(
+        repo,
+        context.stagedRows,
+        existing.status === VALIDATOR_STATUS_ACTIVE ? 1 : 0,
+        0,
+        "Eviction",
+    )
+    if (floor) return { success: false, message: floor }
     closeSeat(existing)
     await repo.save(existing)
     log.info("VALIDATORS", `[evict] ${existing.address} evicted`)
