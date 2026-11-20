@@ -13,7 +13,7 @@ import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-import HandleGCR from "../blockchain/gcr/handleGCR"
+import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
 import { tlsnAdmissionCopy } from "../blockchain/gcr/tlsnTransitions"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
@@ -472,8 +472,9 @@ export async function handleExecuteTransaction(
     if (result.success) {
         // Under tlsnVerified a TLSNotary tx is simulated with the edit the
         // block will derive for it, so a store the block would refuse or
-        // fail is refused here, before it pays.
-        const tlsn = tlsnAdmissionCopy(queriedTx)
+        // fail is refused here, before it pays. The copy is the block's:
+        // the derived fee edits first, the TLSNotary edit last.
+        const tlsn = tlsnAdmissionCopy(queriedTx, withDerivedFeeEdits(queriedTx))
         if (tlsn.ok === false) {
             log.error(`[handleExecuteTransaction] TLSNotary tx refused: ${tlsn.reason}`)
             result.success = false

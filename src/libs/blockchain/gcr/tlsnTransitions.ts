@@ -285,9 +285,14 @@ export function withoutNodeDerivedTlsnEdits(tx: Transaction): Transaction {
  * with its derived edit, or why it is refused. The simulation then judges
  * the token row as the block would. A verifier that cannot run here refuses
  * the transaction at this node only, which is safe: nothing is admitted.
+ * The edit is derived from `tx` as received and appended to `onto`, the
+ * copy the block applies before it (its derived fee edits).
  */
-export function tlsnAdmissionCopy(tx: Transaction): { ok: true; tx: Transaction } | { ok: false; reason: string } {
-    if (!tlsnVerifiedAtTip() || !nativeOf(tx)) return { ok: true, tx }
+export function tlsnAdmissionCopy(
+    tx: Transaction,
+    onto: Transaction = tx,
+): { ok: true; tx: Transaction } | { ok: false; reason: string } {
+    if (!tlsnVerifiedAtTip() || !nativeOf(tx)) return { ok: true, tx: onto }
     const refusal: { reason?: string } = {}
     let prepared: Map<string, GCREditTlsnDerived>
     try {
@@ -302,5 +307,5 @@ export function tlsnAdmissionCopy(tx: Transaction): { ok: true; tx: Transaction 
         return { ok: false, reason: `the TLSNotary verifier cannot run on this node: ${error instanceof Error ? error.message : String(error)}` }
     }
     if (refusal.reason !== undefined) return { ok: false, reason: refusal.reason }
-    return { ok: true, tx: withTlsnEdit(tx, prepared.get(tx.hash)) }
+    return { ok: true, tx: withTlsnEdit(onto, prepared.get(tx.hash)) }
 }

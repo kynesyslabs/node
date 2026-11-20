@@ -36,6 +36,7 @@ jest.mock("@/libs/blockchain/validation/validityData", () => ({ verifyValidityDa
 jest.mock("../blockchain/gcr/handleGCR", () => ({
     __esModule: true,
     default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
+    withDerivedFeeEdits: (tx: unknown) => tx,
 }))
 jest.mock("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal: () => null }))
 jest.mock("src/libs/gossip/GossipManager", () => ({

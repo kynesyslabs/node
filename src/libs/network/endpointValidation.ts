@@ -91,6 +91,40 @@ function publicAdmissionReason(reason: string): string | undefined {
     return ADMISSION_REASON_CATEGORIES.find(([shape]) => shape.test(reason))?.[1]
 }
 
+async function checkSenderFeeBalance(
+    gcrEdits: GCREdit[],
+    sender: string,
+): Promise<void> {
+    const totalFee = gcrEdits
+        .filter(
+            (edit: GCREdit) =>
+                edit.type === "balance" &&
+                edit.operation === "remove" &&
+                (edit.account === sender ||
+                    (typeof edit.account !== "string" &&
+                        (edit.account as any)?.toString() === sender)),
+        )
+        .reduce(
+            (sum: bigint, edit: GCREdit) =>
+                sum + BigInt((edit as any).amount),
+            0n,
+        )
+
+    if (totalFee > 0n) {
+        const checkFeeStart = Date.now()
+        const senderBalance = await GCR.getAccountBalance(sender)
+        const checkFeeEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] Check fee in ${checkFeeEnd - checkFeeStart}ms`,
+        )
+        if (senderBalance < totalFee) {
+            throw new Error(
+                `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
+            )
+        }
+    }
+}
+
 export async function handleValidateTransaction(
     tx: Transaction,
     sender: string,
@@ -220,34 +254,7 @@ export async function handleValidateTransaction(
             )
         }
 
-        const totalFee = gcrEdits
-            .filter(
-                (edit: GCREdit) =>
-                    edit.type === "balance" &&
-                    edit.operation === "remove" &&
-                    (edit.account === sender ||
-                        (typeof edit.account !== "string" &&
-                            (edit.account as any)?.toString() === sender)),
-            )
-            .reduce(
-                (sum: bigint, edit: GCREdit) =>
-                    sum + BigInt((edit as any).amount),
-                0n,
-            )
-
-        if (totalFee > 0n) {
-            const checkFeeStart = Date.now()
-            const senderBalance = await GCR.getAccountBalance(sender)
-            const checkFeeEnd = Date.now()
-            log.only(
-                `[handleValidateTransaction] Check fee in ${checkFeeEnd - checkFeeStart}ms`,
-            )
-            if (senderBalance < totalFee) {
-                throw new Error(
-                    `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
-                )
-            }
-        }
+        await checkSenderFeeBalance(gcrEdits, sender)
     } catch (e) {
         log.error("SERVER", "[TX VALIDATION ERROR] 💀 : " + e)
         validationData = {
