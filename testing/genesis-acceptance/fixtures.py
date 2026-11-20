@@ -11,6 +11,12 @@ Writes into --out:
   forkpast.json     launch with commitLock moved to height 1 (inside tip + 50)
   forkfar.json      launch with atomicWork scheduled at 1000000 (beyond the window)
   unknownfork.json  launch with a fork this build cannot know, scheduled far ahead
+
+nftValidatorGating is at 0 like on mainnet, but the image genesis validators
+carry no NFT. Block 0 seats them from the carry-over validators.jsonl, where
+a node reads a row without NFT fields as a seat already judged, so the
+scenarios boot without a Solana read; launch-go-no-go is what refuses such
+a set for mainnet.
 """
 import argparse
 import copy
@@ -19,11 +25,11 @@ import json
 import os
 
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical", "tokenStakingGate", "gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "storageFeeSettlement", "referenceBlockRoom10", "l2psSettlement", "tlsnVerified"]
+MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical", "tokenStakingGate", "tokenStaking", "nftValidatorGating", "gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "storageFeeSettlement", "referenceBlockRoom10", "l2psSettlement", "tlsnVerified"]
 # Same list as KNOWN_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal.
 # A node on a mainnet chain id refuses a genesis that leaves one undeclared.
 # Same list as LAUNCH_DORMANT_FORKS in scripts/launch-go-no-go.ts
-LAUNCH_DORMANT_FORKS = ["atomicWork", "networkGovernance", "tokenStaking", "l2psGate", "tlsnDisabled", "nftValidatorGating"]
+LAUNCH_DORMANT_FORKS = ["atomicWork", "networkGovernance", "l2psGate", "tlsnDisabled"]
 KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "networkGovernance", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "tokenStakingGate", "tokenStaking", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical", "l2psSettlement", "l2psGate", "tlsnDisabled", "storageFeeSettlement", "referenceBlockRoom10", "nftValidatorGating", "tlsnVerified"]
 # The image genesis carries no tlsnVerified payload and the node refuses the fork
 # scheduled without one, so the launch genesis takes the devnet's test keys

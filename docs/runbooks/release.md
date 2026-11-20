@@ -287,6 +287,18 @@ this restart is a fallback there.
 
 ## Upgrade notes
 
+- From the release that ships validator NFT gating (node#1187): the mainnet
+  set schedules `tokenStaking` and `nftValidatorGating` at height 0 (31 forks
+  at 0), so every seat is backed by an allowlisted Solana Node NFT from
+  block 0 and no DEM is ever bonded. Each genesis validator carries
+  `nft_mint`, `nft_owner` and `nft_proof_tx` and a `staked_amount` of `"0"`
+  ([genesis.md](../mainnet/genesis.md)); every node verifies the proofs on
+  Solana before it seats block 0, so a validator needs a Solana endpoint that
+  answers at first boot (`VALIDATOR_SOLANA_RPCS`). `launch-go-no-go` is NO-GO
+  when either fork is not at 0, when a block 0 seat lacks a valid NFT field
+  set or its proof does not check out, and when the build does not pin its
+  allowlist digest. `atomicWork`, `networkGovernance`, `l2psGate` and
+  `tlsnDisabled` stay `null`.
 - From the first release after `v1.0.0-rc.5`: a node started with `--proxy`
   (`docker-compose.proxy.yml`) refuses to boot while `METRICS_BASIC_AUTH_HASH`
   is empty or still the shipped placeholder. Before upgrading, set the hash, or set
@@ -516,8 +528,8 @@ this restart is a fallback there.
     `l2psSettlement` and `tlsnVerified` at height 0 and leaves `l2psGate`
     and `tlsnDisabled` unscheduled (`null`): they are kill switches a running
     chain can schedule later. The set still has 29 forks at 0. `atomicWork`,
-    `networkGovernance`, `tokenStaking`, `nftValidatorGating`, `l2psGate` and
-    `tlsnDisabled` stay `null`, and `launch-go-no-go` is NO-GO when any of them is scheduled.
+    `networkGovernance`, `tokenStaking`, `l2psGate` and `tlsnDisabled` stay
+    `null`, and `launch-go-no-go` is NO-GO when any of them is scheduled.
   - `tlsnVerified` carries values every validator must agree on: the
     trusted notary keys (1 to 8 compressed secp256k1 keys), the sha256 of
     the verifier wasm, and the presentation size, freshness and clock-skew

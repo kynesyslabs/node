@@ -336,9 +336,11 @@ export type TokenStakingGateConfig = BaseForkConfig
  * nothing.
  *
  * Activation at H binds from the block applied on tip H, which is block
- * H + 1. Dormant by default (`activationHeight: null`) and at launch: a
- * mainnet genesis leaves it null, and a later height-pinned activation turns
- * token staking on. No payload beyond the base.
+ * H + 1. Dormant by default (`activationHeight: null`). A mainnet genesis
+ * sets 0 together with `nftValidatorGating`, so seats open from block 1 and
+ * only through an NFT: under that fork a stake of any amount but 0 is
+ * refused at intake and at apply, and no DEM is ever bonded. No payload
+ * beyond the base.
  */
 export type TokenStakingConfig = BaseForkConfig
 
@@ -355,25 +357,27 @@ export type TokenStakingConfig = BaseForkConfig
  *    other seat the same mint backs;
  *  - a `validatorChallenge` closes a seat whose NFT a later finalized Solana
  *    transfer moved out of the recorded wallet;
- *  - the four seat transactions pay no gas;
+ *  - the four seat transactions pay no gas; pool admission holds a sender
+ *    to a few stakes and challenges per minute and in the pool, and keeps a
+ *    refused proof or challenge refused for a while without reading Solana
+ *    again (src/features/staking/seatAdmission.ts);
+ *  - no eviction (challenge, mint rebound to another seat) and no unstake
+ *    takes the active set below the committee floor, 2/3 + 1 of shardSize;
  *  - an unstake lock is `NFT_UNSTAKE_LOCK_BLOCKS` blocks;
  *  - a governance vote and the snapshot weight count one per seat.
  *
  * Seats taken before the activation keep their rows and stay seated without
- * an NFT. Scheduled at 0, block 0 seats only genesis validators whose NFT
- * proofs check out on Solana (or that are `nft_exempt`, test networks only).
- * Seat transactions stay subject to `tokenStakingGate`, so on a chain with
- * the gate no new seat is taken before `tokenStaking` opens.
+ * an NFT, and the short unstake lock applies to them too. Scheduled at 0,
+ * block 0 seats only genesis validators whose NFT proofs check out on Solana
+ * (or that are `nft_exempt`, test networks only). Seat transactions stay
+ * subject to `tokenStakingGate`, so on a chain with the gate no new seat is
+ * taken before `tokenStaking` opens.
  *
  * Activation at H binds from the block applied on tip H, which is block
- * H + 1. Dormant by default (`activationHeight: null`) and at launch. No
- * payload beyond the base.
- *
- * Before it is scheduled: seat transactions pay no gas, so pool admission
- * needs its own rate limit and a cache of refused proofs, or any account can
- * make every node read Solana for free; eviction (challenge, mint moved to
- * another seat) needs a floor on the active set size; the short unstake lock
- * also applies to bonded seats that have not moved to an NFT.
+ * H + 1. Dormant by default (`activationHeight: null`). Mainnet launches
+ * with it at 0, with `tokenStaking` at 0 beside it, and launch-go-no-go is
+ * NO-GO on a mainnet genesis that does not, or whose validators lack a
+ * valid NFT proof. No payload beyond the base.
  */
 export type NftValidatorGatingConfig = BaseForkConfig
 
@@ -1054,8 +1058,9 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "are refused until tokenStaking opens token staking.",
     },
     tokenStaking: {
-        // Dormant by default and at launch: token staking opens by a later
-        // height-pinned activation. Changes nothing without tokenStakingGate.
+        // Dormant by default: a missing genesis entry hydrates from here. A
+        // mainnet genesis sets 0 beside nftValidatorGating, which takes every
+        // seat by NFT. Changes nothing without tokenStakingGate.
         activationHeight: null,
         description:
             "Token staking opens by network upgrade: validatorStake and validatorUnstake " +
@@ -1131,9 +1136,9 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "(deep window 50) instead of 1 (deep window 5).",
     },
     nftValidatorGating: {
-        // Dormant by default and at launch: it changes who may take a seat
-        // and what a seat costs, and a missing genesis entry hydrates from
-        // here, so a running chain keeps its staking rules.
+        // Dormant by default: it changes who may take a seat and what a seat
+        // costs, and a missing genesis entry hydrates from here, so a running
+        // chain keeps its staking rules. A mainnet genesis sets 0.
         activationHeight: null,
         description:
             "A validator seat is backed by an allowlisted Solana node NFT: entering takes " +

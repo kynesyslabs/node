@@ -10,6 +10,9 @@
  * this build knows, its chain id is no other network's and not a reserved
  * one (REFUSED_MAINNET_CHAIN_IDS), its shardSize is
  * the launch one, and no launch validator is a pinned committee identity.
+ * Validators are seated by NFT from block 0 (nftValidatorGating): every
+ * genesis validator names an allowlisted mint, its wallet and a proof that
+ * checks out on Solana, and the build pins its allowlist digest.
  * With a genesis file, every validator must also report that file's genesis
  * data hash and fork schedule digest, and the mainnet forks as active, and
  * the agreed block hash must be the block 0 that file builds. A validator
@@ -50,7 +53,8 @@ import { treasuryAddressProblem } from "src/forks/treasuryAddress"
 import { notaryKeyProblems, tlsnVerifiedProblems } from "src/forks/tlsnVerifiedPayload"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
-import { verifySeededNfts, type SeededValidatorNft } from "src/features/staking/seedNft"
+import { seededNftReasons, verifySeededNfts, type SeededValidatorNft } from "src/features/staking/seedNft"
+import { NFT_ALLOWLIST_PATH, NFT_ALLOWLIST_SHA256, parseAllowlist } from "src/features/staking/nftAllowlist"
 import {
     type BlockZeroValidators,
     type ValidatorRow,
@@ -196,6 +200,8 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "telegramSenderBinding",
     "xmRemoveCanonical",
     "tokenStakingGate",
+    "tokenStaking",
+    "nftValidatorGating",
     "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
@@ -211,16 +217,13 @@ export const MAINNET_FORKS: readonly ForkName[] = [
  * that they are switched on later, at a height agreed on the running chain.
  * l2psGate and tlsnDisabled are the L2PS and TLSNotary kill switches: both
  * features run from block 0 and a switch is scheduled only if its feature
- * has to be stopped. nftValidatorGating seats validators by Solana NFT
- * instead of bonded DEM; it is scheduled with or before tokenStaking.
+ * has to be stopped.
  */
 export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
     "atomicWork",
     "networkGovernance",
-    "tokenStaking",
     "l2psGate",
     "tlsnDisabled",
-    "nftValidatorGating",
 ]
 
 /**
@@ -908,7 +911,9 @@ export function tlsnNotaryReasons(
 /**
  * NO-GO reasons for a genesis that is not a mainnet launch genesis: its
  * fork block (mainnetForkReasons), a chain id another Demos network uses,
- * or a committee size other than the one the launch was drilled with.
+ * a committee size other than the one the launch was drilled with, or,
+ * with validators seated by NFT, a seat without a valid NFT field set or a
+ * build without its allowlist pin.
  */
 export function mainnetGenesisReasons(
     genesis: { forks?: unknown; properties?: unknown; validators?: unknown } | null,
@@ -921,6 +926,9 @@ export function mainnetGenesisReasons(
             `${exempt.length} genesis validators are nft_exempt (${exempt.join(", ")}); ` +
                 "every mainnet seat needs its NFT",
         )
+    }
+    if (genesisSeatsNfts(genesis)) {
+        reasons.push(...nftAllowlistPinReasons(), ...genesisNftFieldReasons(genesis.validators))
     }
     const properties = (genesis.properties ?? {}) as Record<string, unknown>
     const chainId = properties.id
@@ -959,14 +967,87 @@ function genesisSeatsNfts(genesis: { forks?: unknown } | null): boolean {
 }
 
 /**
- * What a node's NFT checks, Solana included, would refuse in the genesis
- * validators at first boot; nothing when the genesis does not seat them
- * under `nftValidatorGating`, which is then the only network use.
+ * NO-GO reasons for the allowlist this build ships: every node judges every
+ * seat against it at apply, and a node checks the file against the pinned
+ * digest only when a pin is set, so a release without one would let each
+ * node seat by whatever file it holds.
  */
-async function genesisNftProblems(genesis: { forks?: unknown; validators?: unknown }): Promise<string[]> {
+export function nftAllowlistPinReasons(
+    file: string = NFT_ALLOWLIST_PATH,
+    pin: string = NFT_ALLOWLIST_SHA256,
+): string[] {
+    if (!/^[0-9a-f]{64}$/.test(pin)) {
+        return [
+            `this build pins no NFT allowlist digest (NFT_ALLOWLIST_SHA256 is ${JSON.stringify(pin)}); ` +
+                "nodes would seat validators by unpinned allowlist files",
+        ]
+    }
+    try {
+        const raw = fs.readFileSync(file, "utf8")
+        const own = (JSON.parse(raw) as { sha256?: unknown }).sha256
+        parseAllowlist(raw, pin)
+        if (own !== pin) {
+            return [`the NFT allowlist ${file} names sha256 ${JSON.stringify(own ?? null)}, not the pinned ${pin}`]
+        }
+    } catch (e) {
+        return [`the NFT allowlist ${file} does not load as pinned: ${(e as Error).message}`]
+    }
+    return []
+}
+
+/**
+ * NO-GO reasons for genesis validators whose NFT fields a node refuses
+ * before it reads Solana: every seat names an allowlisted mint, its owner
+ * wallet and a proof transaction, and no mint backs two seats.
+ */
+export function genesisNftFieldReasons(validators: unknown, label = "genesis.validators"): string[] {
+    // A non-list is reported as a FILL value or by the block 0 checks
+    if (!Array.isArray(validators)) return []
+    try {
+        return seededNftReasons(validators as SeededValidatorNft[], label)
+    } catch (e) {
+        return [`${label} NFTs cannot be checked: ${(e as Error).message}`]
+    }
+}
+
+/**
+ * NO-GO reasons for block 0 seats taken from the snapshot's validators.jsonl
+ * without a valid NFT field set. A node seeding those rows reads a row with
+ * no NFT fields as a seat its chain already judged, so only this check
+ * holds a launch set to its NFTs. Rows from genesis.validators are checked
+ * by mainnetGenesisReasons.
+ */
+export function blockZeroNftReasons(
+    genesis: { forks?: unknown } | null,
+    blockZero: BlockZeroValidators | null,
+): string[] {
+    if (!genesisSeatsNfts(genesis) || blockZero?.source !== "snapshot") return []
+    return genesisNftFieldReasons(blockZero.rows, "validators.jsonl")
+}
+
+/** The rows block 0 seats and the label they are reported under. */
+function seededRows(
+    genesis: { validators?: unknown },
+    blockZero: BlockZeroValidators | null,
+): { rows: unknown; label: string } {
+    return blockZero?.source === "snapshot"
+        ? { rows: blockZero.rows, label: "validators.jsonl" }
+        : { rows: genesis.validators, label: "genesis.validators" }
+}
+
+/**
+ * What a Solana check of the proofs block 0 seats would refuse; nothing
+ * when the genesis does not seat its validators under `nftValidatorGating`,
+ * or when the offline checks already refuse them without a read.
+ */
+async function genesisNftProblems(
+    genesis: { forks?: unknown; validators?: unknown },
+    blockZero: BlockZeroValidators | null,
+): Promise<string[]> {
     if (!genesisSeatsNfts(genesis)) return []
-    const rows = Array.isArray(genesis.validators) ? (genesis.validators as SeededValidatorNft[]) : []
-    return verifySeededNfts(rows, "genesis.validators")
+    const { rows, label } = seededRows(genesis, blockZero)
+    if (!Array.isArray(rows) || genesisNftFieldReasons(rows, label).length > 0) return []
+    return verifySeededNfts(rows as SeededValidatorNft[], label)
 }
 
 /** The addresses of genesis validator entries seated without an NFT. */
@@ -1202,6 +1283,7 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
         ...ownerRequiredReasons(genesis, table),
         ...(rows ? stakeShareReasons(rows, table.entries) : []),
         ...(blockZero?.reasons ?? []),
+        ...blockZeroNftReasons(genesis, blockZero),
         ...mainnetGenesisReasons(genesis),
         ...treasuryReasons(genesis, expectedTreasury),
         ...notaryKeysReasons(genesis, expectedNotaryKeys),
@@ -1286,7 +1368,12 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
             "genesis file",
             (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),
         ),
-        check("block 0 validator set", input.blockZero ? input.blockZero.reasons : ["no block 0 validator set"]),
+        check(
+            "block 0 validator set",
+            input.blockZero
+                ? [...input.blockZero.reasons, ...blockZeroNftReasons(input.genesis, input.blockZero)]
+                : ["no block 0 validator set"],
+        ),
         check(
             "launch validators",
             launch.length < quorum
@@ -1622,7 +1709,7 @@ async function runPlan(
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
     }
-    genesisFileProblems.push(...(await genesisNftProblems(genesis)))
+    genesisFileProblems.push(...(await genesisNftProblems(genesis, blockZero)))
     const checks = launchPlanChecks({
         genesis,
         blockZero,
@@ -1777,7 +1864,7 @@ async function main(): Promise<number> {
         }
         expectations.genesisFileProblems = [
             ...(expectations.genesisFileProblems ?? []),
-            ...(await genesisNftProblems(genesis)),
+            ...(await genesisNftProblems(genesis, blockZero)),
         ]
     }
 

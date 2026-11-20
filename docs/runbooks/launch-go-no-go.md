@@ -221,8 +221,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   operator, provider or region holds a third or more of block 0's stake
   (`docs/mainnet/validator-concentration.md`); the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
-  `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking`, `nftValidatorGating` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `tokenStaking`, `nftValidatorGating`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
+  `activationHeight` 0, leaves `atomicWork`, `networkGovernance` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
   (`--expected-treasury`), gives `tlsnVerified` exactly the notary keys from
   the notary key ceremony (`--expected-notary-keys`; NO-GO on the template's placeholder keys, on no keys,
@@ -232,7 +232,12 @@ exposed by the node, so it comes from the T-24h posts). Then:
   (mainnet is `8587492`), and sets
   `shardSize` 10; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
-  a seat on any network whose pool holds them; and a node would accept
+  a seat on any network whose pool holds them; every block 0 seat (from
+  `genesis.validators`, or the snapshot's `validators.jsonl` when it has
+  one) names an allowlisted `nft_mint`, its `nft_owner` and an
+  `nft_proof_tx` whose proof checks out on Solana, no mint backs two seats
+  and no seat is `nft_exempt`; the build pins its NFT allowlist digest and
+  the shipped allowlist matches it; and a node would accept
   the genesis file at its first boot (fixed timestamp, snapshot bound by
   `snapshot.manifestSha256`). Without `--genesis` the forks cannot be
   checked and the result is always NO-GO.

@@ -20,11 +20,15 @@ import {
     validatorTable,
 } from "./launch-go-no-go"
 import { notaryKeyHex, tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
+import { NFT_ALLOWLIST_PATH } from "src/features/staking/nftAllowlist"
 
 const ROOT = join(import.meta.dir, "..")
 const TEMPLATE = join(ROOT, "docs/mainnet/genesis.template.json")
 const readTemplate = () => JSON.parse(readFileSync(TEMPLATE, "utf8"))
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
+const MINTS: string[] = JSON.parse(readFileSync(NFT_ALLOWLIST_PATH, "utf8")).mints
+const NFT_OWNER = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
+const PROOF_TX = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
 const isFill = (v: unknown) => typeof v === "string" && v.startsWith("FILL")
 const TREASURY = "0x" + "ab".repeat(32)
 /** The notary keys tlsnVerifiedPayload() lists, as --expected-notary-keys names them. */
@@ -45,10 +49,13 @@ function filledTemplate(validators = 10) {
         address: id(i),
         status: "2",
         connection_url: `http://v${i}.example:53550`,
-        staked_amount: "1000000000000000000",
+        staked_amount: "0",
         first_seen: 0,
         valid_at: 0,
-    }))
+        nft_mint: MINTS[i],
+        nft_owner: NFT_OWNER,
+        nft_proof_tx: PROOF_TX,
+    })) as Array<Record<string, unknown>>
     return g
 }
 
@@ -72,6 +79,14 @@ function table(n: number, edit: (i: number) => Record<string, string> = () => ({
 const failing = (checks: ReturnType<typeof launchPlanChecks>) => checks.filter(c => !c.ok).map(c => c.name)
 
 describe("mainnet genesis template", () => {
+    it("opens seats by NFT only at block 0 and leaves governance off", () => {
+        const forks = readTemplate().forks
+        expect(forks.nftValidatorGating.activationHeight).toBe(0)
+        expect(forks.tokenStaking.activationHeight).toBe(0)
+        expect(forks.tokenStakingGate.activationHeight).toBe(0)
+        expect(forks.networkGovernance.activationHeight).toBeNull()
+    })
+
     it("schedules every mainnet fork at block 0", () => {
         const forks = readTemplate().forks
         for (const name of MAINNET_FORKS) {
@@ -201,10 +216,23 @@ describe("mainnetGenesisReasons", () => {
         expect(mainnetGenesisReasons(readTemplate()).join("\n")).toContain("template FILL values")
     })
 
-    it("ignores nft_exempt while NFT validator gating is unscheduled", () => {
+    it("ignores nft_exempt while NFT validator gating is unscheduled, which is NO-GO itself", () => {
         const g = filledTemplate()
+        g.forks.nftValidatorGating = { activationHeight: null }
         g.validators[2].nft_exempt = true
-        expect(mainnetGenesisReasons(g).join("\n")).not.toContain("nft_exempt")
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).not.toContain("nft_exempt")
+        expect(reasons).toContain("fork nftValidatorGating is not scheduled at activationHeight 0")
+    })
+
+    it("refuses a validator without its NFT fields, and passes once each seat names one", () => {
+        const g = filledTemplate()
+        expect(mainnetGenesisReasons(g)).toEqual([])
+        delete g.validators[4].nft_proof_tx
+        g.validators[6].nft_mint = g.validators[1].nft_mint
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).toContain(`genesis.validators[4] (${id(4)}): nft_proof_tx must be a base58 string`)
+        expect(reasons).toContain(`genesis.validators[6] (${id(6)}): nft_mint ${MINTS[1]} already backs ${id(1)}`)
     })
 
     it("refuses a validator seated without an NFT", () => {
