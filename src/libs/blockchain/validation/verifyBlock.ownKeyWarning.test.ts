@@ -105,7 +105,7 @@ afterEach(() => {
 })
 
 describe("verifyBlock own-key warning", () => {
-    it("warns once when our key signed the block and no signing record exists", async () => {
+    it("warns when our key signed the block and no signing record exists", async () => {
         expect((await verifyBlock(signedBlock([A, B, C]))).valid).toBe(true)
         expect(warning).toHaveBeenCalledTimes(1)
         expect(warning.mock.calls[0][0]).toContain("no signing record")
@@ -120,6 +120,7 @@ describe("verifyBlock own-key warning", () => {
             timestamp: 1500,
             hash: "valid-hash",
         })
+        // Clear the in-memory signature so verifyBlock must consult the persisted record.
         __resetSigningHalt()
         warning.mockClear()
         expect((await verifyBlock(block)).valid).toBe(true)
