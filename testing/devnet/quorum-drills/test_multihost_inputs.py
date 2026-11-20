@@ -139,8 +139,11 @@ class GenInputs30On4Hosts(unittest.TestCase):
         # the halt judge refuses a genesis without these active at block 0
         for fork in ("quorumParity", "committeeBinding", "commitLock"):
             self.assertEqual(g["forks"][fork]["activationHeight"], 0, fork)
+        # the launch set seats validators by NFT from block 0; drill seats are exempt
+        self.assertEqual(g["forks"]["nftValidatorGating"]["activationHeight"], 0)
         for i, v in enumerate(g["validators"], start=1):
             self.assertEqual(v["connection_url"], f"http://{self.ip_of[i]}:{node_port(i)}")
+            self.assertIs(v["nft_exempt"], True)
         self.assertEqual(self.load("hosts", "1", "inputs", "genesis.json"), g)
 
     def test_ports(self):

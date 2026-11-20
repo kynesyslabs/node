@@ -48,6 +48,7 @@ from drill_inputs import (
     seed_peerlist,
     test_chain_problem,
     with_genesis_timestamp,
+    with_exempt_nft_seats,
     with_launch_forks,
     write_json,
 )
@@ -163,6 +164,7 @@ g["validators"] = [
     }
     for i, pk in enumerate(pubs)
 ]
+g = with_exempt_nft_seats(g)
 load_dir = os.path.join(inputs, "load")
 load_pubs = []
 if os.path.isdir(load_dir):
