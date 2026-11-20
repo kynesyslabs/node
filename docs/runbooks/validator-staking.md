@@ -69,10 +69,14 @@ Pick one of the two ways.
 
 ### A. Browser wallet on the staking page
 
-The node serves the page at `http://<node url>/staking` while it holds no
-seat. Once seated the page answers 404.
+The node serves the page at `/staking` on its RPC port while it holds no
+seat. Once seated the page answers 404. The page builds the transaction your
+wallet signs, so open it only over a connection nobody can tamper with: the
+ssh tunnel below, or https served by your own proxy in front of the node.
+On a plain http address anyone on the path can swap the page and ask your
+wallet to sign something else, whichever wallet you use.
 
-1. Open the page. It shows the node's validator address.
+1. Open the page through the tunnel. It shows the node's validator address.
 2. Connect a wallet. Phantom, Solflare, Backpack, MetaMask and other Wallet
   Standard wallets are listed.
 3. Pick the Node NFT from the list, or paste its mint.
@@ -80,10 +84,9 @@ seat. Once seated the page answers 404.
   waits for Solana finality, up to three minutes, then prints the exact
    stake command. **Copy command** copies it.
 
-**Phantom needs https or localhost.** Phantom refuses to connect on a plain
-http page unless the host is `localhost` or `127.0.0.1`. The other wallets
-listed above connect over http. For Phantom, tunnel the node's RPC port to
-your machine and open the page through the tunnel:
+Tunnel the node's RPC port to your machine and open the page through the
+tunnel. Phantom also refuses a plain http page on any host but `localhost`
+or `127.0.0.1`.
 
 ```sh
 ssh -N -L 53550:127.0.0.1:53550 <user>@<node host>
@@ -220,4 +223,4 @@ block numbers and the NFT mint, wallet and proof signature on record.
 | `Sender already holds 2 seat transactions in the pool`            | Wait for the pending ones to be included or dropped                                             |
 | `Validator must be unstaking before exit`                         | Unstake first                                                                                   |
 | Staking page answers 404                                          | The node already holds a seat                                                                   |
-| Page shows no wallets                                             | On http, Phantom hides itself; use the tunnel above or another wallet                           |
+| Page shows no wallets                                             | On http, Phantom hides itself; open the page through the tunnel above                           |
