@@ -729,6 +729,15 @@ this restart is a fallback there.
     it reads schedules the fork at 0. Clients need an SDK whose TLSN link
     accepts the `twitter` context. A network that does not schedule the
     fork keeps the previous behaviour.
+  - A validator whose identity file holds the recovery phrase in a
+    non-canonical form (full-width letters, the ideographic space U+3000 or a
+    no-break space U+00A0) no longer boots. Its key was derived from those
+    exact bytes, so it differed from the key a wallet derives from the same
+    words. Retyping the phrase in plain lowercase ASCII gives a different
+    node key: a validator staked under the old key unstakes and exits with
+    the old file first (`validator.ts unstake` and `exit` still accept it;
+    `stake` and `nft-proof` refuse it), then stakes again under the retyped
+    phrase.
 
 ## Known limits
 

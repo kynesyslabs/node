@@ -130,6 +130,18 @@ export default class Identity {
             throw new Error("Invalid mnemonic: not a valid BIP39 mnemonic phrase")
         }
 
+        // validateMnemonic normalises to NFKD but the key is derived from the
+        // raw string, so a phrase that is not already canonical (full-width
+        // letters, ideographic spaces) would load and give a different key
+        // than the same words typed in ASCII.
+        if (mnemonic.normalize("NFKD") !== mnemonic) {
+            const message =
+                "Invalid mnemonic: the phrase is not in canonical form (full-width letters, ideographic or no-break spaces). " +
+                "Retype it in plain lowercase ASCII letters with ASCII spaces between the words"
+            log.error(message)
+            throw new Error(message)
+        }
+
         // Use raw mnemonic string to match wallet/SDK derivation
         const hashable = mnemonic
         const seedHash = Hashing.sha3_512(hashable)

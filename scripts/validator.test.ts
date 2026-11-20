@@ -2,6 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+    ASCII_PHRASE,
+    IDEOGRAPHIC_PHRASE,
+    NON_CANONICAL_PHRASES,
+    expectRan,
+    expectRefused,
+    useFakeSdk,
+} from "./fixtures/canonicalPhraseTestKit"
 
 const SCRIPT = join(import.meta.dir, "validator.ts")
 
@@ -611,5 +619,53 @@ describe("validator.ts --amount", () => {
         })
         expect(r.exitCode).toBe(1)
         expect(String(r.stderr)).toContain("--amount is used only by stake, not by unstake")
+    })
+})
+
+// Runs scripts/validator.ts under the fake SDK of
+// scripts/fixtures/canonicalPhraseTestKit.ts, which uses the phrase
+// connectWallet received as the node's address.
+const sdk = useFakeSdk("validator-script-")
+
+// An NFT seat stake records EXPOSED_URL, so it is set for every run.
+function runWith(phrase: string, ...args: string[]) {
+    return sdk.run(
+        ["scripts/validator.ts", ...args, "--identity", sdk.phraseFile(phrase), "--rpc", "http://fake.invalid"],
+        { EXPOSED_URL: "http://203.0.113.5:53550" },
+    )
+}
+
+describe("scripts/validator.ts canonical phrase", () => {
+    it("stakes with a canonical ASCII phrase", () => {
+        expectRan(runWith(ASCII_PHRASE, "stake", "--amount", "1_000"), [
+            `wallet:${JSON.stringify(ASCII_PHRASE)}`,
+            "Staking 1_000 DEM",
+        ])
+    })
+
+    for (const [form, phrase] of NON_CANONICAL_PHRASES) {
+        it(`refuses to stake with ${form}`, () => {
+            expectRefused(runWith(phrase, "stake", "--amount", "1_000"), ["wallet:", "Staking"])
+        })
+
+        it(`refuses an NFT seat stake with ${form}`, () => {
+            expectRefused(runWith(phrase, "stake", "--nft-proof", "5ig"), ["wallet:", "Staking"])
+        })
+    }
+
+    // A stake made under the key of a non-canonical phrase must stay
+    // withdrawable, so unstake and exit keep passing the raw phrase through.
+    it("still unstakes with a non-canonical phrase", () => {
+        expectRan(runWith(IDEOGRAPHIC_PHRASE, "unstake"), [
+            `wallet:${JSON.stringify(IDEOGRAPHIC_PHRASE)}`,
+            "Unstaking",
+        ])
+    })
+
+    it("still exits with a non-canonical phrase", () => {
+        expectRan(runWith(IDEOGRAPHIC_PHRASE, "exit"), [
+            `wallet:${JSON.stringify(IDEOGRAPHIC_PHRASE)}`,
+            "Validator Exit",
+        ])
     })
 })
