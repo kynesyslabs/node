@@ -455,9 +455,12 @@ describe("the own-pool seat re-judge", () => {
 })
 
 describe("bounded seat judgement", () => {
+    // Hashes in a known order, offered in another.
     const hashes = Array.from({ length: 30 }, (_, i) => `0xs${String(i).padStart(2, "0")}`)
     const lowest = hashes.slice(0, SEAT_TXS_JUDGED_PER_BATCH)
     const shuffled = (order: number[]) => order.map(i => seatTx(hashes[i]))
+    const reversed = hashes.map((_, i) => 29 - i)
+    const interleaved = hashes.map((_, i) => (i % 2 === 0 ? i / 2 + 15 : (i - 1) / 2))
 
     beforeEach(() => {
         resetReceiveState()
@@ -472,16 +475,28 @@ describe("bounded seat judgement", () => {
 
     const judgedHashes = () => handleStakingTx.mock.calls.map(c => (c[0] as { hash: string }).hash).sort()
 
-    it("judges at most SEAT_TXS_JUDGED_PER_BATCH seat txs of a received batch and leaves the rest out", async () => {
-        await Mempool.receive(shuffled(hashes.map((_, i) => i)))
+    it("judges the same lowest-hash seat txs of a received batch whatever order they arrive in", async () => {
+        await Mempool.receive([...shuffled(reversed), tx("0xpay", 100)])
+        expect(judgedHashes()).toEqual(lowest)
+        expect(insertedRows.map(r => r.hash).sort()).toEqual([...lowest, "0xpay"].sort())
+
+        resetReceiveState()
+        handleStakingTx.mockClear()
+        await Mempool.receive(shuffled(interleaved))
         expect(judgedHashes()).toEqual(lowest)
         expect(insertedRows.map(r => r.hash).sort()).toEqual(lowest)
     })
 
-    it("re-judges at most SEAT_TXS_JUDGED_PER_BATCH own seat txs", async () => {
+    it("re-judges the same lowest-hash own seat txs whatever order the pool reads in", async () => {
         for (const hash of hashes) seatVerdicts.set(hash, { success: false, message: "moved" })
-        seatPool(shuffled(hashes.map((_, i) => i)))
+        seatPool(shuffled(reversed))
         expect([...(await Mempool.startSeatRejudge()).keys()].sort()).toEqual(lowest)
+        expect(judgedHashes()).toEqual(lowest)
+
+        resetSeatRejudge()
+        seatPool(shuffled(interleaved))
+        expect([...(await Mempool.startSeatRejudge()).keys()].sort()).toEqual(lowest)
+        expect(judgedHashes()).toEqual(lowest)
     })
 
     it("counts a verdict not back within SEAT_JUDGE_TIMEOUT_MS as unanswered and keeps its tx", async () => {

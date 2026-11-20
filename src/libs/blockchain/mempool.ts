@@ -1111,9 +1111,11 @@ export default class Mempool {
     }
 
     /**
-     * Fresh staking verdicts on the first SEAT_TXS_JUDGED_PER_BATCH of
-     * `seats`, each unanswered after SEAT_JUDGE_TIMEOUT_MS; null for the
-     * rest, which are not judged this round.
+     * Fresh staking verdicts on the SEAT_TXS_JUDGED_PER_BATCH seat txs with
+     * the lowest hashes, each unanswered after SEAT_JUDGE_TIMEOUT_MS; null
+     * for the rest, which are not judged this round. By hash rather than by
+     * position: members receive the same txs in different orders, and must
+     * judge the same ones to keep the same pool.
      */
     private static async judgeSeatTransactions(
         seats: Transaction[],
@@ -1121,9 +1123,15 @@ export default class Mempool {
         const { handleStakingTx } = await import(
             "src/libs/network/routines/transactions/handleStakingTx"
         )
+        const judged = new Set(
+            seats
+                .map(tx => tx.hash)
+                .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+                .slice(0, SEAT_TXS_JUDGED_PER_BATCH),
+        )
         return Promise.all(
-            seats.map((tx, i) => {
-                if (i >= SEAT_TXS_JUDGED_PER_BATCH) return null
+            seats.map(tx => {
+                if (!judged.has(tx.hash)) return null
                 let timer: ReturnType<typeof setTimeout> | undefined
                 const late = new Promise<StakingTxResult>(resolve => {
                     timer = setTimeout(
