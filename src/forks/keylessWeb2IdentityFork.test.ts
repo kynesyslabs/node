@@ -116,7 +116,19 @@ const telegramAssign = () =>
 const web2Remove = (context: string) =>
     viaConfirm(() => identities.removeWeb2Identity(demos, { context, username: "alice" } as never))
 const PRESENTATION = { version: "0.1.0", data: "00" }
-const tlsnAssign = (context: string) =>
+// The SDK refuses a twitter TLSN link unless the network reports
+// keylessWeb2Identity; the fixture has no network, so the SDK is shown the
+// fork active and the node's own fork config decides, as on a real node.
+const SDK_SEES_KEYLESS = { forks: { keylessWeb2Identity: { activated: true } } }
+const tlsnAssign = async (context: string) => {
+    const info = spyOn(demos, "getNetworkInfo").mockResolvedValue(SDK_SEES_KEYLESS as never)
+    try {
+        return await tlsnAssignTx(context)
+    } finally {
+        info.mockRestore()
+    }
+}
+const tlsnAssignTx = (context: string) =>
     viaConfirm(() =>
         identities.addWeb2IdentityViaTLSN(
             demos,
