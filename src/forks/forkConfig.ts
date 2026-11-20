@@ -368,6 +368,12 @@ export type TokenStakingConfig = BaseForkConfig
  * Activation at H binds from the block applied on tip H, which is block
  * H + 1. Dormant by default (`activationHeight: null`) and at launch. No
  * payload beyond the base.
+ *
+ * Before it is scheduled: seat transactions pay no gas, so pool admission
+ * needs its own rate limit and a cache of refused proofs, or any account can
+ * make every node read Solana for free; eviction (challenge, mint moved to
+ * another seat) needs a floor on the active set size; the short unstake lock
+ * also applies to bonded seats that have not moved to an NFT.
  */
 export type NftValidatorGatingConfig = BaseForkConfig
 
