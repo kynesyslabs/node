@@ -18,7 +18,8 @@ import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
 import Datasource from "@/model/datasource"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { attestationContextError } from "@/features/zk/proof/publicSignals"
-import { TLSN_CONTEXTS, WEB2_CONTEXTS } from "@/libs/identity/web2Contexts"
+import { WEB2_CONTEXTS } from "@/libs/identity/web2Contexts"
+import { keylessWeb2AssignRefusal, tlsnLinkContexts } from "@/forks/keylessWeb2IdentityGate"
 
 import type { IdentityResponse } from "./identityReply"
 
@@ -96,6 +97,10 @@ export default async function handleIdentityRequest(
             )
         case "web2_identity_assign": {
             const web2Payload = payload.payload as Web2CoreTargetIdentityPayload
+            // Apply refuses it too; refused here before any provider call,
+            // so a validator without provider credentials decides it alike.
+            const keyless = keylessWeb2AssignRefusal(web2Payload.context)
+            if (keyless) return { success: false, message: keyless }
             if (
                 ["twitter", "github", "discord"].includes(web2Payload.context) &&
                 (await IdentityManager.isWeb2AccountLinked(
@@ -183,7 +188,7 @@ export default async function handleIdentityRequest(
             // used to throw there); the client is told now instead.
             const web2 = payload.method === "web2_identity_remove"
             const context = (payload.payload as { context?: unknown }).context
-            const known = web2 ? WEB2_CONTEXTS : TLSN_CONTEXTS
+            const known = web2 ? WEB2_CONTEXTS : tlsnLinkContexts()
             if (typeof context !== "string" || !known.has(context)) {
                 return {
                     success: false,

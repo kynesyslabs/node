@@ -30,6 +30,7 @@ export {
 } from "./presentationGate"
 export {
     TLSN_IDENTITY_ENDPOINTS,
+    TLSN_KEYLESS_IDENTITY_ENDPOINTS,
     judgeIdentityTranscript,
     parseBindValue,
 } from "./identityPolicy"

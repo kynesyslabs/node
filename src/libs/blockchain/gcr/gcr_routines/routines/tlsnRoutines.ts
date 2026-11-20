@@ -24,7 +24,8 @@ import {
 import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
 import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
-import { TLSN_CONTEXTS } from "@/libs/identity/web2Contexts"
+import { TLSN_KEYLESS_CONTEXTS } from "@/libs/identity/web2Contexts"
+import { tlsnLinkContexts } from "@/forks/keylessWeb2IdentityGate"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import type { GCREntityCaches } from "../../handleGCR"
@@ -48,7 +49,9 @@ function linkedToken(row: GCRTLSNotary, txhash: string | undefined, attestationI
 /** Takes back the points a TLSN link earned. */
 async function deductTLSNPoints(context: string, identity: Web2GCRData["data"], account: string): Promise<void> {
     // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
-    if (context === "github" && identity.userId) {
+    if (context === "twitter") {
+        await IncentiveManager.twitterUnlinked(account)
+    } else if (context === "github" && identity.userId) {
         await IncentiveManager.githubUnlinked(account, identity.userId)
     } else if (context === "discord") {
         await IncentiveManager.discordUnlinked(account)
@@ -64,7 +67,11 @@ async function awardTLSNPoints(
     account: string,
     referralCode: string | undefined,
 ): Promise<void> {
-    if (context === "github") {
+    if (context === "twitter") {
+        if (await isFirstConnection("twitter", { userId }, account)) {
+            await IncentiveManager.twitterLinked(account, userId, referralCode)
+        }
+    } else if (context === "github") {
         if (await isFirstConnection("github", { userId }, account)) {
             await IncentiveManager.githubLinked(account, userId, referralCode)
         }
@@ -184,7 +191,7 @@ export async function applyTLSNIdentityAdd(
 
     // 1. Validate context is supported. A set, not an object lookup, so an
     // inherited name such as constructor is not taken for a platform.
-    if (!TLSN_CONTEXTS.has(context)) {
+    if (!tlsnLinkContexts().has(context)) {
         return {
             success: false,
             message: `Unsupported TLSN context: ${context}`,
@@ -311,7 +318,7 @@ export async function applyTLSNIdentityRemove(
         }
     }
 
-    if (!TLSN_CONTEXTS.has(context)) {
+    if (!tlsnLinkContexts().has(context)) {
         return {
             success: false,
             message: `Unsupported TLSN context: ${context}`,
@@ -385,7 +392,9 @@ export async function rollbackTLSNIdentityAdd(
 ): Promise<GCRResult> {
     const { context } = editOperation.data ?? {}
     const { username, userId } = editOperation.data?.data ?? {}
-    if (!TLSN_CONTEXTS.has(context) || userId === undefined || userId === null) {
+    // An undo reverses what its add wrote, and a twitter TLSN link exists
+    // only where keylessWeb2Identity let it be written.
+    if (!TLSN_KEYLESS_CONTEXTS.has(context) || userId === undefined || userId === null) {
         return { success: false, message: "Invalid payload: missing context or userId" }
     }
     const links: TLSNLink[] = accountGCR.identities?.web2?.[context] ?? []
@@ -437,7 +446,7 @@ export async function rollbackTLSNIdentityRemove(
     place?: EditPlace,
 ): Promise<GCRResult> {
     const { context } = (editOperation.data ?? {}) as { context?: string }
-    if (!context || !TLSN_CONTEXTS.has(context)) {
+    if (!context || !TLSN_KEYLESS_CONTEXTS.has(context)) {
         return { success: false, message: `Unsupported TLSN context: ${String(context)}` }
     }
     const removed = recordedRemoval<TLSNLink>(place, at =>

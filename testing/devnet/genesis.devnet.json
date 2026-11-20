@@ -103,6 +103,9 @@
     },
     "referenceBlockRoom10": {
       "activationHeight": 0
+    },
+    "keylessWeb2Identity": {
+      "activationHeight": 0
     }
   },
   "balances": [
