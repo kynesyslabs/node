@@ -992,6 +992,7 @@ run_production_checks() {
 	check_ntp_egress
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_unset DEBUG_ASSERTIONS_ENABLED "debug assertions can exit during consensus"
 	check_genesis_file
 	check_genesis_schedule
 	check_web2_identity_credentials
@@ -1034,7 +1035,7 @@ OPTIONS:
                     validator URLs, and the node's own boot check of its fork
                     schedule), the identity file mode (600 or stricter),
                     the GitHub token (one request to api.github.com),
-                    and one-start switches left set; one
+                    debug assertions and one-start switches left set; one
                     PASS/WARN/FAIL line each, exit 1 on any FAIL
     --parameters FILE
                     With --production: the parameter sheet to compare with

@@ -91,11 +91,13 @@ payload (notary keys, verifier wasm sha256, `maxPresentationBytes`,
 `freshnessWindowSec`, `futureSkewSec`) is a genesis value, not an environment
 setting: a node cannot override it.
 
-### Must stay unset
+### Must stay disabled
 
-`node-doctor --production` fails while any of these is set:
-`DEMOS_DISABLE_FORK_MACHINERY` (the node also refuses it at boot on any chain
-id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`
+`node-doctor --production` fails if any of these has a value other than blank,
+`false` or `0`:
+`DEBUG_ASSERTIONS_ENABLED` (debug-only; the node refuses it when enabled at boot
+with `PROD=true`), `DEMOS_DISABLE_FORK_MACHINERY` (the node also refuses it at boot on
+any chain id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`
 (refused at boot on the same chain ids),
 and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and

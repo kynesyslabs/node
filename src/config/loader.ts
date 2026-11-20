@@ -600,6 +600,13 @@ export function loadConfig(): Readonly<AppConfig> {
         },
     }
 
+    if (config.core.prod && config.debug.assertionsEnabled) {
+        throw new Error(
+            "[config] DEBUG_ASSERTIONS_ENABLED is refused with PROD=true; " +
+                "set DEBUG_ASSERTIONS_ENABLED=false before starting a production validator",
+        )
+    }
+
     assertConsensusTimingSane(config)
     assertL2psLimitsSane(config)
     assertRpcLimitsSane(config)

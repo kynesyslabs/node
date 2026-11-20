@@ -20,6 +20,7 @@ SUITE_FILES=(
     scripts/node-doctor.test.ts
     scripts/validator.test.ts
     scripts/validator-prove-signing.test.ts
+    src/config/loader.debugAssertions.test.ts
     docs/runbooks/dormant-mode.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
