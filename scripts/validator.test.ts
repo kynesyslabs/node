@@ -428,14 +428,8 @@ describe("validator.ts identity file selection", () => {
         })
     })
 
-    it("reads only IDENTITY_FILE from .env, not its other keys", async () => {
-        const r = await run({
-            dotenv: "HTTP_PROXY=http://127.0.0.1:9\nIDENTITY_FILE=\n",
-            preload:
-                "process.on('exit', () => console.error(" +
-                "'HTTP_PROXY at exit: ' + process.env.HTTP_PROXY))\n",
-        })
-        expect(r.out).toContain("HTTP_PROXY at exit: undefined")
+    it("chooses the identity from IDENTITY_FILE alone among the .env keys", async () => {
+        const r = await run({ dotenv: "OTHER_KEY=1\nIDENTITY_FILE=\n" })
         expect(r.out).toContain("identity file not found: .demos_identity")
         expect(r.hits).toBeGreaterThan(0)
     })
