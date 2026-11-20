@@ -160,13 +160,6 @@ export async function processPayload(
                 }
             }
         }
-        // case "login_request":
-        //     return await handleLoginRequest(payload.params[0] as BrowserRequest)
-        // case "login_response":
-        //     return await handleLoginResponse(
-        //         payload.params[0] as BrowserRequest,
-        //     )
-
         case "consensus_routine": {
             return await manageConsensusRoutines(sender, payload.params[0])
         }
