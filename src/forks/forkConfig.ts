@@ -336,11 +336,53 @@ export type TokenStakingGateConfig = BaseForkConfig
  * nothing.
  *
  * Activation at H binds from the block applied on tip H, which is block
- * H + 1. Dormant by default (`activationHeight: null`) and at launch: a
- * mainnet genesis leaves it null, and a later height-pinned activation turns
- * token staking on. No payload beyond the base.
+ * H + 1. Dormant by default (`activationHeight: null`). A mainnet genesis
+ * sets 0 together with `nftValidatorGating`, so seats open from block 1 and
+ * only through an NFT: under that fork a stake of any amount but 0 is
+ * refused at intake and at apply, and no DEM is ever bonded. No payload
+ * beyond the base.
  */
 export type TokenStakingConfig = BaseForkConfig
+
+/**
+ * `nftValidatorGating` fork: a validator seat is backed by a Solana node NFT
+ * instead of a DEM stake.
+ *
+ * From the activation height:
+ *  - a `validatorStake` that enters the validator set carries an NFT proof
+ *    (a finalized Solana transaction, signed by the wallet holding an
+ *    allowlisted mint, whose memo names the validator) and stakes 0 DEM; a
+ *    stake of any other amount is refused. The pool and the consensus merge
+ *    check the proof on Solana; apply checks the allowlist and evicts any
+ *    other seat the same mint backs;
+ *  - a `validatorChallenge` closes a seat whose NFT a later finalized Solana
+ *    transfer moved out of the recorded wallet;
+ *  - the four seat transactions pay no gas; pool admission holds a sender
+ *    to a few stakes and challenges per minute and in the pool, and keeps a
+ *    refused proof or challenge refused for a while without reading Solana
+ *    again (src/features/staking/seatAdmission.ts);
+ *  - no eviction (challenge, mint rebound to another seat) and no unstake
+ *    takes the active set below the committee floor, 2/3 + 1 of shardSize;
+ *  - an unstake lock is `NFT_UNSTAKE_LOCK_BLOCKS` blocks;
+ *  - a governance vote and the snapshot weight count one per seat.
+ *
+ * Seats taken before the activation keep their rows and stay seated without
+ * an NFT, and the short unstake lock applies to them too. Scheduled at 0,
+ * block 0 seats only genesis validators naming an allowlisted mint, its
+ * owner and a proof, no mint twice (or `nft_exempt`, test networks only).
+ * The node checks that offline and never reads Solana for block 0: the
+ * proofs were read once by launch-go-no-go before the genesis was sealed
+ * by its hash. Seat transactions stay
+ * subject to `tokenStakingGate`, so on a chain with the gate no new seat is
+ * taken before `tokenStaking` opens.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`). Mainnet launches
+ * with it at 0, with `tokenStaking` at 0 beside it, and launch-go-no-go is
+ * NO-GO on a mainnet genesis that does not, or whose validators lack a
+ * valid NFT proof. No payload beyond the base.
+ */
+export type NftValidatorGatingConfig = BaseForkConfig
 
 /**
  * `nativeSendBinding` fork: a native send pays the recipient and the amount
@@ -537,6 +579,25 @@ export type StorageFeeSettlementConfig = BaseForkConfig
 export type ReferenceBlockRoom10Config = BaseForkConfig
 
 /**
+ * `keylessWeb2Identity` fork: a `web2_identity_assign` for github, discord
+ * or twitter is refused at admission and at apply; those accounts link only
+ * through `tlsn_identity_assign`, whose endpoint table gains twitter.
+ *
+ * The web2 path made every validator fetch the proof (gist, tweet, Discord
+ * message) with its own GitHub, Discord and RapidAPI credentials. A
+ * validator without them refused links its peers admitted and cost the
+ * network consensus rounds, so every operator had to hold third-party API
+ * keys. A notarized presentation is checked against keys the genesis pins,
+ * with no network call, so validators need no third-party credentials.
+ * Telegram links (bot-signed attestation), every identity remove and the
+ * links already stored are unchanged. Judged at the chain tip, the parent of
+ * the block the transaction lands in, like `tlsnVerified`: a height H refuses
+ * from block H + 1. Dormant by default; a mainnet genesis sets 0. No payload
+ * beyond the base.
+ */
+export type KeylessWeb2IdentityConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -659,6 +720,7 @@ export type ForkConfig =
     | BlockCapsConfig
     | TokenStakingGateConfig
     | TokenStakingConfig
+    | NftValidatorGatingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
     | L2psSettlementConfig
@@ -705,7 +767,9 @@ export type ForkName =
     | "tlsnDisabled"
     | "storageFeeSettlement"
     | "referenceBlockRoom10"
+    | "nftValidatorGating"
     | "tlsnVerified"
+    | "keylessWeb2Identity"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -745,7 +809,9 @@ export interface ForkConfigByName {
     tlsnDisabled: TlsnDisabledConfig
     storageFeeSettlement: StorageFeeSettlementConfig
     referenceBlockRoom10: ReferenceBlockRoom10Config
+    nftValidatorGating: NftValidatorGatingConfig
     tlsnVerified: TlsnVerifiedConfig
+    keylessWeb2Identity: KeylessWeb2IdentityConfig
 }
 
 /**
@@ -1016,8 +1082,9 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "are refused until tokenStaking opens token staking.",
     },
     tokenStaking: {
-        // Dormant by default and at launch: token staking opens by a later
-        // height-pinned activation. Changes nothing without tokenStakingGate.
+        // Dormant by default: a missing genesis entry hydrates from here. A
+        // mainnet genesis sets 0 beside nftValidatorGating, which takes every
+        // seat by NFT. Changes nothing without tokenStakingGate.
         activationHeight: null,
         description:
             "Token staking opens by network upgrade: validatorStake and validatorUnstake " +
@@ -1092,6 +1159,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A transaction's reference block may be up to 10 blocks behind the head " +
             "(deep window 50) instead of 1 (deep window 5).",
     },
+    nftValidatorGating: {
+        // Dormant by default: it changes who may take a seat and what a seat
+        // costs, and a missing genesis entry hydrates from here, so a running
+        // chain keeps its staking rules. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A validator seat is backed by an allowlisted Solana node NFT: entering takes " +
+            "an NFT proof and 0 DEM, a challenge evicts a seat whose NFT moved, seat " +
+            "transactions pay no gas and a vote counts one per seat.",
+    },
     tlsnVerified: {
         // Dormant by default and without keys: a node cannot verify a
         // presentation without the notary keys the chain agreed on, and a
@@ -1101,6 +1178,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         description:
             "TLSNotary presentations are verified by the node in the pinned wasm verifier " +
             "against the notary keys of the fork payload.",
+    },
+    keylessWeb2Identity: {
+        // Dormant by default: it refuses links a running chain admits, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "GitHub, Discord and Twitter accounts link only through TLSNotary; the web2 " +
+            "proof path that needed validator API keys refuses them.",
     },
 }
 
@@ -1145,6 +1230,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
         storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
         referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
+        nftValidatorGating: { ...DEFAULT_FORK_CONFIG.nftValidatorGating },
         tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
+        keylessWeb2Identity: { ...DEFAULT_FORK_CONFIG.keylessWeb2Identity },
     }
 }

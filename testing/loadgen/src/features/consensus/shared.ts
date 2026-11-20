@@ -13,8 +13,8 @@ export async function waitForConsensusTargets(rpcUrls: string[], requireTx = fal
   }
 }
 
-export async function getLastBlockNumber(rpcUrl: string, muid: string): Promise<number | null> {
-  const res = await nodeCall(rpcUrl, "getLastBlockNumber", {}, muid, NO_FALLBACKS)
+export async function getLastBlockNumber(rpcUrl: string, muid: string, call = nodeCall): Promise<number | null> {
+  const res = await call(rpcUrl, "getLastBlockNumber", {}, muid, NO_FALLBACKS)
   const n = res?.response
   if (typeof n === "number" && Number.isFinite(n)) return n
   if (typeof n === "string") {

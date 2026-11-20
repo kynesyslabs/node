@@ -21,6 +21,7 @@ export interface ValidatorRow {
     status?: unknown
     valid_at?: unknown
     connection_url?: unknown
+    staked_amount?: unknown
 }
 
 export interface BlockZeroValidators {

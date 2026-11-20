@@ -2,7 +2,7 @@ import type { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import type Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import {
-    syncBlock,
+    syncBlockIfRunning,
     syncLock,
     unreconciledGcrBlockNumber,
 } from "src/libs/blockchain/routines/Sync"
@@ -280,7 +280,7 @@ async function adoptCommittedBlockUnguarded(
         return "rejected"
     }
 
-    const ok = await syncBlock(block, peer, fetchDeadline)
+    const ok = await syncBlockIfRunning(block, peer, fetchDeadline)
     if (!ok) return "rejected"
     log.info(
         `[committedBlock] Adopted block ${block.number} (${block.hash}) committed by ${peer?.identity}`,

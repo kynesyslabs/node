@@ -131,6 +131,22 @@ describe("a transaction that fails part-way", () => {
         expect(entities.tlsNotaries.get("token-2")).toEqual(before)
     })
 
+    // Every account is restored from its own snapshot; one that was not
+    // loaded before the transaction comes back as a fresh account of its key.
+    it("restores each account it touched, and a fresh one for an account it did not find", async () => {
+        const other = "0x" + "cd".repeat(32)
+        const entities = await caches()
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx([burn(1), burn(1, other)]),
+            false,
+            false,
+        )
+        expect(result).toMatchObject({ success: false, message: "Missing account for balance edit" })
+        expect(entities.accounts.get(SENDER)).toMatchObject({ pubkey: SENDER, balance: START })
+        expect(entities.accounts.get(other)).toMatchObject({ pubkey: other, balance: 0n, nonce: 0 })
+    })
+
     it("applies all of a transaction that succeeds", async () => {
         const entities = await caches()
         const result = await HandleGCR.applyTransaction(

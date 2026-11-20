@@ -15,8 +15,10 @@ mockEntityDatasource()
 
 // Every token the simulation would issue for a tlsn_request.
 const issuedTokens: unknown[] = []
+let tokenCreationError: Error | null = null
 mock.module("@/features/tlsnotary/tokenManager", () => ({
     createToken: (...args: unknown[]) => {
+        if (tokenCreationError) throw tokenCreationError
         issuedTokens.push(args)
         return { id: "token-1" }
     },
@@ -95,5 +97,23 @@ describe("the attestation token", () => {
         disabled(null)
         await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
         expect(issuedTokens).toHaveLength(1)
+    })
+
+    it("refuses a request and restores its balance when token creation fails", async () => {
+        disabled(null)
+        issuedTokens.length = 0
+        tokenCreationError = new Error("token creation failed")
+        const before = { ...(block.caches.accounts.get(SENDER) as any) }
+        try {
+            const out = await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
+            expect(out.success).toBe(false)
+            // The error's message, not its default "Error: ..." stringification.
+            expect(out.message).toBe("Error processing native side-effects: token creation failed")
+            expect((block.caches.accounts.get(SENDER) as any).balance).toBe(before.balance)
+            expect((block.caches.accounts.get(SENDER) as any).nonce).toBe(before.nonce)
+            expect(issuedTokens).toEqual([])
+        } finally {
+            tokenCreationError = null
+        }
     })
 })

@@ -1,4 +1,4 @@
-import { envInt, normalizeRpcUrl, nowMs, sleep } from "./common"
+import { envInt, logNonCriticalErrorOnce, normalizeRpcUrl, nowMs, sleep } from "./common"
 import { NetworkError, RpcTimeoutError, serializeLoadgenError } from "./errors"
 
 export type CommittedFallbackMap = Record<string, string>
@@ -39,7 +39,14 @@ export async function rpcPost(
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
     })
-    const json = await res.json().catch(() => null)
+    const json = await res.json().catch(error => {
+      // Method names come from loadgen code, so the set of keys stays bounded.
+      const rawMethod = (body as { method?: unknown } | null)?.method
+      const method = typeof rawMethod === "string" ? rawMethod : null
+      const key = method ? `rpc.rpcPost:${url}:${method}` : `rpc.rpcPost:${url}`
+      logNonCriticalErrorOnce(key, "rpc.rpcPost", error, { rpcUrl: url, method, status: res.status })
+      return null
+    })
     return { ok: res.ok, status: res.status, json }
   } catch (error: any) {
     const typedError = error?.name === "AbortError"

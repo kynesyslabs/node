@@ -1,4 +1,5 @@
 import Chain from "@/libs/blockchain/chain"
+import { asGenesisBlockContent } from "@/libs/blockchain/genesis/genesisBlockContent"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { readGenesisSudoPubkey } from "./genesisSudoPubkey"
@@ -65,9 +66,8 @@ export async function loadShardSizeFromGenesisBlock(): Promise<number> {
     if (!genesisBlock) {
         throw new GenesisShardSizeError("block 0 not found in the database")
     }
-    let genesisData: unknown = (
-        genesisBlock.content as { extra?: { genesisData?: unknown } }
-    ).extra?.genesisData
+    let genesisData: unknown = asGenesisBlockContent(genesisBlock.content).extra
+        ?.genesisData
     if (typeof genesisData === "string") {
         try {
             genesisData = JSON.parse(genesisData)

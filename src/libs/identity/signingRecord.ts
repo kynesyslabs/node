@@ -111,6 +111,11 @@ export function setRestartSigningFloor(floor: number): void {
     restartFloorPending = false
 }
 
+/** The restart signing floor, or null while it is not set. */
+export function restartSigningFloor(): number | null {
+    return restartFloor
+}
+
 /** Why `round` must not be signed by this process, or null. */
 export function restartFloorRefusal(round: number): string | null {
     if (restartFloorPending) {

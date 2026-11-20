@@ -493,12 +493,12 @@ export class PeerConnection extends EventEmitter {
                 privateKey: privateKey as forge.pki.ed25519.NativeBuffer,
             })
             signature = new Uint8Array(signatureBuffer)
-        } catch (error) {
+        } catch (e) {
+            // No cause: handleError prints the cause chain's messages
             throw new SigningError(
                 `Ed25519 signing failed (privateKey length: ${
                     privateKey.length
-                } bytes): ${error instanceof Error ? error.message : error}`,
-                error instanceof Error ? error : undefined,
+                } bytes) (${e instanceof Error ? "Error" : typeof e})`,
             )
         }
 

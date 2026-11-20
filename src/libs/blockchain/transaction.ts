@@ -64,7 +64,7 @@ export default class Transaction implements ITransaction {
     // The node also records why a transaction failed, alongside the SDK's
     // fields. Optional as in the SDK: peers, blocks and mempool rows can
     // carry none.
-    attrs?: (ITransaction["attrs"] & { message?: string }) | null = null
+    attrs?: (ITransaction["attrs"] & { message?: string; total_fee?: string }) | null = null
 
     constructor(data?: Partial<ITransaction>) {
         // Initialize with defaults or provided data

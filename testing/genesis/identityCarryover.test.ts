@@ -417,6 +417,22 @@ describe("genesis refusals under identityCarryover", () => {
         expect(launchValidatorProblems(rows, [{ ...LAUNCH[0], status: true }, LAUNCH[1]]).join()).toContain("status must be")
     })
 
+    it("compares the NFT fields, so a carried row cannot drop or swap the NFT it was sealed with", () => {
+        const nft = {
+            nft_mint: "7M7TxyCHoX3jmUNh68QxWWnUSbxJwEUTJoN5dHxTctGH",
+            nft_owner: "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e",
+            nft_proof_tx: "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+        }
+        const sealed = [{ ...LAUNCH[0], ...nft }, LAUNCH[1]]
+        const rows = launchValidatorRows(sealed)
+        expect(launchValidatorProblems(rows, sealed)).toEqual([])
+        const dropped = rows.map((r, i) => (i === 0 ? { ...r, nft_mint: null, nft_owner: null, nft_proof_tx: null } : r))
+        expect(launchValidatorProblems(dropped, sealed).join()).toContain(`validator ${sealed[0].address} differs`)
+        const swapped = rows.map(r => (r.nft_mint ? { ...r, nft_proof_tx: "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM9hxRbmg6uMLCpjxvBuHFTaN8wPBaDJVHxuN6Lw6dZZMCt" } : r))
+        expect(launchValidatorProblems(swapped, sealed).join()).toContain("differs")
+        expect(launchValidatorProblems(rows, [{ ...sealed[0], nft_mint: 7 }, LAUNCH[1]]).join()).toContain("nft_mint must be a string")
+    })
+
     it("refuses a zero stake in validators.jsonl, with or without a genesis list", () => {
         const zero = [{ ...LAUNCH[0], staked_amount: "0" }, LAUNCH[1]] as any
         const want = `validators.jsonl row ${LAUNCH[0].address} has staked_amount "0", which must be a positive integer`

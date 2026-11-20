@@ -287,6 +287,20 @@ this restart is a fallback there.
 
 ## Upgrade notes
 
+- From the release that ships validator NFT gating (node#1187): the mainnet
+  set schedules `tokenStaking` and `nftValidatorGating` at height 0 (31 forks
+  at 0), so every seat is backed by an allowlisted Solana Node NFT from
+  block 0 and no DEM is ever bonded. Each genesis validator carries
+  `nft_mint`, `nft_owner` and `nft_proof_tx` and a `staked_amount` of `"0"`
+  ([genesis.md](../mainnet/genesis.md)). The proofs are read on Solana once,
+  by `launch-go-no-go` before the genesis is sealed; a node building block 0
+  checks the NFT fields offline (allowlisted mint, well-formed owner and
+  proof, no mint backing two seats, no `nft_exempt` on a mainnet chain id)
+  and never reads Solana, so block 0 builds with Solana down. `launch-go-no-go` is NO-GO
+  when either fork is not at 0, when a block 0 seat lacks a valid NFT field
+  set or its proof does not check out, and when the build does not pin its
+  allowlist digest. `atomicWork`, `networkGovernance`, `l2psGate` and
+  `tlsnDisabled` stay `null`.
 - From the first release after `v1.0.0-rc.5`: a node started with `--proxy`
   (`docker-compose.proxy.yml`) refuses to boot while `METRICS_BASIC_AUTH_HASH`
   is empty or still the shipped placeholder. Before upgrading, set the hash, or set
@@ -679,6 +693,41 @@ this restart is a fallback there.
     and keeps serving `requestTLSNproxy`, and `/health` no longer reports
     the `tlsnotary` subsystem as failed. With `TLSNOTARY_FATAL=true` it
     still exits.
+  - Private L2PS transfers settle against a per-subnet L2PS nonce, kept on
+    the account row (`gcr_main.l2psNonces`), and never against the L1
+    nonce: an L1 transaction sent right after a private transfer no longer
+    waits for its batch. Clients read the nonce with the nodeCall
+    `getL2PSNonce { l2psUid, address }`; the SDK release that ships with
+    this one uses it by default, and an older SDK signs private transfers
+    with the L1 nonce, which the node now refuses once the two differ.
+  - The settlement proof no longer binds balances (Interface v1.2): the
+    circuit, the proving key and the verification key are new. The
+    committed key's digest is
+    `ac5dd4d2a719fd3d44f91e8940f4006bdee30e1e8a268ddbc36550bee23e581e`;
+    rebuild the keys with `bun run setup --only zk --zk --zk-generate` (the
+    setup refuses a build whose key differs from the committed one). Block
+    apply checks in public that each account covers its net change.
+  - New migration `AddL2PSNonces1794355200000`: run `bun run migration:run`
+    before starting the node; it refuses to boot with the migration pending.
+  - A chain on which private transfers have settled must not be upgraded in
+    place: its accounts start with no L2PS nonce, so a transfer settled
+    under the L1 nonce could settle again. Start it from a fresh genesis.
+    The launch rehearsal restarts from a fresh genesis on this release;
+    mainnet starts with it at block 0.
+  - New fork `keylessWeb2Identity`, at height 0 in the mainnet set (30
+    forks at 0). Under it `web2_identity_assign` with context `github`,
+    `discord` or `twitter` is refused at admission and at apply; those
+    accounts link only through `tlsn_identity_assign`, whose endpoint
+    table gains `twitter`
+    (`GET https://api.x.com/2/users/me`, account from `data.username` and
+    the decimal-string `data.id`). Telegram links, every identity remove and
+    the links already stored are unchanged, and a TLSN Twitter link earns
+    the Twitter points a web2 one does. Validators of such a network need no
+    `GITHUB_TOKEN`, `DISCORD_BOT_TOKEN` or `RAPID_API_KEY`, and
+    `node-doctor --production` reports them as not needed when the genesis
+    it reads schedules the fork at 0. Clients need an SDK whose TLSN link
+    accepts the `twitter` context. A network that does not schedule the
+    fork keeps the previous behaviour.
 
 ## Known limits
 

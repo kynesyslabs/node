@@ -69,6 +69,21 @@ export function walletPlan(n: number = SETTLEMENT_TRANSFERS): WalletSpec[] {
     for (let i = 0; i < throughputTransfers(n); i++) add(`tp${i}`, 1000n * DEM)
     for (let i = 0; i < throughputTransfers(n); i++) add(`tq${i}`, 0n, false)
     add("l1", 1_000_000n * DEM)
+    // L2PS nonce apart from L1: an L1 send right behind a private transfer,
+    // L1 credits into a batch's accounts while it proves, and a signer that
+    // spends its L1 balance while its batch proves
+    add("na", 100n * DEM)
+    add("nar", 0n, false)
+    add("nal", 0n, false)
+    add("nb", 100n * DEM)
+    add("nbr", 1n * DEM, false)
+    add("nfund", 1000n * DEM)
+    add("nc", 20n * DEM)
+    add("nk0", 100n * DEM)
+    add("nk1", 100n * DEM)
+    add("ncr", 0n, false)
+    add("nkr", 0n, false)
+    add("nsink", 0n, false)
     return plan
 }
 

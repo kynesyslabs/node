@@ -10,6 +10,8 @@ import { mockCore } from "src/utilities/testSupport/coreMocks"
 const sharedState: Record<string, unknown> = {
     candidateBlock: null,
     inConsensusLoop: false,
+    // A running node; shutdown refuses before waiting (see ensureCandidateBlockFormed.test.ts)
+    runMainLoop: true,
 }
 mockCore(sharedState)
 

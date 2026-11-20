@@ -125,10 +125,11 @@ describe("token staking fork config", () => {
         )
     })
 
-    it("is closed from block 0 by the mainnet template, which leaves tokenStaking unscheduled", () => {
+    it("is open from block 0 by the mainnet template, beside nftValidatorGating, so seats open by NFT", () => {
         const template = readJson("docs/mainnet/genesis.template.json")
         expect(template.forks.tokenStakingGate).toEqual({ activationHeight: 0 })
-        expect(template.forks.tokenStaking).toEqual({ activationHeight: null })
+        expect(template.forks.tokenStaking).toEqual({ activationHeight: 0 })
+        expect(template.forks.nftValidatorGating).toEqual({ activationHeight: 0 })
 
         getSharedState.forkConfig = cloneDefaultForkConfig()
         loadForkConfigFromGenesis({
@@ -137,8 +138,8 @@ describe("token staking fork config", () => {
                 tokenStaking: template.forks.tokenStaking,
             },
         })
-        expect(tokenStakingOpen(0)).toBe(false)
-        expect(tokenStakingOpen(1_000_000)).toBe(false)
+        expect(tokenStakingOpen(0)).toBe(true)
+        expect(tokenStakingOpen(1_000_000)).toBe(true)
     })
 
     it("opens from the height tokenStaking is pinned at", () => {

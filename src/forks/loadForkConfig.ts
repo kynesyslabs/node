@@ -25,6 +25,7 @@ import type {
     BlockCapsConfig,
     TokenStakingGateConfig,
     TokenStakingConfig,
+    NftValidatorGatingConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
     L2psSettlementConfig,
@@ -33,6 +34,7 @@ import type {
     TlsnVerifiedConfig,
     StorageFeeSettlementConfig,
     ReferenceBlockRoom10Config,
+    KeylessWeb2IdentityConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -426,6 +428,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "tokenStaking":
             getSharedState.forkConfig.tokenStaking = config as TokenStakingConfig
             return
+        case "nftValidatorGating":
+            getSharedState.forkConfig.nftValidatorGating =
+                config as NftValidatorGatingConfig
+            return
         case "unpinnedCommittee":
             getSharedState.forkConfig.unpinnedCommittee =
                 config as UnpinnedCommitteeConfig
@@ -458,6 +464,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             return
         case "tlsnVerified":
             getSharedState.forkConfig.tlsnVerified = config as TlsnVerifiedConfig
+            return
+        case "keylessWeb2Identity":
+            getSharedState.forkConfig.keylessWeb2Identity =
+                config as KeylessWeb2IdentityConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -616,6 +626,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as TokenStakingGateConfig
         case "tokenStaking":
             return base as TokenStakingConfig
+        case "nftValidatorGating":
+            return base as NftValidatorGatingConfig
         case "unpinnedCommittee":
             return base as UnpinnedCommitteeConfig
         case "telegramSenderBinding":
@@ -634,6 +646,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as ReferenceBlockRoom10Config
         case "tlsnVerified":
             return validateTlsnVerifiedEntry(base, entry)
+        case "keylessWeb2Identity":
+            return base as KeylessWeb2IdentityConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

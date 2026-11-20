@@ -7,6 +7,7 @@ import { TXS_MAX_BYTES } from "src/libs/gossip/topics"
 import { estimateNextConfirmationBlock } from "src/libs/consensus/confirmationEstimate"
 import { verifyRpcEdits } from "src/libs/blockchain/validation/editBinding"
 import { clientTxTypeRefusal } from "src/libs/blockchain/validation/txTypes"
+import { nftGatingAtTip } from "@/forks/nftValidatorGatingGate"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
@@ -147,7 +148,7 @@ export async function submitValidatedTx(
     validityData: ValidityData,
     transaction: Transaction = validityData.data.transaction,
 ): Promise<TxSubmissionResult> {
-    const typeRefusal = clientTxTypeRefusal(transaction)
+    const typeRefusal = clientTxTypeRefusal(transaction, nftGatingAtTip())
     if (typeRefusal) {
         log.error(`[TX SUBMIT] refusing ${transaction.hash}: ${typeRefusal}`)
         return { ok: false, error: typeRefusal }

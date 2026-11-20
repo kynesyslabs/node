@@ -18,6 +18,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { GCREditBalance, Transaction } from "@kynesyslabs/demosdk/types"
 import { isForkActive } from "@/forks/forkGates"
+import { isGaslessTxType, nftGatingActive } from "@/forks/nftValidatorGatingGate"
 import { generateNetworkFeeCredits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -46,7 +47,8 @@ export function legacyGasRetired(tx: Pick<Transaction, "content">): boolean {
  * `transaction_fee`, so for every other type the gas is its fee. Under the
  * same forks as {@link legacyGasRetired} that debit gets matching credits,
  * routed like a network fee, so no transaction takes DEM out of the total
- * supply. Identity and d402 transactions ship no gas.
+ * supply. Identity and d402 transactions ship no gas, nor do the seat
+ * transactions under `nftValidatorGating`.
  *
  * A Work replay is left as signed: it pays nothing (the Work it reads back
  * already paid), so its gas is never charged and there is nothing to credit,
@@ -54,11 +56,11 @@ export function legacyGasRetired(tx: Pick<Transaction, "content">): boolean {
  */
 export function legacyGasCredited(tx: Pick<Transaction, "content">): boolean {
     const type = tx.content?.type as string
-    if (type === "native" || type === "identity" || type === "d402_payment") {
+    const height = getSharedState.lastBlockNumber ?? 0
+    if (type === "native" || isGaslessTxType(type, nftGatingActive(height))) {
         return false
     }
     if (isWorkReplay(tx.content?.gcr_edits)) return false
-    const height = getSharedState.lastBlockNumber ?? 0
     return (
         isForkActive("gasFeeSeparation", height) &&
         isForkActive("feeBinding", height)

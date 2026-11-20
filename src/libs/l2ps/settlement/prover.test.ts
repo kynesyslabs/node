@@ -36,7 +36,7 @@ import { plonkVerifyBun, plonkVerifyBunStrict } from "../zk/BunPlonkWrapper"
 
 const signals = () => fixture.publicSignals.map(BigInt)
 
-// Offsets of the Interface v1 signal groups.
+// Offsets of the Interface v1.2 signal groups.
 const AT = {
     transferActive: 1,
     signerHi: 1 + N,
@@ -45,9 +45,8 @@ const AT = {
     fee: 1 + 4 * N,
     accountActive: 1 + 5 * N,
     accountHi: 1 + 5 * N + M,
-    balanceBefore: 1 + 5 * N + 3 * M,
-    deltaNegative: 1 + 5 * N + 4 * M,
-    deltaMagnitude: 1 + 5 * N + 5 * M,
+    deltaNegative: 1 + 5 * N + 3 * M,
+    deltaMagnitude: 1 + 5 * N + 4 * M,
     last: SETTLEMENT_PUBLIC_SIGNALS - 1,
 }
 const proof = () => structuredClone(fixture.proof) as Record<string, unknown>
@@ -63,7 +62,7 @@ function rebuilt(edit: (p: ReturnType<typeof plan>) => void, hashOrder?: number[
     edit(p)
     const s = settlementPublicSignals(
         p.transfers.map(t => ({ commitment: t.commitment, signer: t.from, nonce: t.nonce, fee: t.fee })),
-        p.changes.map(c => ({ account: c.account, balanceBefore: p.balancesBefore.get(c.account) as bigint, delta: c.delta })),
+        p.changes.map(c => ({ account: c.account, delta: c.delta })),
     )
     if (hashOrder) s[0] = commitmentsHash(hashOrder.map(i => p.transfers[i].commitment))
     return s
@@ -159,10 +158,16 @@ describe("verifySettlementProof", () => {
         expect(accepted).toEqual([])
     })
 
-    it("rejects a changed public balance", async () => {
-        const s = rebuilt(p => p.balancesBefore.set(p.changes[1].account, 1n))
-        expect(publicSignalsProblem(s)).toBeUndefined()
-        expect(await verifySettlementProof(s, proof())).toBe(false)
+    it("binds no balance: the same batch planned on other balances verifies with the same proof", async () => {
+        const { transfers, balances, nonces } = fixtureBatch()
+        const richer = new Map([...balances].map(([a, b]) => [a, b * 3n + 7n]))
+        const p = planSettlement(transfers, richer, nonces)
+        expect(p.transfers.map(t => t.txHash)).toEqual(plan().transfers.map(t => t.txHash))
+        const s = settlementPublicSignals(
+            p.transfers.map(t => ({ commitment: t.commitment, signer: t.from, nonce: t.nonce, fee: t.fee })),
+            p.changes.map(c => ({ account: c.account, delta: c.delta })),
+        )
+        expect(await verifySettlementProof(s, proof())).toBe(true)
     })
 
     it("rejects a changed delta", async () => {
@@ -182,7 +187,7 @@ describe("verifySettlementProof", () => {
     })
 
     it("rejects any signal at or above the field order, which would alias a valid one", async () => {
-        for (const i of [0, AT.transferActive, AT.nonce, AT.accountActive + 3, AT.balanceBefore, AT.last]) {
+        for (const i of [0, AT.transferActive, AT.nonce, AT.accountActive + 3, AT.deltaMagnitude, AT.last]) {
             const s = signals()
             s[i] += FIELD_ORDER
             expect(publicSignalsProblem(s)).toMatch(/out of range/)
@@ -205,7 +210,7 @@ describe("verifySettlementProof", () => {
         expect(at(AT.accountHi, 1n << 128n)).toMatch(/out of range/)
         expect(at(AT.nonce, 1n << 64n)).toMatch(/out of range/)
         expect(at(AT.nonce, (1n << 64n) - 1n)).toBeUndefined()
-        expect(at(AT.balanceBefore, 1n << 128n)).toMatch(/out of range/)
+        expect(at(AT.deltaMagnitude, 1n << 128n)).toMatch(/out of range/)
         expect(at(AT.deltaNegative, 2n)).toMatch(/out of range/)
         expect(at(AT.deltaMagnitude, -1n)).toMatch(/out of range/)
     })

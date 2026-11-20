@@ -1,7 +1,7 @@
 # L2PS settlement with validator-checked zero-knowledge proofs
 
 Status: in implementation. Ships behind a new `l2psSettlement` fork, active
-from mainnet block 0. The binding formats are in "Interface v1" and "Interface v1.1" below.
+from mainnet block 0. The binding formats are in "Interface v1" and "Interface v1.2" below.
 
 ## Problem
 
@@ -38,8 +38,8 @@ The current code does not give them one. Checked on `stabilisation` at
 1. Every validator applies the same balance changes for a batch, in the block
    that carries it, and Sync applies them the same way.
 2. A validator applies those changes only if a proof shows they are exactly
-   the net result of transfers that the senders signed, with no overdraft and
-   no overflow.
+   the net result of transfers that the senders signed, and every touched
+   account can cover its net change at the point the batch applies.
 3. Validators learn the net change per account, never the individual
    transfers.
 4. The chain's liveness does not depend on proving: proving never runs on a
@@ -89,15 +89,16 @@ The `l2psBatch` transaction gains, inside its signed content:
 `L2PSSettlement(N, M)`, up to N transfers and up to M touched accounts,
 M = 2N. A batch with fewer fills the tail with inactive slots: each slot has a
 public `active` flag, active slots come first, an inactive account slot has
-address, balance and change 0 and is never indexed by a transfer, and an
+address and change 0 and is never indexed by a transfer, and an
 inactive transfer slot has commitment 0 and touches no account. The strict
 address order applies to active slots only, so one circuit serves every batch
 up to its size.
 
 The statement: a Poseidon hash over the N commitments, each commitment's
-signer and nonce, the M account addresses, their balances before the batch
-and their net changes. Its one public input is a hash of the statement
-("Interface v1.1"), which every validator computes from its own values.
+signer, nonce and fee, the M account addresses and their net changes. It
+holds no balance, so it depends on the transaction alone. Its one public
+input is a hash of the statement ("Interface v1.2"), which every validator
+computes from the transaction.
 
 Private inputs: each transfer's `from`, `to`, `amount`, `salt`, and the index
 of its sender and receiver among the M accounts.
@@ -112,23 +113,31 @@ Constraints, per transfer:
 - `from` equals the commitment's public signer, so a member cannot sign a
   commitment that debits another account;
 - `from` and `to` equal the accounts at the given indices (selector over M);
-- the amount and the running balances are range-checked to 128 bits. 64 bits
-  covers about 1.8 × 10^10 DEM at 10^9 OS per DEM, which a treasury account
-  could exceed;
-- the running sender balance does not go below zero, applied in batch order.
+- the amount and the fee are range-checked to 128 bits. 64 bits covers about
+  1.8 × 10^10 DEM at 10^9 OS per DEM, which a treasury account could exceed.
 
-And for the whole batch: each account's balance after the last transfer minus
-its balance before equals its public net change. The M addresses are strictly
-increasing, which the circuit checks and validators check before verifying,
-so one account cannot appear twice with the same balance spent from each.
+And for the whole batch: for each account, the amounts it receives minus the
+amounts and fees it sends equal its public net change. The M addresses are
+strictly increasing, which the circuit checks and validators check before
+verifying, so one account cannot appear twice with its debits split between
+two slots.
 
-Balances before the batch are public L1 state, so validators supply them from
-their own GCR instead of trusting the prover: the working state after every
-earlier transaction in the block, L1 transfers and earlier batches included.
-Two batches proven against the same parent balance cannot then both spend it.
+The proof binds no balance. Validators check solvency in public instead, at
+apply time, on their working state (the state after every earlier
+transaction in the block, L1 transfers and earlier batches included): every
+touched account's balance plus its net change must be at least zero, or the
+batch fails. The net changes are public anyway, so this check reveals
+nothing new, and two batches that spend the same balance cannot both pass
+it. A batch is all or nothing and settles as one net transfer: a transfer
+may be paid out of an amount the same batch credits to its sender, whatever
+their order. Earlier versions bound the balances before the batch, which
+made every proof stale when any L1 transaction moved a touched account's
+balance during the two minutes of proving; an account that is paid on L1
+often could then never settle.
 
 Measured for N = 9, M = 18 (`l2ps_settlement.circom`, Interface v1.1,
-2026-11-11, 32-core host shared with other load):
+2026-11-11, 32-core host shared with other load; Interface v1.2 below the
+table):
 
 | | |
 |---|---|
@@ -138,6 +147,15 @@ Measured for N = 9, M = 18 (`l2ps_settlement.circom`, Interface v1.1,
 | Key build | about 5 s and 3.3 GB for the PLONK setup; byte-identical zkey from the setup path and a separate manual build |
 | Proof | 33-40 s per batch in the prover subprocess (Bun, one core), whatever the number of transfers; peak 1.0 GB (1.3 GB without the GC hint the pool sets) |
 | Verify | 16 ms median, 17 ms worst of 20 warm runs; the first call also builds the curve once per process |
+
+Interface v1.2 (no balances in the statement, 2026-11-19, same host, load
+average 21-26 during the run): R1CS 15,186 non-linear + 15,590 linear
+constraints, 30,601 wires, 1 public input; 55,994 PLONK constraints in the
+same 2^16 domain (9,542 rows to spare); 101 MB zkey (101,055,060 bytes,
+byte-identical across two builds), 4.0 MB wasm; PLONK setup 4.1 s and
+3.3 GB; proof 45.6-47.7 s per batch in the prover subprocess under that
+load; verify 15 ms. Dropping the balances removed the 2M balance range
+checks and the running balances, about 9,400 rows.
 
 Batch size options, measured the same way (time per proof in the Bun
 prover subprocess, one core):
@@ -167,16 +185,17 @@ with worker threads (2.6 GB, 2.3 cores busy) against 46 s single-threaded
 Bun's 0.24, so the pool scales with single-threaded Bun processes. Witness
 generation alone takes about 60 ms.
 
-Range checks: witness values (amount, fee, nonce) and every running balance
-are range-checked inside the circuit, so the balance arithmetic cannot wrap.
-Balances before, net change magnitudes and account limbs are hashed as whole
-field elements, so they are exactly the verifier's values, and the verifier
+Range checks: witness values (amount, fee, nonce) are range-checked inside
+the circuit, so an account's net change, a sum of at most N credits and N
+debits of amount + fee, stays below 2^133 in magnitude and cannot wrap the
+field. Net change magnitudes and account limbs are hashed as whole field
+elements, so they are exactly the verifier's values, and the verifier
 accepts none outside its declared range (`verifySettlementProof` rejects any
 public signal outside it, which also rules out aliases at or above the field
-order, and `settlementPublicHash` refuses to hash one). The circuit alone
-accepts a magnitude or a balance of p - x; the tests show both, and that no
-verifier hashes them. Checking them in the circuit as well would cross 2^16
-rows and double the proving time. The account ordering keeps accounts unique
+order, and `settlementPublicHash` refuses to hash one). With the magnitude
+below 2^128 and the true net change below 2^133, the circuit's field
+equation holds over the integers. The circuit alone accepts a magnitude of
+p - x; the tests show it, and that no verifier hashes it. The account ordering keeps accounts unique
 for any limb values (the argument is in the circuit). Every active account
 must be touched by an active transfer, so the account list is exactly the
 touched set.
@@ -186,13 +205,14 @@ touched set.
 For each `l2psBatch` in a block, once `l2psSettlement` is active:
 
 1. Each commitment's signature verifies against its public signer, and its
-   public nonce is fresh (nonce rule as for L1 transfers). The circuit ties
-   both to the commitment, so a replay with another nonce needs a commitment
-   the signer never signed.
-2. The public inputs are rebuilt from the transaction and the validator's own
-   working state at that transaction, never taken from the transaction.
-3. The PLONK proof verifies against the committed key, with the hash of the
-   rebuilt signals as its public input (about 20 ms). `verifySettlementProof`
+   public nonce is the signer's next L2PS nonce in the batch's subnet ("L2PS
+   nonce" below). The circuit ties both to the commitment, so a replay with
+   another nonce needs a commitment the signer never signed.
+2. Every account in `changes` covers its net change: its working-state
+   balance plus its delta is at least zero.
+3. The public inputs are rebuilt from the transaction alone, never taken
+   from it as signals. The PLONK proof verifies against the committed key,
+   with the hash of the rebuilt signals as its public input (about 20 ms). `verifySettlementProof`
    returns false only when the proof is invalid on every honest node
    (signals out of range, malformed or non-canonical proof, a point off the
    curve, a failed pairing). When this node cannot judge (verification key
@@ -205,6 +225,29 @@ For each `l2psBatch` in a block, once `l2psSettlement` is active:
    reaches the same verdict. Only a verifier fault (step 3) stops block
    apply.
 
+### L2PS nonce
+
+A private transfer spends a nonce of its own, never the sender's L1 account
+nonce. Each account holds one L2PS nonce per subnet, kept on the account
+row (`gcr_main.l2psNonces`, a JSON object from subnet uid to nonce; a subnet
+absent from it, and an account absent from the table, read 0). Genesis and
+snapshots start every account with none. A settlement batch moves it with
+an `l2psNonce` edit (account, subnet uid, count), which only the node
+derives from a settlement batch: block apply refuses a transaction that
+ships one. The edit applies, fails and rolls back with the account row like
+the L1 nonce edit, and nothing else reads or writes the field. An L1
+transaction never moves an L2PS nonce and a private transfer never moves
+the L1 nonce, so an L1 transaction sent right after a private transfer is
+not held behind the transfer's settlement.
+
+Replay across subnets stays impossible: the signed message names the
+subnet (`l2ps-settlement:v2:<chainId>:<l2psUid>:<c>`), so a commitment
+signed for one subnet's nonce verifies in no other subnet.
+
+Clients read it with the `getL2PSNonce` nodeCall
+(`{ l2psUid, address }`, answered with the nonce as a number); the SDK's
+private-transfer builder uses it by default.
+
 The local `l2ps_proofs` application path is removed once the fork is active.
 That closes DEM-816.
 
@@ -213,11 +256,16 @@ about 1 s to block validation.
 
 ### Proving (subnet member nodes)
 
-- The aggregator decrypts the batch (it is a member), builds the witness from
-  the real transfers and the touched balances at its current tip, and proves
-  in a subprocess. If any of those balances changes before the batch is
-  included, validation fails and the batch goes back to the L2PS mempool to be
-  proven again; an account that is busy on L1 can delay its subnet's batches.
+- The aggregator decrypts the batch (it is a member), plans it on the
+  touched balances and L2PS nonces at its current tip, builds the witness
+  from the real transfers and proves in a subprocess. L1 transactions that
+  move a touched balance while the batch proves do not void it: the proof
+  binds no balance. The batch fails on L1 only if a touched account can no
+  longer cover its net change when the batch applies (a sender spent its
+  balance on L1 meanwhile) or an L2PS nonce it spends was spent first. Then
+  the aggregator re-plans the batch's transfers on the tip: a transfer the
+  sender's balance no longer covers is dropped with a reason, and the rest
+  go back to the queue and settle in the next batch.
 - No main-thread fallback. A batch that cannot be proved stays in the L2PS
   mempool and is retried; it never goes out without a proof.
 - Throughput is about one core and 1 GB per 0.24 transfer/s (a full batch of
@@ -227,22 +275,22 @@ about 1 s to block validation.
 - Parallel proving: a cycle plans at most `L2PS_SETTLEMENT_PROVERS` batches,
   across every subnet the node is a member of, each on accounts that no
   batch in flight or planned before it in the cycle names (sender, receiver
-  or change), so every batch binds tip balances no other unsettled batch
-  moves. It proves them all at once and submits each in plan order as soon
+  or change), so no two unsettled batches of a member debit one balance or
+  spend one signer's L2PS nonces. It proves them all at once and submits each in plan order as soon
   as it and the batches before it are proved, so the same queue and tip give
-  the same batches in the same order however the proofs interleave. No batch
-  waits for a prover after it is planned: its tip is never older than one
-  proof. Subnets are visited in uid order from a starting subnet that moves
+  the same batches in the same order however the proofs interleave. Subnets are visited in uid order from a starting subnet that moves
   by one each cycle, so subnets that share an account take turns at it.
 - A batch the mempool refuses backs its subnet off; other subnets go on. Its
   transfers are counted towards isolation only when no retry can change the
   refusal (unstorable, larger than a block), never for a full pool or a
   database error. A submission that throws fails only its batch; a batch the
   mempool took is followed to the end even when marking its rows fails.
-- An L1 failure counts towards isolation only when the batch's accounts are
-  still at the balances and nonces it was proved on: a failed settlement
-  edits none of them, so any change came from another transaction and made
-  the proof stale. Unknown (a batch from before a restart) counts as moved.
+- An L1 failure counts towards isolation only when the tip explains none of
+  it: no signer's L2PS nonce moved since planning (a failed settlement edits
+  none, so a move came from another batch) and every touched account still
+  covers its net change. A balance change that keeps every account covered
+  says nothing about the failure. Unknown (a batch from before a restart)
+  counts as explained.
 - Stopping the service closes the loop before it waits for the cycle: no
   proof starts and no batch goes out after that, and proofs the closing pool
   cuts short count against nothing.
@@ -254,11 +302,11 @@ aggregator keeps transfers it cannot place from crowding out the rest. The
 bounds are constants in the code, not configuration, so every member admits
 and expires the same transfers.
 
-- Nonce: above the sender's L1 account nonce and at most `MAX_NONCE_AHEAD`
-  = 18 (two full batches) past it, and not a nonce this member already holds
-  unsettled for the sender in any of its subnets: they all settle against
-  the one L1 nonce. So a sender has at most 18 unsettled transfers on one
-  member.
+- Nonce: above the sender's L2PS nonce in the transfer's subnet, at most
+  `MAX_NONCE_AHEAD` = 18 (two full batches) past it, and not a nonce this
+  member already holds unsettled for the sender in that subnet. Subnets
+  have separate nonces, so the same nonce may be queued in two subnets. A
+  sender has at most 18 unsettled transfers per subnet on one member.
 - Size: the stored envelope (the outer L2PS transaction as JSON) is at most
   `SETTLEMENT_ENVELOPE_MAX_BYTES` = 174,506 bytes, so a full batch of 9
   rows (each envelope with its about 180-byte row wrapper, 256 reserved) in
@@ -285,8 +333,7 @@ and expires the same transfers.
   has worked since its first failure alone; a prover or verifier that fails
   everything drops nothing. A batch that expired past its reference block
   (`TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE`) is not counted against its
-  transfers. A transfer whose account keeps moving on L1
-  between proving and inclusion can be dropped this way and is signed again.
+  transfers, nor is a failure the tip explains (see Proving).
 - The prover back-off is per subnet; other subnets keep settling.
 - Restart: rows still `batched` are tied back to their L1 batch through the
   history, all of them, page by page; a failed read stops the cycle and is
@@ -323,24 +370,27 @@ tests the same file.
 - Commitment: `c = Poseidon8(from_hi, from_lo, to_hi, to_lo, amount, fee,
   nonce, salt)`, circomlib Poseidon (poseidon-lite on both sides).
 - Signed message: UTF-8 of
-  `l2ps-settlement:v1:<chainId>:<l2psUid>:<c as 0x + 64 hex>`, ed25519 by
+  `l2ps-settlement:v2:<chainId>:<l2psUid>:<c as 0x + 64 hex>`, ed25519 by
   the sender's account key. It cannot be read as a transaction preimage
   (`demos-tx:v1:`) or a personal message.
+  v2 marks the switch from the L1 nonce to the L2PS nonce: a transfer
+  signed under v1 carried an L1 nonce, and on a chain where the L2PS nonce
+  starts at 0 it could otherwise be settled a second time.
 - Commitments hash: `Poseidon_N(c_0 .. c_(N-1))` (Poseidon9 for N = 9),
   inactive slots 0.
-- Nonce: the sender's L1 account nonce. The transfers of one signer in a
-  batch carry consecutive nonces from the account's nonce + 1, in batch
-  order, and settlement spends them. An L1 transaction that takes a nonce
-  first makes the transfer void; the subnet drops it.
+- Nonce: the sender's L2PS nonce in the transfer's subnet ("L2PS nonce"
+  above), never the L1 account nonce. The transfers of one signer in a
+  batch carry consecutive nonces from that nonce + 1, in batch order, and
+  settlement spends them.
 - Fee: per transfer, public, at least the node's native transfer fee. The
   sender pays `amount + fee`. The fee is distributed as an L1 native fee
   (`generateFeeDistributionEdits`, network fee = `fee`).
 
-### Public signals (1 + 5N + 6M = 154)
+### Public signals (1 + 5N + 5M = 136)
 
     commitmentsHash,
     transferActive[N], signerHi[N], signerLo[N], nonce[N], fee[N],
-    accountActive[M], accountHi[M], accountLo[M], balanceBefore[M],
+    accountActive[M], accountHi[M], accountLo[M],
     deltaNegative[M], deltaMagnitude[M]
 
 Active slots come first and inactive slots are all zero. `delta` is the
@@ -355,13 +405,11 @@ Circuit constraints, in addition to "Circuit" above:
 - the commitment opens with the sender account's limbs at `senderIndex`
   and the receiver's at `receiverIndex`, indices below M and pointing at
   active accounts; the signer is bound to the sender through the public
-  hash (Interface v1.1);
-- running balances in batch order: the sender is debited `amount + fee`,
-  then the receiver credited `amount`; every running balance stays in
-  [0, 2^128);
-- `deltaNegative` is a bit, `deltaMagnitude` is below 2^128, magnitude 0
-  has `deltaNegative` 0, and `balanceAfter - balanceBefore` equals the signed
-  delta;
+  hash (Interface v1.2);
+- per account, the sum over transfers of `amount` where it receives minus
+  `amount + fee` where it sends equals the signed delta;
+- `deltaNegative` is a bit, `deltaMagnitude` is below 2^128 (by the
+  verifier), and magnitude 0 has `deltaNegative` 0;
 - active accounts strictly increasing by `(hi, lo)`.
 
 ### Transaction
@@ -376,9 +424,8 @@ The `l2psBatch` payload (`data[1]`) gains, inside the signed content:
       proof: <snarkjs PLONK proof JSON>
     }
 
-Balances before are never in the transaction: each validator reads them from
-its working state at that transaction. Public signals are rebuilt, never
-read from the transaction.
+Public signals are rebuilt from the record, never read from the transaction
+as signals; no balance is among them.
 
 The encrypted inner transfer (SDK) is a native send whose `data[1]` carries
 `settlement: { fee, salt, commitment, signature }` and whose `content.nonce`
@@ -399,24 +446,29 @@ validator reaches the same verdict:
    block); every `changes` account, a zero delta included, is loaded and
    orders the batch with the block's other transactions over it;
 2. each signature over its message; per-signer nonces consecutive from the
-   working-state nonce + 1; each fee at least the native transfer fee;
-3. public signals from the working state; PLONK verify, with their
+   working-state L2PS nonce in the batch's subnet + 1; each fee at least the
+   native transfer fee;
+3. every `changes` account's working-state balance plus its delta is at
+   least zero;
+4. public signals from the record; PLONK verify, with their
    `settlementPublicHash` as the one public input, against the committed key
    `src/libs/l2ps/zk/keys/settlement/verification_key.json`;
-4. apply each delta, add the transfer count to each signer's nonce, credit
-   each fee's distribution edits without their sender debit (the delta
-   already holds it).
+5. apply each delta, add the transfer count to each signer's L2PS nonce in
+   the subnet (`l2psNonce` edit), credit each fee's distribution edits
+   without their sender debit (the delta already holds it).
 
 The local `l2ps_proofs` path (`L2PSConsensus.applyPendingProofs`) and
 `L2PSProofManager.createProof` stop when the fork is active, and members
 refuse old-format transfers at admission.
 
-## Interface v1.1
+## Interface v1.2
 
 Replaces the public signal list of v1 as the circuit's public input; the
-encoding above, the transaction and `settlementPublicSignals` are unchanged.
-Node code: `settlementPublicHash` in `encoding.ts`; the circuit computes the
-same value from its inputs and checks it against its one public input.
+encoding above and the transaction are unchanged. Node code:
+`settlementPublicHash` in `encoding.ts`; the circuit computes the same value
+from its inputs and checks it against its one public input. v1.1 also packed
+each account's balance before the batch; v1.2 drops it with the running
+balances (see "Circuit"), so the hash depends on the transaction alone.
 
 The circuit takes the v1 signals as private inputs except `signerHi` and
 `signerLo`: it opens each commitment with the limbs of the account at
@@ -427,12 +479,11 @@ them, and computes:
    active account whose `(hi, lo)` equals the signer's; no such account
    rejects the statement. If idle, the signer limbs must be 0 (else reject)
    and `senderIndex_i` = 0.
-2. Packed elements, in order (2 + N + 4M = 83 for N = 9):
+2. Packed elements, in order (2 + N + 3M = 65 for N = 9):
    - `commitmentsHash`;
    - per transfer i: `fee_i + nonce_i * 2^128 + senderIndex_i * 2^192 +
      transferActive_i * 2^200`;
-   - per account j: `accountHi_j`, `accountLo_j`, `balanceBefore_j`,
-     `deltaMagnitude_j`;
+   - per account j: `accountHi_j`, `accountLo_j`, `deltaMagnitude_j`;
    - `sum_j (accountActive_j * 4^j + deltaNegative_j * 2 * 4^j)`.
 3. Sponge: `h = 0`; for each chunk of 7 elements, the last padded with
    zeros: `h = Poseidon8(h, e_7k, .., e_7k+6)` (circomlib Poseidon,
@@ -442,11 +493,11 @@ The packing is injective on range-checked values: fee < 2^128 and nonce <
 2^64 are range-checked in the circuit, `senderIndex` < M <= 126 by its
 selector, the flags are bits, and everything else is a whole element. Each
 value of the statement therefore changes the hash; the tests change every
-one of the 154 signals in turn and check that the proof fails or the
+one of the 136 signals in turn and check that the proof fails or the
 statement is refused.
 
 Why packed Poseidon8 rather than one element per signal: absorbing the 154
-signals one by one costs about 45,000 PLONK rows with Poseidon8 (294 per
+signals of Interface v1.1 one by one costs about 45,000 PLONK rows with Poseidon8 (294 per
 element) or 54,000 with Poseidon16 (328 per element, 15 per chunk), which
 would put N = 9 at 2^17 and double its proving time. Packed, the hash costs about 24,700 rows
 for N = 9. One public input instead of 154 shrinks the proving key from
@@ -455,8 +506,8 @@ the prover's memory from 4 GB to 1 GB.
 
 Example (pinned in `encoding.test.ts`): transfers A -> B (10, fee 1, nonce
 3, salt 9) and C -> A (4, fee 2, nonce 7, salt 8), A = 0x11..11, B =
-0x22..22, C = 0x33..33, balances before A 100, B 0, C 50, deltas -7, +10,
--6: `publicHash = 0x06e69393040f0b0be0b77a589cb51dc8d89beb42f28b4a26eec431cb8b544c27`.
+0x22..22, C = 0x33..33, deltas -7, +10, -6:
+`publicHash = 0x2d3b8bd8d256f550cdc426a00feea2a30188cf9811599fe1f973f6b09000e8f5`.
 
 ## Launch stance
 
@@ -467,7 +518,7 @@ are refused from the start, so DEM-816 never exists on mainnet.
 
 | Step | Work | Estimate | Status |
 |------|------|----------|--------|
-| 1 | Circuit `L2PSSettlement(9, 18)`, witness builder, constraint and proving-time check against the budget | 2 days | Done: Interface v1.1, one hashed public input |
+| 1 | Circuit `L2PSSettlement(9, 18)`, witness builder, constraint and proving-time check against the budget | 2 days | Done: Interface v1.2, one hashed public input, no balances in the statement |
 | 2 | SDK: transfer commitment, signature domain, encrypted payload carries the salt | 1 day | Open |
 | 3 | Aggregator: settlement record, real witness, no fallback, prover pool | 2 days | Node side done: plan, prove in the subprocess, submit at the tip, follow each batch, re-plan a failed one; the planner and prover come with step 1 |
 | 4 | Validation and apply in block and Sync behind the fork, remove the local apply path | 2 days | Done: block apply and Sync share `HandleGCR.applyTransactions`; caps of 9 transfers, 18 changes and 20 batches per block; the local proof path and the hash update stop under the fork |

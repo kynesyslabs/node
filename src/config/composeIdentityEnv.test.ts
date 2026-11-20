@@ -17,6 +17,7 @@ const PROVIDER_KEYS = [
     EnvKey.ETHERSCAN_API_KEY,
     EnvKey.HELIUS_API_KEY,
     EnvKey.SOLANA_RPC,
+    EnvKey.VALIDATOR_SOLANA_RPCS,
 ]
 
 const repo = path.resolve(import.meta.dir, "../..")

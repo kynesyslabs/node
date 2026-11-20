@@ -83,15 +83,15 @@ describe("encoding rules", () => {
         const s = settlementPublicSignals(
             [{ commitment: c, signer: A, nonce: 3n, fee: 1n }],
             [
-                { account: A, balanceBefore: 100n, delta: -11n },
-                { account: B, balanceBefore: 0n, delta: 10n },
+                { account: A, delta: -11n },
+                { account: B, delta: 10n },
             ],
         )
         expect(s).toHaveLength(SETTLEMENT_PUBLIC_SIGNALS)
         expect(s[0]).toBe(commitmentsHash([c]))
         expect(s.slice(1, 1 + N)).toEqual([1n, ...Array(N - 1).fill(0n)])
         // deltaNegative and deltaMagnitude are the last 2 * M signals
-        const negative = 1 + 5 * N + 4 * M
+        const negative = 1 + 5 * N + 3 * M
         expect(s.slice(negative, negative + 2)).toEqual([1n, 0n])
         expect(s.slice(negative + M, negative + M + 2)).toEqual([11n, 10n])
     })
@@ -100,23 +100,23 @@ describe("encoding rules", () => {
         const t = [{ commitment: 1n, signer: A, nonce: 1n, fee: 0n }]
         expect(() =>
             settlementPublicSignals(t, [
-                { account: B, balanceBefore: 0n, delta: 0n },
-                { account: A, balanceBefore: 0n, delta: 0n },
+                { account: B, delta: 0n },
+                { account: A, delta: 0n },
             ]),
         ).toThrow()
         expect(() =>
             settlementPublicSignals(t, [
-                { account: A, balanceBefore: 0n, delta: 0n },
-                { account: A, balanceBefore: 0n, delta: 0n },
+                { account: A, delta: 0n },
+                { account: A, delta: 0n },
             ]),
         ).toThrow()
     })
 })
 
-// The design doc's Interface v1.1 example; changing it is an interface change.
-const PINNED_PUBLIC_HASH = "0x06e69393040f0b0be0b77a589cb51dc8d89beb42f28b4a26eec431cb8b544c27"
+// The design doc's Interface v1.2 example; changing it is an interface change.
+const PINNED_PUBLIC_HASH = "0x2d3b8bd8d256f550cdc426a00feea2a30188cf9811599fe1f973f6b09000e8f5"
 
-describe("settlementPublicHash (Interface v1.1)", () => {
+describe("settlementPublicHash (Interface v1.2)", () => {
     const C = "0x" + "33".repeat(32)
     const statement = () => {
         const c1 = settlementCommitment({ from: A, to: B, amount: 10n, fee: 1n, nonce: 3n, salt: 9n })
@@ -127,13 +127,13 @@ describe("settlementPublicHash (Interface v1.1)", () => {
                 { commitment: c2, signer: C, nonce: 7n, fee: 2n },
             ],
             [
-                { account: A, balanceBefore: 100n, delta: -7n },
-                { account: B, balanceBefore: 0n, delta: 10n },
-                { account: C, balanceBefore: 50n, delta: -6n },
+                { account: A, delta: -7n },
+                { account: B, delta: 10n },
+                { account: C, delta: -6n },
             ],
         )
     }
-    // Offsets of the Interface v1 signal groups.
+    // Offsets of the Interface v1.2 signal groups.
     const at = {
         transferActive: 1,
         signerHi: 1 + N,
@@ -142,9 +142,8 @@ describe("settlementPublicHash (Interface v1.1)", () => {
         fee: 1 + 4 * N,
         accountActive: 1 + 5 * N,
         accountHi: 1 + 5 * N + M,
-        balanceBefore: 1 + 5 * N + 3 * M,
-        deltaNegative: 1 + 5 * N + 4 * M,
-        deltaMagnitude: 1 + 5 * N + 5 * M,
+        deltaNegative: 1 + 5 * N + 3 * M,
+        deltaMagnitude: 1 + 5 * N + 4 * M,
     }
     const refuses = (s: bigint[], message: RegExp) => {
         expect(() => settlementPublicHash(s)).toThrow(SettlementEncodingError)
@@ -228,8 +227,6 @@ describe("settlementPublicHash (Interface v1.1)", () => {
             [at.fee, 1n << 128n],
             [at.accountActive, 2n],
             [at.accountHi, 1n << 128n],
-            [at.balanceBefore, 1n << 128n],
-            [at.balanceBefore, FIELD_ORDER - 5n],
             [at.deltaNegative, 2n],
             [at.deltaMagnitude, 1n << 128n],
             [at.deltaMagnitude, FIELD_ORDER - 7n],

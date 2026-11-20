@@ -27,7 +27,7 @@ jest.mock("src/utilities/logger", () => ({
 const signing = await import("src/libs/identity/signingRecord")
 const { CommitLockError, commitLockPath, writeCommitLock } = await import("./lockStore")
 const { loadPrevoteRecord, prevoteRecordPath, recordPrevoteRound } = await import("./prevoteRecord")
-const { armRestartSigningFloor } = await import("./restartFloor")
+const { armRestartSigningFloor, waitForRestartSigningFloor } = await import("./restartFloor")
 const { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS: LEAD } = await import("../routines/cosignTimestamp")
 
 const GENESIS = "hash-0"
@@ -232,5 +232,39 @@ describe("the floor itself", () => {
         expect(() =>
             prevote({ height: 11, round: BOOT_NOW + LEAD + 1, hash: "block-11-x" }),
         ).toThrow(CommitLockError)
+    })
+})
+
+describe("waiting for the floor before joining the network", () => {
+    // A clock that advances one second on every sleep
+    function clock(start: number) {
+        let t = start
+        return {
+            now: () => t,
+            sleep: async () => {
+                t += 1
+            },
+        }
+    }
+
+    it("returns at once when no floor is set", async () => {
+        const c = clock(BOOT_NOW)
+        expect(await waitForRestartSigningFloor(c.now, c.sleep)).toBe(true)
+        expect(c.now()).toBe(BOOT_NOW)
+    })
+
+    it("returns once the clock is past the floor, when rounds are signed", async () => {
+        const floor = armRestartSigningFloor(identityFile, BOOT_NOW)
+        const c = clock(BOOT_NOW)
+        expect(await waitForRestartSigningFloor(c.now, c.sleep)).toBe(true)
+        expect(c.now()).toBe(floor + 1)
+        expect(signing.restartFloorRefusal(c.now())).toBeNull()
+    })
+
+    it("gives up when the state files put the floor far ahead", async () => {
+        signing.setRestartSigningFloor(BOOT_NOW + 3600)
+        const c = clock(BOOT_NOW)
+        expect(await waitForRestartSigningFloor(c.now, c.sleep)).toBe(false)
+        expect(c.now()).toBe(BOOT_NOW + LEAD + 2)
     })
 })

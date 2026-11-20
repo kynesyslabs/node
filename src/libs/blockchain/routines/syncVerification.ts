@@ -27,6 +27,21 @@ import { countStorageRootSyncMismatch } from "@/features/metrics/consensusMetric
 type FinalStatus = typeof TRANSACTION_STATUS.CONFIRMED | typeof TRANSACTION_STATUS.FAILED
 
 /**
+ * Attrs as sync writes them. The SDK's TransactionAttrs requires
+ * reference_block, but a transaction served without attrs gets code-only
+ * attrs when its failure code is pinned, and is stored that way.
+ */
+type NodeTransactionAttrs = Omit<
+    NonNullable<Transaction["attrs"]>,
+    "reference_block"
+> & { reference_block?: number }
+
+/** A served transaction whose attrs sync may rewrite. */
+type ServedTransaction = Omit<Transaction, "attrs"> & {
+    attrs?: NodeTransactionAttrs
+}
+
+/**
  * A served block that must not be applied: what the peer sent disagrees with
  * the quorum-signed block or with what applying it does here. The peer, not
  * the node, is at fault, so callers drop the block and move to another peer.
@@ -327,7 +342,7 @@ export function localStatuses(
  * the local apply does not report one. TX_EXISTS is left alone: the forger
  * checks nonce and reference block first, so an honest code can differ.
  */
-export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): void {
+export function pinFailureCodes(txs: ServedTransaction[], plan: BlockOutcomePlan): void {
     for (const tx of txs) {
         const code = plan.failedBeforeApply.get(tx.hash)
         if (code === undefined || code === ErrorCode.TX_EXISTS || tx.attrs?.code === code) continue
@@ -349,7 +364,7 @@ export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): voi
  * local outcome.
  */
 export function pinResultCodes(
-    txs: Transaction[],
+    txs: ServedTransaction[],
     plan: BlockOutcomePlan,
     height: number,
 ): void {
@@ -359,7 +374,7 @@ export function pinResultCodes(
             if (tx.attrs && "code" in tx.attrs) {
                 log.warn(`[sync] tx ${tx.hash}: served code on a confirmed transaction dropped`)
                 const { code: _served, ...rest } = tx.attrs
-                tx.attrs = rest as typeof tx.attrs
+                tx.attrs = rest
             }
             continue
         }
@@ -374,7 +389,7 @@ export function pinResultCodes(
         tx.attrs = {
             ...(tx.attrs ?? {}),
             code: ErrorCode.TX_EXECUTE_FAILED,
-        } as typeof tx.attrs
+        }
     }
 }
 

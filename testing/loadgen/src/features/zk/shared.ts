@@ -1,5 +1,5 @@
 import { rpcPost } from "../../framework/rpc"
-import { envInt, normalizeRpcUrl } from "../../framework/common"
+import { envInt, logNonCriticalErrorOnce, normalizeRpcUrl } from "../../framework/common"
 import { getTokenTargets } from "../../token_shared"
 
 export type ZkTargetProbe = {
@@ -76,13 +76,18 @@ export function buildUniqueHex64(prefix = ""): string {
   return buildHex64(`${prefix}${nowHex}${randomHex}`)
 }
 
-async function fetchJson(url: string): Promise<{ status: number; ok: boolean; json: any }> {
+// `route` is the URL without its per-request commitment or hash, so a malformed reply
+// logs once per target and route, not once per request.
+async function fetchJson(url: string, route = url): Promise<{ status: number; ok: boolean; json: any }> {
   const timeoutMs = envInt("ZK_HTTP_TIMEOUT_MS", 5000)
   const controller = timeoutMs > 0 ? new AbortController() : null
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
   try {
     const res = await fetch(url, controller ? { signal: controller.signal } : undefined)
-    const json = await res.json().catch(() => null)
+    const json = await res.json().catch(error => {
+      logNonCriticalErrorOnce(`zk.fetchJson:${route}`, "zk.fetchJson", error, { rpcUrl: url, status: res.status })
+      return null
+    })
     return { status: res.status, ok: res.ok, json }
   } finally {
     if (timer) clearTimeout(timer)
@@ -94,11 +99,13 @@ export async function getMerkleRoot(rpcUrl: string) {
 }
 
 export async function getMerkleProof(rpcUrl: string, commitment: string) {
-  return await fetchJson(`${httpBase(rpcUrl)}/zk/merkle/proof/${commitment}`)
+  const route = `${httpBase(rpcUrl)}/zk/merkle/proof`
+  return await fetchJson(`${route}/${commitment}`, route)
 }
 
 export async function getNullifierStatus(rpcUrl: string, hash: string) {
-  return await fetchJson(`${httpBase(rpcUrl)}/zk/nullifier/${hash}`)
+  const route = `${httpBase(rpcUrl)}/zk/nullifier`
+  return await fetchJson(`${route}/${hash}`, route)
 }
 
 export async function verifyProofRpc(rpcUrl: string, proof: Groth16Proof, publicSignals: string[]) {

@@ -99,7 +99,7 @@ Modes
 
 L2PS
   --l2ps / --no-l2ps      Set up L2PS on this node (implied by --l2ps-uid).
-  --l2ps-uid <id>         Subnet id: letters, digits, _ and -, up to 255.
+  --l2ps-uid <id>         Subnet id: letters, digits, _ and -, up to 128.
   --l2ps-role create|join create makes a new key; join imports the owner's key and IV.
   --l2ps-rpc <url>        RPC of a subnet member; repeat or comma-separate.
   --l2ps-key-file <path>  File holding the subnet key (hex) for join/import.

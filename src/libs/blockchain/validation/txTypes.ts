@@ -10,6 +10,7 @@
  */
 
 import type { Transaction } from "@kynesyslabs/demosdk/types"
+import { NFT_GATED_TX_TYPES } from "@/forks/nftValidatorGatingGate"
 
 /**
  * Types a client may submit over RPC and a peer may gossip. Each one either
@@ -74,9 +75,10 @@ function notAccepted(type: unknown): string {
  * its type, or null. A local policy of the node that first sees it, so it
  * needs no fork.
  */
-export function clientTxTypeRefusal(tx: TxView): string | null {
+export function clientTxTypeRefusal(tx: TxView, nftGating = false): string | null {
     const type = typeOf(tx)
     if (typeof type === "string" && CLIENT_TX_TYPES.has(type)) return null
+    if (nftGating && typeof type === "string" && NFT_GATED_TX_TYPES.has(type)) return null
     if (typeof type === "string" && NODE_TX_TYPES.has(type)) {
         return `${type} transactions are authored by nodes only`
     }
@@ -85,13 +87,14 @@ export function clientTxTypeRefusal(tx: TxView): string | null {
 
 /**
  * Why a block, or the consensus merge that fills one, refuses a transaction
- * for its type, or null. Applied under the `txTypeAllowList` fork.
+ * for its type, or null. Applied under the `txTypeAllowList` fork. A
+ * `validatorChallenge` is a type of its own only under `nftValidatorGating`.
  */
-export function blockTxTypeRefusal(tx: TxView): string | null {
+export function blockTxTypeRefusal(tx: TxView, nftGating = false): string | null {
     const type = typeOf(tx)
-    return typeof type === "string" && BLOCK_TX_TYPES.has(type)
-        ? null
-        : notAccepted(type)
+    if (typeof type !== "string") return notAccepted(type)
+    if (BLOCK_TX_TYPES.has(type)) return null
+    return nftGating && NFT_GATED_TX_TYPES.has(type) ? null : notAccepted(type)
 }
 
 /**

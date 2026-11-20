@@ -2,6 +2,16 @@
 
 This document describes the current integrated flow for adding Web2 identities (`github`, `discord`, `telegram`) via TLSNotary.
 
+On a network where the `keylessWeb2Identity` fork is active (mainnet, from block 0), GitHub, Discord and Twitter accounts link only through TLSNotary: `web2_identity_assign` with context `github`, `discord` or `twitter` is refused, so validators hold no GitHub, Discord or RapidAPI credentials. Under `tlsnVerified` the node reads the account from the attested response of one endpoint per context, with the request bound to the sender by the `X-Demos-Bind: demos-tlsn:v1:<context>:<sender>:<tlsn_request hash>` header:
+
+| context | request | account read from the response |
+| --- | --- | --- |
+| `github` | `GET https://api.github.com/user` | `login`, numeric `id` |
+| `discord` | `GET https://discord.com/api/users/@me` | `username`, decimal-string `id` |
+| `twitter` (only under `keylessWeb2Identity`) | `GET https://api.x.com/2/users/me` (X OAuth 2.0 user token, done in the user's browser) | `data.username`, decimal-string `data.id` |
+
+Telegram keeps its bot-signed attestation path.
+
 It reflects the behavior implemented in:
 - `src/libs/tlsnotary/verifier.ts`
 - `src/libs/network/routines/transactions/handleIdentityRequest.ts`

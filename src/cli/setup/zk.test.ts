@@ -48,6 +48,22 @@ describe("runL2psZkSetup", () => {
         expect(fs.existsSync(path.join(keysDir(5), "verification_key.generated.json"))).toBe(false)
     })
 
+    it("rebuilds settlement files that were built for an older committed verification key", async () => {
+        seedCommittedVkeys(BATCH_VKEY)
+        await runL2psZkSetup(root, fakeRunner(), recorder().say)
+        expect(inspectSettlementArtifacts(root).complete).toBe(true)
+        // A release with a new circuit ships a new committed key; the old zkey and wasm stay on disk.
+        const newKey = { ...BATCH_VKEY, power: 15 }
+        fs.writeFileSync(path.join(keysDir("settlement"), "verification_key.json"), JSON.stringify(newKey))
+        const stale = inspectSettlementArtifacts(root)
+        expect([stale.zkey, stale.wasm, stale.vkey, stale.current, stale.complete]).toEqual([true, true, true, false, false])
+        const runner = fakeRunner({ vkeyJson: JSON.stringify(newKey) })
+        const out = await runL2psZkSetup(root, runner, recorder().say, ["settlement"])
+        expect(out.ok).toBe(true)
+        expect(runner.calls).toContain("snarkjs plonk setup")
+        expect(inspectSettlementArtifacts(root).complete).toBe(true)
+    })
+
     it("refuses to ship a key whose verification key differs from the committed one", async () => {
         seedCommittedVkeys(BATCH_VKEY)
         const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ ...BATCH_VKEY, power: 15 }) }), recorder().say)
