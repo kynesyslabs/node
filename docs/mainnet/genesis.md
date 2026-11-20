@@ -109,11 +109,15 @@ what a validator would hit on this file, and the same checks fail
   the node boots but no block after block 0 can be forged;
 - a validator `connection_url` in that set that is not an http(s) URL with a
   host (and, if it names a port, one in 1-65535). Each one is exactly the
-  `EXPOSED_URL` that operator runs with, port included; peers dial it.
+  `EXPOSED_URL` that operator runs with, port included. Consensus finds
+  validators through the peer list, not this field, but go/no-go and
+  `launch-height1-check` reach block 0's validators at it, and RPC reports it.
   A validator without a URL is not reported, because the node accepts it:
   `null` in either list, and a missing or empty URL in a `validators.jsonl`
-  row (a genesis `validators` entry without one is refused at boot). Before
-  publishing, check separately that every launch validator has a URL.
+  row (a genesis `validators` entry without one is refused at boot).
+  `scripts/genesis-seeds.ts` asks for each seat's URL and writes no seat
+  without one; for rows written any other way, check before publishing that
+  every launch validator has a URL.
 
 What each value covers, how they are published, the 24 h rule and the
 height-1 check after launch are in [genesis-hash.md](genesis-hash.md).

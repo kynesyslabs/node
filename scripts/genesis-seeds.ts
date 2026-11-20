@@ -5,8 +5,9 @@
  *
  *   bun scripts/genesis-seeds.ts --key <solana key file> [--account <n>] > seeds.json
  *
- * Prompts on stderr for which of the wallet's allowlisted NFTs to use, then
- * prints one JSON document on stdout: the `validators` rows for
+ * Prompts on stderr for which of the wallet's allowlisted NFTs to use and for
+ * the EXPOSED_URL of the node that will run each seat, then prints one JSON
+ * document on stdout: the `validators` rows for
  * data/genesis.json and the `mnemonics` of their identity files, keyed by
  * address. stdout holds signing keys: redirect it to a file. If a proof
  * fails after others finished, the finished seats are still printed.
@@ -21,13 +22,14 @@ import { NFT_ALLOWLIST_PATH, NFT_ALLOWLIST_SHA256, parseAllowlist } from "../src
 import { TOKEN_PROGRAM_ID } from "../src/features/staking/proofBytes"
 import { verifySeededNfts } from "../src/features/staking/seedNft"
 import { newDemosIdentity } from "./demos-identity"
+import { connectionUrlProblem } from "./genesis-hash"
 import { PUBLIC_SOLANA_RPC, proveNft } from "./solana-proof"
 import { ACCEPTED_SECRET_FORMATS, loadSolanaSigner } from "./solana-signer"
 
 export interface SeedRow {
     address: string
     status: "2"
-    connection_url: null
+    connection_url: string
     staked_amount: "0"
     first_seen: 0
     valid_at: 0
@@ -36,11 +38,11 @@ export interface SeedRow {
     nft_proof_tx: string
 }
 
-export function seedRow(address: string, mint: string, owner: string, proofTx: string): SeedRow {
+export function seedRow(address: string, mint: string, owner: string, proofTx: string, url: string): SeedRow {
     return {
         address,
         status: "2",
-        connection_url: null,
+        connection_url: url,
         staked_amount: "0",
         first_seen: 0,
         valid_at: 0,
@@ -59,6 +61,20 @@ export function parseSelection(input: string, count: number): number[] {
     }
     if (new Set(picks).size !== picks.length) throw new Error("a mint backs one seat; pick each number once")
     return picks
+}
+
+/**
+ * A seat's connection URL: the EXPOSED_URL its node runs with. Launch checks
+ * (go/no-go, launch-height1-check) reach block 0's validators at this URL, so
+ * a seat is not written without one.
+ */
+export function parseSeatUrl(input: string, taken: ReadonlySet<string>): string {
+    const url = input.trim().replace(/\/+$/, "")
+    if (url === "") throw new Error("a seat needs the EXPOSED_URL of the node that runs it")
+    const problem = connectionUrlProblem(url)
+    if (problem) throw new Error(`${url} ${problem}`)
+    if (taken.has(url)) throw new Error(`${url} is already the URL of another seat`)
+    return url
 }
 
 function flag(name: string): string | undefined {
@@ -109,13 +125,18 @@ async function main(): Promise<void> {
 
     const rl = createInterface({ input: process.stdin, output: process.stderr })
     const answer = await rl.question("Mints to bind, one seat each (numbers, e.g. 1 3 4): ")
-    rl.close()
     const chosen = parseSelection(answer, mints.length).map(n => mints[n - 1])
+    // Asked before any proof is sent, so a typo costs no Solana transaction.
+    const urls: string[] = []
+    for (const { mint } of chosen) {
+        urls.push(parseSeatUrl(await rl.question(`EXPOSED_URL of the node for ${mint}: `), new Set(urls)))
+    }
+    rl.close()
 
     const validators: SeedRow[] = []
     const mnemonics: Record<string, string> = {}
     try {
-        for (const { mint, tokenAccount } of chosen) {
+        for (const [i, { mint, tokenAccount }] of chosen.entries()) {
             const { mnemonic, address } = await newDemosIdentity()
             const proofTx = await proveNft(
                 connection,
@@ -125,7 +146,7 @@ async function main(): Promise<void> {
                 line => console.error(line),
                 tokenAccount,
             )
-            validators.push(seedRow(address, mint, owner, proofTx))
+            validators.push(seedRow(address, mint, owner, proofTx, urls[i]))
             mnemonics[address] = mnemonic
         }
     } catch (e) {
