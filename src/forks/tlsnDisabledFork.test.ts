@@ -107,7 +107,8 @@ describe("the attestation token", () => {
         try {
             const out = await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
             expect(out.success).toBe(false)
-            expect(out.message).toContain("token creation failed")
+            // The error's message, not its default "Error: ..." stringification.
+            expect(out.message).toBe("Error processing native side-effects: token creation failed")
             expect((block.caches.accounts.get(SENDER) as any).balance).toBe(before.balance)
             expect((block.caches.accounts.get(SENDER) as any).nonce).toBe(before.nonce)
             expect(issuedTokens).toEqual([])

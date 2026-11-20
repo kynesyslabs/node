@@ -1819,14 +1819,19 @@ export default class HandleGCR {
         const placeOf = HandleGCR.editPlaces(entities, tx, simulate)
 
         const restoreFailedEdits = async (message: string): Promise<GCRApplyResult> => {
-            for (const snap of snapshots) {
-                if (snap.entity === null) {
-                    const freshEntity = await HandleGCR.createAccount(snap.pubkey, {}, true)
-                    entities.accounts.set(snap.pubkey, freshEntity)
-                } else {
-                    entities.accounts.set(snap.pubkey, snap.entity)
-                }
-            }
+            // An account not loaded before the transaction comes back as a
+            // fresh one, built in memory only (skipSave), so the builds can
+            // run together.
+            const restored = await Promise.all(
+                snapshots.map(
+                    async snap =>
+                        [
+                            snap.pubkey,
+                            snap.entity ?? (await HandleGCR.createAccount(snap.pubkey, {}, true)),
+                        ] as const,
+                ),
+            )
+            for (const [pubkey, entity] of restored) entities.accounts.set(pubkey, entity)
             restoreRows(rowSnapshots)
             restoreStaged(entities, staged)
             return {
@@ -1902,7 +1907,7 @@ export default class HandleGCR {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
-                const message = `Error processing native side-effects: ${error}`
+                const message = `Error processing native side-effects: ${error instanceof Error ? error.message : String(error)}`
                 log.error(`[simulateOne] ${message}`)
                 return restoreFailedEdits(message)
             }
