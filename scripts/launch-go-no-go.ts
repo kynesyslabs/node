@@ -28,7 +28,9 @@
  *
  * operators.json maps each validator identity to { owner, operator,
  * provider, region }; owner is required on the mainnet chain id. Before any validator is up, --plan checks the genesis file and
- * that table alone, with no network:
+ * that table alone. It contacts no node; its one network read is Solana, for
+ * the NFT proofs of the block 0 seats, which nothing reads again once the
+ * genesis is sealed:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
  *       --snapshot mainnet/snapshot --operators operators.json \
@@ -1419,7 +1421,8 @@ function usage(): string {
         "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
         "           --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
         "  --plan               check the genesis file and the launch validator table only, with no",
-        "                       network: one PASS/FAIL line per check, exit 0 when all pass",
+        "                       node: one PASS/FAIL line per check, exit 0 when all pass; it reads",
+        "                       Solana for the NFT proofs of the block 0 seats",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
         "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",

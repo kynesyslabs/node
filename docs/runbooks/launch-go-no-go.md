@@ -99,7 +99,10 @@ since each node would then stamp block 0 with its own clock.
 ## Plan check (before any validator is up)
 
 The genesis rules and the validator table can be checked as soon as the
-genesis file, the snapshot and the table exist, with no node running:
+genesis file, the snapshot and the table exist, with no node running. The
+check needs Solana: under `nftValidatorGating` it verifies the NFT proof of
+every block 0 seat there, the one time those proofs are read before the
+genesis is sealed.
 
 ```bash
 bun scripts/launch-go-no-go.ts --plan \
