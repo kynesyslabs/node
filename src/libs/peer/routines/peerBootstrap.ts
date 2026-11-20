@@ -21,6 +21,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { parseGenesisPin } from "@/libs/blockchain/genesis/genesisPin"
 import { hashGenesisCore, hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
 import Chain from "@/libs/blockchain/chain"
+import { asGenesisBlockContent } from "@/libs/blockchain/genesis/genesisBlockContent"
 import {
     editedGenesisOnFreshChainProblem,
     resolveGenesisMismatch,
@@ -179,7 +180,7 @@ function logGenesisVerdict(
 /** Hash of the genesis data in this node's stored block 0, or null when it has none. */
 async function storedGenesisHash(): Promise<string | null> {
     const block = await Chain.getGenesisBlock()
-    const content = block?.content as { extra?: { genesisData?: unknown } } | undefined
+    const content = asGenesisBlockContent(block?.content)
     let data = content?.extra?.genesisData
     if (!data) return null
     if (typeof data === "string") data = JSON.parse(data)
