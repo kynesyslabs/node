@@ -1024,7 +1024,9 @@ export default class Mempool {
      * whose NFT moved since admission leaves this pool as it leaves theirs and
      * the committee keeps building the same block. An unanswerable one stays.
      * Only under `nftValidatorGating`, the rule whose verdict can change
-     * after admission.
+     * after admission. The txs of our locked block are never judged again:
+     * the committee already voted that block, and members rebuilding it
+     * fetch them from us, so dropping one would leave the height unbuildable.
      */
     public static async dropRefusedSeatTransactions(): Promise<string[]> {
         if (!nftGatingAtTip()) return []
@@ -1032,8 +1034,9 @@ export default class Mempool {
         const { handleStakingTx } = await import(
             "src/libs/network/routines/transactions/handleStakingTx"
         )
-        const seats = (await this.getMempool()).filter(tx =>
-            isStakingTxType(tx.content?.type ?? ""),
+        const locked = this.lockedHashes()
+        const seats = (await this.getMempool()).filter(
+            tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
         )
         const verdicts = await Promise.all(
             seats.map(tx => handleStakingTx(tx, { fresh: true })),
@@ -1347,17 +1350,21 @@ export default class Mempool {
         // fresh here, past the admission caches, so members do not split on
         // an outage or a refusal one of them saw earlier. Only under
         // nftValidatorGating: before it the staking policy reads the chain
-        // alone, which the block's apply already judges.
-        if (nftGatingAtTip()) {
+        // alone, which the block's apply already judges. Not for the txs of
+        // a block being rebuilt or of our locked block: the committee voted
+        // that block with them, and a verdict that changed since would leave
+        // it unbuildable at that height.
+        if (nftGatingAtTip() && !options.rebuild) {
             const { isStakingTxType } = await import("src/features/staking/types")
             const { handleStakingTx } = await import(
                 "src/libs/network/routines/transactions/handleStakingTx"
             )
+            const locked = this.lockedHashes()
             // Solana is asked for every staking tx at once, so a batch of
             // unanswerable proofs costs one timeout, not one per tx.
             const verdicts = await Promise.all(
                 validTransactions.map(tx =>
-                    isStakingTxType(tx.content?.type ?? "")
+                    isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash)
                         ? handleStakingTx(tx, { fresh: true })
                         : null,
                 ),

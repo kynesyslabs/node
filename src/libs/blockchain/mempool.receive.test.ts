@@ -358,6 +358,53 @@ describe("Mempool.dropRefusedSeatTransactions", () => {
     })
 })
 
+describe("seat transactions of a locked block", () => {
+    const realLockedHashes = (Mempool as any).lockedHashes
+    const seat = (hash: string) => {
+        const t = tx(hash, 100)
+        t.content = { ...t.content, type: "validatorStake" }
+        return t
+    }
+    beforeEach(() => {
+        resetReceiveState()
+        nftGatingOn = true
+        ;(Mempool as any).lockedHashes = () => new Set(["0xlocked"])
+        seatVerdicts.set("0xlocked", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xloose", { success: false, message: "nft.owner no longer holds the NFT" })
+        handleStakingTx.mockClear()
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        ;(Mempool as any).lockedHashes = realLockedHashes
+    })
+
+    it("are never judged away from the pool, though the NFT has moved since", async () => {
+        const deleted: string[][] = []
+        ;(Mempool as any).repo = {
+            find: jest.fn(async () => [seat("0xlocked"), seat("0xloose")]),
+            delete: jest.fn(async (where: { hash: { _value: string[] } }) => {
+                deleted.push(where.hash._value)
+            }),
+        }
+        expect(await Mempool.dropRefusedSeatTransactions()).toEqual(["0xloose"])
+        expect(deleted).toEqual([["0xloose"]])
+        expect(handleStakingTx.mock.calls.map(c => (c[0] as { hash: string }).hash)).toEqual(["0xloose"])
+    })
+
+    it("are taken in for a rebuild without a Solana judgement, so the locked block rebuilds", async () => {
+        ;(Mempool as any).lockedHashes = () => new Set()
+        await Mempool.receive([seat("0xlocked")], false, { rebuild: true })
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlocked"])
+        expect(handleStakingTx).not.toHaveBeenCalled()
+    })
+
+    it("are not judged again when a peer sends them in a merge", async () => {
+        await Mempool.receive([seat("0xlocked"), seat("0xloose")])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlocked"])
+        expect(handleStakingTx.mock.calls.map(c => (c[0] as { hash: string }).hash)).toEqual(["0xloose"])
+    })
+})
+
 describe("Mempool.receive seat transactions", () => {
     beforeEach(resetReceiveState)
     afterEach(() => {
