@@ -48,7 +48,8 @@ export async function mergeMempools(
 ) {
     const now = Date.now()
     // Our own seat transactions are judged again in the background: Solana
-    // must not hold up the exchange (see Mempool.startSeatRejudge).
+    // must not hold up the exchange. What it refuses leaves the pool at the
+    // start of a later round (see Mempool.startSeatRejudge).
     void Mempool.startSeatRejudge()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)

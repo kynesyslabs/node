@@ -1025,61 +1025,89 @@ export default class Mempool {
     }
 
     /**
-     * Judges the staking policy again on the seat transactions this node
-     * admitted itself, the way `receive` judges those from peers, so a stake
-     * whose NFT moved since admission leaves this pool as it leaves theirs and
-     * the committee keeps building the same block. An unanswerable one stays.
-     * Only under `nftValidatorGating`, the rule whose verdict can change
-     * after admission. The txs of our locked block are never judged again:
-     * the committee already voted that block, and members rebuilding it
-     * fetch them from us, so dropping one would leave the height unbuildable.
+     * Seat transactions of this pool a fresh re-judge refused, by hash, with
+     * the reason, waiting for applySeatRefusals at the start of the next
+     * round. The reads run in the background, so the refusal must not land
+     * mid-round: between the round's pool read and its precommit, a deletion
+     * would leave members forging different blocks, or drop a tx the
+     * precommit is about to lock with nothing left to rebuild it from.
      */
-    public static async dropRefusedSeatTransactions(): Promise<string[]> {
-        if (!nftGatingAtTip()) return []
-        const { isStakingTxType } = await import("src/features/staking/types")
-        const locked = this.lockedHashes()
-        const seats = (await this.getMempool()).filter(
-            tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
-        )
-        const verdicts = await this.judgeSeatTransactions(seats)
-        const refused = seats.filter((_, i) => {
-            const verdict = verdicts[i]
-            return verdict !== null && !verdict.success && !verdict.unreachable
-        })
-        for (const tx of refused) {
-            log.error(
-                `[Mempool] Dropping own tx ${tx.hash}: ${verdicts[seats.indexOf(tx)]?.message}`,
-            )
-        }
-        // The lock can be taken while Solana is read; its txs stay.
-        const lockedNow = this.lockedHashes()
-        const drop = refused.map(tx => tx.hash).filter(hash => !lockedNow.has(hash))
-        if (drop.length > 0) await this.removeTransactionsByHashes(drop)
-        return drop
-    }
-
-    private static seatRejudge: Promise<string[]> | null = null
+    private static pendingSeatRefusals = new Map<string, string>()
+    private static seatRejudge: Promise<Map<string, string>> | null = null
 
     /**
-     * Starts dropRefusedSeatTransactions unless one is still running, and
-     * does not wait for it: the round's peer exchange must not wait on
-     * Solana. What it refuses leaves the pool when its reads come back, as
-     * the same txs leave peers' merges.
+     * Judges the staking policy again on the seat transactions this node
+     * holds, the way `receive` judges those from peers, so a stake whose NFT
+     * moved since admission leaves this pool as it leaves theirs. An
+     * unanswerable one stays. Only under `nftValidatorGating`, the rule whose
+     * verdict can change after admission. The txs of our locked block are
+     * not judged: the committee voted that block with them.
+     *
+     * Runs in the background, one at a time, and never deletes: the round's
+     * peer exchange must not wait on Solana, and what it refuses is only
+     * recorded for applySeatRefusals.
      */
-    public static startSeatRejudge(): Promise<string[]> {
+    public static startSeatRejudge(): Promise<Map<string, string>> {
         if (this.seatRejudge !== null) return this.seatRejudge
-        const running = this.dropRefusedSeatTransactions()
+        const running = this.judgeOwnSeatTransactions()
+            .then(refused => {
+                for (const [hash, reason] of refused) this.pendingSeatRefusals.set(hash, reason)
+                return refused
+            })
             .catch((e: unknown) => {
                 log.warning(
                     `[Mempool] Seat re-judge failed: ${e instanceof Error ? e.message : String(e)}`,
                 )
-                return [] as string[]
+                return new Map<string, string>()
             })
             .finally(() => {
                 this.seatRejudge = null
             })
         this.seatRejudge = running
         return running
+    }
+
+    private static async judgeOwnSeatTransactions(): Promise<Map<string, string>> {
+        const refused = new Map<string, string>()
+        if (!nftGatingAtTip()) return refused
+        const { isStakingTxType } = await import("src/features/staking/types")
+        const locked = this.lockedHashes()
+        const seats = (await this.getMempool()).filter(
+            tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
+        )
+        const verdicts = await this.judgeSeatTransactions(seats)
+        seats.forEach((tx, i) => {
+            const verdict = verdicts[i]
+            if (verdict !== null && !verdict.success && !verdict.unreachable) {
+                refused.set(tx.hash, verdict.message)
+            }
+        })
+        return refused
+    }
+
+    /**
+     * Drops the seat transactions the background re-judge refused, except
+     * the txs of the lock at `height` and `inFlight` (the candidate our open
+     * prevote names). The caller holds the pool lock and the commit lock
+     * mutex and calls this before it reads the round's pool, so the check
+     * and the deletion see the same lock the precommit writes.
+     */
+    public static async applySeatRefusals(
+        height: number,
+        inFlight: ReadonlySet<string> = new Set(),
+    ): Promise<string[]> {
+        if (this.pendingSeatRefusals.size === 0) return []
+        const refused = new Map(this.pendingSeatRefusals)
+        this.pendingSeatRefusals.clear()
+        const locked = this.lockedHashes(height)
+        const drop: string[] = []
+        for (const [hash, reason] of refused) {
+            if (locked.has(hash) || inFlight.has(hash)) continue
+            log.error(`[Mempool] Dropping own tx ${hash}: ${reason}`)
+            drop.push(hash)
+        }
+        if (drop.length > 0) await this.removeTransactionsByHashes(drop)
+        return drop
     }
 
     /**

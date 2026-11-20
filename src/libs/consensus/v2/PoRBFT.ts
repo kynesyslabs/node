@@ -94,6 +94,7 @@ import {
 } from "./commitLock/candidate"
 import { broadcastPrecommit, lockAndPrecommit } from "./commitLock/precommit"
 import { proofOfLock } from "./commitLock/votes"
+import { latestPrevote, withLockMutex } from "./commitLock/roundState"
 import { CosignTimestampError } from "./routines/cosignTimestamp"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
@@ -910,11 +911,22 @@ async function mergeAndOrderMempools(
     // relay txs, our locked block's txs) is left out of the round, so the
     // round's pool is the one peers holding the same txs keep.
     const capped = blockCapsActive(blockRef)
-    const preMempool = await Mempool.lock.runExclusive(async () => {
-        if (capped) await Mempool.capPoolSenders(blockRef)
-        const pool = await Mempool.getMempool(blockRef)
-        return capped ? holdSendersToCap(pool) : pool
-    })
+    // Seat transactions the background re-judge refused leave here, before
+    // the round reads its pool and never during it. Under the commit lock
+    // mutex too, so no precommit writes a lock between the check and the
+    // deletion; the open prevote's candidate may still be locked by one.
+    const preMempool = await withLockMutex(() =>
+        Mempool.lock.runExclusive(async () => {
+            const prevote = latestPrevote()
+            await Mempool.applySeatRefusals(
+                blockRef,
+                new Set(prevote?.open ? prevote.inputs.orderedTransactions : []),
+            )
+            if (capped) await Mempool.capPoolSenders(blockRef)
+            const pool = await Mempool.getMempool(blockRef)
+            return capped ? holdSendersToCap(pool) : pool
+        }),
+    )
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
     const preHashes = preMempool.map(tx => tx.hash)
