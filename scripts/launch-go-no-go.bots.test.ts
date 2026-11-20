@@ -47,7 +47,7 @@ describe("launch bot allowlist", () => {
         expect(notes).toContain(note)
         // Once, and for the next release: rc.11 to rc.13 shipped without --bots
         expect(notes.split(note)).toHaveLength(2)
-        const next = notes.split("- From the first release after `v1.0.0-rc.13`:")[1]?.split("\n## ")[0]
+        const next = notes.split("- From `v1.0.0-rc.14`:")[1]?.split("\n## ")[0]
         expect(next).toContain(note)
     }, 60_000)
 
