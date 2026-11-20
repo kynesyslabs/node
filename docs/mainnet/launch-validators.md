@@ -66,11 +66,13 @@ missing committee members and stops at the 4th.
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
+  --bots mainnet/bots.json \
   --operators mainnet/launch-validators.json \
   --expected-treasury <agreed treasury address> \
   --expected-notary-keys <id:hex,id:hex from the notary key ceremony>
 ```
 
+The bot inventory and allocation rule are in [genesis.md](genesis.md#bot-authorization-launch-decision-and-gate).
 Each rule prints one `PASS` or `FAIL` line, followed by the counts per
 operator, provider, owner and region. Exit 0 when every check passes, 1 otherwise,
 2 on bad input. `--json` prints the same as JSON. At T-0 the same file is

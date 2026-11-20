@@ -572,13 +572,14 @@ function withNfts<T extends object>(rows: T[]): T[] {
 }
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
-    return { properties: { id: 7, shardSize: 10 }, forks, validators: withNfts(rows) }
+    return { properties: { id: 7, shardSize: 10 }, forks, validators: withNfts(rows), balances: [] }
 }
 
 describe("checkLaunch", () => {
     const launch = launchSet(10)
     const rows: Array<{ address: string; status: string; valid_at: number | null }> = launch.map(address => ({ address, status: "2", valid_at: 0 }))
     const base = {
+        botAllowlist: [],
         shardSize: 10,
         probes: launch.map(v => online(v)),
         operators: spread(launch),

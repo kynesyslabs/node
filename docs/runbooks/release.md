@@ -683,6 +683,7 @@ this restart is a fallback there.
     `--plan`, and is NO-GO when the genesis `tlsnVerified.notaryKeys` are
     not exactly those keys. Before, any well-formed key that was not one of
     this repository's test keys passed.
+  - `launch-go-no-go` GO and `--plan` now require `--bots FILE` (`[]` for no bots).
   - `launch-height1-check` defaults to `--timeout 20000` and
     `--max-scan 1000` (were 5000 and 20), and stops reading blocks at the
     first one that carries a transaction. Run from outside the validators'

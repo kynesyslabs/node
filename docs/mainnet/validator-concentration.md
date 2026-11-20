@@ -248,11 +248,11 @@ What it can abuse in Demos-specific state:
 
 | Check (`--plan` line) | Rule | Code |
 |---|---|---|
-| operator and provider cap | no operator or provider runs more than `min(launch, 10) − 7` | `scripts/launch-go-no-go.ts:353`, `:392` |
-| voting power per operator and provider | none holds more than a third of the first committee | `:402` |
-| beneficial owner cap | on the mainnet chain id every entry names an owner; no owner over the same cap or third | `:379`, `:448` |
-| region share | no region hosts a third or more of the launch validators | `:415` |
-| stake share | no owner, operator, provider or region holds a third or more of block 0's `staked_amount` | `:462` |
+| operator and provider cap | no operator or provider runs more than `min(launch, 10) − 7` | `scripts/launch-go-no-go.ts:356`, `:395` |
+| voting power per operator and provider | none holds more than a third of the first committee | `:405` |
+| beneficial owner cap | on the mainnet chain id every entry names an owner; no owner over the same cap or third | `:382`, `:451` |
+| region share | no region hosts a third or more of the launch validators | `:418` |
+| stake share | no owner, operator, provider or region holds a third or more of block 0's `staked_amount` | `:465` |
 
 The T-0 go/no-go (`checkLaunch`) applies the same rules, so a table that
 was edited after `--plan` is caught on launch day. On the testnet and
