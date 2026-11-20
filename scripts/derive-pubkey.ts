@@ -10,7 +10,7 @@ import { ucrypto, Hashing, uint8ArrayToHex } from "@kynesyslabs/demosdk/encrypti
 
 const mnemonicFile = process.argv[2]
 if (!mnemonicFile || !fs.existsSync(mnemonicFile)) {
-    console.error(`usage: bun derive-pubkey.ts <mnemonic-file>`)
+    console.error("usage: bun derive-pubkey.ts <mnemonic-file>")
     process.exit(1)
 }
 
