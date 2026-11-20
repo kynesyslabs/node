@@ -1,5 +1,5 @@
 import { getRunConfig, writeJson } from "../../framework/io"
-import { envInt } from "../../framework/common"
+import { envInt, logNonCriticalError } from "../../framework/common"
 import { maybeSilenceConsole } from "../../token_shared"
 import { PeerConnection } from "src/libs/omniprotocol/transport/PeerConnection"
 import { OmniOpcode } from "src/libs/omniprotocol/protocol/opcodes"
@@ -16,7 +16,7 @@ type OmniConnectionProbe = {
   error?: string
 }
 
-async function probeTarget(target: string, connectTimeoutMs: number, requestTimeoutMs: number): Promise<OmniConnectionProbe> {
+export async function probeTarget(target: string, connectTimeoutMs: number, requestTimeoutMs: number): Promise<OmniConnectionProbe> {
   const connection = new PeerConnection(`loadgen:${target}`, target)
   const startedAt = performance.now()
   try {
@@ -46,7 +46,7 @@ async function probeTarget(target: string, connectTimeoutMs: number, requestTime
       error: error instanceof Error ? error.message : String(error),
     }
   } finally {
-    await connection.close().catch(() => {})
+    await connection.close().catch(error => logNonCriticalError("omni_connection_smoke.close", error, { target }))
   }
 }
 

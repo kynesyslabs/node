@@ -26,7 +26,11 @@ import {
     parseExpectedNotaryKeys,
     KNOWN_TEST_TREASURIES,
     KNOWN_TEST_NOTARY_KEYS,
+    blockZeroNftReasons,
+    mainnetGenesisReasons,
+    nftAllowlistPinReasons,
 } from "./launch-go-no-go"
+import { NFT_ALLOWLIST_PATH, NFT_ALLOWLIST_SHA256 } from "src/features/staking/nftAllowlist"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
 const GENESIS = "genesis-a"
@@ -556,8 +560,19 @@ const atZero = (name: string, extra: Record<string, unknown> = {}) =>
 const mainnetForks = () =>
     Object.fromEntries(KNOWN_FORKS.map(name => [name, MAINNET_FORKS.includes(name) ? atZero(name) : { activationHeight: null }]))
 
+/** Mints of the allowlist this build ships, one per test seat. */
+const MINTS: string[] = JSON.parse(fs.readFileSync(NFT_ALLOWLIST_PATH, "utf8")).mints
+const NFT_OWNER = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
+const PROOF_TX = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+const nftOf = (i: number) => ({ nft_mint: MINTS[i], nft_owner: NFT_OWNER, nft_proof_tx: PROOF_TX })
+
+/** Each row seated by its own allowlisted NFT, unless it names its NFT fields itself. */
+function withNfts<T extends object>(rows: T[]): T[] {
+    return rows.map((row, i) => ("nft_mint" in row || "nft_exempt" in row ? row : { ...row, ...nftOf(i) }))
+}
+
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
-    return { properties: { id: 7, shardSize: 10 }, forks, validators: rows, balances: [] }
+    return { properties: { id: 7, shardSize: 10 }, forks, validators: withNfts(rows), balances: [] }
 }
 
 describe("checkLaunch", () => {
@@ -643,10 +658,12 @@ describe("checkLaunch", () => {
         expect(d.reasons.join("\n")).toContain("fork atomicWork is scheduled at 1000000")
     })
 
-    it("launches with token staking off: the gate at block 0, tokenStaking left for a later upgrade", () => {
+    it("launches with seats open by NFT only: the gate, tokenStaking and nftValidatorGating at block 0", () => {
         expect(MAINNET_FORKS).toContain("tokenStakingGate")
-        expect(LAUNCH_DORMANT_FORKS).toContain("tokenStaking")
-        expect(MAINNET_FORKS).not.toContain("tokenStaking")
+        expect(MAINNET_FORKS).toContain("tokenStaking")
+        expect(MAINNET_FORKS).toContain("nftValidatorGating")
+        expect(LAUNCH_DORMANT_FORKS).not.toContain("tokenStaking")
+        expect(LAUNCH_DORMANT_FORKS).not.toContain("nftValidatorGating")
     })
 
     it("launches with bound web2 and xm proofs and no structure-only TLSN claims", () => {
@@ -710,6 +727,65 @@ describe("checkLaunch", () => {
             const d = checkLaunch({ ...base, expectedNotaryKeys: reordered, genesis: genesisFile(rows), blockZero: blockZero(rows) })
             expect(d.reasons).toEqual([])
             expect(d.go).toBe(true)
+        })
+
+        it("is NO-GO when an agreed genesis key carries validFrom or validUntil, and GO without them", () => {
+            const plain = checkLaunch({ ...base, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+            expect(plain.reasons).toEqual([])
+            expect(plain.go).toBe(true)
+            for (const range of [{ validUntil: 10 }, { validFrom: 0 }, { validFrom: 5, validUntil: 10 }]) {
+                const payload = tlsnVerifiedPayload()
+                const keys = payload.notaryKeys as Array<Record<string, unknown>>
+                payload.notaryKeys = keys.map(k => ({ ...k, ...range }))
+                const forks = { ...mainnetForks(), tlsnVerified: { activationHeight: 0, ...payload } }
+                const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons).toEqual([
+                    "the genesis tlsnVerified notaryKeys demos-notary-1, demos-notary-standby carry validFrom or validUntil: " +
+                        "launch notary keys must not carry a range",
+                ])
+            }
+        })
+
+        it("is NO-GO on a ranged genesis key whether or not the agreed keys are given, on every chain id", () => {
+            const range = "the genesis tlsnVerified notaryKeys demos-notary-1 carry validFrom or validUntil: " +
+                "launch notary keys must not carry a range"
+            const noKeys = "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them"
+            const payload = tlsnVerifiedPayload()
+            const keys = payload.notaryKeys as Array<Record<string, unknown>>
+            payload.notaryKeys = keys.map(k => (k.id === "demos-notary-1" ? { ...k, validUntil: 10 } : k))
+            const ranged = genesisFile(rows, { ...mainnetForks(), tlsnVerified: { activationHeight: 0, ...payload } })
+            for (const chainId of NON_MAINNET_CHAIN_IDS) {
+                const g = { ...ranged, properties: { id: chainId, shardSize: 10 } }
+                for (const none of [null, undefined, " "]) expect(notaryKeysReasons(g, none)).toEqual([range])
+                expect(notaryKeysReasons(g, NOTARY_KEYS)).toEqual([range])
+                expect(notaryKeysReasons(g, "not-a-key")).toEqual([`--expected-notary-keys entry 1 is not id:hex, got ${JSON.stringify("not-a-key")}`, range])
+                expect(notaryKeysReasons({ ...genesisFile(rows), properties: g.properties }, null)).toEqual([])
+            }
+            expect(notaryKeysReasons(ranged, null)).toEqual([noKeys, range])
+            const d = checkLaunch({ ...base, expectedNotaryKeys: null, genesis: ranged, blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons).toEqual([noKeys, range])
+        })
+
+        it("names each ranged key by its id as written: a string as is, any other value as JSON", () => {
+            const hex = notaryKeyHex(0x11)
+            const notaryKeys = [
+                { id: "demos-notary-1", alg: "k256", hex, validUntil: 10 },
+                { id: { name: "x" }, alg: "k256", hex, validFrom: 0 },
+                { id: 7, alg: "k256", hex, validUntil: 10 },
+                { alg: "k256", hex, validUntil: 10 },
+            ]
+            const ranged = genesisFile(rows, {
+                ...mainnetForks(),
+                tlsnVerified: { activationHeight: 0, ...tlsnVerifiedPayload(), notaryKeys },
+            })
+            const g = { ...ranged, properties: { id: NON_MAINNET_CHAIN_IDS[0], shardSize: 10 } }
+            expect(notaryKeysReasons(g, null)).toEqual([
+                "the genesis tlsnVerified notaryKeys demos-notary-1, {\"name\":\"x\"}, 7, undefined carry validFrom or validUntil: " +
+                    "launch notary keys must not carry a range",
+            ])
         })
 
         it("checks given keys on the testnet and devnet chain ids, and needs none there", () => {
@@ -877,7 +953,89 @@ describe("checkLaunch", () => {
         expect(MAINNET_FORKS).toContain("tlsnVerified")
         expect(MAINNET_FORKS).not.toContain("tlsnDisabled")
         expect(LAUNCH_DORMANT_FORKS).toContain("tlsnDisabled")
-        expect(MAINNET_FORKS).toHaveLength(29)
+        expect(MAINNET_FORKS).toHaveLength(32)
+    })
+
+    describe("validators seated by NFT at block 0", () => {
+        const reasonsFor = (validators: Array<Record<string, unknown>>) =>
+            checkLaunch({ ...base, genesis: { ...genesisFile(rows), validators }, blockZero: blockZero(rows) }).reasons.join("\n")
+
+        it("is GO when every genesis seat names an allowlisted mint, its wallet and a proof", () => {
+            expect(reasonsFor(rows.map((r, i) => ({ ...r, ...nftOf(i) })))).toBe("")
+        })
+
+        it("is NO-GO on a seat without the NFT fields, with a bad field, or an unlisted mint", () => {
+            const seats = rows.map((r, i) => ({ ...r, ...nftOf(i) }))
+            const missing = seats.map((r, i) => (i === 3 ? { address: r.address, status: r.status, valid_at: 0 } : r))
+            expect(reasonsFor(missing)).toContain(`genesis.validators[3] (${id(3)}): nft_mint must be a base58 string`)
+            const badProof = seats.map((r, i) => (i === 4 ? { ...r, nft_proof_tx: "not base58!" } : r))
+            expect(reasonsFor(badProof)).toContain(`genesis.validators[4] (${id(4)}): nft_proof_tx must be a base58 string`)
+            const unlisted = seats.map((r, i) => (i === 5 ? { ...r, nft_mint: "1".repeat(44) } : r))
+            expect(reasonsFor(unlisted)).toContain("is not on the allowlist")
+        })
+
+        it("is NO-GO when one mint backs two seats", () => {
+            const seats = rows.map((r, i) => ({ ...r, ...nftOf(i === 7 ? 6 : i) }))
+            expect(reasonsFor(seats)).toContain(`nft_mint ${MINTS[6]} already backs ${id(6)}`)
+        })
+
+        it("is NO-GO on an nft_exempt seat", () => {
+            const seats = rows.map((r, i) => (i === 2 ? { ...r, nft_exempt: true } : { ...r, ...nftOf(i) }))
+            expect(reasonsFor(seats)).toContain("1 genesis validators are nft_exempt")
+        })
+
+        it("holds seats from the snapshot's validators.jsonl to the same fields", () => {
+            const snapshot = (r: Array<Record<string, unknown>>) => ({ rows: r, source: "snapshot" as const, reasons: [], warnings: [] })
+            const genesis = genesisFile(rows)
+            expect(blockZeroNftReasons(genesis, snapshot(withNfts(rows)))).toEqual([])
+            const bare = blockZeroNftReasons(genesis, snapshot(rows))
+            expect(bare).toHaveLength(10)
+            expect(bare[0]).toContain(`validators.jsonl[0] (${id(0)}): nft_mint must be a base58 string`)
+            const d = checkLaunch({ ...base, genesis, blockZero: snapshot(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("validators.jsonl[9]")
+            // Rows from genesis.validators are judged there, not again here
+            expect(blockZeroNftReasons(genesis, blockZero(rows))).toEqual([])
+            // Nothing to hold without the fork at 0
+            const off = genesisFile(rows, { ...mainnetForks(), nftValidatorGating: { activationHeight: null } })
+            expect(blockZeroNftReasons(off, snapshot(rows))).toEqual([])
+        })
+
+        it("checks no NFT fields when the fork is not at 0, which is NO-GO on its own", () => {
+            const genesis = { ...genesisFile(rows, { ...mainnetForks(), nftValidatorGating: { activationHeight: null } }), validators: rows }
+            const reasons = mainnetGenesisReasons(genesis).join("\n")
+            expect(reasons).toContain("fork nftValidatorGating is not scheduled at activationHeight 0")
+            expect(reasons).not.toContain("must be a base58 string")
+        })
+    })
+
+    describe("the NFT allowlist pin", () => {
+        it("passes for the allowlist this build ships", () => {
+            expect(NFT_ALLOWLIST_SHA256).toMatch(/^[0-9a-f]{64}$/)
+            expect(nftAllowlistPinReasons()).toEqual([])
+        })
+
+        it("is NO-GO without a pin, on a file that does not hash to it, and on an unreadable file", () => {
+            expect(nftAllowlistPinReasons(NFT_ALLOWLIST_PATH, "")[0]).toContain("pins no NFT allowlist digest")
+            expect(nftAllowlistPinReasons(NFT_ALLOWLIST_PATH, "0".repeat(64))[0]).toContain("does not load as pinned")
+            expect(nftAllowlistPinReasons("/nonexistent/allowlist.json")[0]).toContain("does not load as pinned")
+        })
+
+        it("is NO-GO when the file names no digest of its own", () => {
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nft-allowlist-"))
+            try {
+                const file = path.join(dir, "allowlist.json")
+                fs.writeFileSync(file, JSON.stringify({ mints: MINTS }))
+                expect(nftAllowlistPinReasons(file)[0]).toContain("names sha256 null")
+            } finally {
+                fs.rmSync(dir, { recursive: true, force: true })
+            }
+        })
+
+        it("is checked with the NFT seats of a mainnet genesis", () => {
+            const genesis = genesisFile(rows)
+            expect(mainnetGenesisReasons(genesis)).toEqual([])
+        })
     })
 
     describe("the TLSNotary notary keys", () => {
@@ -985,6 +1143,10 @@ describe("checkLaunch", () => {
 
     it("launches with a reference block room of 10", () => {
         expect(MAINNET_FORKS).toContain("referenceBlockRoom10")
+    })
+
+    it("launches with identity links that need no validator API keys", () => {
+        expect(MAINNET_FORKS).toContain("keylessWeb2Identity")
     })
 
     it("is NO-GO on chain ids 0, 1, 1337 and 31337", () => {

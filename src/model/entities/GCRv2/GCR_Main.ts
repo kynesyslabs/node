@@ -40,6 +40,13 @@ export class GCRMain {
         transformer: bigintNumericTransformer,
     })
     balance: bigint
+    /**
+     * Per-subnet L2PS nonces, subnet uid -> nonce; an absent subnet is 0.
+     * Private transfers settle against these, never against `nonce`. Read and
+     * written only through libs/l2ps/settlement/l2psNonce.
+     */
+    @Column({ type: "jsonb", name: "l2psNonces", default: () => "'{}'" })
+    l2psNonces: Record<string, number>
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities
     @Column({ type: "jsonb", name: "points", default: () => "'{}'" })

@@ -48,6 +48,7 @@ mock.module("@/libs/blockchain/validation/validityData", () => ({ verifyValidity
 mock.module("../blockchain/gcr/handleGCR", () => ({
     __esModule: true,
     default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
+    withDerivedFeeEdits: (tx: unknown) => tx,
 }))
 mock.module("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal }))
 mock.module("src/libs/gossip/GossipManager", () => ({

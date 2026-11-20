@@ -190,3 +190,47 @@ describe("validator.ts peer list handling", () => {
         })
     }
 })
+
+describe("validator.ts stakeCommand", () => {
+    it("keeps the identity and endpoints of the proof, quoted for a shell", async () => {
+        const { stakeCommand } = await import("./validator")
+        expect(stakeCommand("5ig", {})).toBe("bun run validator:stake --nft-proof 5ig")
+        expect(
+            stakeCommand("5ig", {
+                identity: "/keys/my node's id",
+                rpc: "http://10.0.0.2:53550",
+                "solana-rpc": "https://rpc.example/?api-key=a&b",
+                keypair: "solana.json",
+            }),
+        ).toBe(
+            "bun run validator:stake --nft-proof 5ig --identity '/keys/my node'\\''s id' " +
+                "--rpc http://10.0.0.2:53550 --solana-rpc 'https://rpc.example/?api-key=a&b'",
+        )
+    })
+})
+
+describe("validator.ts --amount", () => {
+    it("keeps a bonded stake on a network without nftValidatorGating, or one that does not say", async () => {
+        const { amountRefusal } = await import("./validator")
+        expect(amountRefusal("stake", "1000", false)).toBeNull()
+        expect(amountRefusal("stake", "1000", null)).toBeNull()
+        expect(amountRefusal("stake", undefined, true)).toBeNull()
+    })
+
+    it("refuses it where nftValidatorGating is active, and on every command but stake", async () => {
+        const { amountRefusal } = await import("./validator")
+        expect(amountRefusal("stake", "1000", true)).toContain("this network runs nftValidatorGating")
+        for (const command of ["unstake", "exit", "challenge", "nft-proof"]) {
+            expect(amountRefusal(command, "1000", false)).toBe(`--amount is used only by stake, not by ${command}`)
+        }
+    })
+
+    it("refuses --amount on another command before any network use", () => {
+        const r = Bun.spawnSync([process.execPath, SCRIPT, "unstake", "--amount", "5", "--rpc", "http://127.0.0.1:9"], {
+            stdout: "pipe",
+            stderr: "pipe",
+        })
+        expect(r.exitCode).toBe(1)
+        expect(String(r.stderr)).toContain("--amount is used only by stake, not by unstake")
+    })
+})

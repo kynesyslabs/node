@@ -135,10 +135,10 @@ export function createToken(
         txHash,
     }
 
-    store.tokens.set(token.id, token)
     log.info(
         `[TLSNotary] Created token ${token.id} for ${domain} (owner: ${owner.substring(0, 16)}...)`,
     )
+    store.tokens.set(token.id, token)
 
     return token
 }

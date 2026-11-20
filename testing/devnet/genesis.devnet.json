@@ -76,6 +76,9 @@
     "tlsnDisabled": {
       "activationHeight": null
     },
+    "nftValidatorGating": {
+      "activationHeight": null
+    },
     "tlsnVerified": {
       "activationHeight": 0,
       "notaryKeys": [
@@ -102,6 +105,9 @@
       "activationHeight": 0
     },
     "referenceBlockRoom10": {
+      "activationHeight": 0
+    },
+    "keylessWeb2Identity": {
       "activationHeight": 0
     }
   },

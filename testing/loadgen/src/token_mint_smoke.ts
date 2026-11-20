@@ -13,6 +13,7 @@ import {
   waitForTxReady,
 } from "./token_shared"
 import { getRunConfig, writeJson } from "./framework/io"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -45,12 +46,13 @@ function envBool(name: string, fallback: boolean): boolean {
 function expectPresentFromBalance(balance: string | null): boolean {
   try {
     return BigInt(balance ?? "0") > 0n
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce("token_mint_smoke.expectPresentFromBalance", "token_mint_smoke.expectPresentFromBalance", error, { balance })
     return false
   }
 }
 
-async function waitForTotalSupplyDelta(params: {
+export async function waitForTotalSupplyDelta(params: {
   rpcUrl: string
   tokenAddress: string
   before: bigint
@@ -66,8 +68,12 @@ async function waitForTotalSupplyDelta(params: {
       try {
         const total = BigInt(totalRaw)
         if (total >= params.before + params.delta) return total
-      } catch {
-        // ignore
+      } catch (error) {
+        logNonCriticalErrorOnce("token_mint_smoke.waitForTotalSupply", "token_mint_smoke.waitForTotalSupply", error, {
+          rpcUrl: params.rpcUrl,
+          tokenAddress: params.tokenAddress,
+          totalSupply: totalRaw,
+        })
       }
     }
     attempt++

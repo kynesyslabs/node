@@ -6,10 +6,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
-# Single files outside SUITE_DIRS that guard consensus, boot and launch
+# Single files outside SUITE_DIRS that guard consensus, boot, launch and logging
 # safety. A listed file that is gone fails its run instead of dropping out
 # silently
 SUITE_FILES=(
+    scripts/check-secret-logs.test.ts
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
@@ -20,6 +21,7 @@ SUITE_FILES=(
     scripts/node-doctor.test.ts
     scripts/validator.test.ts
     scripts/validator-prove-signing.test.ts
+    src/config/loader.debugAssertions.test.ts
     docs/runbooks/dormant-mode.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
@@ -27,14 +29,17 @@ SUITE_FILES=(
     src/config/loader.rapidApi.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/libs/crypto/keyErrorLogging.test.ts
     src/features/tlsnotary/proxyToken.test.ts
     src/features/tlsnotary/proxyRelay.test.ts
     src/features/tlsnotary/relayTarget.test.ts
     src/features/tlsnotary/notaryUnreachable.test.ts
+    src/features/tlsnotary/tokenCreate.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
+    src/libs/blockchain/chainBlocks.storedHead.test.ts
     src/libs/blockchain/chainTransactions.insert.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
@@ -71,6 +76,7 @@ SUITE_FILES=(
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/blockchain/routines/validateTransaction.feeBalance.test.ts
+    src/libs/blockchain/routines/validateTransaction.fees.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
     src/libs/blockchain/routines/validatorsManagement.typecheck.test.ts
@@ -130,7 +136,9 @@ SUITE_FILES=(
     src/model/datasource.test.ts
     src/model/dbPreflight.test.ts
     src/utilities/nodeVersion.test.ts
+    src/utilities/shutdownExitStatus.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts
+    testing/monitoring/metricsExposure.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
@@ -181,6 +189,21 @@ SUITE_FILES=(
     src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
+    # Loadgen error logging (#708), including the guard against silent catches
+    testing/loadgen/src/features/omni/close_log.test.ts
+    testing/loadgen/src/features/peersync/shared.test.ts
+    testing/loadgen/src/features/peersync/snapshot_reply_log.test.ts
+    testing/loadgen/src/features/tlsnotary/shared.test.ts
+    testing/loadgen/src/framework/common.test.ts
+    testing/loadgen/src/framework/rpc_json_log.test.ts
+    testing/loadgen/src/framework/silent_catch.test.ts
+    testing/loadgen/src/rpc_ready_log.test.ts
+    testing/loadgen/src/token_holders_export.test.ts
+    testing/loadgen/src/token_names_from_runs.test.ts
+    testing/loadgen/src/token_script_complex_policy_amounts.test.ts
+    testing/loadgen/src/token_script_complex_policy_object_amounts.test.ts
+    testing/loadgen/src/token_settle_check_balance_log.test.ts
+    testing/loadgen/src/token_total_supply_log.test.ts
 )
 
 list_suite_files() {
@@ -208,7 +231,7 @@ count=0
 while IFS= read -r file; do
     count=$((count + 1))
     echo "::group::$file ($(runner_for "$file"))"
-    if [ "$(runner_for "$file")" = jest ]; then
+    if [[ "$(runner_for "$file")" = jest ]]; then
         npx jest --maxWorkers=1 "$file" < /dev/null
     else
         bun test "./$file" < /dev/null
@@ -219,7 +242,13 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
-done < <(list_suite_files | sort -u)
+done < <(
+    if [[ "$#" -gt 0 ]]; then
+        printf '%s\n' "$@"
+    else
+        list_suite_files | sort -u
+    fi
+)
 
 echo "consensus suites: $count files, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then

@@ -63,6 +63,32 @@ function writeSheet(name: string, body: string): string {
 const line = (lines: string[], key: string) =>
     lines.find(l => l.startsWith(`PASS ${key}:`) || l.startsWith(`FAIL ${key}:`))
 
+it("runs the production debug assertion guard test in the consensus suite", () => {
+    const suite = fs.readFileSync(path.join(repo, "scripts/test-consensus.sh"), "utf8")
+    expect(/^\s*src\/config\/loader\.debugAssertions\.test\.ts$/m.test(suite)).toBe(true)
+})
+
+it("lists debug assertions in the install guide's production doctor checklist", () => {
+    const guide = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const checklist = guide.match(/^A validator never leaves these enabled in `.env`:.*$/m)?.[0]
+    expect(checklist).toContain("DEBUG_ASSERTIONS_ENABLED")
+})
+
+it("lists every production doctor unset check in both operator checklists", () => {
+    const script = fs.readFileSync(doctor, "utf8")
+    const keys = [...script.matchAll(/^\s*check_unset ([A-Z_]+) /gm)].map(m => m[1])
+    expect(keys.length).toBeGreaterThan(0)
+
+    const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const installList = install.match(/^A validator never leaves these enabled in `.env`:.*$/m)?.[0]
+    const parameters = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.md"), "utf8")
+    const mainnetList = parameters.split("### Must stay disabled\n")[1]?.split("\n### ")[0]
+    for (const key of keys) {
+        expect(installList).toContain(`\`${key}\``)
+        expect(mainnetList).toContain(`\`${key}\``)
+    }
+})
+
 describe("node-doctor --production against the parameter sheet", () => {
     it("passes every published value when the node runs exactly the sheet", () => {
         const sheet = readSheet(path.join(repo, "docs/mainnet/parameters.env"))
@@ -89,6 +115,16 @@ describe("node-doctor --production against the parameter sheet", () => {
         const { lines } = run({ PROD: "1" }, "--parameters", sheet)
         expect(line(lines, "PROD")).toStartWith("FAIL PROD: is '1'")
     }, 60_000)
+
+    it("refuses debug assertions in the effective production environment", () => {
+        for (const value of ["true", "1"]) {
+            const { status, lines } = run({ DEBUG_ASSERTIONS_ENABLED: value })
+            expect(status).toBe(1)
+            expect(line(lines, "DEBUG_ASSERTIONS_ENABLED")).toStartWith(
+                "FAIL DEBUG_ASSERTIONS_ENABLED: is set",
+            )
+        }
+    }, 120_000)
 
     it("compares a published genesis pin, case and 0x aside", () => {
         const pin = "ab".repeat(32)
@@ -768,4 +804,65 @@ describe("node-doctor --production genesis fork schedule", () => {
             "FAIL genesis fork schedule: the node's boot check did not run (exit 1): no such service: node",
         ])
     }, 30_000)
+})
+
+describe("node-doctor --production web2 identity credentials under keylessWeb2Identity", () => {
+    let dir: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-keyless-"))
+        fs.symlinkSync(PYTHON3, path.join(dir, "python3"))
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    function genesisWith(keyless: unknown, raw?: string): string {
+        const file = path.join(dir, "genesis.json")
+        const forks = keyless === undefined ? {} : { keylessWeb2Identity: keyless }
+        fs.writeFileSync(file, raw ?? JSON.stringify({ properties: { id: 4242, shardSize: 3 }, forks }))
+        return file
+    }
+
+    /** The credential lines after check_genesis_file read `file`, every credential empty. */
+    function credentialLines(file: string, token = ""): string[] {
+        const settings = { DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir, GITHUB_TOKEN: token }
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ")
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; check_genesis_file >/dev/null; check_web2_identity_credentials; check_github_token`],
+            { env: { PATH: dir } },
+        )
+        return run.stdout.toString().trim().split("\n")
+    }
+
+    it("reports the credentials as not needed when the genesis schedules the fork at 0", () => {
+        const lines = credentialLines(genesisWith({ activationHeight: 0 }), "ghp_expired")
+        expect(lines).toEqual([
+            "PASS GITHUB_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so GitHub identity links go through TLSNotary only",
+            "PASS DISCORD_BOT_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so Discord identity links go through TLSNotary only",
+            "PASS RAPID_API_KEY: not needed: the genesis schedules keylessWeb2Identity at 0, so Twitter/X identity links go through TLSNotary only",
+        ])
+    })
+
+    it("reads a height written as 0.0 as 0, like the node", () => {
+        const raw = '{"properties":{"id":4242,"shardSize":3},"forks":{"keylessWeb2Identity":{"activationHeight":0.0}}}'
+        const lines = credentialLines(genesisWith(undefined, raw))
+        expect(lines.filter(l => l.startsWith("FAIL"))).toEqual([])
+        expect(lines).toHaveLength(3)
+    })
+
+    it("still fails empty credentials when the fork is absent, unscheduled or later", () => {
+        for (const keyless of [
+            undefined,
+            { activationHeight: null },
+            { activationHeight: 10 },
+            { activationHeight: "0" },
+            { activationHeight: false },
+        ]) {
+            const lines = credentialLines(genesisWith(keyless))
+            expect([keyless, lines.filter(l => l.startsWith("FAIL")).map(l => l.split(":")[0])]).toEqual([
+                keyless,
+                ["FAIL GITHUB_TOKEN", "FAIL DISCORD_BOT_TOKEN", "FAIL RAPID_API_KEY"],
+            ])
+        }
+    })
 })

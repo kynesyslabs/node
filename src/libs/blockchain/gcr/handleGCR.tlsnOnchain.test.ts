@@ -137,7 +137,7 @@ import { setPresentationVerifierForTests } from "@/libs/tlsnotary/presentationGa
 import { TlsnVerifierUnavailableAtApplyError } from "@/libs/tlsnotary/verifiedIdentity"
 import { StateReadError } from "./stateReadError"
 
-const { default: HandleGCR } = await import("./handleGCR")
+const { default: HandleGCR, withDerivedFeeEdits } = await import("./handleGCR")
 
 const other: any = new Demos()
 await other.connectWalletFromPrivateKey("0x" + "22".repeat(32), {
@@ -751,6 +751,62 @@ describe("one request backs one attestation, and a node without a verdict", () =
         expect(tlsnRequestOf(a.row(req.hash))!.status).toBe("pending")
         // Admission refuses it on this node only, with a reason to retry.
         expect(await admissionRefusal(a, 102, st)).toContain("cannot run on this node")
+    })
+})
+
+describe("admission under gasFeeSeparation", () => {
+    it("simulates the copy the block applies: fee edits first, the TLSNotary edit last", async () => {
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
+        const savedFees = getSharedState.feeDistribution
+        const BURN = "0x" + "00".repeat(32)
+        const TREASURY = "0x" + "f7".repeat(32)
+        getSharedState.feeDistribution = {
+            burnAddress: BURN,
+            treasuryAddress: TREASURY,
+            networkFee: { burnPct: 50, treasuryPct: 50 },
+            additionalFee: { burnPct: 50, treasuryPct: 50 },
+            specialOps: { burnPct: 50, rpcPct: 25, treasuryPct: 25 },
+        } as any
+        // Every tx the block applies, as applyTransactions hands it over.
+        const applyOne = HandleGCR.applyTransaction
+        const applied: Transaction[] = []
+        ;(HandleGCR as any).applyTransaction = (...args: any[]) => {
+            if (args[3] === false) applied.push(args[1])
+            return (applyOne as any).apply(HandleGCR, args)
+        }
+        try {
+            const v = new Validator(0)
+            for (const fees of [BURN, TREASURY]) {
+                v.caches.accounts.set(fees, { pubkey: fees, balance: 0n, nonce: 0 } as any)
+            }
+            const req = await request()
+            const st = await store(req.hash, facts(req.hash))
+            for (const [height, tx] of [[101, req], [102, st]] as const) {
+                current = v
+                getSharedState.lastBlockNumber = height - 1
+                // What handleExecuteTransaction simulates.
+                const feeCopy = withDerivedFeeEdits(tx)
+                const admitted = tlsnAdmissionCopy(tx, feeCopy)
+                if (admitted.ok === false) throw new Error(admitted.reason)
+
+                applied.length = 0
+                const out = await v.apply(height, [tx])
+                expect(out.successfulTxs).toEqual([tx.hash])
+
+                const signed = tx.content.gcr_edits
+                const fees = feeCopy.content.gcr_edits
+                const edits = admitted.tx.content.gcr_edits
+                expect(applied.map(t => t.content.gcr_edits)).toEqual([edits])
+                expect(fees.length).toBeGreaterThan(signed.length)
+                expect(fees.slice(-signed.length)).toEqual(signed)
+                expect(edits.slice(0, -1)).toEqual(fees)
+                expect(edits.at(-1)).toMatchObject({ type: "tlsnotary" })
+            }
+            expect(v.row(req.hash)!.status).toBe("stored")
+        } finally {
+            ;(HandleGCR as any).applyTransaction = applyOne
+            getSharedState.feeDistribution = savedFees
+        }
     })
 })
 

@@ -90,6 +90,13 @@ import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
+import GCRL2PSNonceRoutines from "./gcr_routines/GCRL2PSNonceRoutines"
+import {
+    hasL2PSNonces,
+    isL2PSNonceEdit,
+    L2PS_NONCE_EDIT,
+    type GCREditL2PSNonce,
+} from "@/libs/l2ps/settlement/l2psNonce"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
 import {
@@ -662,9 +669,9 @@ const settlementOfTx = new WeakMap<Transaction, ParsedSettlement>()
  */
 /**
  * Every account a derived settlement copy reads, its zero-delta changes
- * included: the proof binds each change's balance before, and a change with
- * no edit would otherwise be neither loaded nor ordered with the block's
- * other transactions over that account.
+ * included: apply checks that each change's account covers it, and a change
+ * with no edit would otherwise be neither loaded nor ordered with the
+ * block's other transactions over that account.
  */
 function settlementAccounts(tx: Transaction): string[] {
     return settlementOfTx.get(tx)?.changes.map(c => c.account) ?? []
@@ -687,12 +694,13 @@ export function withSettlementEdits(
 
 /**
  * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
- * Returns true for balance and nonce types which have the 'account' property
+ * Returns true for the edit types that act on one account row, which carry
+ * the 'account' property
  */
 export function isGCRMainEdit(
     edit: GCREdit,
 ): edit is GCREditBalance | GCREditNonce | GCREditIdentity {
-    const gcrMainEdits = new Set(["balance", "nonce", "identity"])
+    const gcrMainEdits = new Set(["balance", "nonce", "identity", L2PS_NONCE_EDIT])
     return gcrMainEdits.has(edit.type)
 }
 
@@ -717,6 +725,7 @@ function rowsEditWrites(edit: GCREdit, entities: GCREntityCaches): WrittenRows[]
     const all = (cache: string): WrittenRows => ({ cache, rows: caches[cache], keys: "all" })
     switch (edit.type as string) {
         case "identity":
+        case L2PS_NONCE_EDIT:
             return one("accounts", normalizePubkey(fields.account))
         case "storageProgram":
         case "storage-program-put":
@@ -768,6 +777,9 @@ function unstorableAfter(edit: GCREdit, entities: GCREntityCaches, stored: Store
         case "balance":
         case "nonce":
             return isKeyStorable(normalizePubkey(fields.account)) ? null : "accounts.pubkey"
+        case L2PS_NONCE_EDIT:
+            // The subnet uid becomes a jsonb key: judged with the row below.
+            if (!isKeyStorable(normalizePubkey(fields.account))) return "accounts.pubkey"
     }
     for (const written of rowsEditWrites(edit, entities)) {
         for (const [key, row] of writtenEntries(written)) {
@@ -844,6 +856,7 @@ export default class HandleGCR {
         "balance",
         "nonce",
         "identity",
+        L2PS_NONCE_EDIT,
 
         // These ⌄⌄⌄ are here because they don't have implemented handlers
         "subnetsTx",
@@ -1033,14 +1046,19 @@ export default class HandleGCR {
     /**
      * Drops the settlement placeholders no batch moved: a failed batch, or a
      * zero change, would otherwise create a stored account that no edit made.
-     * A settlement edits only balances and nonces, so an untouched one still
-     * has both at zero.
+     * A settlement edits only balances and L2PS nonces, so an untouched one
+     * still has a zero balance and no L2PS nonce. A signer whose transfers
+     * net to zero keeps its row: its spent L2PS nonce must not be lost.
      */
     static dropUnmovedPlaceholders(entities: GCREntityCaches): void {
         for (const pubkey of entities.settlementPlaceholders ?? []) {
             const account = entities.accounts.get(pubkey)
             if (!account) continue
-            if (BigInt(account.balance ?? 0) === 0n && Number(account.nonce ?? 0) === 0) {
+            if (
+                BigInt(account.balance ?? 0) === 0n &&
+                Number(account.nonce ?? 0) === 0 &&
+                !hasL2PSNonces(account)
+            ) {
                 entities.accounts.delete(pubkey)
             }
         }
@@ -1252,11 +1270,11 @@ export default class HandleGCR {
 
     /**
      * A settlement batch, judged on the working state the block's earlier
-     * transactions left (nonces, balances for the public signals, then the
-     * proof), and applied all or nothing. Every refusal fails the batch with
-     * no edits and never the block: every node reaches the same verdict. Its
-     * nonces are spent only when it applies, since nothing proves who would
-     * pay for a failed one.
+     * transactions left (L2PS nonces, then every touched account covering its
+     * net change, then the proof), and applied all or nothing. Every refusal
+     * fails the batch with no edits and never the block: every node reaches
+     * the same verdict. Its L2PS nonces are spent only when it applies, since
+     * nothing proves who would pay for a failed one.
      */
     private static async applySettlement(
         entities: GCREntityCaches,
@@ -1461,6 +1479,26 @@ export default class HandleGCR {
                     appliedEditsCount: 0,
                     unproven: true,
                 }
+            }
+        }
+
+        // Only a settlement batch spends an L2PS nonce, through the copy
+        // applyTransactions derives from its proven record; a shipped one
+        // would move any account's nonce in any subnet.
+        if (
+            !isRollback &&
+            !settlementOfTx.has(tx) &&
+            tx.content.gcr_edits.some(edit => isL2PSNonceEdit(edit))
+        ) {
+            const message = "l2psNonce edits come only from a settlement batch"
+            log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${message}`)
+            return {
+                success: false,
+                entities,
+                message,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
             }
         }
 
@@ -1818,6 +1856,32 @@ export default class HandleGCR {
         const appliedPlaces: (EditPlace | undefined)[] = []
         const placeOf = HandleGCR.editPlaces(entities, tx, simulate)
 
+        const restoreFailedEdits = async (message: string): Promise<GCRApplyResult> => {
+            // An account not loaded before the transaction comes back as a
+            // fresh one, built in memory only (skipSave), so the builds can
+            // run together.
+            const restored = await Promise.all(
+                snapshots.map(
+                    async snap =>
+                        [
+                            snap.pubkey,
+                            snap.entity ?? (await HandleGCR.createAccount(snap.pubkey, {}, true)),
+                        ] as const,
+                ),
+            )
+            for (const [pubkey, entity] of restored) entities.accounts.set(pubkey, entity)
+            restoreRows(rowSnapshots)
+            restoreStaged(entities, staged)
+            return {
+                success: false,
+                entities,
+                message,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
+            }
+        }
+
         // Apply all edits for this tx
         for (const signedEdit of gcrEdits) {
             const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
@@ -1850,31 +1914,7 @@ export default class HandleGCR {
                 }
                 // After the rollback, which also reverses the balance edits:
                 // reversing them on the restored accounts would refund them twice.
-                for (const snap of snapshots) {
-                    if (snap.entity === null) {
-                        // Entity was newly created - restore to fresh state
-                        const freshEntity = await HandleGCR.createAccount(
-                            snap.pubkey,
-                            {},
-                            true,
-                        )
-                        entities.accounts.set(snap.pubkey, freshEntity)
-                    } else {
-                        entities.accounts.set(snap.pubkey, snap.entity)
-                    }
-                }
-                restoreRows(rowSnapshots)
-                // After the rollback, which may have edited the staged rows
-                restoreStaged(entities, staged)
-
-                return {
-                    success: false,
-                    entities,
-                    message: result.message,
-                    sideEffects: [],
-                    deferredWrites: [],
-                    appliedEditsCount: 0,
-                }
+                return restoreFailedEdits(result.message)
             }
 
             // They run after this call returns, still stamping the block's time.
@@ -1905,9 +1945,9 @@ export default class HandleGCR {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
-                log.error(
-                    `[simulateOne] Error processing native side-effects: ${error}`,
-                )
+                const message = `Error processing native side-effects: ${error instanceof Error ? error.message : String(error)}`
+                log.error(`[simulateOne] ${message}`)
+                return restoreFailedEdits(message)
             }
         }
 
@@ -2257,11 +2297,11 @@ export default class HandleGCR {
         } = state
         for (const tx of txs) {
             const reason =
-                (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
+                (typeAllowList ? blockTxTypeRefusal(tx, state.nftGating) : null) ??
                 featureGateRefusal(tx, state) ??
                 governanceGateRefusal(tx, governance) ??
                 tokenStakingRefusal(tx, stakingOpen) ??
-                (stakeChecks ? stakeSenderRefusal(tx) : null)
+                (stakeChecks ? stakeSenderRefusal(tx, state.nftGating) : null)
             if (reason) {
                 refuse(tx, reason)
                 continue
@@ -2283,7 +2323,10 @@ export default class HandleGCR {
             if (refused.has(tx.hash)) continue
             let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
             try {
-                verdict = await verifyEditsAtApply(tx, { postFork })
+                verdict = await verifyEditsAtApply(tx, {
+                    postFork,
+                    nftGating: state.nftGating,
+                })
             } catch (error) {
                 verdict = { ok: false, reason: `could not be verified: ${error}` }
             }
@@ -2834,6 +2877,25 @@ export default class HandleGCR {
                         return row
                     }
                 }
+                if (property === "findBy") {
+                    // Rows holding a mint: the ones this block already
+                    // staged first, then the database, deduplicated by
+                    // address so a staged row shadows its stored version.
+                    return async (where: { nft_mint: string }) => {
+                        const byAddress = new Map<string, Validators>()
+                        for (const row of await repo.findBy(where)) {
+                            if (row.address) byAddress.set(row.address, row)
+                        }
+                        for (const row of cache.values()) {
+                            if (row && row.address && row.nft_mint === where.nft_mint) {
+                                byAddress.set(row.address, row)
+                            } else if (row && row.address) {
+                                byAddress.delete(row.address)
+                            }
+                        }
+                        return [...byAddress.values()]
+                    }
+                }
                 return Reflect.get(target, property, receiver)
             },
         })
@@ -3326,9 +3388,14 @@ export default class HandleGCR {
             }
         }
 
-        // Work edits are newer than some SDK builds' edit union, so they are
-        // matched as strings ahead of the typed switch.
+        // Work and L2PS nonce edits are newer than some SDK builds' edit
+        // union, so they are matched as strings ahead of the typed switch.
         switch (editOperation.type as string) {
+            case L2PS_NONCE_EDIT:
+                return GCRL2PSNonceRoutines.apply(
+                    editOperation as unknown as GCREditL2PSNonce,
+                    account,
+                )
             case "work-attempt":
                 return applyWorkAttempt(
                     editOperation as unknown as WorkAttemptEdit,
@@ -3660,13 +3727,10 @@ export default class HandleGCR {
                 log.debug(`[TLSNotary] Domain extracted: ${domain}`)
 
                 // Create the attestation token (idempotent - tokenManager handles duplicates)
-                const token = createToken(
+                createToken(
                     tx.content.from as string,
                     targetUrl,
                     tx.hash,
-                )
-                log.info(
-                    `[TLSNotary] Created token ${token.id} for tx ${tx.hash}`,
                 )
                 break
             }
@@ -3776,6 +3840,7 @@ export default class HandleGCR {
         }
 
         account.nonce = fillData["nonce"] || 0
+        account.l2psNonces = fillData["l2psNonces"] || {}
         account.points = fillData["points"] || {
             totalPoints: 0,
             breakdown: {

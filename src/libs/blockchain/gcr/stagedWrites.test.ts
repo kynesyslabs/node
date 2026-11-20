@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
 import { In } from "typeorm"
 
 /**
@@ -30,6 +30,8 @@ function repoFor(table: string, sink: Map<string, unknown[]>, tag: string) {
         create: (row: unknown) => row,
         findOneBy: async (where: Record<string, unknown>) =>
             rows().find(row => matches(row, where)) ?? null,
+        findBy: async (where: Record<string, unknown>) =>
+            rows().filter(row => matches(row, where)),
         findOne: async ({ where }: { where: Record<string, unknown> }) =>
             rows().find(row => matches(row, where)) ?? null,
         find: async (options?: { where?: Record<string, unknown> }) =>
@@ -61,6 +63,15 @@ const datasourceModule = () => ({
 mock.module("src/model/datasource", datasourceModule)
 mock.module("@/model/datasource", datasourceModule)
 
+// These edits exercise staging, not the seat rules: no NFT.
+const policyModule = () => ({
+    __esModule: true,
+    isAllowlistedMint: () => true,
+})
+mock.module("src/features/staking/nftAllowlist", policyModule)
+mock.module("@/features/staking/nftAllowlist", policyModule)
+
+const { getSharedState } = await import("@/utilities/sharedState")
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
 const { StateReadError } = await import("./stateReadError")
@@ -73,13 +84,21 @@ const caches = (): any => ({
     resourceSlots: new Map(),
 })
 
-const stake = (amount: string): any => ({
+// A stake carries no amount, so the edits differ by the connection URL they record.
+const stake = (url: string): any => ({
     type: "validatorStake",
     operation: "stake",
     account: "0xabc",
-    amount,
-    connectionUrl: "https://v1.example",
+    amount: "0",
+    connectionUrl: `https://${url}.example`,
+    nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
 })
+
+// A seat already held is topped up without a proof.
+const topUp = (url: string): any => {
+    const { nft: _nft, ...edit } = stake(url)
+    return edit
+}
 
 beforeEach(() => {
     durable.clear()
@@ -89,6 +108,15 @@ beforeEach(() => {
 })
 
 describe("validator stake edits", () => {
+    // An NFT seat stakes 0, which only the nftValidatorGating apply accepts.
+    const state = getSharedState as unknown as { forkConfig?: unknown }
+    beforeEach(() => {
+        state.forkConfig = { nftValidatorGating: { activationHeight: 0 } }
+    })
+    afterEach(() => {
+        delete state.forkConfig
+    })
+
     it("stages the row instead of saving it, and writes it through the block's manager", async () => {
         const entities = caches()
         const result = await HandleGCR.applyGCREdit(stake("5"), entities, false, false)
@@ -102,31 +130,31 @@ describe("validator stake edits", () => {
 
         expect(issued).toEqual(["em:Validators"])
         expect(durable.get("Validators")).toMatchObject([
-            { address: "0xabc", staked_amount: "5", status: expect.any(String) },
+            { address: "0xabc", connection_url: "https://5.example", status: expect.any(String) },
         ])
     })
 
     it("lets a later edit in the same set read what an earlier one staged", async () => {
         const entities = caches()
         const first = await HandleGCR.applyGCREdit(stake("5"), entities, false, false)
-        const second = await HandleGCR.applyGCREdit(stake("7"), entities, false, false)
+        const second = await HandleGCR.applyGCREdit(topUp("7"), entities, false, false)
 
         expect(first.success).toBe(true)
         expect(second.success).toBe(true)
         expect(second.message).toBe("Stake increased")
-        expect(entities.validators.get("0xabc").staked_amount).toBe("12")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://7.example")
         expect(issued).toEqual([])
     })
 
     it("reads an existing row from the database once, then from the set", async () => {
         seeded = {
-            Validators: [{ address: "0xabc", status: "active", staked_amount: "10" }],
+            Validators: [{ address: "0xabc", status: "2", staked_amount: "0", connection_url: "https://10.example" }],
         }
         const entities = caches()
-        const result = await HandleGCR.applyGCREdit(stake("1"), entities, false, false)
+        const result = await HandleGCR.applyGCREdit(topUp("1"), entities, false, false)
 
         expect(result.success).toBe(true)
-        expect(entities.validators.get("0xabc").staked_amount).toBe("11")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://1.example")
         expect(durable.size).toBe(0)
     })
 
@@ -141,11 +169,11 @@ describe("validator stake edits", () => {
     it("writes the row as it was staged, not as a later edit left it", async () => {
         const entities = caches()
         const first = await HandleGCR.applyGCREdit(stake("5"), entities, false, false)
-        await HandleGCR.applyGCREdit(stake("7"), entities, false, false)
+        await HandleGCR.applyGCREdit(topUp("7"), entities, false, false)
 
         await fakeDataSource.transaction(async em => first.deferredWrite!(em as any))
 
-        expect(durable.get("Validators")).toMatchObject([{ staked_amount: "5" }])
+        expect(durable.get("Validators")).toMatchObject([{ connection_url: "https://5.example" }])
     })
 
     it("puts the staged row back when a later transaction fails", async () => {
@@ -154,7 +182,7 @@ describe("validator stake edits", () => {
         const first = await HandleGCR.applyTransaction(entities, stakeTx(["5"]), false, false)
         expect(first.success).toBe(true)
 
-        const failing = stakeTx(["7"])
+        const failing = stakeTx(["7"], topUp)
         failing.content.gcr_edits.push({
             type: "balance",
             operation: "remove",
@@ -165,11 +193,11 @@ describe("validator stake edits", () => {
 
         expect(second.success).toBe(false)
         expect(second.deferredWrites).toEqual([])
-        expect(entities.validators.get("0xabc").staked_amount).toBe("5")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://5.example")
 
-        const third = await HandleGCR.applyTransaction(entities, stakeTx(["1"]), false, false)
+        const third = await HandleGCR.applyTransaction(entities, stakeTx(["6"], topUp), false, false)
         expect(third.success).toBe(true)
-        expect(entities.validators.get("0xabc").staked_amount).toBe("6")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://6.example")
 
         for (const r of [first, third]) {
             await fakeDataSource.transaction(async em => {
@@ -177,8 +205,8 @@ describe("validator stake edits", () => {
             })
         }
         expect(durable.get("Validators")).toMatchObject([
-            { staked_amount: "5" },
-            { staked_amount: "6" },
+            { connection_url: "https://5.example" },
+            { connection_url: "https://6.example" },
         ])
     })
 })
@@ -443,7 +471,7 @@ describe("ZK claims within a block", () => {
         const claims = entities.zkCommitments
 
         // A stake transaction fails while the ZK claim sits in the shared caches
-        const failing = stakeTx(["7"])
+        const failing = stakeTx(["7"], topUp)
         failing.content.gcr_edits.push({
             type: "balance",
             operation: "remove",
@@ -500,12 +528,12 @@ describe("a set applied on top of a pending one", () => {
     })
 })
 
-const stakeTx = (amounts: string[]): any => ({
+const stakeTx = (amounts: string[], edit: (url: string) => any = stake): any => ({
     hash: `0xstake${amounts.join("")}`,
     content: {
         type: "validatorStake",
         from_ed25519_address: "0xabc",
-        gcr_edits: amounts.map(stake),
+        gcr_edits: amounts.map(url => edit(url)),
     },
 })
 

@@ -14,6 +14,7 @@ import {
   waitForRpcReady,
   waitForTxReady,
 } from "./token_shared"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 type LoadgenConfig = {
   targets: string[]
@@ -338,7 +339,8 @@ export async function runTokenBurnLoadgen() {
     for (const [addr, balRaw] of Object.entries(postRunSettle.perNode[0].snapshot.balances)) {
       try {
         expectedPresent[addr] = BigInt(balRaw ?? "0") > 0n
-      } catch {
+      } catch (error) {
+        logNonCriticalErrorOnce("token_burn_loadgen.expectedPresent", "token_burn_loadgen.expectedPresent", error, { address: addr, balance: textOrType(balRaw).slice(0, 80) })
         expectedPresent[addr] = false
       }
     }

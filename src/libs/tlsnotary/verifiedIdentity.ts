@@ -19,7 +19,13 @@ import { blockTimeSec } from "@/libs/blockchain/gcr/applyTime"
 import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
 import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 import { judgePresentation } from "./presentationGate"
-import { bindSenderForm, judgeIdentityTranscript, tlsnIdentityEndpoint } from "./identityPolicy"
+import {
+    bindSenderForm,
+    judgeIdentityTranscript,
+    tlsnIdentityEndpoint,
+    tlsnIdentityEndpoints,
+} from "./identityPolicy"
+import { keylessWeb2IdentityActive } from "@/forks/keylessWeb2IdentityGate"
 import { TlsnVerifierUnavailableError } from "./wasmVerifier"
 import { findTlsnLinkHits, findTlsnRequest, tipBlockTimestampSec } from "./tlsnChainReads"
 import { tlsnRequestOf, tlsnRequestRefusal, type TlsnRequestRefusal } from "./onchainRequests"
@@ -85,7 +91,11 @@ function linksOf(holder: LinkHolder, context: string): Record<string, unknown>[]
 
 async function judge(input: VerifiedIdentityInput, applying: boolean): Promise<VerifiedIdentityResult> {
     const { context, sender } = input
-    if (!tlsnIdentityEndpoint(context)) {
+    // Judged at the tip like the other apply-time rules: block N applies on
+    // tip N - 1, and admission judges for the block after the tip.
+    const height = getSharedState.lastBlockNumber ?? 0
+    const endpoints = tlsnIdentityEndpoints(keylessWeb2IdentityActive(height))
+    if (!tlsnIdentityEndpoint(context, endpoints)) {
         return refuse(`TLSN context ${context} cannot be linked with a TLSNotary proof`)
     }
     if (typeof sender !== "string" || sender.length === 0) {
@@ -96,15 +106,12 @@ async function judge(input: VerifiedIdentityInput, applying: boolean): Promise<V
         return refuse("Invalid proof: expected TLSNotary presentation object")
     }
 
-    // Judged at the tip like the other apply-time rules: block N applies on
-    // tip N - 1, and admission judges for the block after the tip.
-    const height = getSharedState.lastBlockNumber ?? 0
     const blockTime = applying ? (blockTimeSec() as number) : await tipBlockTimestampSec()
 
     const verdict = judgePresentation(proof.data, { height, blockTimeSec: blockTime })
     if (verdict.ok === false) return refuse(`Proof verification failed: ${verdict.reason}`)
 
-    const identity = judgeIdentityTranscript(verdict.presentation, context, sender)
+    const identity = judgeIdentityTranscript(verdict.presentation, context, sender, endpoints)
     if (identity.ok === false) return refuse(`Proof verification failed: ${identity.reason}`)
     const facts = identity.facts
 

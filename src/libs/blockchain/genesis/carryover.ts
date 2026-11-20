@@ -13,6 +13,7 @@ import { createHash } from "node:crypto"
 import { compareCodeUnits } from "@/libs/crypto/canonicalJson"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import { GenesisRefusal } from "./genesisPin"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 import type {
     SnapshotLoaderAvailable,
     ValidatorSeed,
@@ -226,6 +227,9 @@ type ComparableValidator = {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint: string | null
+    nft_owner: string | null
+    nft_proof_tx: string | null
 }
 
 /**
@@ -252,7 +256,18 @@ function comparable(v: Record<string, unknown>): ComparableValidator {
         valid_at: num(v.valid_at),
         unstake_requested_at: num(v.unstake_requested_at),
         unstake_available_at: num(v.unstake_available_at),
+        // Compared too, so a carried row cannot drop or swap the NFT its
+        // genesis entry was sealed with
+        nft_mint: nftText(v.nft_mint, "nft_mint"),
+        nft_owner: nftText(v.nft_owner, "nft_owner"),
+        nft_proof_tx: nftText(v.nft_proof_tx, "nft_proof_tx"),
     }
+}
+
+function nftText(value: unknown, field: string): string | null {
+    if (value === null || value === undefined) return null
+    if (typeof value === "string") return value
+    throw new GenesisRefusal(`${field} must be a string, got ${JSON.stringify(value) ?? typeof value}`)
 }
 
 /** `comparable`, with a refused value reported as a problem instead of thrown. */
@@ -284,9 +299,11 @@ function snapshotValidators(
         if (v.unstake_requested_at !== null || v.unstake_available_at !== null) {
             problems.push(`validators.jsonl row ${address} has an unstake under way`)
         }
-        if (!isPositiveStake(v.staked_amount)) {
+        if (!stakeAllowed(v.staked_amount)) {
             problems.push(
-                `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a positive integer`,
+                nftGatingActiveAtGenesis()
+                    ? `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a non-negative integer`
+                    : `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a positive integer`,
             )
         }
     }
@@ -296,10 +313,11 @@ function snapshotValidators(
 /**
  * With validators.jsonl in the snapshot, block 0 seeds its rows directly and
  * skips seedValidators, the other place that refuses a stake of 0, and the
- * active-set query has no stake filter.
+ * active-set query has no stake filter. A genesis that seats validators
+ * under `nftValidatorGating` backs a seat by its NFT, so 0 is a stake there.
  */
-function isPositiveStake(stake: string): boolean {
-    return /^[1-9]\d*$/.test(stake)
+function stakeAllowed(stake: string): boolean {
+    return nftGatingActiveAtGenesis() ? /^\d+$/.test(stake) : /^[1-9]\d*$/.test(stake)
 }
 
 function genesisValidatorMap(

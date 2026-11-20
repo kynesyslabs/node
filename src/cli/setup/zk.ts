@@ -16,8 +16,8 @@ export type ZkTarget = BatchSize | typeof SETTLEMENT_TARGET
 export const ZK_TARGETS: readonly ZkTarget[] = [...BATCH_SIZES, SETTLEMENT_TARGET]
 
 // Power of Tau file per circuit; same pairing as setup_all_batches.sh for the
-// batches. The settlement circuit (9 transfers) has 65,388 PLONK constraints,
-// just under 2^16.
+// batches. The settlement circuit (9 transfers) has 55,994 PLONK constraints,
+// under 2^16.
 const PTAU_POWER: Record<ZkTarget, number> = { 5: 16, 10: 17, [SETTLEMENT_TARGET]: 16 }
 
 interface CircuitBuild {
@@ -77,10 +77,29 @@ export interface SettlementArtifacts {
     wasm: boolean
     vkey: boolean
     vkeyProblem?: string
+    /** The zkey and wasm were built for the verification key committed now. */
+    current: boolean
     complete: boolean
 }
 
-/** What a subnet member needs to prove settlements: zkey + wasm, and the committed vkey. */
+/**
+ * The proving key and circuit are built on the node while the verification key
+ * comes with the release. A circuit change ships a new verification key, and the
+ * files built for the old one would still look complete, so the build records
+ * the digest of the key it matched in this file next to them.
+ */
+export const BUILT_FOR_VKEY_FILE = ".built-for-vkey"
+
+function builtForCommittedKey(dir: string): boolean {
+    try {
+        const stamp = fs.readFileSync(path.join(dir, BUILT_FOR_VKEY_FILE), "utf8").trim()
+        return stamp === canonicalDigest(fs.readFileSync(path.join(dir, "verification_key.json"), "utf8"))
+    } catch {
+        return false
+    }
+}
+
+/** What a subnet member needs to prove settlements: zkey + wasm built for the committed vkey. */
 export function inspectSettlementArtifacts(root: string): SettlementArtifacts {
     const dir = keysDirOf(root, SETTLEMENT_TARGET)
     const zkey = nonEmptyFile(path.join(dir, `${SETTLEMENT_CIRCUIT}.zkey`))
@@ -88,7 +107,8 @@ export function inspectSettlementArtifacts(root: string): SettlementArtifacts {
     const vkeyFile = path.join(dir, "verification_key.json")
     const vkeyProblem = fs.existsSync(vkeyFile) ? batchVkeyProblem(vkeyFile) : undefined
     const vkey = fs.existsSync(vkeyFile) && vkeyProblem === undefined
-    return { zkey, wasm, vkey, vkeyProblem, complete: zkey && wasm && vkey }
+    const current = vkey && builtForCommittedKey(dir)
+    return { zkey, wasm, vkey, vkeyProblem, current, complete: zkey && wasm && vkey && current }
 }
 
 export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
@@ -506,6 +526,7 @@ export async function runL2psZkSetup(
                 return { ok: false, messages }
             }
             swapIntoPlace(path.join(staging, wasmDirName), path.join(out, wasmDirName), zkeyNew, zkey)
+            fs.writeFileSync(path.join(out, BUILT_FOR_VKEY_FILE), `${canonicalDigest(fs.readFileSync(committedVkey, "utf8"))}\n`)
         } finally {
             // Whatever ended the batch, a staging directory must not outlive it.
             abandon()

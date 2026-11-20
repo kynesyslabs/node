@@ -51,7 +51,6 @@ interface RawTransfer {
 
 interface RawAccount {
     account: string
-    balance: bigint
     delta: bigint
 }
 
@@ -70,7 +69,7 @@ function raw(transfers: (RawTransfer | null)[], accounts: (RawAccount | null)[])
         "senderIndex", "receiverIndex",
     ]
     for (const n of names) s[n] = Array(N).fill(0n)
-    for (const n of ["accountActive", "accountHi", "accountLo", "balanceBefore", "deltaNegative", "deltaMagnitude"]) {
+    for (const n of ["accountActive", "accountHi", "accountLo", "deltaNegative", "deltaMagnitude"]) {
         s[n] = Array(M).fill(0n)
     }
     transfers.forEach((t, i) => {
@@ -95,7 +94,6 @@ function raw(transfers: (RawTransfer | null)[], accounts: (RawAccount | null)[])
         s.accountActive[j] = 1n
         s.accountHi[j] = h
         s.accountLo[j] = l
-        s.balanceBefore[j] = a.balance
         s.deltaNegative[j] = a.delta < 0n ? 1n : 0n
         s.deltaMagnitude[j] = a.delta < 0n ? -a.delta : a.delta
     })
@@ -115,7 +113,7 @@ function rehash(s: Signals, order: number[] = [...Array(N).keys()]): Signals {
 
 /**
  * The public hash as the circuit packs it from its own inputs (Interface
- * v1.1), reduced mod p like the witness calculator does. Written from the
+ * v1.2), reduced mod p like the witness calculator does. Written from the
  * spec, independently of settlementPublicHash.
  */
 function circuitHash(s: Signals): bigint {
@@ -125,7 +123,7 @@ function circuitHash(s: Signals): bigint {
     }
     let flags = 0n
     for (let j = 0; j < M; j++) {
-        e.push(s.accountHi[j], s.accountLo[j], s.balanceBefore[j], s.deltaMagnitude[j])
+        e.push(s.accountHi[j], s.accountLo[j], s.deltaMagnitude[j])
         flags += s.accountActive[j] * 4n ** BigInt(j) + s.deltaNegative[j] * 2n * 4n ** BigInt(j)
     }
     e.push(flags)
@@ -197,6 +195,13 @@ const base = (over: Partial<RawTransfer> = {}): RawTransfer => ({
 
 describe.skipIf(!built)("settlement circuit witnesses", () => {
     describe("valid batches", () => {
+        // The statement binds no balance: block apply judges solvency on its
+        // own state, so a self-transfer larger than what the sender holds
+        // still has a witness, and moves only the fee.
+        it("a self-transfer, which moves only the fee", async () => {
+            await witness(raw([base({ to: a, amount: 500n, receiverIndex: 0 })], [{ account: a, delta: -10n }]))
+        })
+
         for (const make of [...PROVEN_BATCHES, fixtureBatch]) {
             it(make().name, async () => {
                 await witness(fromBatch(make))
@@ -211,9 +216,9 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                     { signer: c, to: c, amount: 40n, fee: 10n, nonce: 1n, salt: 23n, senderIndex: 2, receiverIndex: 2 },
                 ],
                 [
-                    { account: a, balance: 1_000n, delta: -710n },
-                    { account: b, balance: 0n, delta: 40n },
-                    { account: c, balance: 5n, delta: 640n },
+                    { account: a, delta: -710n },
+                    { account: b, delta: 40n },
+                    { account: c, delta: 640n },
                 ],
             )
             // Includes the public hash: circuit packing here, settlementPublicHash there.
@@ -259,16 +264,6 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             expect(checked).toBeGreaterThan(SETTLEMENT_PUBLIC_SIGNALS / 2)
         }, 120_000)
 
-        it("a balance before other than the validator's fails", async () => {
-            // The circuit alone accepts any consistent balance; the hash pins
-            // it to the validator's own.
-            const s = fromBatch(fixtureBatch)
-            s.balanceBefore[1] += 1n
-            await witness(seal({ ...s }))
-            s.publicHash = [settlementPublicHash(s.statement)]
-            await rejects(s, PUBLIC_HASH)
-        })
-
         it("signer is not the debited account", async () => {
             // The validator saw c sign transfer 0, which debits a: proving
             // with a's slot misses the validator's hash. Proving with c's slot
@@ -284,47 +279,37 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
     })
 
     describe("tampered statements fail", () => {
-        it("overdraft, with the field arithmetic otherwise consistent", async () => {
-            // a holds 700 and pays 710: after - before is still -710 mod p.
-            await rejects(
-                raw([base()], [
-                    { account: a, balance: 700n, delta: -710n },
-                    { account: b, balance: 0n, delta: 700n },
-                ]),
-                "senderAfterRange[i].in <==",
-            )
-        })
-
-        it("self-transfer that can only pay out of its own credit", async () => {
-            await rejects(
-                raw([base({ to: a, amount: 500n, receiverIndex: 0 })], [{ account: a, balance: 509n, delta: -10n }]),
-                "senderAfterRange[i].in <==",
-            )
-        })
+        const NET = "net === deltaMagnitude[j] - 2 * negativeMagnitude[j]"
 
         it("wrong delta", async () => {
             const s = fromBatch(fixtureBatch)
             s.deltaMagnitude[2] += 1n
-            await rejects(seal(s), "balance[N][j] - balanceBefore[j] ===")
+            await rejects(seal(s), NET)
         })
 
         it("delta sign flipped", async () => {
             const s = fromBatch(fixtureBatch)
             s.deltaNegative[0] = 0n
-            await rejects(seal(s), "balance[N][j] - balanceBefore[j] ===")
+            await rejects(seal(s), NET)
         })
 
-        // Magnitudes and balances before are hashed whole, so they are the
-        // verifier's values, and the verifier hashes none at or above 2^128.
-        // The circuit alone accepts these field wraps; the hash refuses them.
+        it("a credit moved from one account to another", async () => {
+            const s = fromBatch(fixtureBatch)
+            s.deltaMagnitude[1] -= 1n
+            s.deltaMagnitude[2] += 1n
+            await rejects(seal(s), NET)
+        })
+
+        // Magnitudes are hashed whole, so they are the verifier's values, and
+        // the verifier hashes none at or above 2^128. The circuit alone
+        // accepts these field wraps; the hash refuses them.
         const verifierRefuses = (s: Signals, k: number, value: bigint) => {
             const statement = [...s.statement]
             statement[k] = value
             expect(() => settlementPublicHash(statement)).toThrow(`public signal ${k} is out of range`)
         }
-        const MAGNITUDE = 1 + 5 * N + 5 * M
-        const NEGATIVE = 1 + 5 * N + 4 * M
-        const BALANCE = 1 + 5 * N + 3 * M
+        const MAGNITUDE = 1 + 5 * N + 4 * M
+        const NEGATIVE = 1 + 5 * N + 3 * M
 
         it("debit written as a credit of p - x (field wrap)", async () => {
             const s = fromBatch(fixtureBatch)
@@ -347,28 +332,17 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
 
         it("negative zero", async () => {
             const s = raw([base({ amount: 0n })], [
-                { account: a, balance: 1_000n, delta: -10n },
-                { account: b, balance: 0n, delta: 0n },
+                { account: a, delta: -10n },
+                { account: b, delta: 0n },
             ])
             s.deltaNegative[1] = 1n
             await rejects(seal(s), "deltaNegative[j] * zeroMagnitude[j].out === 0")
         })
 
-        it("balance before written as p - x (an account below zero)", async () => {
-            // b "holds -5", receives 700 and ends at 695: every running value
-            // after it is in range, only the balance itself is not.
-            const s = raw([base()], [
-                { account: a, balance: 1_000n, delta: -710n },
-                { account: b, balance: P - 5n, delta: 700n },
-            ])
-            await witness(s)
-            verifierRefuses(fromBatch(fixtureBatch), BALANCE + 1, P - 5n)
-        })
-
         it("fee written as p - x (a fee that pays the sender)", async () => {
             const s = raw([base({ fee: P - 5n })], [
-                { account: a, balance: 1_000n, delta: -695n },
-                { account: b, balance: 0n, delta: 700n },
+                { account: a, delta: -695n },
+                { account: b, delta: 700n },
             ])
             await rejects(s, "feeRange[i].in <==")
         })
@@ -377,8 +351,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             // A debit of (p - 700) + 10 is a gain of 690 for a; b loses 700.
             await rejects(
                 raw([base({ amount: P - 700n, fee: 10n })], [
-                    { account: a, balance: 1_000n, delta: 690n },
-                    { account: b, balance: 1_000n, delta: -700n },
+                    { account: a, delta: 690n },
+                    { account: b, delta: -700n },
                 ]),
                 "amountRange[i].in <==",
             )
@@ -387,8 +361,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
         it("unsorted accounts", async () => {
             await rejects(
                 raw([base({ senderIndex: 1, receiverIndex: 0 })], [
-                    { account: b, balance: 0n, delta: 700n },
-                    { account: a, balance: 1_000n, delta: -710n },
+                    { account: b, delta: 700n },
+                    { account: a, delta: -710n },
                 ]),
                 "gapRange[j].in <==",
             )
@@ -399,8 +373,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             const lo2 = "0x" + "aa".repeat(16) + "02".repeat(16)
             await rejects(
                 raw([base({ signer: lo1, to: lo2, senderIndex: 1, receiverIndex: 0 })], [
-                    { account: lo2, balance: 0n, delta: 700n },
-                    { account: lo1, balance: 1_000n, delta: -710n },
+                    { account: lo2, delta: 700n },
+                    { account: lo1, delta: -710n },
                 ]),
                 "gapRange[j].in <==",
             )
@@ -414,9 +388,9 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                         base({ amount: 990n, nonce: 2n, salt: 22n, senderIndex: 1, receiverIndex: 2 }),
                     ],
                     [
-                        { account: a, balance: 1_000n, delta: -1_000n },
-                        { account: a, balance: 1_000n, delta: -1_000n },
-                        { account: b, balance: 0n, delta: 1_980n },
+                        { account: a, delta: -1_000n },
+                        { account: a, delta: -1_000n },
+                        { account: b, delta: 1_980n },
                     ],
                 ),
                 "gapRange[j].in <==",
@@ -427,8 +401,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             // c signed a commitment from c; a's slot pays.
             await rejects(
                 raw([base({ signer: c })], [
-                    { account: a, balance: 1_000n, delta: -710n },
-                    { account: b, balance: 0n, delta: 700n },
+                    { account: a, delta: -710n },
+                    { account: b, delta: 700n },
                 ]),
                 "batchHash.out === commitmentsHash",
             )
@@ -437,8 +411,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
         it("receiver is not the committed one", async () => {
             // Committed to b, credited to c.
             const s = raw([base()], [
-                { account: a, balance: 1_000n, delta: -710n },
-                { account: c, balance: 0n, delta: 700n },
+                { account: a, delta: -710n },
+                { account: c, delta: 700n },
             ])
             await rejects(s, "receiverHi[i].out === toHi[i]")
         })
@@ -446,13 +420,12 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
         describe("inactive slot with a nonzero value", () => {
             const valid = () =>
                 raw([base()], [
-                    { account: a, balance: 1_000n, delta: -710n },
-                    { account: b, balance: 0n, delta: 700n },
+                    { account: a, delta: -710n },
+                    { account: b, delta: 700n },
                 ])
             const cases: [string, (s: Signals) => void, string][] = [
                 ["account limb", s => (s.accountHi[2] = 1n), "accountHi[j] * accountIdle[j] === 0"],
                 ["account lo limb", s => (s.accountLo[5] = 7n), "accountLo[j] * accountIdle[j] === 0"],
-                ["balance", s => (s.balanceBefore[2] = 5n), "balanceBefore[j] * accountIdle[j] === 0"],
                 ["delta magnitude", s => (s.deltaMagnitude[M - 1] = 1n), "deltaMagnitude[j] * accountIdle[j] === 0"],
                 ["delta sign", s => (s.deltaNegative[3] = 1n), "deltaNegative[j] * accountIdle[j] === 0"],
                 ["fee", s => (s.fee[1] = 1n), "fee[i] * transferIdle[i] === 0"],
@@ -477,10 +450,10 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
 
         it("active account slot after an inactive one", async () => {
             const s = raw([base({ to: c, receiverIndex: 3 })], [
-                { account: a, balance: 1_000n, delta: -710n },
+                { account: a, delta: -710n },
                 null,
                 null,
-                { account: c, balance: 0n, delta: 700n },
+                { account: c, delta: 700n },
             ])
             await rejects(s, "accountActive[j] * (1 - accountActive[j - 1]) === 0")
         })
@@ -489,8 +462,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             const s = raw(
                 [base({ amount: 100n }), null, base({ amount: 100n, nonce: 2n, salt: 22n })],
                 [
-                    { account: a, balance: 1_000n, delta: -220n },
-                    { account: b, balance: 0n, delta: 200n },
+                    { account: a, delta: -220n },
+                    { account: b, delta: 200n },
                 ],
             )
             await rejects(s, "transferActive[i] * (1 - transferActive[i - 1]) === 0")
@@ -502,9 +475,9 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
 
         it("active account that no transfer touches", async () => {
             const s = raw([base()], [
-                { account: a, balance: 1_000n, delta: -710n },
-                { account: b, balance: 0n, delta: 700n },
-                { account: d, balance: 3n, delta: 0n },
+                { account: a, delta: -710n },
+                { account: b, delta: 700n },
+                { account: d, delta: 0n },
             ])
             await rejects(s, "accountActive[j] * untouched[j].out === 0")
         })
@@ -512,8 +485,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
         for (const index of [M, 31, 1_000_000]) {
             it(`sender index ${index} (not below M)`, async () => {
                 const s = raw([base()], [
-                    { account: a, balance: 1_000n, delta: -710n },
-                    { account: b, balance: 0n, delta: 700n },
+                    { account: a, delta: -710n },
+                    { account: b, delta: 700n },
                 ])
                 s.senderIndex[0] = BigInt(index)
                 await rejects(seal(s), "senderSel[i].enable <==")
@@ -522,8 +495,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
 
         it("receiver index p - 1", async () => {
             const s = raw([base()], [
-                { account: a, balance: 1_000n, delta: -710n },
-                { account: b, balance: 0n, delta: 700n },
+                { account: a, delta: -710n },
+                { account: b, delta: 700n },
             ])
             s.receiverIndex[0] = P - 1n
             await rejects(seal(s), "receiverSel[i].enable <==")
@@ -533,7 +506,7 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             // The zero account with amount 0: limbs and balances all agree with
             // the empty slot, only its inactivity rejects it.
             await rejects(
-                raw([base({ to: ZERO, amount: 0n, receiverIndex: 1 })], [{ account: a, balance: 1_000n, delta: -10n }]),
+                raw([base({ to: ZERO, amount: 0n, receiverIndex: 1 })], [{ account: a, delta: -10n }]),
                 "receiverActive[i].out === transferActive[i]",
             )
         })
@@ -541,7 +514,7 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
         it("sender index pointing at an inactive slot", async () => {
             await rejects(
                 raw([base({ signer: ZERO, to: a, amount: 0n, fee: 0n, senderIndex: 1, receiverIndex: 0 })], [
-                    { account: a, balance: 1_000n, delta: 0n },
+                    { account: a, delta: 0n },
                 ]),
                 "senderActive[i].out === transferActive[i]",
             )

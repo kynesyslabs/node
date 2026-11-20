@@ -152,13 +152,12 @@ Block 0 embeds the raw genesis JSON (`chainGenesis.ts`, `extra.genesisData`) and
 its hash feeds the common validator seed. A node with an EMPTY database that
 creates its chain from the edited file therefore gets a block 0 different from
 the network's, and fast sync refuses the peers (`Sync.ts`,
-`verifyLastBlockIntegrity`). The procedure for such a node (also a node whose
-database was wiped): boot it on the UNEDITED genesis first, let block 0 be
-stored, and only then add the `forks` entries and `properties.id` and restart.
-A node that has done this anyway refuses to continue at bootstrap with an
-error naming the cause, because its stored block 0 hashes differently from what
-its peers advertise. The upgrade-path mode does not cover this, since every node there has a database
-from before the edit.
+`verifyLastBlockIntegrity`). Keep the node stopped and follow
+[§6.1 of the activation runbook](../../forking/RUNBOOK_FORK_ACTIVATION.md#61-validator-desync)
+for a verified backup or snapshot from the intended chain; escalate if none
+exists. A node that already created a different block 0 refuses to continue
+at bootstrap. The upgrade-path mode does not cover this, since every node
+there has a database from before the edit.
 
 ## Running it
 
@@ -438,7 +437,7 @@ The first two can ship long before the rest: a client that follows
 | Domain signature before H, or legacy after H | refused at `confirm` with the signature error above; nothing is stored | the client signs from `getNetworkInfo`, never from a constant |
 | Domain signature bound to another chain id | same signature error | the id in the client comes from `getNetworkInfo`, and must equal `properties.id` |
 | Genesis edit on a build without the two-hash handling | `Genesis data hash does not match` on every node, the file overwritten with the stored version, the schedule gone at the next restart | the newer build on every node first (step 3) |
-| Empty-database node booted on the edited file | a block 0 different from the network's; fast sync refuses its peers | boot it on the unedited genesis first, then add the schedule |
+| Empty-database node booted on the edited file | a block 0 different from the network's; fast sync refuses its peers, or bootstrap says `created its block 0 from an edited data/genesis.json` | keep it stopped; to join an existing chain, restore a verified backup from that chain or contact the core team ([§6.1](../../forking/RUNBOOK_FORK_ACTIVATION.md#61-validator-desync)); do not follow the wipe instruction in the bootstrap message |
 | `web2ProofBinding` legacy proof after H | can still land: the gate is admission-only | a validation-time check (follow-up); until then the height is a client deadline |
 | A validator whose genesis lacks the schedule | pairs, logs `FORK SCHEDULE MISMATCH`, admits legacy, refuses domain, its candidate blocks are refused by the others, 3 signatures per block. A 3-of-4 quorum survives one such node; two would stall it (not run) | correct its file and restart it |
 | The stall watchdog ends the process | exit code 0 after three drawn shards without its signature | see below |
