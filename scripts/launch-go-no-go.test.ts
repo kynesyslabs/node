@@ -893,7 +893,7 @@ describe("checkLaunch", () => {
         expect(MAINNET_FORKS).toContain("tlsnVerified")
         expect(MAINNET_FORKS).not.toContain("tlsnDisabled")
         expect(LAUNCH_DORMANT_FORKS).toContain("tlsnDisabled")
-        expect(MAINNET_FORKS).toHaveLength(31)
+        expect(MAINNET_FORKS).toHaveLength(32)
     })
 
     describe("validators seated by NFT at block 0", () => {
@@ -1083,6 +1083,10 @@ describe("checkLaunch", () => {
 
     it("launches with a reference block room of 10", () => {
         expect(MAINNET_FORKS).toContain("referenceBlockRoom10")
+    })
+
+    it("launches with identity links that need no validator API keys", () => {
+        expect(MAINNET_FORKS).toContain("keylessWeb2Identity")
     })
 
     it("is NO-GO on chain ids 0, 1, 1337 and 31337", () => {

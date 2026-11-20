@@ -210,6 +210,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "referenceBlockRoom10",
     "l2psSettlement",
     "tlsnVerified",
+    "keylessWeb2Identity",
 ]
 
 /**
