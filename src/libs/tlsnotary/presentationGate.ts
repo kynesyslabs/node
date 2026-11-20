@@ -188,7 +188,7 @@ function judgeWith(
         return refuse(`notary key algorithm ${out.verifyingKey.alg} is not k256`)
     }
     if (!isTrustedNotaryKey(clock.height, out.verifyingKey.alg, out.verifyingKey.hex)) {
-        return refuse("presentation is not signed by a notary key the chain lists")
+        return refuse("presentation is not signed by a notary key the chain trusts at this height")
     }
     if (out.attestationVersionIsCurrent !== true) {
         return refuse("attestation header version is not the one the chain verifies")

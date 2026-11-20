@@ -507,17 +507,35 @@ export type L2psGateConfig = BaseForkConfig
  * at RPC intake, pool admission, the consensus merge and apply, before any
  * of its edits run: no fee is charged, nothing is burned and no attestation
  * token is issued. Judged at the tip like the other apply-time gates.
- * No payload beyond the base.
  */
-export type TlsnDisabledConfig = BaseForkConfig
+export interface TlsnDisabledConfig extends BaseForkConfig {
+    /**
+     * Block height from which TLSNotary is accepted again, at least
+     * `activationHeight` + 2. Like a notary key's range it is the height of the
+     * block itself (`tip + 1`), so a block at `reenableAt` judges its claims
+     * with the keys valid at `reenableAt`. Absent, the switch stays on.
+     */
+    reenableAt?: number
+}
 
-/** A notary signing key, in the form the verifier reports `verifyingKey`. */
+/**
+ * A notary signing key, in the form the verifier reports `verifyingKey`.
+ * `validFrom` / `validUntil` bound the block heights it may sign for: the
+ * height of the block a presentation lands in (at admission, the next block)
+ * must be at least `validFrom` and below `validUntil`. A key without them is
+ * valid wherever the fork is active. A closed key stays listed, so blocks it
+ * signed for still verify on resync.
+ */
 export interface TlsnNotaryKey {
     /** Operator label; names the key in refusals and logs. */
     id: string
     alg: "k256"
     /** 33-byte SEC1 compressed secp256k1 public key, lowercase hex (66 chars). */
     hex: string
+    /** First block height the key is valid at. */
+    validFrom?: number
+    /** First block height the key is no longer valid at. */
+    validUntil?: number
 }
 
 /** The `tlsnVerified` payload, complete once the loader has accepted it. */
@@ -538,8 +556,9 @@ export interface TlsnVerifiedParams {
  * `tlsnVerified` fork: the node verifies a TLSNotary presentation itself, in
  * the pinned wasm verifier, against the notary keys listed here, instead of
  * checking its structure only. Keys rotate through a release that schedules a
- * new payload, since governance is dormant at launch. `tlsnDisabled`, once
- * scheduled, still refuses every TLSNotary transaction. Dormant by default;
+ * new payload, since governance is dormant at launch: a key is closed with
+ * `validUntil`, never removed. `tlsnDisabled`, once scheduled, still refuses
+ * every TLSNotary transaction until its `reenableAt`. Dormant by default;
  * a mainnet genesis sets 0 with the keys from the notary key ceremony.
  *
  * The payload may be absent only while the fork is unscheduled (the code

@@ -639,7 +639,7 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
         case "l2psGate":
             return base as L2psGateConfig
         case "tlsnDisabled":
-            return base as TlsnDisabledConfig
+            return validateTlsnDisabledEntry(base, entry)
         case "storageFeeSettlement":
             return base as StorageFeeSettlementConfig
         case "referenceBlockRoom10":
@@ -725,4 +725,32 @@ function validateTlsnVerifiedEntry(
         description: base.description,
         ...(hasPayload ? tlsnVerifiedParamsOf(entry) : {}),
     }
+}
+
+/**
+ * Validate the optional `reenableAt` of tlsnDisabled: the block height from
+ * which TLSNotary is accepted again. It needs a scheduled kill switch and must
+ * be at least its activation height + 2: the switch at H first refuses block
+ * H + 1, so a lower value would refuse no block. Absent or null, the switch
+ * stays on, as before; the field is kept only when set, so the schedule digest
+ * of an entry without it is unchanged.
+ */
+function validateTlsnDisabledEntry(
+    base: BaseForkConfig,
+    entry: Record<string, unknown>,
+): TlsnDisabledConfig {
+    const reenableAt = entry.reenableAt
+    if (reenableAt === undefined || reenableAt === null) return base
+    if (
+        base.activationHeight === null ||
+        !Number.isSafeInteger(reenableAt) ||
+        (reenableAt as number) <= base.activationHeight + 1
+    ) {
+        throw new ForkConfigValidationError(
+            "[FORKS] Genesis fork \"tlsnDisabled\".reenableAt must be an integer block height of at least a scheduled " +
+                `activationHeight (${JSON.stringify(base.activationHeight)}) + 2, as a lower one would refuse no block, ` +
+                `got: ${JSON.stringify(reenableAt)}`,
+        )
+    }
+    return { ...base, reenableAt: reenableAt as number }
 }
