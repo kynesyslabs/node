@@ -270,6 +270,8 @@ export interface IdentityConfig {
     rapidApiKey: string
     rapidApiHost: string
     solanaRpc: string
+    /** Comma-separated Solana endpoints for validator NFT proofs; empty for the built-in public ones. */
+    validatorSolanaRpcs: string
     zkAttestationPoints: number
 }
 

@@ -1,4 +1,5 @@
 import { createHash } from "crypto"
+import { logNonCriticalErrorOnce } from "./framework/common"
 import { getRunConfig, writeJson } from "./framework/io"
 import {
   ensureTokenAndBalances,
@@ -83,7 +84,10 @@ async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
     })
-    const json = await res.json().catch(() => null)
+    const json = await res.json().catch(error => {
+      logNonCriticalErrorOnce(`token_invariants_known_holders.rpcPost:${url}`, "token_invariants_known_holders.rpcPost", error, { rpcUrl: url, status: res.status })
+      return null
+    })
     return json
   } finally {
     if (timer) clearTimeout(timer)

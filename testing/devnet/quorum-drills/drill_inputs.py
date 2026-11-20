@@ -21,7 +21,8 @@ empty-snapshot/ into DIR, readable by any uid (see make_readable).
 prints the genesis with its `forks` replaced by the launch set of the
 mainnet genesis template (docs/mainnet/genesis.template.json): active at 0
 where the template says the number 0, off for null and "FILL: ...", and off
-for the forks in LAUNCH_EXCLUDED_FORKS (see with_launch_forks).
+for the forks in LAUNCH_EXCLUDED_FORKS (see with_launch_forks); its validators
+get `nft_exempt` when that set gates seats by NFT from block 0.
 
     drill_inputs.py launch-excluded --template FILE
 prints the excluded forks the template activates at 0 as a JSON object of
@@ -395,6 +396,22 @@ def with_launch_forks(genesis, template, carryover=False):
         forks[name] = {"activationHeight": height, **entry}
     out = dict(genesis)
     out["forks"] = forks
+    return with_exempt_nft_seats(out)
+
+
+def with_exempt_nft_seats(genesis):
+    """Copy of `genesis` whose validators carry `nft_exempt: true` when its
+    forks activate nftValidatorGating at 0; else `genesis` unchanged.
+
+    Block 0 then refuses a seat without an NFT proof (seededNftReasons in
+    src/features/staking/seedNft.ts). A drill has no Node NFTs and runs on a
+    test chain id, where an exempt seat is allowed.
+    """
+    gating = (genesis.get("forks") or {}).get("nftValidatorGating")
+    if not _active_at_zero(gating) or not genesis.get("validators"):
+        return genesis
+    out = dict(genesis)
+    out["validators"] = [{**v, "nft_exempt": True} for v in genesis["validators"]]
     return out
 
 

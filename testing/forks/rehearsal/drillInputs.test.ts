@@ -6,6 +6,7 @@ import { join, resolve } from "path"
 import { NON_MAINNET_CHAIN_IDS, cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
 import { getSharedState } from "@/utilities/sharedState"
+import { seededNftReasons } from "src/features/staking/seedNft"
 import {
     BOOT_LOG_TAIL_LINES,
     BOOT_LOG_TIMEOUT_MS,
@@ -311,6 +312,17 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         for (const n of ["atomicWork", "networkGovernance", "l2psGate", "tlsnDisabled"]) {
             expect(expected[n]).toBeNull()
         }
+    })
+    it("seats the drill validators nft_exempt under NFT gating at 0, so block 0 builds", () => {
+        const g = withLaunchForks(genesis())
+        expect(g.forks.nftValidatorGating.activationHeight).toBe(0)
+        expect(g.validators.every((v: any) => v.nft_exempt === true)).toBe(true)
+        expect(seededNftReasons(g.validators, "genesis.validators", { mainnet: false })).toEqual([])
+        expect(seededNftReasons(genesis().validators, "genesis.validators", { mainnet: false })).not.toEqual([])
+    })
+    it("leaves the validators as they are when the set does not gate seats by NFT at 0", () => {
+        const g = withLaunchForks(genesis(), template({ ...MIN, nftValidatorGating: { activationHeight: null } }))
+        expect(g.validators).toEqual(genesis().validators)
     })
     describe("excluded forks", () => {
         it("sets identityCarryover to an explicit null when the template has it at 0, and the rest of the set is unchanged", () => {

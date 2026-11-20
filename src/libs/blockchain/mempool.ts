@@ -37,8 +37,18 @@ import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
+import { nftGatingActive, nftGatingAtTip } from "@/forks/nftValidatorGatingGate"
+import {
+    SEAT_JUDGE_TIMEOUT_MS,
+    SEAT_TXS_JUDGED_PER_BATCH,
+    SOLANA_SEAT_TX_TYPES,
+    recordSeatVerdict,
+    seatAdmittedHere,
+    seatPoolRefusal,
+} from "src/features/staking/seatAdmission"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
+import type { StakingTxResult } from "src/libs/network/routines/transactions/handleStakingTx"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
 import {
     EvictionCandidate,
@@ -608,7 +618,7 @@ export default class Mempool {
         }
 
         // Node-authored types reach peers through the merge, never as gossip.
-        const typeRefusal = clientTxTypeRefusal(tx)
+        const typeRefusal = clientTxTypeRefusal(tx, nftGatingActive(head))
         if (typeRefusal) {
             return { accepted: false, reason: typeRefusal }
         }
@@ -625,6 +635,11 @@ export default class Mempool {
             return { accepted: false, reason: identity.reason }
         }
 
+        const seatRefusal = await this.gossipSeatRefusal(tx)
+        if (seatRefusal !== null) {
+            return { accepted: false, reason: seatRefusal }
+        }
+
         const { confirmationBlock, error } = await this.addTransactionWithLock(
             tx,
             undefined,
@@ -634,6 +649,22 @@ export default class Mempool {
             return { accepted: false, reason: error }
         }
         return { accepted: true, confirmationBlock }
+    }
+
+    /**
+     * Why a gossiped seat transaction may not enter the pool, or null. The
+     * merge judges only txs a member has not pooled yet, so one pooled from
+     * gossip would reach a block on its publisher's word alone; its NFT
+     * proof or challenge evidence is judged on Solana here, as at RPC
+     * intake. One Solana cannot answer for is refused too: its RPC node
+     * still holds it and the merge judges it there.
+     */
+    public static async gossipSeatRefusal(tx: Transaction): Promise<string | null> {
+        const type = tx.content?.type as string | undefined
+        if (!type || !SOLANA_SEAT_TX_TYPES.has(type) || !nftGatingAtTip()) return null
+        const [verdict] = await this.judgeSeatTransactions([tx])
+        if (verdict === null || verdict === undefined) return "seat transaction not judged"
+        return verdict.success ? null : verdict.message
     }
 
     /**
@@ -698,6 +729,11 @@ export default class Mempool {
                 confirmationBlock: null,
                 error: "Transaction already in mempool",
             }
+        }
+
+        const seatRefusal = await this.seatPoolCapRefusal(transaction)
+        if (seatRefusal !== null) {
+            return { confirmationBlock: null, error: seatRefusal }
         }
 
         if (blockRef === undefined) {
@@ -996,6 +1032,188 @@ export default class Mempool {
     }
 
     /**
+     * Why `tx`, a gasless seat transaction under `nftValidatorGating`, may
+     * not join the pool beside its sender's others, or null. Each one is
+     * read from Solana again at every merge, so a sender holding many costs
+     * every node that many reads per round. The merge does not apply it:
+     * every committee member must end a merge with the same pool.
+     */
+    private static async seatPoolCapRefusal(tx: Transaction): Promise<string | null> {
+        const type = tx.content?.type as string | undefined
+        if (!type || !SOLANA_SEAT_TX_TYPES.has(type) || !nftGatingAtTip()) return null
+        const from = tx.content?.from
+        if (typeof from !== "string" || from === "") return null
+        const pending = await this.listPendingBySenders([from])
+        return seatPoolRefusal(pending.map(row => row.type))
+    }
+
+    /**
+     * Seat transactions of this pool a fresh re-judge refused, by hash, with
+     * the reason, waiting for applySeatRefusals at the start of the next
+     * round. The reads run in the background, so the refusal must not land
+     * mid-round: between the round's pool read and its precommit, a deletion
+     * would leave members forging different blocks, or drop a tx the
+     * precommit is about to lock with nothing left to rebuild it from.
+     */
+    private static pendingSeatRefusals = new Map<string, string>()
+    /**
+     * The re-judge's verdicts, held like its refusals for applySeatRefusals:
+     * the round's candidate reads seatAdmittedHere, so a verdict landing
+     * mid-round would let members choose different seat txs from one pool.
+     */
+    private static pendingSeatVerdicts = new Map<string, StakingTxResult>()
+    private static seatRejudge: Promise<Map<string, string>> | null = null
+
+    /**
+     * Judges the staking policy again on the seat transactions this node
+     * holds, the way `receive` judges those from peers, so a stake whose NFT
+     * moved since admission leaves this pool as it leaves theirs. An
+     * unanswerable one stays. Only under `nftValidatorGating`, the rule whose
+     * verdict can change after admission. The txs of our locked block are
+     * not judged: the committee voted that block with them.
+     *
+     * Runs in the background, one at a time, and never deletes: the round's
+     * peer exchange must not wait on Solana, and what it refuses is only
+     * recorded for applySeatRefusals.
+     */
+    public static startSeatRejudge(): Promise<Map<string, string>> {
+        if (this.seatRejudge !== null) return this.seatRejudge
+        const running = this.judgeOwnSeatTransactions()
+            .then(refused => {
+                for (const [hash, reason] of refused) this.pendingSeatRefusals.set(hash, reason)
+                return refused
+            })
+            .catch((e: unknown) => {
+                log.warning(
+                    `[Mempool] Seat re-judge failed: ${e instanceof Error ? e.message : String(e)}`,
+                )
+                return new Map<string, string>()
+            })
+            .finally(() => {
+                this.seatRejudge = null
+            })
+        this.seatRejudge = running
+        return running
+    }
+
+    private static async judgeOwnSeatTransactions(): Promise<Map<string, string>> {
+        const refused = new Map<string, string>()
+        if (!nftGatingAtTip()) return refused
+        const { isStakingTxType } = await import("src/features/staking/types")
+        const locked = this.lockedHashes()
+        const seats = (await this.getMempool()).filter(
+            tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
+        )
+        const verdicts = await this.judgeSeatTransactions(seats, (hash, verdict) =>
+            this.pendingSeatVerdicts.set(hash, verdict),
+        )
+        seats.forEach((tx, i) => {
+            const verdict = verdicts[i]
+            if (verdict !== null && !verdict.success && !verdict.unreachable) {
+                refused.set(tx.hash, verdict.message)
+            }
+        })
+        return refused
+    }
+
+    /**
+     * Applies the background re-judge's verdicts to this node's admissions
+     * and drops the seat transactions it refused, except
+     * the txs of the lock at `height` and `inFlight` (the candidate our open
+     * prevote names). The caller holds the pool lock and the commit lock
+     * mutex and calls this before it reads the round's pool, so the check
+     * and the deletion see the same lock the precommit writes.
+     */
+    public static async applySeatRefusals(
+        height: number,
+        inFlight: ReadonlySet<string> = new Set(),
+    ): Promise<string[]> {
+        for (const [hash, verdict] of this.pendingSeatVerdicts) recordSeatVerdict(hash, verdict)
+        this.pendingSeatVerdicts.clear()
+        if (this.pendingSeatRefusals.size === 0) return []
+        const refused = new Map(this.pendingSeatRefusals)
+        this.pendingSeatRefusals.clear()
+        const locked = this.lockedHashes(height)
+        const drop: string[] = []
+        for (const [hash, reason] of refused) {
+            if (locked.has(hash) || inFlight.has(hash)) continue
+            log.error(`[Mempool] Dropping own tx ${hash}: ${reason}`)
+            drop.push(hash)
+        }
+        if (drop.length > 0) await this.removeTransactionsByHashes(drop)
+        return drop
+    }
+
+    /**
+     * The round's candidate `txs` with only the seat txs this node admitted
+     * itself, and of those the SEAT_TXS_JUDGED_PER_BATCH lowest hashes; the
+     * rest stay pooled for a later round. A merge judges and imports that
+     * many per peer batch, so one member may hold more than another, but
+     * the lowest hashes of all of them reach every member's pool, and taking
+     * only those keeps the members' blocks equal. Our locked block's txs are
+     * left as they are: the merge does not judge them either.
+     */
+    public static async boundSeatTransactions<T extends Transaction>(txs: T[]): Promise<T[]> {
+        if (!nftGatingAtTip()) return txs
+        const { isStakingTxType } = await import("src/features/staking/types")
+        const locked = this.lockedHashes()
+        const counted = (tx: T) => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash)
+        const kept = new Set(
+            txs
+                .filter(tx => counted(tx) && seatAdmittedHere(tx.hash))
+                .map(tx => tx.hash)
+                .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+                .slice(0, SEAT_TXS_JUDGED_PER_BATCH),
+        )
+        return txs.filter(tx => !counted(tx) || kept.has(tx.hash))
+    }
+
+    /**
+     * Fresh staking verdicts on the SEAT_TXS_JUDGED_PER_BATCH seat txs with
+     * the lowest hashes, each unanswered after SEAT_JUDGE_TIMEOUT_MS; null
+     * for the rest, which are not judged this round. By hash rather than by
+     * position: members receive the same txs in different orders, and must
+     * judge the same ones to keep the same pool.
+     */
+    private static async judgeSeatTransactions(
+        seats: Transaction[],
+        record: (hash: string, verdict: StakingTxResult) => void = recordSeatVerdict,
+    ): Promise<Array<StakingTxResult | null>> {
+        const { handleStakingTx } = await import(
+            "src/libs/network/routines/transactions/handleStakingTx"
+        )
+        const judged = new Set(
+            seats
+                .map(tx => tx.hash)
+                .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+                .slice(0, SEAT_TXS_JUDGED_PER_BATCH),
+        )
+        return Promise.all(
+            seats.map(tx => {
+                if (!judged.has(tx.hash)) return null
+                let timer: ReturnType<typeof setTimeout> | undefined
+                const late = new Promise<StakingTxResult>(resolve => {
+                    timer = setTimeout(
+                        () =>
+                            resolve({
+                                success: false,
+                                unreachable: true,
+                                message: `no staking verdict within ${SEAT_JUDGE_TIMEOUT_MS}ms`,
+                            }),
+                        SEAT_JUDGE_TIMEOUT_MS,
+                    )
+                })
+                return Promise.race([handleStakingTx(tx, { fresh: true }), late])
+                    .then(verdict => {
+                        record(tx.hash, verdict)
+                        return verdict
+                    })
+                    .finally(() => clearTimeout(timer))
+            }),
+        )
+    }
+
+    /**
      * Holds the senders of merged-in `txs` to the per-sender cap (see
      * chooseSenderOverflow), evicting the held txs that no longer fit, and
      * returns the txs still to insert. Runs under the pool lock.
@@ -1282,6 +1500,55 @@ export default class Mempool {
             }
             validTransactions.length = 0
             validTransactions.push(...editVerifiedTransactions)
+        }
+
+        // Staking policy is judged again here by every node that merges the
+        // tx, not only by the RPC node that admitted it, so a seat needs a
+        // voting quorum to agree the NFT proof holds. A tx no Solana
+        // endpoint could answer for is left out and comes back at the next
+        // merge; one a healthy endpoint rejected is dropped. Solana is read
+        // fresh here, past the admission caches, so members do not split on
+        // an outage or a refusal one of them saw earlier. Only under
+        // nftValidatorGating: before it the staking policy reads the chain
+        // alone, which the block's apply already judges. Not for the txs of
+        // a block being rebuilt or of our locked block: the committee voted
+        // that block with them, and a verdict that changed since would leave
+        // it unbuildable at that height.
+        if (nftGatingAtTip() && !options.rebuild) {
+            const { isStakingTxType } = await import("src/features/staking/types")
+            const locked = this.lockedHashes()
+            const seats = validTransactions.filter(
+                tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
+            )
+            // Solana is asked for every judged seat tx at once, so a batch of
+            // unanswerable proofs costs one timeout, not one per tx.
+            const seatVerdicts = await this.judgeSeatTransactions(seats)
+            const verdictOf = new Map(seats.map((tx, i) => [tx, seatVerdicts[i]]))
+            const policyVerified: Transaction[] = []
+            validTransactions.forEach(tx => {
+                if (!verdictOf.has(tx)) {
+                    policyVerified.push(tx)
+                    return
+                }
+                const verdict = verdictOf.get(tx)
+                if (verdict === null || verdict === undefined) {
+                    log.warning(
+                        `[Mempool.receive] Leaving out tx ${tx.hash} for now: over ${SEAT_TXS_JUDGED_PER_BATCH} seat transactions in one batch`,
+                    )
+                } else if (verdict.success) {
+                    policyVerified.push(tx)
+                } else if (verdict.unreachable) {
+                    log.warning(
+                        `[Mempool.receive] Leaving out tx ${tx.hash} for now: ${verdict.message}`,
+                    )
+                } else {
+                    log.error(
+                        `[Mempool.receive] Rejecting tx ${tx.hash}: ${verdict.message}`,
+                    )
+                }
+            })
+            validTransactions.length = 0
+            validTransactions.push(...policyVerified)
         }
 
         // Proofs are checked concurrently so that provider latency is paid

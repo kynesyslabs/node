@@ -25,14 +25,15 @@ allocation. Those are decided by the genesis owners and filled in once.
 | `properties.id` | `8587492` | the mainnet chain id the owners decided. go/no-go and the plan check refuse `0`, testnet `1`, devnet `1337` and `31337` (the fork rehearsals' and local EVM development chains' default): every signature binds to the chain id, so a reused id lets a transaction signed on another network replay on mainnet |
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
-| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement`, `tlsnVerified` | `activationHeight: 0` | mainnet starts with every safety fork on; `web2ProofBinding` takes only web2 proofs that sign the bound message (SDK ≥ 4.0.20 `createWeb2ProofPayload` with a claim), and `xmProofBinding` takes only cross-chain identity proofs that sign the `demos-xm:v1` message, so clients need `@kynesyslabs/demosdk` 4.0.21; and `tlsnProofEnforcement` refuses every TLSN identity claim that carries the structure-only marker; L2PS settles from block 0: under `l2psSettlement` an `l2psBatch` moves L1 balances through a PLONK-proven net-change record that every validator verifies (the verification key ships in the image, pinned by its digest in the code), and the entry node's local L2PS proof path is off; TLSNotary runs from block 0: under `tlsnVerified` the node verifies a presentation itself, in the verifier wasm whose sha256 the payload pins, and accepts only the notary keys the payload lists (see the owner-filled fields below); `storageFeeSettlement` credits the storage fee of a Storage Program create or write to burn and treasury like a network fee, so the total supply stays the genesis total; `referenceBlockRoom10` lets a transaction's reference block be up to 10 blocks behind the head (deep window 50 blocks), so a transaction confirmed under load or approved after a few seconds still lands; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height. `identityCarryover` makes block 0 import user data without balances and refuse any other snapshot ([genesis-import.md](genesis-import.md)) |
+| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `tokenStaking`, `nftValidatorGating`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement`, `tlsnVerified`, `keylessWeb2Identity` | `activationHeight: 0` | mainnet starts with every safety fork on; `web2ProofBinding` takes only web2 proofs that sign the bound message (SDK ≥ 4.0.20 `createWeb2ProofPayload` with a claim), and `xmProofBinding` takes only cross-chain identity proofs that sign the `demos-xm:v1` message, so clients need `@kynesyslabs/demosdk` 4.0.21; and `tlsnProofEnforcement` refuses every TLSN identity claim that carries the structure-only marker; L2PS settles from block 0: under `l2psSettlement` an `l2psBatch` moves L1 balances through a PLONK-proven net-change record that every validator verifies (the verification key ships in the image, pinned by its digest in the code), and the entry node's local L2PS proof path is off; TLSNotary runs from block 0: under `tlsnVerified` the node verifies a presentation itself, in the verifier wasm whose sha256 the payload pins, and accepts only the notary keys the payload lists (see the owner-filled fields below); `storageFeeSettlement` credits the storage fee of a Storage Program create or write to burn and treasury like a network fee, so the total supply stays the genesis total; `referenceBlockRoom10` lets a transaction's reference block be up to 10 blocks behind the head (deep window 50 blocks), so a transaction confirmed under load or approved after a few seconds still lands; `keylessWeb2Identity` links GitHub, Discord and Twitter accounts only through TLSNotary (`tlsn_identity_assign`) and refuses the `web2_identity_assign` path for them, so validators hold no GitHub, Discord or RapidAPI credentials; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height. `identityCarryover` makes block 0 import user data without balances and refuse any other snapshot ([genesis-import.md](genesis-import.md)) |
 | `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
 | `forks.l2psGate` | `activationHeight: null` | the L2PS kill switch, not scheduled at launch. Scheduled at a height on the running chain, it refuses every L2PS transaction, request and pending proof and stops the L2PS services; go/no-go is NO-GO on a genesis that schedules it |
+| `forks.nftValidatorGating` | `activationHeight: 0` | validator seats are backed by an allowlisted Solana Node NFT from block 0, not by bonded DEM. Every genesis validator carries `nft_mint`, `nft_owner` and `nft_proof_tx` (see `validators` below). go/no-go reads each proof on Solana before the genesis is sealed; a node building block 0 checks the NFT fields offline (allowlisted mint, well-formed owner and proof, no mint backing two seats, no `nft_exempt`) and never reads Solana. From block 1 a `validatorStake` carries amount 0 and a proof that the NFT's wallet backs the validator, a `validatorChallenge` evicts a seat whose NFT left that wallet, seat transactions pay no gas and the unstake lock is 20 blocks. Pool admission holds a sender to 3 stakes or challenges a minute and 2 in the pool, and keeps a refused proof refused for 10 minutes without reading Solana again; the merge that decides the block reads Solana fresh, past both admission caches. No eviction and no unstake takes the active set below the committee floor (7 of shardSize 10). go/no-go is NO-GO on a genesis that does not schedule it at 0, on a block 0 seat without a valid NFT field set or with a proof that does not check out on Solana, on an `nft_exempt` seat, and on a build without its allowlist digest pin ([validator-staking.md](../runbooks/validator-staking.md)) |
 | `forks.tlsnDisabled` | `activationHeight: null` | the TLSNotary kill switch, not scheduled at launch. Scheduled at a height on the running chain, it refuses `tlsn_request`, `tlsn_store` and any `tlsnotary` edit before any fee or burn and issues no attestation token; go/no-go is NO-GO on a genesis that schedules it |
 | `forks.tlsnVerified` payload limits | `maxPresentationBytes` `65536`, `freshnessWindowSec` `3600`, `futureSkewSec` `60` | the largest presentation the node verifies or stores (1024 to 1048576 bytes); how long before the block time an attested connection may have been made (1 to 604800 s), which at 3600 s is shorter than the 500-block `tlsn_request` token at 10 s blocks, so users must store or link within an hour of attesting ([tlsn-notary.md](../runbooks/tlsn-notary.md), section 1); and how far after the block time an attested time may lie, for a notary whose clock runs ahead (0 to 600 s). Every validator judges a presentation with the values of the block it lands in, so they are consensus values and change only by a scheduled release |
 | `forks.networkGovernance` | `activationHeight: null` | network-upgrade proposals and votes are refused at launch; go/no-go is NO-GO on a genesis that schedules it. Turning governance on is a later, height-pinned schedule change |
-| `forks.tokenStakingGate` | `activationHeight: 0` | token staking is off at launch: the validators are the ones in `validators`, and a `validatorStake` or `validatorUnstake` transaction is refused at intake and at apply with "token staking is not enabled on this network (fork tokenStaking)". A node whose build does not know the fork refuses to boot on this genesis |
-| `forks.tokenStaking` | `activationHeight: null` | token staking opens by network upgrade. Opening it is a later, height-pinned schedule change: with `tokenStaking` at H, stakes and unstakes are taken in and applied from block H + 1 under the `stakeApplyChecks` rules. The change ships as a signed release that sets only `tokenStaking` and leaves every active fork at 0 ([fork-schedule-policy.md, Changing the schedule](../runbooks/fork-schedule-policy.md#changing-the-schedule)); go/no-go is NO-GO on a genesis that schedules it |
+| `forks.tokenStakingGate` | `activationHeight: 0` | stakes and unstakes are refused at intake and at apply with "token staking is not enabled on this network (fork tokenStaking)" unless `tokenStaking` is active, which it is from block 0. Kept so that a later release can close seat intake again by moving `tokenStaking`. A node whose build does not know the fork refuses to boot on this genesis |
+| `forks.tokenStaking` | `activationHeight: 0` | seat intake is open from block 1. With `nftValidatorGating` at 0 every stake is an NFT seat: a stake of any amount but 0 is refused at intake and at apply, so no DEM is ever bonded and the bonded-stake rules of `stakeApplyChecks` never run. go/no-go is NO-GO on a genesis that does not schedule it at 0 |
 | `forks.gasFeeSeparation` | `activationHeight: 0`, with the treasury the owners fill | a native transaction pays the fee its `transaction_fee` names, split between the burn and treasury accounts (the rpc share goes to treasury while no operator is named), and with `feeBinding` that fee is all it pays: no flat gas on top, so transfers keep the total supply. Without the fork the fee is a flat 1 DEM per transaction that no account receives |
 | `status` | `"confirmed"` | as on testnet |
 
@@ -52,7 +53,51 @@ them equal.
 | `snapshot.manifestSha256` | `sha256sum` of the launch snapshot's `manifest.json`. Keep the field: the launch tools model block 0 on the snapshot path, and the plan check and the height-1 check both require the snapshot |
 | `balances` | the agreed allocations, `[["0x<64 hex address>", "<amount>"], ...]`, each address lowercase. An entry replaces the balance an address has in the snapshot, it is not added to it, so write the whole balance the account starts with, never a top-up. The amount is in OS (1 DEM = 10^9 OS), a decimal integer string. Under `identityCarryover`, the only mainnet path, the snapshot is already in OS units: the carry-over builder refuses any other (`scripts/state-snapshot/carryover.ts`), so a DEM figure entered here would start the account with a billionth of its allocation. A build script that takes whole DEM multiplies by 10^9 before it writes the field. Write the total supply in OS (with the DEM figure beside it) into the allocation sign-off ([genesis-key-custody.md](../runbooks/genesis-key-custody.md)) |
 | `timestamp` | the launch time in seconds as a positive integer string. Block 0 is built from it, so the block 0 hash is known only once it is fixed |
-| `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount`, `first_seen` `0`, `valid_at` `0`. `staked_amount` is in OS units (1 DEM = 10^9 OS): the node seeds this list after block 0 applies `osDenomination` and stores each stake as written. When the snapshot carries `validators.jsonl`, the node seeds from that file instead. Under `identityCarryover` the launch snapshot is built from this list (`bun run snapshot:carryover --validators mainnet/genesis.json`), and block 0 refuses a snapshot whose `validators.jsonl` differs from it |
+| `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount` `"0"`, `first_seen` `0`, `valid_at` `0`, `nft_mint`, `nft_owner`, `nft_proof_tx`. The NFT fields name the allowlisted Node NFT that backs the seat, the Solana wallet holding it and the finalized Solana transaction, signed by that wallet, whose `demos-validator:` memo names the address; `bun scripts/genesis-seeds.ts` writes them ([validator-staking.md](../runbooks/validator-staking.md)). No two seats share a mint, and no entry is `nft_exempt` (test networks only). `staked_amount` is in OS units (1 DEM = 10^9 OS) and is `"0"`: a seat is backed by its NFT. When the snapshot carries `validators.jsonl`, the node seeds from that file instead and, on a mainnet chain id, holds those rows to the same NFT fields offline, as go/no-go does; the carry-over check compares the NFT fields of each row with its genesis entry. Under `identityCarryover` the launch snapshot is built from this list (`bun run snapshot:carryover --validators mainnet/genesis.json`), and block 0 refuses a snapshot whose `validators.jsonl` differs from it |
+
+### Bot authorization: launch decision and gate
+
+The existing rule authorizes **every address with any `balances` entry
+whose raw integer amount is at least `1_000_000_000_000`**, inclusive.
+The 1e12 threshold is in the units written in the file: 1000 DEM when
+the file uses OS, and 1e12 DEM when the file uses DEM.
+`loadGenesisIdentities.ts` reads the genesis file at each boot; social-bot
+attestations in `src/libs/abstraction/index.ts` require membership in that
+set. Addresses match exactly, including case.
+
+This threshold applies to the amount written in the file, before
+`osDenomination` or snapshot restore. Snapshot balances, current balances,
+validator stakes and later transfers do not qualify an address. An empty
+`balances` array authorizes no bots; the bundled `data/genesis.json` has
+that empty array. Every large allocation also grants bot authorization,
+whether its owner operates a bot or not.
+
+Before publishing genesis, its owners must approve the full resulting
+allowlist and ensure each intended bot has a qualifying allocation. Create
+`mainnet/bots.json` as a JSON array of the approved lowercase, `0x`-prefixed
+64-hex public keys, for example `["0x<64 lowercase hex characters>"]`.
+Use `[]` only for an explicit decision to authorize no bots. This is a
+review inventory supplied to the launch tool through `--bots FILE`, never
+an input to the node or an alternative authorization source.
+
+Both the offline plan and live go/no-go checks require that inventory and
+compare it with the complete derived set. Missing or underfunded intended
+bots, unreviewed qualifying allocations, invalid inventory entries and a
+missing inventory are NO-GO. Publish the reviewed inventory alongside the
+genesis; genesis owners supply the actual keys, which this template cannot
+choose. If this funding rule is unsuitable, stop launch and agree a
+separately fork-gated authorization change before proceeding. Do not
+silently add a new genesis field or environment override to grant access.
+
+Operator paths use the same rule:
+
+| Setup | File to check and operational action |
+|---|---|
+| Docker Compose | Run the plan against the published host file, then mount that exact file read-only at `/app/data/genesis.json`, as in `INSTALL.md`. If `DEMOS_GENESIS_FILE` is set, it names a path **inside** the container and must resolve to that same mounted file. Mount the inventory as well if running the launch tool inside the container. |
+| Bare metal / `./run` | Run the plan from the repository root using Bun 1.4.4; `--genesis` must name the same file as `DEMOS_GENESIS_FILE`, or `data/genesis.json` when unset. |
+| Bun only / `bun run start:bun` | Use the same working directory and genesis path as the launch check; no new environment setting or Node runtime is required. |
+| Fresh install | Check allocations and inventory before publication, pinning hashes or writing block 0. Regenerate the published hashes if allocations change before launch. |
+| Upgrade / restart | Keep the original published genesis file and allocations: the loader rereads that file even with an existing database. Run the check against it; do not edit it, reset the chain or top up an account to change authorization. The launch check changes no node behavior. |
 
 ### Forks this build does not know yet
 
@@ -75,6 +120,7 @@ launch snapshot and the validator table
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
+  --bots mainnet/bots.json \
   --operators mainnet/launch-validators.json \
   --expected-treasury <agreed treasury address> \
   --expected-notary-keys <id:hex,id:hex from the notary key ceremony>
@@ -84,7 +130,7 @@ It prints one `PASS` or `FAIL` line per check (genesis forks, the
 treasury against `--expected-treasury`, the `tlsnVerified` notary keys
 against `--expected-notary-keys`, chain id,
 shard size, genesis values (no template `FILL` left), whether a node
-would load the file, block 0 validator set,
+would load the file, bot allowlist, block 0 validator set,
 launch validators against the quorum, the validator table, the operator
 and provider cap, voting power per operator and provider, the beneficial
 owner cap, region share, stake share, pinned identities) and exits 0 only
@@ -108,11 +154,15 @@ what a validator would hit on this file, and the same checks fail
   the node boots but no block after block 0 can be forged;
 - a validator `connection_url` in that set that is not an http(s) URL with a
   host (and, if it names a port, one in 1-65535). Each one is exactly the
-  `EXPOSED_URL` that operator runs with, port included; peers dial it.
+  `EXPOSED_URL` that operator runs with, port included. Consensus finds
+  validators through the peer list, not this field, but go/no-go and
+  `launch-height1-check` reach block 0's validators at it, and RPC reports it.
   A validator without a URL is not reported, because the node accepts it:
   `null` in either list, and a missing or empty URL in a `validators.jsonl`
-  row (a genesis `validators` entry without one is refused at boot). Before
-  publishing, check separately that every launch validator has a URL.
+  row (a genesis `validators` entry without one is refused at boot).
+  `scripts/genesis-seeds.ts` asks for each seat's URL and writes no seat
+  without one; for rows written any other way, check before publishing that
+  every launch validator has a URL.
 
 What each value covers, how they are published, the 24 h rule and the
 height-1 check after launch are in [genesis-hash.md](genesis-hash.md).

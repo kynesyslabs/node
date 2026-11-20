@@ -22,8 +22,10 @@ the set. `scripts/launch-go-no-go.ts` enforces it (see
 [Enforced in tooling](#enforced-in-tooling)).
 
 Everything below is read from the `stabilisation` branch with the mainnet
-genesis (every fork in `MAINNET_FORKS` at block 0, `networkGovernance` and
-`tokenStaking` off). Paths are relative to the repository root. Statements
+genesis (every fork in `MAINNET_FORKS` at block 0, `networkGovernance` off).
+Since node#1187 the set includes `tokenStaking` and `nftValidatorGating`, so
+seats are NFT-gated from block 0; the bullets below that describe a frozen
+launch set and DEM stakes predate that decision. Paths are relative to the repository root. Statements
 marked *reading* come from code reading and were not run.
 
 ## How the code counts
@@ -122,20 +124,13 @@ captured committee becomes a captured chain.
   refused at every layer while `networkGovernance` is off
   (`src/forks/governanceGate.ts:64-69`); the mainnet genesis leaves it off.
 - The fork schedule comes only from the genesis file; no vote changes it.
-- No one can join or leave after genesis while `tokenStaking` is off:
-  stake and unstake transactions are refused
-  (`src/forks/tokenStakingGate.ts:11`). The launch set is frozen until a
-  release schedules `tokenStaking`.
-- When staking opens: minimum stake 1,000 DEM (`MIN_VALIDATOR_STAKE`,
-  `docs/mainnet/parameters.env`), a 1,000-block unstake lock, and an
-  unstake is refused when it would leave fewer than 7 active validators
-  (`src/libs/blockchain/gcr/gcr_routines/GCRValidatorStakeRoutines.ts:470-476`).
-  There is **no per-validator, per-owner or total cap** and no limit on how
-  many validators one party registers.
-- node#1187 (open, not merged) replaces token staking with NFT-gated seats:
-  one seat per NFT mint, stake forced to 0, governance weight one per seat.
-  It ties a seat to a mint, not to a person, so one holder of many NFTs
-  still gets many seats.
+- From block 1 anyone holding an allowlisted Node NFT can take a seat
+  (`nftValidatorGating` and `tokenStaking` at 0, node#1187): one seat per
+  NFT mint, stake forced to 0, a 20-block unstake lock, governance weight
+  one per seat. An unstake or an eviction is refused when it would leave
+  fewer than 7 active validators. The allowlist ties a seat to a mint, not
+  to a person, so one holder of many NFTs still gets many seats: there is
+  **no per-owner or total cap** beyond the number of allowlisted mints.
 
 ## Share controlled by one party, and what it can do
 
@@ -223,10 +218,11 @@ What it can abuse in Demos-specific state:
    at the monitoring host), and on a committed peerlist that drops
    validators that are online.
 
-### Post-launch (before `tokenStaking` or node#1187 is scheduled)
+### Post-launch
 
-6. **An allowlist for joining**, curated per owner: node#1187 or an
-   approval step in #11's growth plan. Without a cap, open staking lets any
+6. **An allowlist for joining**, curated per owner: the node#1187 NFT
+   allowlist gates joining by mint, not by owner, so the owner side still
+   needs an approval step in #11's growth plan. Without a cap, open staking lets any
    party add validators until it holds 13 of 40, which is under a third and
    still captures a committee every few minutes.
 7. **On-chain per-owner limits are not possible** without identity: one
@@ -252,11 +248,11 @@ What it can abuse in Demos-specific state:
 
 | Check (`--plan` line) | Rule | Code |
 |---|---|---|
-| operator and provider cap | no operator or provider runs more than `min(launch, 10) − 7` | `scripts/launch-go-no-go.ts:353`, `:392` |
-| voting power per operator and provider | none holds more than a third of the first committee | `:402` |
-| beneficial owner cap | on the mainnet chain id every entry names an owner; no owner over the same cap or third | `:379`, `:448` |
-| region share | no region hosts a third or more of the launch validators | `:415` |
-| stake share | no owner, operator, provider or region holds a third or more of block 0's `staked_amount` | `:462` |
+| operator and provider cap | no operator or provider runs more than `min(launch, 10) − 7` | `scripts/launch-go-no-go.ts:356`, `:395` |
+| voting power per operator and provider | none holds more than a third of the first committee | `:405` |
+| beneficial owner cap | on the mainnet chain id every entry names an owner; no owner over the same cap or third | `:382`, `:451` |
+| region share | no region hosts a third or more of the launch validators | `:418` |
+| stake share | no owner, operator, provider or region holds a third or more of block 0's `staked_amount` | `:465` |
 
 The T-0 go/no-go (`checkLaunch`) applies the same rules, so a table that
 was edited after `--plan` is caught on launch day. On the testnet and

@@ -20,9 +20,14 @@ function contentOf(tx: TxView): Record<string, unknown> {
         : {}
 }
 
-/** Whether TLSNotary is off for the block applied on `tip`. */
+/**
+ * Whether TLSNotary is off for the block applied on `tip`, block `tip + 1`:
+ * from the fork's activation height until that block reaches `reenableAt`.
+ */
 export function tlsnDisabledAt(tip: number): boolean {
-    return isForkActive("tlsnDisabled", tip)
+    if (!isForkActive("tlsnDisabled", tip)) return false
+    const reenableAt = getSharedState.forkConfig.tlsnDisabled.reenableAt
+    return reenableAt === undefined || tip + 1 < reenableAt
 }
 
 /** Whether TLSNotary is off at this node's tip. */

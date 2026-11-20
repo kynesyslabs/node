@@ -32,6 +32,7 @@ import {
     GCREditTLSNotary,
 } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 import log from "src/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { normalizePubkey } from "./normalizePubkey"
 
@@ -1401,6 +1402,42 @@ export default class HandleGCR {
         return { nonceCharged: nonceOnly.success, feeCharged: false }
     }
 
+    /**
+     * Puts back the accounts, rows and staged caches of a transaction whose
+     * edits failed, and returns its failed result.
+     */
+    private static async restoreFailedEdits(
+        entities: GCREntityCaches,
+        snapshots: GCRMainSnapshot[],
+        rowSnapshots: RowSnapshot[],
+        staged: Partial<StagedSnapshot>,
+        message: string,
+    ): Promise<GCRApplyResult> {
+        // An account not loaded before the transaction comes back as a
+        // fresh one, built in memory only (skipSave), so the builds can
+        // run together.
+        const restored = await Promise.all(
+            snapshots.map(
+                async snap =>
+                    [
+                        snap.pubkey,
+                        snap.entity ?? (await HandleGCR.createAccount(snap.pubkey, {}, true)),
+                    ] as const,
+            ),
+        )
+        for (const [pubkey, entity] of restored) entities.accounts.set(pubkey, entity)
+        restoreRows(rowSnapshots)
+        restoreStaged(entities, staged)
+        return {
+            success: false,
+            entities,
+            message,
+            sideEffects: [],
+            deferredWrites: [],
+            appliedEditsCount: 0,
+        }
+    }
+
     private static async applyTransactionEdits(
         entities: GCREntityCaches,
         tx: Transaction,
@@ -1888,31 +1925,13 @@ export default class HandleGCR {
                 }
                 // After the rollback, which also reverses the balance edits:
                 // reversing them on the restored accounts would refund them twice.
-                for (const snap of snapshots) {
-                    if (snap.entity === null) {
-                        // Entity was newly created - restore to fresh state
-                        const freshEntity = await HandleGCR.createAccount(
-                            snap.pubkey,
-                            {},
-                            true,
-                        )
-                        entities.accounts.set(snap.pubkey, freshEntity)
-                    } else {
-                        entities.accounts.set(snap.pubkey, snap.entity)
-                    }
-                }
-                restoreRows(rowSnapshots)
-                // After the rollback, which may have edited the staged rows
-                restoreStaged(entities, staged)
-
-                return {
-                    success: false,
+                return HandleGCR.restoreFailedEdits(
                     entities,
-                    message: result.message,
-                    sideEffects: [],
-                    deferredWrites: [],
-                    appliedEditsCount: 0,
-                }
+                    snapshots,
+                    rowSnapshots,
+                    staged,
+                    result.message,
+                )
             }
 
             // They run after this call returns, still stamping the block's time.
@@ -1943,8 +1962,14 @@ export default class HandleGCR {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
-                log.error(
-                    `[simulateOne] Error processing native side-effects: ${error}`,
+                const message = `Error processing native side-effects: ${getErrorMessage(error)}`
+                log.error(`[simulateOne] ${message}`)
+                return HandleGCR.restoreFailedEdits(
+                    entities,
+                    snapshots,
+                    rowSnapshots,
+                    staged,
+                    message,
                 )
             }
         }
@@ -2295,11 +2320,11 @@ export default class HandleGCR {
         } = state
         for (const tx of txs) {
             const reason =
-                (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
+                (typeAllowList ? blockTxTypeRefusal(tx, state.nftGating) : null) ??
                 featureGateRefusal(tx, state) ??
                 governanceGateRefusal(tx, governance) ??
                 tokenStakingRefusal(tx, stakingOpen) ??
-                (stakeChecks ? stakeSenderRefusal(tx) : null)
+                (stakeChecks ? stakeSenderRefusal(tx, state.nftGating) : null)
             if (reason) {
                 refuse(tx, reason)
                 continue
@@ -2321,7 +2346,10 @@ export default class HandleGCR {
             if (refused.has(tx.hash)) continue
             let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
             try {
-                verdict = await verifyEditsAtApply(tx, { postFork })
+                verdict = await verifyEditsAtApply(tx, {
+                    postFork,
+                    nftGating: state.nftGating,
+                })
             } catch (error) {
                 verdict = { ok: false, reason: `could not be verified: ${error}` }
             }
@@ -2870,6 +2898,25 @@ export default class HandleGCR {
                         const row = await repo.findOneBy(where)
                         cache.set(where.address, row)
                         return row
+                    }
+                }
+                if (property === "findBy") {
+                    // Rows holding a mint: the ones this block already
+                    // staged first, then the database, deduplicated by
+                    // address so a staged row shadows its stored version.
+                    return async (where: { nft_mint: string }) => {
+                        const byAddress = new Map<string, Validators>()
+                        for (const row of await repo.findBy(where)) {
+                            if (row.address) byAddress.set(row.address, row)
+                        }
+                        for (const row of cache.values()) {
+                            if (row && row.address && row.nft_mint === where.nft_mint) {
+                                byAddress.set(row.address, row)
+                            } else if (row && row.address) {
+                                byAddress.delete(row.address)
+                            }
+                        }
+                        return [...byAddress.values()]
                     }
                 }
                 return Reflect.get(target, property, receiver)
@@ -3703,13 +3750,10 @@ export default class HandleGCR {
                 log.debug(`[TLSNotary] Domain extracted: ${domain}`)
 
                 // Create the attestation token (idempotent - tokenManager handles duplicates)
-                const token = createToken(
+                createToken(
                     tx.content.from as string,
                     targetUrl,
                     tx.hash,
-                )
-                log.info(
-                    `[TLSNotary] Created token ${token.id} for tx ${tx.hash}`,
                 )
                 break
             }

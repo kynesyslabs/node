@@ -1,5 +1,6 @@
 import {
     loadSigningRecord,
+    restartSigningFloor,
     setRestartSigningFloor,
 } from "src/libs/identity/signingRecord"
 import log from "src/utilities/logger"
@@ -54,4 +55,34 @@ export function armRestartSigningFloor(
         `[SIGNING] Restart signing floor: only rounds after ${floor} are signed`,
     )
     return floor
+}
+
+/**
+ * Waits until the network clock is past the restart signing floor, so the
+ * first round this node joins is one it signs. Gives up after the lead plus
+ * a margin when the floor comes from the state files and is further ahead.
+ */
+export async function waitForRestartSigningFloor(
+    now: () => number,
+    sleep: (ms: number) => Promise<void> = ms =>
+        new Promise(resolve => setTimeout(resolve, ms)),
+): Promise<boolean> {
+    const floor = restartSigningFloor()
+    if (floor === null) return true
+    const maxWaitSeconds = COSIGN_TIMESTAMP_MAX_LEAD_SECONDS + 2
+    const start = now()
+    if (start > floor) return true
+    log.info(
+        `[SIGNING] Waiting for the network clock to pass the restart signing floor ${floor} before joining the network`,
+    )
+    while (now() <= floor) {
+        if (now() - start >= maxWaitSeconds) {
+            log.warning(
+                `[SIGNING] Restart signing floor ${floor} is still ${floor - now()}s ahead; joining the network, rounds up to it stay refused`,
+            )
+            return false
+        }
+        await sleep(200)
+    }
+    return true
 }

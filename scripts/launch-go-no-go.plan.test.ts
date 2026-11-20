@@ -20,11 +20,15 @@ import {
     validatorTable,
 } from "./launch-go-no-go"
 import { notaryKeyHex, tlsnVerifiedPayload } from "src/libs/blockchain/testSupport/tlsnVerifiedFixtures"
+import { NFT_ALLOWLIST_PATH } from "src/features/staking/nftAllowlist"
 
 const ROOT = join(import.meta.dir, "..")
 const TEMPLATE = join(ROOT, "docs/mainnet/genesis.template.json")
 const readTemplate = () => JSON.parse(readFileSync(TEMPLATE, "utf8"))
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
+const MINTS: string[] = JSON.parse(readFileSync(NFT_ALLOWLIST_PATH, "utf8")).mints
+const NFT_OWNER = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
+const PROOF_TX = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
 const isFill = (v: unknown) => typeof v === "string" && v.startsWith("FILL")
 const TREASURY = "0x" + "ab".repeat(32)
 /** The notary keys tlsnVerifiedPayload() lists, as --expected-notary-keys names them. */
@@ -45,10 +49,13 @@ function filledTemplate(validators = 10) {
         address: id(i),
         status: "2",
         connection_url: `http://v${i}.example:53550`,
-        staked_amount: "1000000000000000000",
+        staked_amount: "0",
         first_seen: 0,
         valid_at: 0,
-    }))
+        nft_mint: MINTS[i],
+        nft_owner: NFT_OWNER,
+        nft_proof_tx: PROOF_TX,
+    })) as Array<Record<string, unknown>>
     return g
 }
 
@@ -72,6 +79,14 @@ function table(n: number, edit: (i: number) => Record<string, string> = () => ({
 const failing = (checks: ReturnType<typeof launchPlanChecks>) => checks.filter(c => !c.ok).map(c => c.name)
 
 describe("mainnet genesis template", () => {
+    it("opens seats by NFT only at block 0 and leaves governance off", () => {
+        const forks = readTemplate().forks
+        expect(forks.nftValidatorGating.activationHeight).toBe(0)
+        expect(forks.tokenStaking.activationHeight).toBe(0)
+        expect(forks.tokenStakingGate.activationHeight).toBe(0)
+        expect(forks.networkGovernance.activationHeight).toBeNull()
+    })
+
     it("schedules every mainnet fork at block 0", () => {
         const forks = readTemplate().forks
         for (const name of MAINNET_FORKS) {
@@ -149,7 +164,7 @@ describe("mainnet genesis template", () => {
     it("shows unset notary keys on the genesis forks line of --plan", () => {
         const g = filledTemplate()
         g.forks.tlsnVerified = readTemplate().forks.tlsnVerified
-        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
+        const checks = launchPlanChecks({ botAllowlist: [], genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toContain("genesis forks")
         expect(checks.find(c => c.name === "genesis forks")?.details.join("\n")).toContain("placeholder or unset notary keys")
     })
@@ -201,6 +216,39 @@ describe("mainnetGenesisReasons", () => {
         expect(mainnetGenesisReasons(readTemplate()).join("\n")).toContain("template FILL values")
     })
 
+    it("ignores nft_exempt while NFT validator gating is unscheduled, which is NO-GO itself", () => {
+        const g = filledTemplate()
+        g.forks.nftValidatorGating = { activationHeight: null }
+        g.validators[2].nft_exempt = true
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).not.toContain("nft_exempt")
+        expect(reasons).toContain("fork nftValidatorGating is not scheduled at activationHeight 0")
+    })
+
+    it("refuses a validator without its NFT fields, and passes once each seat names one", () => {
+        const g = filledTemplate()
+        expect(mainnetGenesisReasons(g)).toEqual([])
+        delete g.validators[4].nft_proof_tx
+        g.validators[6].nft_mint = g.validators[1].nft_mint
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).toContain(`genesis.validators[4] (${id(4)}): nft_proof_tx must be a base58 string`)
+        expect(reasons).toContain(`genesis.validators[6] (${id(6)}): nft_mint ${MINTS[1]} already backs ${id(1)}`)
+    })
+
+    it("refuses a validator seated without an NFT", () => {
+        const g = filledTemplate()
+        g.forks.nftValidatorGating = { activationHeight: 0 }
+        g.validators[2].nft_exempt = true
+        g.validators[5].nft_exempt = true
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).toContain("2 genesis validators are nft_exempt")
+        expect(reasons).toContain(id(2))
+        expect(reasons).toContain(id(5))
+        g.validators[2].nft_exempt = false
+        delete g.validators[5].nft_exempt
+        expect(mainnetGenesisReasons(g).join("\n")).not.toContain("nft_exempt")
+    })
+
     it("refuses the testnet and devnet chain ids, and a missing one", () => {
         for (const chainId of NON_MAINNET_CHAIN_IDS) {
             const g = filledTemplate()
@@ -225,7 +273,7 @@ describe("mainnetGenesisReasons", () => {
         for (const chainId of REFUSED_MAINNET_CHAIN_IDS) {
             const g = filledTemplate()
             g.properties.id = chainId
-            const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
+            const checks = launchPlanChecks({ botAllowlist: [], genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
             expect(failing(checks)).toEqual(["chain id"])
         }
     })
@@ -280,6 +328,7 @@ describe("mainnetGenesisReasons", () => {
 describe("validator table", () => {
     it("passes ten validators spread three or fewer per operator and provider", () => {
         const checks = launchPlanChecks({
+            botAllowlist: [],
             genesis: filledTemplate(),
             blockZero: blockZero(10),
             shardSize: 10,
@@ -296,6 +345,7 @@ describe("validator table", () => {
         g.properties.name = "FILL: network name (testnet: DEMOS)"
         g.properties.currency = "FILL: currency symbol (testnet: DEM)"
         const checks = launchPlanChecks({
+            botAllowlist: [],
             genesis: g,
             blockZero: blockZero(10),
             shardSize: 10,
@@ -312,6 +362,7 @@ describe("validator table", () => {
 
     it("fails four validators of one operator: over the cap and over a third of the votes", () => {
         const checks = launchPlanChecks({
+            botAllowlist: [],
             genesis: filledTemplate(),
             blockZero: blockZero(10),
             shardSize: 10,
@@ -329,6 +380,7 @@ describe("validator table", () => {
     it("fails four validators on one provider, whatever the spelling", () => {
         const spellings = ["AWS", "aws", " Aws ", "aws"]
         const checks = launchPlanChecks({
+            botAllowlist: [],
             genesis: filledTemplate(),
             blockZero: blockZero(10),
             shardSize: 10,
@@ -345,7 +397,7 @@ describe("validator table", () => {
         const ops = table(10)
         delete (ops[id(2)] as Record<string, string>).region
         delete ops[id(3)]
-        const checks = launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: ops, genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
+        const checks = launchPlanChecks({ botAllowlist: [], genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: ops, genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toEqual(["validator table"])
         const details = checks.find(c => c.name === "validator table").details.join("\n")
         expect(details).toContain(`have no region: ${id(2)}`)
@@ -353,7 +405,7 @@ describe("validator table", () => {
     })
 
     it("fails fewer launch validators than the quorum", () => {
-        const checks = launchPlanChecks({ genesis: filledTemplate(6), blockZero: blockZero(6), shardSize: 10, operators: table(6), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
+        const checks = launchPlanChecks({ botAllowlist: [], genesis: filledTemplate(6), blockZero: blockZero(6), shardSize: 10, operators: table(6), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toContain("launch validators")
     })
 
@@ -362,7 +414,7 @@ describe("validator table", () => {
         g.properties.id = 1
         g.properties.shardSize = 4
         g.forks.commitLock = { activationHeight: null }
-        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 4, operators: table(10), genesisFileProblems: ["x"], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
+        const checks = launchPlanChecks({ botAllowlist: [], genesis: g, blockZero: blockZero(10), shardSize: 4, operators: table(10), genesisFileProblems: ["x"], expectedTreasury: TREASURY, expectedNotaryKeys: NOTARY_KEYS })
         expect(failing(checks)).toEqual(
             expect.arrayContaining(["genesis forks", "chain id", "shard size", "genesis file"]),
         )
@@ -370,7 +422,7 @@ describe("validator table", () => {
 
     it("fails the notary keys check without the agreed keys, or with others in the genesis", () => {
         const plan = (expectedNotaryKeys: string | null) =>
-            launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys })
+            launchPlanChecks({ botAllowlist: [], genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY, expectedNotaryKeys })
         const missing = plan(null)
         expect(failing(missing)).toEqual(["notary keys"])
         expect(missing.find(c => c.name === "notary keys").details.join("\n")).toContain("no --expected-notary-keys given")
@@ -382,7 +434,7 @@ describe("validator table", () => {
 
     it("fails the treasury check without the agreed treasury, or with another one in the genesis", () => {
         const plan = (expectedTreasury: string | null, g = filledTemplate()) =>
-            launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury, expectedNotaryKeys: NOTARY_KEYS })
+            launchPlanChecks({ botAllowlist: [], genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury, expectedNotaryKeys: NOTARY_KEYS })
         const missing = plan(null)
         expect(failing(missing)).toEqual(["treasury"])
         expect(missing.find(c => c.name === "treasury").details.join("\n")).toContain("no --expected-treasury given")
@@ -415,6 +467,7 @@ const stakedBlockZero = (stakes: string[]) => ({
 describe("validator concentration", () => {
     const plan = (operators: Record<string, unknown>, overrides: Partial<Parameters<typeof launchPlanChecks>[0]> = {}) =>
         launchPlanChecks({
+            botAllowlist: [],
             genesis: filledTemplate(),
             blockZero: blockZero(10),
             shardSize: 10,

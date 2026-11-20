@@ -14,6 +14,7 @@ import {
 import { createHash } from "crypto"
 import { getRunConfig, writeJson } from "./framework/io"
 import { buildComplexPolicyScript } from "./token_script_complex_policy_shared"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -56,12 +57,13 @@ function stringifyJson(value: unknown) {
   return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v), 2)
 }
 
-function parseBigintOrZero(value: any): bigint {
+export function parseBigintOrZero(value: any): bigint {
   try {
     if (typeof value === "bigint") return value
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     return BigInt(String(value ?? "0"))
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce("token_script_complex_policy_vesting_lockup.parseBigintOrZero", "token_script_complex_policy_vesting_lockup.parseBigintOrZero", error, { value: textOrType(value).slice(0, 80) })
     return 0n
   }
 }

@@ -7,6 +7,19 @@ import {
     jest,
 } from "@jest/globals"
 
+// NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
+jest.mock("@/features/staking/nftAllowlist", () => ({
+    __esModule: true,
+    isAllowlistedMint: jest.fn(() => true),
+}))
+
+jest.mock("@/features/staking/solanaProof", () => ({
+    __esModule: true,
+    verifyNftProof: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyCurrentOwner: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyChallengeEvidence: jest.fn(async () => ({ status: "valid", slot: 2 })),
+}))
+
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
     default: {
@@ -28,9 +41,14 @@ jest.mock("@/libs/blockchain/chain", () => ({
     default: { getLastBlockNumber: jest.fn() },
 }))
 
+jest.mock("@/utilities/sharedState", () => ({
+    __esModule: true,
+    getSharedState: { shardSize: 10, networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
+}))
+
 import Chain from "@/libs/blockchain/chain"
 import {
-    UNSTAKE_LOCK_BLOCKS,
+    NFT_UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
@@ -57,13 +75,22 @@ interface FakeRow {
     unstake_available_at: number | null
 }
 
-function createMockRepo(seed: FakeRow | null = null) {
+/** One row under test, beside `othersActive` active validators that keep the committee floor. */
+function createMockRepo(seed: FakeRow | null = null, othersActive = 10) {
     const store: FakeRow | null = seed ? { ...seed } : null
     const state = { row: store }
+    const others = Array.from({ length: othersActive }, (_, i) => ({ address: `other-${i}`, status: VALIDATOR_STATUS_ACTIVE }))
     return {
         state,
+        find: jest.fn(async ({ where }: { where: { status: string } }) => [
+            ...(state.row && state.row.status === where.status ? [state.row] : []),
+            ...others.filter(o => o.status === where.status),
+        ]),
         findOneBy: jest.fn(async ({ address }: { address: string }) =>
             state.row && state.row.address === address ? state.row : null,
+        ),
+        findBy: jest.fn(async ({ nft_mint }: { nft_mint: string }) =>
+            state.row && state.row.nft_mint === nft_mint ? [state.row] : [],
         ),
         save: jest.fn(async (row: FakeRow) => {
             state.row = { ...row }
@@ -93,8 +120,9 @@ function stakeEdit(overrides: Record<string, unknown> = {}) {
         isRollback: false,
         account: "aabbcc",
         operation: "stake",
-        amount: "10000000000000000000000000",
+        amount: "0",
         connectionUrl: "https://v1.example",
+        nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
         txhash: "0xtxstake",
         ...overrides,
     }
@@ -120,7 +148,7 @@ describe("GCRValidatorStakeRoutines", () => {
     })
 
     describe("stake", () => {
-        it("creates a new validator row with the supplied amount", async () => {
+        it("creates a new validator row with a stake of 0", async () => {
             const repo = createMockRepo(null)
             const r = await GCRValidatorStakeRoutines.apply(
                 stakeEdit() as any,
@@ -133,7 +161,7 @@ describe("GCRValidatorStakeRoutines", () => {
                 address: "aabbcc",
                 status: VALIDATOR_STATUS_ACTIVE,
                 connection_url: "https://v1.example",
-                staked_amount: "10000000000000000000000000",
+                staked_amount: "0",
                 first_seen: 100,
                 valid_at: 100,
                 unstake_requested_at: null,
@@ -141,27 +169,29 @@ describe("GCRValidatorStakeRoutines", () => {
             })
         })
 
-        it("adds to the existing stake on a repeat stake tx", async () => {
+        it("keeps the recorded stake on a repeat stake tx", async () => {
             const existing = validatorRow({ staked_amount: "5" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit({ amount: "7" }) as any,
+                stakeEdit({ nft: undefined }) as any,
                 repo as any,
                 100,
             )
             expect(r.success).toBe(true)
-            expect(repo.state.row?.staked_amount).toBe("12")
+            expect(repo.state.row?.staked_amount).toBe("5")
         })
 
-        it("rejects a zero stake amount", async () => {
+        it("rejects any amount but 0", async () => {
             const repo = createMockRepo(null)
-            const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit({ amount: "0" }) as any,
-                repo as any,
-                100,
-            )
-            expect(r.success).toBe(false)
-            expect(r.message).toContain("positive")
+            for (const amount of ["1", "-1", "1000000000000000000000000000000"]) {
+                const r = await GCRValidatorStakeRoutines.apply(
+                    stakeEdit({ amount }) as any,
+                    repo as any,
+                    100,
+                )
+                expect(r.success).toBe(false)
+                expect(r.message).toContain("must be 0")
+            }
         })
 
         it("rejects a non-numeric stake amount", async () => {
@@ -188,13 +218,13 @@ describe("GCRValidatorStakeRoutines", () => {
             } as any)
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit({ amount: "3" }) as any,
+                stakeEdit({ nft: undefined }) as any,
                 repo as any,
                 100,
             )
             expect(r.success).toBe(true)
             expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
-            expect(repo.state.row?.staked_amount).toBe("13")
+            expect(repo.state.row?.staked_amount).toBe("10")
             expect(repo.state.row?.unstake_requested_at).toBeNull()
             expect(repo.state.row?.unstake_available_at).toBeNull()
         })
@@ -213,8 +243,22 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
             expect(repo.state.row?.unstake_requested_at).toBe(100)
             expect(repo.state.row?.unstake_available_at).toBe(
-                100 + UNSTAKE_LOCK_BLOCKS,
+                100 + NFT_UNSTAKE_LOCK_BLOCKS,
             )
+        })
+
+        it("refuses an unstake that takes the active set below the committee floor", async () => {
+            // 7 active of a committee of 10 is the floor: one leaving would halt the chain
+            const repo = createMockRepo(validatorRow(), 6)
+            const r = await GCRValidatorStakeRoutines.apply(
+                stakeEdit({ operation: "unstake", amount: "0" }) as any,
+                repo as any,
+                100,
+            )
+            expect(r.success).toBe(false)
+            expect(r.message).toBe("Unstake would leave 6 active validators, below the committee floor of 7")
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+            expect(repo.save).not.toHaveBeenCalled()
         })
 
         it("fails when the validator row does not exist", async () => {
@@ -227,6 +271,18 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(r.success).toBe(false)
             expect(r.message).toContain("not found")
         })
+
+        it("fails unless the seat is active", async () => {
+            const repo = createMockRepo(validatorRow({ status: VALIDATOR_STATUS_EXITED, staked_amount: "0" }))
+            const r = await GCRValidatorStakeRoutines.apply(
+                stakeEdit({ operation: "unstake", amount: "0" }) as any,
+                repo as any,
+                100,
+            )
+            expect(r.success).toBe(false)
+            expect(r.message).toContain("not active")
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_EXITED)
+        })
     })
 
     describe("exit", () => {
@@ -235,13 +291,13 @@ describe("GCRValidatorStakeRoutines", () => {
                 status: VALIDATOR_STATUS_UNSTAKING,
                 staked_amount: "100",
                 unstake_requested_at: 10,
-                unstake_available_at: 10 + UNSTAKE_LOCK_BLOCKS,
+                unstake_available_at: 10 + NFT_UNSTAKE_LOCK_BLOCKS,
             })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
                 stakeEdit({ operation: "exit", amount: "0" }) as any,
                 repo as any,
-                10 + UNSTAKE_LOCK_BLOCKS,
+                10 + NFT_UNSTAKE_LOCK_BLOCKS,
             )
             expect(r.success).toBe(true)
             expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_EXITED)
@@ -249,8 +305,8 @@ describe("GCRValidatorStakeRoutines", () => {
         })
     })
 
-    describe("rollback inversion", () => {
-        it("rolls back a stake by exiting the validator", async () => {
+    describe("rollback", () => {
+        it("refuses a stake edit shipped as a rollback", async () => {
             const existing = validatorRow({ staked_amount: "50" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
@@ -258,9 +314,24 @@ describe("GCRValidatorStakeRoutines", () => {
                 repo as any,
                 100,
             )
-            expect(r.success).toBe(true)
-            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_EXITED)
-            expect(repo.state.row?.staked_amount).toBe("0")
+            expect(r.success).toBe(false)
+            expect(r.message).toContain("rollback")
+            expect(repo.state.row?.staked_amount).toBe("50")
+            expect(repo.save).not.toHaveBeenCalled()
+        })
+
+        it("fails an undo so an orphaned block is resynced, not left applied", async () => {
+            const existing = validatorRow({ status: VALIDATOR_STATUS_ACTIVE })
+            const repo = createMockRepo(existing)
+            const r = await GCRValidatorStakeRoutines.apply(
+                stakeEdit() as any,
+                repo as any,
+                100,
+                { rollback: true },
+            )
+            expect(r.success).toBe(false)
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+            expect(repo.save).not.toHaveBeenCalled()
         })
     })
 })

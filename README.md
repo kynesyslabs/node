@@ -163,6 +163,7 @@ For the bare-metal `./run` path:
 | ----------- | -------- | ------------------------------ |
 | 53550       | TCP      | Node RPC API                   |
 | 53551       | TCP      | OmniProtocol P2P communication |
+| 9095        | TCP      | Gossip sidecar (`GOSSIP_PORT`) |
 | 7047        | TCP      | TLSNotary server (FFI/docker)  |
 | 55000-60000 | TCP      | WebSocket proxy for TLSNotary FFI mode |
 
@@ -181,6 +182,7 @@ For the bare-metal `./run` path:
 # Required
 sudo ufw allow 53550/tcp        # Node RPC
 sudo ufw allow 53551/tcp        # OmniProtocol
+sudo ufw allow 9095/tcp         # Gossip
 sudo ufw allow 7047/tcp         # TLSNotary
 sudo ufw allow 55000:60000/tcp  # TLSNotary WS proxy (FFI mode)
 ```

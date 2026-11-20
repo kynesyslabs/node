@@ -4,6 +4,7 @@ import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
 import Chain from "../blockchain/chain"
+import { asGenesisBlockContent } from "../blockchain/genesis/genesisBlockContent"
 import Mempool from "../blockchain/mempool"
 import GCR from "../blockchain/gcr/gcr"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
@@ -31,6 +32,7 @@ import {
     IDENTITIES_MAX_QUEUE,
     IDENTITIES_ACQUIRE_TIMEOUT_MS,
 } from "src/utilities/constants"
+import { nftGatingScheduled } from "@/forks/nftValidatorGatingGate"
 
 // Re-export for backward compatibility
 export { emptyResponse }
@@ -320,8 +322,9 @@ export async function serverRpcBun() {
 
     server.get("/genesis", async () => {
         try {
-            const genesisBlock = await Chain.getGenesisBlock()
-            let genesisData = genesisBlock.content.extra?.genesisData || null
+            let genesisData =
+                asGenesisBlockContent((await Chain.getGenesisBlock()).content)
+                    .extra?.genesisData || null
 
             if (typeof genesisData === "string") {
                 try {
@@ -572,6 +575,19 @@ export async function serverRpcBun() {
         registerStorageProgramRoutes(server)
     } catch (error) {
         log.warning("[RPC] Failed to register StorageProgram routes: " + error)
+    }
+
+    // Staking page and its proof relay; the routes answer only while this
+    // node has no seat. A network that never schedules NFT gating has no use
+    // for them, and they relay to Solana on the node's endpoints.
+    if (nftGatingScheduled()) {
+        try {
+            const { registerStakingValidationRoutes } =
+                await import("@/features/staking/validationPage")
+            registerStakingValidationRoutes(server)
+        } catch (error) {
+            log.warning("[RPC] Failed to register staking page routes: " + error)
+        }
     }
 
     log.info(`[RPC Call] Server is running on ${rpcBind}:${port}`, true)

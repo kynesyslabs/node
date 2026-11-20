@@ -10,6 +10,9 @@
  * this build knows, its chain id is no other network's and not a reserved
  * one (REFUSED_MAINNET_CHAIN_IDS), its shardSize is
  * the launch one, and no launch validator is a pinned committee identity.
+ * Validators are seated by NFT from block 0 (nftValidatorGating): every
+ * genesis validator names an allowlisted mint, its wallet and a proof that
+ * checks out on Solana, and the build pins its allowlist digest.
  * With a genesis file, every validator must also report that file's genesis
  * data hash and fork schedule digest, and the mainnet forks as active, and
  * the agreed block hash must be the block 0 that file builds. A validator
@@ -18,18 +21,22 @@
  * See docs/runbooks/launch-go-no-go.md.
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
- *       --operators operators.json --snapshot data/snapshot \
+ *       --operators operators.json --snapshot data/snapshot --bots mainnet/bots.json \
  *       --genesis-hash BLOCK_HASH --commit SHA --expected-treasury ADDRESS \
  *       --expected-notary-keys ID:HEX[,ID:HEX...] \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
  * operators.json maps each validator identity to { owner, operator,
- * provider, region }; owner is required on the mainnet chain id. Before any validator is up, --plan checks the genesis file and
- * that table alone, with no network:
+ * provider, region }; owner is required on the mainnet chain id. Before any
+ * validator is up, --plan checks the genesis file, that table and the
+ * reviewed bot inventory. It contacts no node; its one network read is
+ * Solana, for the NFT proofs of the block 0 seats, which nothing reads again
+ * once the genesis is sealed:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
  *       --snapshot mainnet/snapshot --operators operators.json \
- *       --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]
+ *       --bots mainnet/bots.json --expected-treasury ADDRESS \
+ *       --expected-notary-keys ID:HEX[,ID:HEX...]
  *
  * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
@@ -49,7 +56,10 @@ import {
 import { treasuryAddressProblem } from "src/forks/treasuryAddress"
 import { notaryKeyProblems, tlsnVerifiedProblems } from "src/forks/tlsnVerifiedPayload"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import { botAllowlistReasons } from "./launch-bot-allowlist"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
+import { seededNftReasons, verifySeededNfts, type SeededValidatorNft } from "src/features/staking/seedNft"
+import { NFT_ALLOWLIST_PATH, NFT_ALLOWLIST_SHA256, parseAllowlist } from "src/features/staking/nftAllowlist"
 import {
     type BlockZeroValidators,
     type ValidatorRow,
@@ -195,6 +205,8 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "telegramSenderBinding",
     "xmRemoveCanonical",
     "tokenStakingGate",
+    "tokenStaking",
+    "nftValidatorGating",
     "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
@@ -203,6 +215,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "referenceBlockRoom10",
     "l2psSettlement",
     "tlsnVerified",
+    "keylessWeb2Identity",
 ]
 
 /**
@@ -215,7 +228,6 @@ export const MAINNET_FORKS: readonly ForkName[] = [
 export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
     "atomicWork",
     "networkGovernance",
-    "tokenStaking",
     "l2psGate",
     "tlsnDisabled",
 ]
@@ -905,11 +917,25 @@ export function tlsnNotaryReasons(
 /**
  * NO-GO reasons for a genesis that is not a mainnet launch genesis: its
  * fork block (mainnetForkReasons), a chain id another Demos network uses,
- * or a committee size other than the one the launch was drilled with.
+ * a committee size other than the one the launch was drilled with, or,
+ * with validators seated by NFT, a seat without a valid NFT field set or a
+ * build without its allowlist pin.
  */
-export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: unknown } | null): string[] {
+export function mainnetGenesisReasons(
+    genesis: { forks?: unknown; properties?: unknown; validators?: unknown } | null,
+): string[] {
     const reasons = mainnetForkReasons(genesis)
     if (!genesis) return reasons
+    const exempt = genesisSeatsNfts(genesis) ? nftExemptEntries(genesis.validators) : []
+    if (exempt.length > 0) {
+        reasons.push(
+            `${exempt.length} genesis validators are nft_exempt (${exempt.join(", ")}); ` +
+                "every mainnet seat needs its NFT",
+        )
+    }
+    if (genesisSeatsNfts(genesis)) {
+        reasons.push(...nftAllowlistPinReasons(), ...genesisNftFieldReasons(genesis.validators))
+    }
     const properties = (genesis.properties ?? {}) as Record<string, unknown>
     const chainId = properties.id
     if (typeof chainId !== "number" || !Number.isInteger(chainId)) {
@@ -938,6 +964,105 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
         reasons.push(`genesis still holds template FILL values at ${markers.join(", ")}`)
     }
     return reasons
+}
+
+/** Whether the genesis seats its validators under `nftValidatorGating` (scheduled at block 0). */
+function genesisSeatsNfts(genesis: { forks?: unknown } | null): boolean {
+    const forks = (genesis?.forks ?? {}) as Record<string, { activationHeight?: unknown } | undefined>
+    return forks.nftValidatorGating?.activationHeight === 0
+}
+
+/**
+ * NO-GO reasons for the allowlist this build ships: every node judges every
+ * seat against it at apply, and a node checks the file against the pinned
+ * digest only when a pin is set, so a release without one would let each
+ * node seat by whatever file it holds.
+ */
+export function nftAllowlistPinReasons(
+    file: string = NFT_ALLOWLIST_PATH,
+    pin: string = NFT_ALLOWLIST_SHA256,
+): string[] {
+    if (!/^[0-9a-f]{64}$/.test(pin)) {
+        return [
+            `this build pins no NFT allowlist digest (NFT_ALLOWLIST_SHA256 is ${JSON.stringify(pin)}); ` +
+                "nodes would seat validators by unpinned allowlist files",
+        ]
+    }
+    try {
+        const raw = fs.readFileSync(file, "utf8")
+        const own = (JSON.parse(raw) as { sha256?: unknown }).sha256
+        parseAllowlist(raw, pin)
+        if (own !== pin) {
+            return [`the NFT allowlist ${file} names sha256 ${JSON.stringify(own ?? null)}, not the pinned ${pin}`]
+        }
+    } catch (e) {
+        return [`the NFT allowlist ${file} does not load as pinned: ${(e as Error).message}`]
+    }
+    return []
+}
+
+/**
+ * NO-GO reasons for genesis validators whose NFT fields a node refuses
+ * before it reads Solana: every seat names an allowlisted mint, its owner
+ * wallet and a proof transaction, and no mint backs two seats.
+ */
+export function genesisNftFieldReasons(validators: unknown, label = "genesis.validators"): string[] {
+    // A non-list is reported as a FILL value or by the block 0 checks
+    if (!Array.isArray(validators)) return []
+    try {
+        return seededNftReasons(validators as SeededValidatorNft[], label)
+    } catch (e) {
+        return [`${label} NFTs cannot be checked: ${(e as Error).message}`]
+    }
+}
+
+/**
+ * NO-GO reasons for block 0 seats taken from the snapshot's validators.jsonl
+ * without a valid NFT field set, reported before the genesis is sealed. A
+ * node refuses the same rows offline on a mainnet chain id; this check also
+ * covers a genesis whose chain id would let the node read a row without NFT
+ * fields as a seat already judged. Rows from genesis.validators are checked
+ * by mainnetGenesisReasons.
+ */
+export function blockZeroNftReasons(
+    genesis: { forks?: unknown } | null,
+    blockZero: BlockZeroValidators | null,
+): string[] {
+    if (!genesisSeatsNfts(genesis) || blockZero?.source !== "snapshot") return []
+    return genesisNftFieldReasons(blockZero.rows, "validators.jsonl")
+}
+
+/** The rows block 0 seats and the label they are reported under. */
+function seededRows(
+    genesis: { validators?: unknown },
+    blockZero: BlockZeroValidators | null,
+): { rows: unknown; label: string } {
+    return blockZero?.source === "snapshot"
+        ? { rows: blockZero.rows, label: "validators.jsonl" }
+        : { rows: genesis.validators, label: "genesis.validators" }
+}
+
+/**
+ * What a Solana check of the proofs block 0 seats would refuse; nothing
+ * when the genesis does not seat its validators under `nftValidatorGating`,
+ * or when the offline checks already refuse them without a read.
+ */
+async function genesisNftProblems(
+    genesis: { forks?: unknown; validators?: unknown },
+    blockZero: BlockZeroValidators | null,
+): Promise<string[]> {
+    if (!genesisSeatsNfts(genesis)) return []
+    const { rows, label } = seededRows(genesis, blockZero)
+    if (!Array.isArray(rows) || genesisNftFieldReasons(rows, label).length > 0) return []
+    return verifySeededNfts(rows as SeededValidatorNft[], label)
+}
+
+/** The addresses of genesis validator entries seated without an NFT. */
+function nftExemptEntries(validators: unknown): string[] {
+    if (!Array.isArray(validators)) return []
+    return validators
+        .filter(v => v && typeof v === "object" && (v as { nft_exempt?: unknown }).nft_exempt === true)
+        .map(v => String((v as { address?: unknown }).address ?? "?"))
 }
 
 /**
@@ -1022,6 +1147,8 @@ export function parseExpectedNotaryKeys(raw: string): ExpectedNotaryKey[] {
  * NO-GO reasons for a genesis whose notary keys are not the ones the notary
  * key ceremony produced: the payload checks accept any well-formed key, and a
  * wrong one lets whoever holds its private half attest anything from block 0.
+ * Also NO-GO, on every chain id and whether or not the agreed keys are given,
+ * when a genesis notary key carries a validFrom / validUntil range.
  * On the mainnet chain id the agreed keys must be given; on the testnet and
  * devnets they are checked only when given.
  */
@@ -1032,21 +1159,38 @@ export function notaryKeysReasons(
     if (!genesis) return []
     const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
     const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
-    if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {
-        return mainnet
-            ? [
-                  "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
-                      "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+    const entry = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).tlsnVerified
+    const ranged = (Array.isArray(entry?.notaryKeys) ? (entry.notaryKeys as unknown[]) : []).filter(
+        k => typeof k === "object" && k !== null && ("validFrom" in k || "validUntil" in k),
+    )
+    const rangedIds = ranged.map(k => {
+        const id = (k as { id?: unknown }).id
+        return typeof id === "string" ? id : String(JSON.stringify(id))
+    })
+    const rangeReasons =
+        ranged.length === 0
+            ? []
+            : [
+                  `the genesis tlsnVerified notaryKeys ${rangedIds.join(", ")} ` +
+                      "carry validFrom or validUntil: launch notary keys must not carry a range",
               ]
-            : []
+    if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {
+        return [
+            ...(mainnet
+                ? [
+                      "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                          "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+                  ]
+                : []),
+            ...rangeReasons,
+        ]
     }
     let expected: string[]
     try {
         expected = parseExpectedNotaryKeys(expectedNotaryKeys).map(k => `${k.id}:${k.hex}`)
     } catch (e) {
-        return [(e as Error).message]
+        return [(e as Error).message, ...rangeReasons]
     }
-    const entry = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).tlsnVerified
     if (!Array.isArray(entry?.notaryKeys) || entry.notaryKeys.length === 0) {
         return [`the genesis tlsnVerified has no notaryKeys; the agreed notary keys are ${expected.join(", ")}`]
     }
@@ -1058,10 +1202,10 @@ export function notaryKeysReasons(
         actual.length === expected.length &&
         actual.every(k => expected.includes(k)) &&
         expected.every(k => actual.includes(k))
-    if (!same) {
-        return [`the genesis tlsnVerified notaryKeys ${actual.join(", ")} are not the agreed notary keys ${expected.join(", ")}`]
-    }
-    return []
+    const reasons = same
+        ? []
+        : [`the genesis tlsnVerified notaryKeys ${actual.join(", ")} are not the agreed notary keys ${expected.join(", ")}`]
+    return [...reasons, ...rangeReasons]
 }
 
 /**
@@ -1121,7 +1265,11 @@ export async function launchGenesisExpectations(
 
 export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" | "committee"> {
     /** The parsed genesis file, or null when only endpoints were given. */
-    genesis: { forks?: unknown; validators?: unknown; properties?: unknown } | null
+    genesis: { forks?: unknown; validators?: unknown; properties?: unknown; balances?: unknown } | null
+    /** Reviewed bot addresses from --bots, including [] for a launch without bots. */
+    botAllowlist?: unknown
+    /** The genesis file holds a JSON string, which the node's bot loader does not parse again. */
+    genesisIsJsonString?: boolean
     /** Block 0's validators as the node seeds them; required with a genesis. */
     blockZero: BlockZeroValidators | null
     /** The launch set when there is no genesis (peerlist or --rpc). */
@@ -1144,6 +1292,8 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const {
         genesis,
+        botAllowlist,
+        genesisIsJsonString,
         blockZero,
         launchValidators,
         genesisFileBlockHash,
@@ -1165,9 +1315,11 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
         ...ownerRequiredReasons(genesis, table),
         ...(rows ? stakeShareReasons(rows, table.entries) : []),
         ...(blockZero?.reasons ?? []),
+        ...blockZeroNftReasons(genesis, blockZero),
         ...mainnetGenesisReasons(genesis),
         ...treasuryReasons(genesis, expectedTreasury),
         ...notaryKeysReasons(genesis, expectedNotaryKeys),
+        ...botAllowlistReasons(genesis, botAllowlist, genesisIsJsonString),
     )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
@@ -1195,7 +1347,9 @@ export interface PlanCheck {
 }
 
 export interface LaunchPlanInput {
-    genesis: { forks?: unknown; properties?: unknown } | null
+    genesis: { forks?: unknown; properties?: unknown; balances?: unknown } | null
+    botAllowlist?: unknown
+    genesisIsJsonString?: boolean
     blockZero: BlockZeroValidators | null
     shardSize: number
     operators: Record<string, unknown> | null
@@ -1249,7 +1403,13 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
             "genesis file",
             (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),
         ),
-        check("block 0 validator set", input.blockZero ? input.blockZero.reasons : ["no block 0 validator set"]),
+        check("bot allowlist", botAllowlistReasons(input.genesis, input.botAllowlist, input.genesisIsJsonString)),
+        check(
+            "block 0 validator set",
+            input.blockZero
+                ? [...input.blockZero.reasons, ...blockZeroNftReasons(input.genesis, input.blockZero)]
+                : ["no block 0 validator set"],
+        ),
         check(
             "launch validators",
             launch.length < quorum
@@ -1276,6 +1436,7 @@ interface CliArgs {
     snapshot: string | null
     peerlist: string | null
     operators: string | null
+    bots: string | null
     rpc: string[]
     shardSize: number | null
     genesisHash: string | null
@@ -1289,11 +1450,12 @@ interface CliArgs {
 
 function usage(): string {
     return [
-        "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
+        "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE --bots FILE [options]",
         "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
-        "           --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
-        "  --plan               check the genesis file and the launch validator table only, with no",
-        "                       network: one PASS/FAIL line per check, exit 0 when all pass",
+        "           --bots FILE --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
+        "  --plan               check the genesis file, launch validator table and reviewed bot inventory,",
+        "                       with no node: one PASS/FAIL line per check, exit 0 when all pass; it reads",
+        "                       Solana for the NFT proofs of the block 0 seats",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
         "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",
@@ -1306,6 +1468,8 @@ function usage(): string {
         "                       equal the genesis properties.shardSize or the run is refused",
         "  --operators FILE     identity -> { owner, operator, provider, region }; owner (the",
         "                       beneficial owner) is required on the mainnet chain id",
+        "  --bots FILE          required for GO and --plan: reviewed JSON array of bot addresses;",
+        "                       must exactly match raw genesis balances >= 1000000000000; [] means no bots",
         "  --genesis-hash HASH  required for GO: the agreed block 0 hash, the genesis block hash",
         "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
         "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
@@ -1336,6 +1500,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         snapshot: null,
         peerlist: null,
         operators: null,
+        bots: null,
         rpc: [],
         shardSize: null,
         genesisHash: null,
@@ -1358,6 +1523,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--snapshot": args.snapshot = value(); break
             case "--peerlist": args.peerlist = value(); break
             case "--operators": args.operators = value(); break
+            case "--bots": args.bots = value(); break
             case "--rpc": args.rpc.push(...value().split(",").map(s => s.trim()).filter(Boolean)); break
             case "--shard-size": args.shardSize = Number(value()); break
             case "--genesis-hash": args.genesisHash = value(); break
@@ -1565,6 +1731,19 @@ function readJson(file: string): any {
     return JSON.parse(fs.readFileSync(file, "utf8"))
 }
 
+const UNREADABLE_BOTS = Symbol("unreadable --bots file")
+
+/** The parsed --bots file, undefined without one; prints why and returns UNREADABLE_BOTS when it cannot be read. */
+function readBotAllowlist(file: string | null): unknown {
+    if (!file) return undefined
+    try {
+        return readJson(file)
+    } catch (e) {
+        console.error(`--bots: ${(e as Error).message}`)
+        return UNREADABLE_BOTS
+    }
+}
+
 async function runPlan(
     args: CliArgs,
     genesis: any,
@@ -1573,6 +1752,8 @@ async function runPlan(
     operators: Record<string, unknown> | null,
     manifestSha256: string | null,
     snapshotForkState: ForkStateEntry[] | null,
+    botAllowlist: unknown,
+    genesisIsJsonString: boolean,
 ): Promise<number> {
     if (!args.genesis || !args.snapshot || !args.operators) {
         console.error(`--plan needs --genesis, --snapshot and --operators\n${usage()}`)
@@ -1585,8 +1766,11 @@ async function runPlan(
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
     }
+    genesisFileProblems.push(...(await genesisNftProblems(genesis, blockZero)))
     const checks = launchPlanChecks({
         genesis,
+        botAllowlist,
+        genesisIsJsonString,
         blockZero,
         shardSize,
         operators,
@@ -1667,12 +1851,15 @@ async function main(): Promise<number> {
     const targets = new Map<string, string>()
     let launch: string[] = []
     let genesis: any = null
+    let genesisIsJsonString = false
     let blockZero: BlockZeroValidators | null = null
     let manifestSha256: string | null = null
     let snapshotForkState: ForkStateEntry[] | null = null
     if (args.genesis) {
         const { readGenesisFile, snapshotManifestSha256, snapshotManifestForkState } = await import("./genesis-hash")
         genesis = readGenesisFile(args.genesis)
+        // readGenesisFile parses a JSON string a second time; the node's bot loader does not
+        genesisIsJsonString = typeof JSON.parse(fs.readFileSync(args.genesis, "utf8")) === "string"
         // The node takes shardSize from block 0 and nowhere else; a flag
         // that moved q here would judge a quorum the chain does not use
         const { readGenesisShardSize } = await import("src/libs/consensus/genesisShardSize")
@@ -1726,10 +1913,16 @@ async function main(): Promise<number> {
         return 2
     }
     const operators = operatorsRaw as Record<string, unknown> | null
+    const botAllowlist = readBotAllowlist(args.bots)
+    if (botAllowlist === UNREADABLE_BOTS) return 2
 
-    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState)
+    if (args.plan) {
+        return await runPlan(
+            args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState, botAllowlist, genesisIsJsonString,
+        )
+    }
 
-    let expectations = {}
+    let expectations: Partial<Awaited<ReturnType<typeof launchGenesisExpectations>>> = {}
     if (genesis) {
         try {
             expectations = await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)
@@ -1737,6 +1930,10 @@ async function main(): Promise<number> {
             console.error(`genesis: ${(e as Error).message}`)
             return 2
         }
+        expectations.genesisFileProblems = [
+            ...(expectations.genesisFileProblems ?? []),
+            ...(await genesisNftProblems(genesis, blockZero)),
+        ]
     }
 
     const prover = await startIdentityProver(args.timeoutMs)
@@ -1771,6 +1968,8 @@ async function main(): Promise<number> {
     const decision = checkLaunch({
         shardSize,
         genesis,
+        botAllowlist,
+        genesisIsJsonString,
         blockZero,
         launchValidators: launch,
         probes: [...merged.values()],

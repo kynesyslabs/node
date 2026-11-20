@@ -1,6 +1,6 @@
 import { appendJsonl, getRunConfig, writeJson } from "../../framework/io"
 import { ReservoirSampler, summarizeLatency } from "../../framework/metrics"
-import { envBool, envFloat, envInt, nowMs, sleep } from "../../framework/common"
+import { envBool, envFloat, envInt, nowMs, sleep, logNonCriticalError } from "../../framework/common"
 import { startProgressReporter } from "../../framework/progress"
 import { maybeSilenceConsole } from "../../token_shared"
 import { PeerConnection } from "src/libs/omniprotocol/transport/PeerConnection"
@@ -34,7 +34,7 @@ function buildTargets(targets: string[], concurrency: number): string[] {
   return Array.from({ length: Math.max(1, concurrency) }, (_, index) => targets[index % targets.length]!)
 }
 
-async function worker(params: {
+export async function worker(params: {
   workerId: number
   target: string
   stopAtMs: number
@@ -88,7 +88,7 @@ async function worker(params: {
       }
     }
   } finally {
-    await connection.close().catch(() => {})
+    await connection.close().catch(error => logNonCriticalError("omni_throughput.close", error, { target: params.target }))
   }
 
   return {

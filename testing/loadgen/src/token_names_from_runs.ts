@@ -1,6 +1,6 @@
 import path from "path"
 import { nodeCall } from "./token_shared"
-import { logNonCriticalErrorOnce } from "./framework/common"
+import { logNonCriticalError, logNonCriticalErrorOnce } from "./framework/common"
 
 function env(name: string, fallback: string): string {
   const raw = process.env[name]
@@ -23,13 +23,16 @@ function extractTokenAddress(summary: any): string | null {
   return null
 }
 
-async function listTokenAddressesFromRuns(runsDir: string): Promise<string[]> {
+export async function listTokenAddressesFromRuns(runsDir: string): Promise<string[]> {
   const glob = new Bun.Glob("**/*.summary.json")
   const addresses = new Set<string>()
 
   for await (const rel of glob.scan(runsDir)) {
     const full = path.join(runsDir, rel)
-    const text = await Bun.file(full).text().catch(() => "")
+    const text = await Bun.file(full).text().catch(error => {
+      logNonCriticalError("token_names_from_runs.listTokenAddressesFromRuns", error, { file: full })
+      return ""
+    })
     if (!text) continue
     const parsed = safeParseJson(text)
     const addr = extractTokenAddress(parsed)

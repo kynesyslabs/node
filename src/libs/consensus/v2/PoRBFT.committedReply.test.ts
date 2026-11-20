@@ -48,10 +48,22 @@ beforeEach(() => {
     adoptImpl = async () => true
     latchedDrift = null
     getSharedState.syncStatus = true
+    getSharedState.runMainLoop = true
     exitSpy.mockClear()
 })
 
 describe("a proposal answered with a committed block", () => {
+    it("aborts when shutdown refuses a reported commit adoption", async () => {
+        adoptImpl = async () => {
+            getSharedState.runMainLoop = false
+            return false
+        }
+        await expect(adoptReportedCommit(6, [report("a")])).rejects.toBeInstanceOf(
+            secretaryTypes.AbortConsensusError,
+        )
+        expect(exitSpy).not.toHaveBeenCalled()
+    })
+
     it("ends the round on the member's block once it is adopted", async () => {
         expect(await adoptReportedCommit(6, [report("a"), report("b")])).toBe(true)
         expect(adoptCalls).toEqual([[6, ["a", "b"], "proposeBlockHash"]])

@@ -23,53 +23,86 @@ export interface TlsnIdentityEndpoint {
 
 const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 256
 
+const decimalId = (v: unknown): v is string => typeof v === "string" && /^(0|[1-9][0-9]{0,31})$/.test(v)
+
+const GITHUB_ENDPOINT: TlsnIdentityEndpoint = {
+    server: "api.github.com",
+    method: "GET",
+    path: "/user",
+    extract: body =>
+        nonEmpty(body.login) &&
+        typeof body.id === "number" &&
+        Number.isSafeInteger(body.id) &&
+        body.id >= 0
+            ? { username: body.login, userId: String(body.id) }
+            : null,
+}
+
+const DISCORD_ENDPOINT: TlsnIdentityEndpoint = {
+    server: "discord.com",
+    method: "GET",
+    path: "/api/users/@me",
+    extract: body =>
+        nonEmpty(body.username) && decimalId(body.id) ? { username: body.username, userId: body.id } : null,
+}
+
 /**
- * Contexts a TLSN proof can link under the fork. Telegram is not one: its
- * endpoint is a Demos backend, not Telegram, and Telegram links through its
- * own bot-signed attestation.
+ * X API v2: `{"data":{"id":"2244994945","username":"XDevelopers",...}}`.
+ * The id is a decimal string, already the form web2 Twitter links store.
+ */
+const TWITTER_ENDPOINT: TlsnIdentityEndpoint = {
+    server: "api.x.com",
+    method: "GET",
+    path: "/2/users/me",
+    extract: body => {
+        const data = body.data
+        if (data === null || typeof data !== "object" || Array.isArray(data)) return null
+        const { username, id } = data as Record<string, unknown>
+        return nonEmpty(username) && decimalId(id) ? { username, userId: id } : null
+    },
+}
+
+/**
+ * Contexts a TLSN proof can link under `tlsnVerified`. Telegram is not one:
+ * its endpoint is a Demos backend, not Telegram, and Telegram links through
+ * its own bot-signed attestation.
  */
 export const TLSN_IDENTITY_ENDPOINTS: Readonly<Record<string, TlsnIdentityEndpoint>> = Object.freeze({
-    github: {
-        server: "api.github.com",
-        method: "GET",
-        path: "/user",
-        extract: body =>
-            nonEmpty(body.login) &&
-            typeof body.id === "number" &&
-            Number.isSafeInteger(body.id) &&
-            body.id >= 0
-                ? { username: body.login, userId: String(body.id) }
-                : null,
-    },
-    discord: {
-        server: "discord.com",
-        method: "GET",
-        path: "/api/users/@me",
-        extract: body =>
-            nonEmpty(body.username) &&
-            typeof body.id === "string" &&
-            /^(0|[1-9][0-9]{0,31})$/.test(body.id)
-                ? { username: body.username, userId: body.id }
-                : null,
-    },
+    github: GITHUB_ENDPOINT,
+    discord: DISCORD_ENDPOINT,
 })
 
-let activeEndpoints: Readonly<Record<string, TlsnIdentityEndpoint>> = TLSN_IDENTITY_ENDPOINTS
+/**
+ * The table under `keylessWeb2Identity`, which closes the web2 path for
+ * Twitter as well: a chain where only `tlsnVerified` is active keeps the
+ * table it has been judging links by.
+ */
+export const TLSN_KEYLESS_IDENTITY_ENDPOINTS: Readonly<Record<string, TlsnIdentityEndpoint>> = Object.freeze({
+    ...TLSN_IDENTITY_ENDPOINTS,
+    twitter: TWITTER_ENDPOINT,
+})
+
+let testEndpoints: Readonly<Record<string, TlsnIdentityEndpoint>> | null = null
 
 /**
  * Replaces the endpoint table, for tests whose vectors come from a local
- * test server; null restores the real one.
+ * test server; null restores the real ones.
  */
 export function setTlsnIdentityEndpointsForTests(
     endpoints: Readonly<Record<string, TlsnIdentityEndpoint>> | null,
 ): void {
-    activeEndpoints = endpoints ?? TLSN_IDENTITY_ENDPOINTS
+    testEndpoints = endpoints
+}
+
+/** The endpoint table in force, given whether `keylessWeb2Identity` is active. */
+export function tlsnIdentityEndpoints(keyless: boolean): Readonly<Record<string, TlsnIdentityEndpoint>> {
+    return testEndpoints ?? (keyless ? TLSN_KEYLESS_IDENTITY_ENDPOINTS : TLSN_IDENTITY_ENDPOINTS)
 }
 
 /** The endpoint of a context, read as an own key only. */
 export function tlsnIdentityEndpoint(
     context: unknown,
-    endpoints: Readonly<Record<string, TlsnIdentityEndpoint>> = activeEndpoints,
+    endpoints: Readonly<Record<string, TlsnIdentityEndpoint>> = tlsnIdentityEndpoints(false),
 ): TlsnIdentityEndpoint | null {
     return typeof context === "string" && Object.hasOwn(endpoints, context) ? endpoints[context] : null
 }
@@ -86,7 +119,7 @@ const SECRET_REQUEST_HEADERS: ReadonlySet<string> = new Set(["authorization", "p
 const SECRET_RESPONSE_HEADERS: ReadonlySet<string> = new Set(["set-cookie", "set-cookie2"])
 
 export interface BindClaim {
-    /** "github", "discord" or "store". */
+    /** The link context ("github", "discord", "twitter") or "store". */
     purpose: string
     /** 0x + 64 lowercase hex. */
     sender: string
@@ -142,7 +175,7 @@ export function judgeIdentityTranscript(
     p: AcceptedPresentation,
     context: string,
     sender: string,
-    endpoints: Readonly<Record<string, TlsnIdentityEndpoint>> = activeEndpoints,
+    endpoints: Readonly<Record<string, TlsnIdentityEndpoint>> = tlsnIdentityEndpoints(false),
 ): IdentityVerdict {
     const endpoint = tlsnIdentityEndpoint(context, endpoints)
     if (!endpoint) return refuse(`TLSN context ${context} cannot be linked with a TLSNotary proof`)

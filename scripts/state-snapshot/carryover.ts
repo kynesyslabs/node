@@ -64,6 +64,10 @@ export type LaunchValidatorRow = {
     valid_at: number
     unstake_requested_at: null
     unstake_available_at: null
+    /** Written only for a seat taken with an NFT, as the exporter does. */
+    nft_mint?: string | null
+    nft_owner?: string | null
+    nft_proof_tx?: string | null
 }
 
 export type CarryoverResult = {
@@ -140,8 +144,19 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
                 throw new Error(`${where} (${address}): ${name} must be a non-negative integer`)
             }
         }
+        const nft: Record<string, string | null> = {}
+        for (const name of ["nft_mint", "nft_owner", "nft_proof_tx"] as const) {
+            const value = v[name]
+            if (value !== undefined && value !== null && (typeof value !== "string" || value === "")) {
+                throw new Error(`${where} (${address}): ${name} must be null or a non-empty string`)
+            }
+            nft[name] = typeof value === "string" ? value : null
+        }
+        if (v.nft_exempt === true) {
+            throw new Error(`${where} (${address}): nft_exempt is a genesis rule; a carried-over seat needs its NFT`)
+        }
         // Field order matches the exporter's validators.jsonl.
-        return {
+        const row: LaunchValidatorRow = {
             address,
             status,
             connection_url: connectionUrl as string | null,
@@ -151,6 +166,12 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
             unstake_requested_at: null,
             unstake_available_at: null,
         }
+        if (nft.nft_mint !== null || nft.nft_owner !== null || nft.nft_proof_tx !== null) {
+            row.nft_mint = nft.nft_mint
+            row.nft_owner = nft.nft_owner
+            row.nft_proof_tx = nft.nft_proof_tx
+        }
+        return row
     })
     return rows.sort((a, b) => compareCodeUnits(a.address, b.address))
 }
