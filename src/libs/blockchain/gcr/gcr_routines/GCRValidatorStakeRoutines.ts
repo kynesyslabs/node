@@ -557,9 +557,11 @@ async function refundingExit(
  * what every node can judge from the chain (the allowlist and which seats
  * hold a mint), so no node's view of Solana decides what a block does.
  *
- * Rollback is a no-op: a failed transaction restores the rows and accounts
- * it staged, and a reversed eviction or exit could not rebuild the row it
- * closed from the edit alone.
+ * Rollback is refused: a reversed eviction or exit could not rebuild the
+ * row it closed from the edit alone. A failed transaction does not need it,
+ * since it restores the rows it staged and ignores the rollback result; an
+ * orphaned block's undo does, and failing it sends the node to a resync
+ * instead of leaving a seat the chain no longer holds.
  */
 async function applyNftGated(
     repo: Repository<Validators>,
@@ -570,7 +572,7 @@ async function applyNftGated(
     context: StakeApplyContext,
 ): Promise<GCRResult> {
     if (context.rollback === true) {
-        return { success: true, message: "Seat edits are restored with the staged rows" }
+        return { success: false, message: "A seat edit cannot be rolled back" }
     }
     if (edit.isRollback) {
         return { success: false, message: "validatorStake edit is shipped as a rollback" }

@@ -319,5 +319,19 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(repo.state.row?.staked_amount).toBe("50")
             expect(repo.save).not.toHaveBeenCalled()
         })
+
+        it("fails an undo so an orphaned block is resynced, not left applied", async () => {
+            const existing = validatorRow({ status: VALIDATOR_STATUS_ACTIVE })
+            const repo = createMockRepo(existing)
+            const r = await GCRValidatorStakeRoutines.apply(
+                stakeEdit() as any,
+                repo as any,
+                100,
+                { rollback: true },
+            )
+            expect(r.success).toBe(false)
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
+            expect(repo.save).not.toHaveBeenCalled()
+        })
     })
 })
