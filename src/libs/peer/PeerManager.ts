@@ -599,11 +599,23 @@ export default class PeerManager {
             const ours = new URL(getSharedState.exposedUrl)
             return (
                 stripTrailingDots(url.hostname) ===
-                    stripTrailingDots(ours.hostname) && url.port === ours.port
+                    stripTrailingDots(ours.hostname) &&
+                (url.port === ours.port ||
+                    PeerManager.effectivePort(url) ===
+                        PeerManager.effectivePort(ours))
             )
         } catch (_e) {
             return false
         }
+    }
+
+    // URL.port is "" for the scheme's own default, so https://h and
+    // http://h:443 differ as strings but name the same TCP port.
+    private static effectivePort(url: URL): string {
+        if (url.port) return url.port
+        if (url.protocol === "https:") return "443"
+        if (url.protocol === "http:") return "80"
+        return ""
     }
 
     /** Identities with a hello in flight; breaks hello/hello-back cycles. */
