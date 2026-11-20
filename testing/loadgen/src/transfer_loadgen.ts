@@ -2,6 +2,12 @@ import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
 import { startProgressReporter } from "./framework/progress"
+import { errorShapeKey, logNonCriticalErrorOnce, logNonCriticalErrorOnceCapped, truncatedError } from "./framework/common"
+
+// Worker error text can come from the peer (e.g. confirm rejections), so each message
+// is cut and its control characters escaped before keying and logging, and the number
+// of distinct shapes logged is capped; the rest are only counted.
+const WORKER_ERROR_LOG_BUDGET = 50
 
 type LoadgenConfig = {
   targets: string[]
@@ -179,7 +185,7 @@ function normalizeRpcUrl(url: string): string {
   return url.replace(/\/+$/, "") + "/"
 }
 
-async function isRpcReady(rpcUrl: string): Promise<boolean> {
+export async function isRpcReady(rpcUrl: string): Promise<boolean> {
   const url = normalizeRpcUrl(rpcUrl)
   try {
     const res = await fetch(url, {
@@ -188,9 +194,12 @@ async function isRpcReady(rpcUrl: string): Promise<boolean> {
       body: JSON.stringify({ method: "ping", params: [] }),
     })
     if (!res.ok) return false
-    const data = (await res.json().catch(() => null)) as any
+    // A malformed reply rejects into the catch below, which logs it.
+    const data = (await res.json()) as any
     return typeof data?.result === "number" && data.result >= 200 && data.result < 300
-  } catch {
+  } catch (error) {
+    // Keyed per target: one worker per target waits in parallel and each can fail differently.
+    logNonCriticalErrorOnce(`transfer_loadgen.isRpcReady:${rpcUrl}`, "transfer_loadgen.isRpcReady", error, { rpcUrl })
     return false
   }
 }
@@ -295,11 +304,13 @@ async function worker(
       } else {
         counters.broadcastError++
       }
-    } catch {
+    } catch (error) {
       const elapsed = performance.now() - start
       sampler.add(elapsed)
       timeseriesSampler.add(elapsed)
       counters.unexpectedError++
+      const cut = truncatedError(error)
+      logNonCriticalErrorOnceCapped("transfer_loadgen.worker", WORKER_ERROR_LOG_BUDGET, errorShapeKey(cut), cut, { rpcUrl, workerId })
     }
   }
 

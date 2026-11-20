@@ -1,7 +1,7 @@
 import { decodeRpcResponse, encodeJsonRequest } from "../../../../../src/libs/omniprotocol/serialization/jsonEnvelope"
 import { OmniOpcode } from "../../../../../src/libs/omniprotocol/protocol/opcodes"
 import { PeerConnection } from "../../../../../src/libs/omniprotocol/transport/PeerConnection"
-import { envInt, normalizeRpcUrl, sleep, splitCsv } from "../../framework/common"
+import { envInt, normalizeRpcUrl, sleep, splitCsv, logNonCriticalError } from "../../framework/common"
 import { nodeCall } from "../../framework/rpc"
 import { maybeSilenceConsole, waitForRpcReady, waitForTxReady } from "../../token_shared"
 
@@ -123,7 +123,7 @@ export async function probeOmniParticipation(omniTarget: string, l2psUid: string
       error: error instanceof Error ? error.message : String(error),
     }
   } finally {
-    await connection.close().catch(() => {})
+    await connection.close().catch(error => logNonCriticalError("l2ps.probeOmniParticipation.close", error, { omniTarget }))
   }
 }
 

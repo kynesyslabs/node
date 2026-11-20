@@ -46,7 +46,8 @@ function envBool(name: string, fallback: boolean): boolean {
 function expectPresentFromBalance(balance: string | null): boolean {
   try {
     return BigInt(balance ?? "0") > 0n
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce("token_smoke.expectPresentFromBalance", "token_smoke.expectPresentFromBalance", error, { balance })
     return false
   }
 }
