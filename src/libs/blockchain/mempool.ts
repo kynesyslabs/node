@@ -1056,6 +1056,12 @@ export default class Mempool {
      * precommit is about to lock with nothing left to rebuild it from.
      */
     private static pendingSeatRefusals = new Map<string, string>()
+    /**
+     * The re-judge's verdicts, held like its refusals for applySeatRefusals:
+     * the round's candidate reads seatAdmittedHere, so a verdict landing
+     * mid-round would let members choose different seat txs from one pool.
+     */
+    private static pendingSeatVerdicts = new Map<string, StakingTxResult>()
     private static seatRejudge: Promise<Map<string, string>> | null = null
 
     /**
@@ -1098,7 +1104,9 @@ export default class Mempool {
         const seats = (await this.getMempool()).filter(
             tx => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash),
         )
-        const verdicts = await this.judgeSeatTransactions(seats)
+        const verdicts = await this.judgeSeatTransactions(seats, (hash, verdict) =>
+            this.pendingSeatVerdicts.set(hash, verdict),
+        )
         seats.forEach((tx, i) => {
             const verdict = verdicts[i]
             if (verdict !== null && !verdict.success && !verdict.unreachable) {
@@ -1109,7 +1117,8 @@ export default class Mempool {
     }
 
     /**
-     * Drops the seat transactions the background re-judge refused, except
+     * Applies the background re-judge's verdicts to this node's admissions
+     * and drops the seat transactions it refused, except
      * the txs of the lock at `height` and `inFlight` (the candidate our open
      * prevote names). The caller holds the pool lock and the commit lock
      * mutex and calls this before it reads the round's pool, so the check
@@ -1119,6 +1128,8 @@ export default class Mempool {
         height: number,
         inFlight: ReadonlySet<string> = new Set(),
     ): Promise<string[]> {
+        for (const [hash, verdict] of this.pendingSeatVerdicts) recordSeatVerdict(hash, verdict)
+        this.pendingSeatVerdicts.clear()
         if (this.pendingSeatRefusals.size === 0) return []
         const refused = new Map(this.pendingSeatRefusals)
         this.pendingSeatRefusals.clear()
@@ -1166,6 +1177,7 @@ export default class Mempool {
      */
     private static async judgeSeatTransactions(
         seats: Transaction[],
+        record: (hash: string, verdict: StakingTxResult) => void = recordSeatVerdict,
     ): Promise<Array<StakingTxResult | null>> {
         const { handleStakingTx } = await import(
             "src/libs/network/routines/transactions/handleStakingTx"
@@ -1193,7 +1205,7 @@ export default class Mempool {
                 })
                 return Promise.race([handleStakingTx(tx, { fresh: true }), late])
                     .then(verdict => {
-                        recordSeatVerdict(tx.hash, verdict)
+                        record(tx.hash, verdict)
                         return verdict
                     })
                     .finally(() => clearTimeout(timer))

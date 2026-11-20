@@ -346,6 +346,7 @@ function seatPool(rows: any[]) {
 
 function resetSeatRejudge() {
     ;(Mempool as any).pendingSeatRefusals.clear()
+    ;(Mempool as any).pendingSeatVerdicts.clear()
     handleStakingTx.mockClear()
     handleStakingTx.mockImplementation(async (t: { hash: string }) => seatVerdicts.get(t.hash))
 }
@@ -502,6 +503,23 @@ describe("the own-pool seat re-judge", () => {
         locked.add("0xX")
         expect(await Mempool.applySeatRefusals(101)).toEqual([])
         expect(deleted).toEqual([])
+    })
+
+    it("keeps a round's seat eligibility fixed: the re-judge's verdicts apply at the next round start", async () => {
+        seatPool([seatTx("0xmoved"), seatTx("0xlate")])
+        recordSeatVerdict("0xmoved", { success: true })
+        seatVerdicts.set("0xmoved", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xlate", { success: true, message: "ok" })
+        await Mempool.startSeatRejudge()
+        // Landed mid-round: the candidate still sees what it saw at the round's start.
+        expect(seatAdmittedHere("0xmoved")).toBe(true)
+        expect(seatAdmittedHere("0xlate")).toBe(false)
+        const before = (await Mempool.boundSeatTransactions([seatTx("0xmoved"), seatTx("0xlate")])).map(t => t.hash)
+        expect(before).toEqual(["0xmoved"])
+
+        await Mempool.applySeatRefusals(101)
+        expect(seatAdmittedHere("0xmoved")).toBe(false)
+        expect(seatAdmittedHere("0xlate")).toBe(true)
     })
 
     it("drops a refused tx at the next round start when no lock holds it", async () => {
