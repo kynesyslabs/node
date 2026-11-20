@@ -227,6 +227,9 @@ type ComparableValidator = {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint: string | null
+    nft_owner: string | null
+    nft_proof_tx: string | null
 }
 
 /**
@@ -253,7 +256,18 @@ function comparable(v: Record<string, unknown>): ComparableValidator {
         valid_at: num(v.valid_at),
         unstake_requested_at: num(v.unstake_requested_at),
         unstake_available_at: num(v.unstake_available_at),
+        // Compared too, so a carried row cannot drop or swap the NFT its
+        // genesis entry was sealed with
+        nft_mint: nftText(v.nft_mint, "nft_mint"),
+        nft_owner: nftText(v.nft_owner, "nft_owner"),
+        nft_proof_tx: nftText(v.nft_proof_tx, "nft_proof_tx"),
     }
+}
+
+function nftText(value: unknown, field: string): string | null {
+    if (value === null || value === undefined) return null
+    if (typeof value === "string") return value
+    throw new GenesisRefusal(`${field} must be a string, got ${JSON.stringify(value) ?? typeof value}`)
 }
 
 /** `comparable`, with a refused value reported as a problem instead of thrown. */

@@ -292,9 +292,11 @@ this restart is a fallback there.
   at 0), so every seat is backed by an allowlisted Solana Node NFT from
   block 0 and no DEM is ever bonded. Each genesis validator carries
   `nft_mint`, `nft_owner` and `nft_proof_tx` and a `staked_amount` of `"0"`
-  ([genesis.md](../mainnet/genesis.md)); every node verifies the proofs on
-  Solana before it seats block 0, so a validator needs a Solana endpoint that
-  answers at first boot (`VALIDATOR_SOLANA_RPCS`). `launch-go-no-go` is NO-GO
+  ([genesis.md](../mainnet/genesis.md)). The proofs are read on Solana once,
+  by `launch-go-no-go` before the genesis is sealed; a node building block 0
+  checks the NFT fields offline (allowlisted mint, well-formed owner and
+  proof, no mint backing two seats, no `nft_exempt` on a mainnet chain id)
+  and never reads Solana, so block 0 builds with Solana down. `launch-go-no-go` is NO-GO
   when either fork is not at 0, when a block 0 seat lacks a valid NFT field
   set or its proof does not check out, and when the build does not pin its
   allowlist digest. `atomicWork`, `networkGovernance`, `l2psGate` and

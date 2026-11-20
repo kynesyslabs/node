@@ -20,9 +20,10 @@ jest.mock("@/features/staking/solanaProof", () => ({
     verifyChallengeEvidence: jest.fn(async () => ({ status: "valid", slot: 2 })),
 }))
 
-const mockSharedState: { networkParameters: null; forkConfig: Record<string, unknown> } = {
+const mockSharedState: { networkParameters: null; forkConfig: Record<string, unknown>; chainId: number | null } = {
     networkParameters: null,
     forkConfig: {},
+    chainId: null,
 }
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
@@ -433,6 +434,7 @@ describe("ensureValidatorSeed", () => {
         })
         afterEach(() => {
             mockSharedState.forkConfig = {}
+            mockSharedState.chainId = null
         })
 
         it("refuses a genesis seat without an NFT", async () => {
@@ -471,6 +473,33 @@ describe("ensureValidatorSeed", () => {
             repoCount.mockResolvedValue(0)
             snapshotRow({ nft_mint: "4".repeat(44), nft_owner: null, nft_proof_tx: null })
             await expect(ensureValidatorSeed({})).rejects.toThrow(/validators\.jsonl\[0\].*nft_owner/)
+        })
+
+        describe("on a mainnet chain id", () => {
+            beforeEach(() => {
+                mockSharedState.chainId = 8587492
+            })
+
+            it("refuses a snapshot row with no NFT fields, which no mainnet seat can be", async () => {
+                repoCount.mockResolvedValue(0)
+                snapshotRow({ nft_mint: null, nft_owner: null, nft_proof_tx: null })
+                await expect(ensureValidatorSeed({})).rejects.toThrow(/validators\.jsonl\[0\].*nft_mint must be a base58 string/)
+            })
+
+            it("refuses an nft_exempt genesis entry", async () => {
+                repoCount.mockResolvedValue(0)
+                await expect(
+                    ensureValidatorSeed({ validators: [makeSeed({ status: "2", nft_exempt: true })] }),
+                ).rejects.toThrow(/nft_exempt is refused on a mainnet chain id/)
+            })
+
+            it("seats snapshot rows carrying their NFTs without reading Solana", async () => {
+                const solana = await import("@/features/staking/solanaProof")
+                repoCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1)
+                snapshotRow({})
+                expect(await ensureValidatorSeed({})).toMatchObject({ reseeded: true, source: "snapshot" })
+                expect(solana.verifyNftProof).not.toHaveBeenCalled()
+            })
         })
     })
 })

@@ -18,7 +18,9 @@
  * intentionally change block-0 hash; restoring snapshot rows does not.
  */
 
-import { verifySeededNfts } from "src/features/staking/seedNft"
+import { seededNftReasons } from "src/features/staking/seedNft"
+import { getSharedState } from "src/utilities/sharedState"
+import { isMainnetChainId } from "./genesisPin"
 import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 import type { EntityManager } from "typeorm"
 
@@ -436,7 +438,7 @@ export async function restoreSnapshot(
  * seats its validators under `nftValidatorGating`. The insert runs in the
  * genesis transaction, so the throw rolls every row back.
  */
-async function* nftCheckedValidators(
+export async function* nftCheckedValidators(
     rows: AsyncIterable<ValidatorSeed>,
 ): AsyncIterable<ValidatorSeed> {
     if (!nftGatingActiveAtGenesis()) {
@@ -448,7 +450,12 @@ async function* nftCheckedValidators(
         seen.push(row)
         yield row
     }
-    const reasons = await verifySeededNfts(seen, "validators.jsonl", { fromChain: true })
+    // Offline only, like the genesis list: the manifest these rows come from
+    // is bound by the sealed genesis.
+    const reasons = seededNftReasons(seen, "validators.jsonl", {
+        fromChain: true,
+        mainnet: isMainnetChainId(getSharedState.chainId),
+    })
     if (reasons.length > 0) {
         throw new Error(`[GENESIS][SNAPSHOT] ${reasons.join("; ")}`)
     }

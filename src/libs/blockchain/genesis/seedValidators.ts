@@ -18,8 +18,10 @@ import type { EntityManager } from "typeorm"
 import log from "src/utilities/logger"
 import { Validators } from "src/model/entities/Validators"
 import { decimalBigInt } from "./decimalAmount"
-import { nftExemptSeeds, verifySeededNfts } from "src/features/staking/seedNft"
+import { nftExemptSeeds, seededNftReasons } from "src/features/staking/seedNft"
 import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
+import { getSharedState } from "src/utilities/sharedState"
+import { isMainnetChainId } from "./genesisPin"
 
 // Matches `0x` followed by exactly 64 hex characters.
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
@@ -129,7 +131,11 @@ export async function seedValidators(
     const nftSeats = nftGatingActiveAtGenesis()
     validators.forEach((v, i) => validateSeed(v, i, nftSeats))
     if (nftSeats) {
-        const nftReasons = await verifySeededNfts(validators, "genesis.validators")
+        // No Solana read: the pinned genesis was sealed after go/no-go
+        // verified every proof, and block 0 must build the same on every node.
+        const nftReasons = seededNftReasons(validators, "genesis.validators", {
+            mainnet: isMainnetChainId(getSharedState.chainId),
+        })
         if (nftReasons.length > 0) {
             throw new Error(`[GENESIS][VALIDATORS] ${nftReasons.join("; ")}`)
         }

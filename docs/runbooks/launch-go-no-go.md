@@ -236,7 +236,10 @@ exposed by the node, so it comes from the T-24h posts). Then:
   `genesis.validators`, or the snapshot's `validators.jsonl` when it has
   one) names an allowlisted `nft_mint`, its `nft_owner` and an
   `nft_proof_tx` whose proof checks out on Solana, no mint backs two seats
-  and no seat is `nft_exempt`; the build pins its NFT allowlist digest and
+  and no seat is `nft_exempt` (this is the only Solana read of the launch
+  proofs: the genesis is sealed by its hash after it, and a node building
+  block 0 checks the NFT fields offline and never reads Solana); the build
+  pins its NFT allowlist digest and
   the shipped allowlist matches it; and a node would accept
   the genesis file at its first boot (fixed timestamp, snapshot bound by
   `snapshot.manifestSha256`). Without `--genesis` the forks cannot be

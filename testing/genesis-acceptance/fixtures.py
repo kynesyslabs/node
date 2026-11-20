@@ -12,11 +12,10 @@ Writes into --out:
   forkfar.json      launch with atomicWork scheduled at 1000000 (beyond the window)
   unknownfork.json  launch with a fork this build cannot know, scheduled far ahead
 
-nftValidatorGating is at 0 like on mainnet, but the image genesis validators
-carry no NFT. Block 0 seats them from the carry-over validators.jsonl, where
-a node reads a row without NFT fields as a seat already judged, so the
-scenarios boot without a Solana read; launch-go-no-go is what refuses such
-a set for mainnet.
+nftValidatorGating is at 0 like on mainnet. run.sh gives the image genesis
+validators allowlisted mints and well-formed owner and proof fields before
+it builds the carry-over snapshot, so block 0 passes the node's offline NFT
+checks; the proofs are not real, and no node reads Solana to build block 0.
 """
 import argparse
 import copy

@@ -19,6 +19,7 @@ import { Connection, PublicKey } from "@solana/web3.js"
 
 import { NFT_ALLOWLIST_PATH, NFT_ALLOWLIST_SHA256, parseAllowlist } from "../src/features/staking/nftAllowlist"
 import { TOKEN_PROGRAM_ID } from "../src/features/staking/proofBytes"
+import { verifySeededNfts } from "../src/features/staking/seedNft"
 import { newDemosIdentity } from "./demos-identity"
 import { PUBLIC_SOLANA_RPC, proveNft } from "./solana-proof"
 import { ACCEPTED_SECRET_FORMATS, loadSolanaSigner } from "./solana-signer"
@@ -134,8 +135,14 @@ async function main(): Promise<void> {
         }
         throw e
     }
+    // The check go/no-go repeats before the genesis is sealed; nodes building
+    // block 0 never read Solana, so a bad proof must be caught here or there.
+    const refused = await verifySeededNfts(validators, "seeds")
     console.error("stdout holds the seed nodes' signing mnemonics")
     console.log(JSON.stringify({ validators, mnemonics }, null, 2))
+    if (refused.length > 0) {
+        throw new Error(`the seats above do not verify on Solana: ${refused.join("; ")}`)
+    }
 }
 
 if (import.meta.main) {

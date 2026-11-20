@@ -47,6 +47,8 @@ import {
     type SeedNftOptions,
 } from "src/features/staking/seedNft"
 import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
+import { isMainnetChainId } from "src/libs/blockchain/genesis/genesisPin"
+import { getSharedState } from "src/utilities/sharedState"
 
 export interface GenesisValidatorSeed {
     address: string
@@ -185,7 +187,10 @@ function refuseOnNftReasons(
     options: SeedNftOptions = {},
 ): void {
     if (!nftGatingActiveAtGenesis()) return
-    const reasons = seededNftReasons(rows, label, options)
+    const reasons = seededNftReasons(rows, label, {
+        ...options,
+        mainnet: isMainnetChainId(getSharedState.chainId),
+    })
     if (reasons.length > 0) {
         throw new ConsensusInvariantError(`[BOOT] ${reasons.join("; ")}`)
     }

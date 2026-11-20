@@ -1012,9 +1012,10 @@ export function genesisNftFieldReasons(validators: unknown, label = "genesis.val
 
 /**
  * NO-GO reasons for block 0 seats taken from the snapshot's validators.jsonl
- * without a valid NFT field set. A node seeding those rows reads a row with
- * no NFT fields as a seat its chain already judged, so only this check
- * holds a launch set to its NFTs. Rows from genesis.validators are checked
+ * without a valid NFT field set, reported before the genesis is sealed. A
+ * node refuses the same rows offline on a mainnet chain id; this check also
+ * covers a genesis whose chain id would let the node read a row without NFT
+ * fields as a seat already judged. Rows from genesis.validators are checked
  * by mainnetGenesisReasons.
  */
 export function blockZeroNftReasons(

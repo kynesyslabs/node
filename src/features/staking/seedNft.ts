@@ -31,9 +31,13 @@ function holdsSeat(row: Pick<SeededValidatorNft, "status">): boolean {
  * not a genesis list. A seat there with no NFT fields at all was taken
  * without one, by a genesis `nft_exempt` entry or before the fork, and the
  * table does not keep which; the chain already judged it.
+ *
+ * `mainnet`: the genesis chain id is not a test network's. No seat there is
+ * taken without an NFT, so neither `nft_exempt` nor `fromChain` exempts one.
  */
 export interface SeedNftOptions {
     fromChain?: boolean
+    mainnet?: boolean
 }
 
 function hasNoNftFields(row: SeededValidatorNft): boolean {
@@ -49,6 +53,7 @@ export function isNftExemptSeed(
     row: SeededValidatorNft,
     options: SeedNftOptions = {},
 ): boolean {
+    if (options.mainnet === true) return false
     return row.nft_exempt === true || (options.fromChain === true && hasNoNftFields(row))
 }
 
@@ -60,7 +65,9 @@ export function nftExemptSeeds(rows: readonly SeededValidatorNft[]): string[] {
 /**
  * The reasons a seeded validator set breaks the NFT rules: every row that
  * holds a seat carries a proof, its mint is allowlisted, no mint backs two
- * seats. An exempt row skips the NFT fields.
+ * seats. An exempt row skips the NFT fields. Offline and deterministic: this
+ * is all a node checks when it builds block 0, since the genesis hash it
+ * pins was sealed after go/no-go read every launch proof on Solana.
  */
 export function seededNftReasons(
     rows: readonly SeededValidatorNft[],
@@ -74,6 +81,10 @@ export function seededNftReasons(
         if (!holdsSeat(row)) return
         if (row.nft_exempt !== undefined && row.nft_exempt !== null && typeof row.nft_exempt !== "boolean") {
             reasons.push(`${where}: nft_exempt must be a boolean`)
+            return
+        }
+        if (options.mainnet === true && row.nft_exempt === true) {
+            reasons.push(`${where}: nft_exempt is refused on a mainnet chain id`)
             return
         }
         const exempt = isNftExemptSeed(row, options)
@@ -111,11 +122,12 @@ export function seededNftReasons(
 
 /**
  * The seeded-set rules, then the Solana side of every proof: the signer
- * held the NFT when it was made and bound this address. Whether the wallet
- * still holds it is not asked; a seat that lost its NFT is challenged in a
- * later block, and every node must be able to rebuild block 0. Age is not
- * checked, a genesis proof is as old as the launch. An unreachable chain is
- * a reason too: a node that cannot verify its seats does not seat them.
+ * held the NFT when it was made and bound this address. The check run
+ * before a genesis is sealed (launch-go-no-go, genesis-seeds); a node never
+ * runs it, so block 0 builds the same with Solana down or its history
+ * pruned. Whether the wallet still holds the NFT is not asked; a seat that
+ * lost it is challenged in a later block. Age is not checked, a genesis
+ * proof is as old as the launch. An unreachable chain is a reason too.
  */
 export async function verifySeededNfts(
     rows: readonly SeededValidatorNft[],

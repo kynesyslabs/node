@@ -117,3 +117,20 @@ describe("a seeded validator set checked against Solana", () => {
         expect(verifyNftProof).not.toHaveBeenCalled()
     })
 })
+
+describe("a seeded set on a mainnet chain id", () => {
+    const bare = { address: "0x" + "c".repeat(64), status: "2", staked_amount: "0" }
+
+    it("refuses nft_exempt, which only a test network may seat", () => {
+        expect(seededNftReasons([{ ...bare, nft_exempt: true }], "g", { mainnet: true })).toEqual([
+            `g[0] (${bare.address}): nft_exempt is refused on a mainnet chain id`,
+        ])
+        expect(seededNftReasons([{ ...bare, nft_exempt: true }], "g")).toEqual([])
+    })
+
+    it("holds a snapshot row without NFT fields to them, instead of reading it as judged", () => {
+        expect(seededNftReasons([bare], "s", { fromChain: true })).toEqual([])
+        expect(seededNftReasons([bare], "s", { fromChain: true, mainnet: true })[0]).toContain("nft_mint must be a base58 string")
+        expect(seededNftReasons([row()], "s", { fromChain: true, mainnet: true })).toEqual([])
+    })
+})

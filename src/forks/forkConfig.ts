@@ -368,8 +368,11 @@ export type TokenStakingConfig = BaseForkConfig
  *
  * Seats taken before the activation keep their rows and stay seated without
  * an NFT, and the short unstake lock applies to them too. Scheduled at 0,
- * block 0 seats only genesis validators whose NFT proofs check out on Solana
- * (or that are `nft_exempt`, test networks only). Seat transactions stay
+ * block 0 seats only genesis validators naming an allowlisted mint, its
+ * owner and a proof, no mint twice (or `nft_exempt`, test networks only).
+ * The node checks that offline and never reads Solana for block 0: the
+ * proofs were read once by launch-go-no-go before the genesis was sealed
+ * by its hash. Seat transactions stay
  * subject to `tokenStakingGate`, so on a chain with the gate no new seat is
  * taken before `tokenStaking` opens.
  *
