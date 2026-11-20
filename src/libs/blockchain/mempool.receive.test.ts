@@ -344,6 +344,34 @@ function resetSeatRejudge() {
     handleStakingTx.mockImplementation(async (t: { hash: string }) => seatVerdicts.get(t.hash))
 }
 
+describe("a gossiped seat transaction", () => {
+    beforeEach(() => {
+        resetSeatRejudge()
+        nftGatingOn = true
+    })
+    afterEach(() => {
+        nftGatingOn = false
+    })
+
+    it("enters the pool only once Solana confirms its proof, read fresh", async () => {
+        seatVerdicts.set("0xheld", { success: true, message: "ok" })
+        seatVerdicts.set("0xinvented", { success: false, message: "NFT proof invalid" })
+        seatVerdicts.set("0xdown", { success: false, message: "timed out", unreachable: true })
+
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xheld"))).toBeNull()
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xinvented"))).toBe("NFT proof invalid")
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xdown"))).toBe("timed out")
+        expect(handleStakingTx.mock.calls.map(c => c[1])).toEqual([{ fresh: true }, { fresh: true }, { fresh: true }])
+    })
+
+    it("is not judged before nftValidatorGating, nor is any other type", async () => {
+        expect(await Mempool.gossipSeatRefusal(tx("0xpay", 100))).toBeNull()
+        nftGatingOn = false
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xinvented"))).toBeNull()
+        expect(handleStakingTx).not.toHaveBeenCalled()
+    })
+})
+
 describe("the own-pool seat re-judge", () => {
     const realLockedHashes = (Mempool as any).lockedHashes
     let locked = new Set<string>()

@@ -633,6 +633,11 @@ export default class Mempool {
             return { accepted: false, reason: identity.reason }
         }
 
+        const seatRefusal = await this.gossipSeatRefusal(tx)
+        if (seatRefusal !== null) {
+            return { accepted: false, reason: seatRefusal }
+        }
+
         const { confirmationBlock, error } = await this.addTransactionWithLock(
             tx,
             undefined,
@@ -642,6 +647,22 @@ export default class Mempool {
             return { accepted: false, reason: error }
         }
         return { accepted: true, confirmationBlock }
+    }
+
+    /**
+     * Why a gossiped seat transaction may not enter the pool, or null. The
+     * merge judges only txs a member has not pooled yet, so one pooled from
+     * gossip would reach a block on its publisher's word alone; its NFT
+     * proof or challenge evidence is judged on Solana here, as at RPC
+     * intake. One Solana cannot answer for is refused too: its RPC node
+     * still holds it and the merge judges it there.
+     */
+    public static async gossipSeatRefusal(tx: Transaction): Promise<string | null> {
+        const type = tx.content?.type as string | undefined
+        if (!type || !SOLANA_SEAT_TX_TYPES.has(type) || !nftGatingAtTip()) return null
+        const [verdict] = await this.judgeSeatTransactions([tx])
+        if (verdict === null || verdict === undefined) return "seat transaction not judged"
+        return verdict.success ? null : verdict.message
     }
 
     /**
