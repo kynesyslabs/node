@@ -1,5 +1,4 @@
 import {
-    BrowserRequest,
     BundleContent,
     RPCRequest,
     RPCResponse,
@@ -13,7 +12,6 @@ import manageConsensusRoutines from "./manageConsensusRoutines"
 import manageGCRRoutines from "./manageGCRRoutines"
 import { manageExecution } from "./manageExecution"
 import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
-import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
@@ -162,13 +160,6 @@ export async function processPayload(
                 }
             }
         }
-        case "login_request":
-            return await handleLoginRequest(payload.params[0] as BrowserRequest)
-        case "login_response":
-            return await handleLoginResponse(
-                payload.params[0] as BrowserRequest,
-            )
-
         case "consensus_routine": {
             return await manageConsensusRoutines(sender, payload.params[0])
         }

@@ -39,7 +39,6 @@ mock.module("src/libs/network/manageNodeCall", () => ({
 const { PeerConnection } = await import("./PeerConnection")
 const { ConnectionState } = await import("./types")
 const { MessageFramer } = await import("./MessageFramer")
-const { InvalidAuthBlockFormatError } = await import("../types/errors")
 const { PEER_CLOSE_GRACE_MS, PREAUTH_MAX_PAYLOAD_SIZE } = await import("../constants")
 const { encodeNodeCallRequest, decodeNodeCallResponse } = await import("../serialization/control")
 const log: any = (await import("src/utilities/logger")).default
@@ -161,10 +160,10 @@ describe("PeerConnection pre-auth buffering", () => {
     })
 })
 
-describe("MessageFramer auth block parse errors", () => {
-    it("logs a bounded line instead of the whole buffer", () => {
+describe("MessageFramer partial auth block", () => {
+    it("waits for more data without logging an error", () => {
         // Header with the auth flag, then an auth block whose identity claims
-        // 65535 bytes and is cut short, so parsing fails on every chunk.
+        // 65535 bytes and is cut short.
         const header = Buffer.alloc(12)
         header.writeUInt16BE(1, 0)
         header.writeUInt8(0x10, 2)
@@ -179,13 +178,8 @@ describe("MessageFramer auth block parse errors", () => {
         framer.addData(Buffer.concat([header, authHead, Buffer.alloc(60 * 1024, 0x43)]))
 
         log.error.mockClear()
-        expect(() => framer.extractMessage()).toThrow(InvalidAuthBlockFormatError)
-
-        const lines: string[] = log.error.mock.calls.map((c: unknown[]) => String(c[0]))
-        expect(lines.length).toBeGreaterThan(0)
-        for (const line of lines) {
-            expect(line.length).toBeLessThan(512)
-        }
+        expect(framer.extractMessage()).toBeNull()
+        expect(log.error.mock.calls.length).toBe(0)
     })
 })
 
