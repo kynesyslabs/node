@@ -1,5 +1,6 @@
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import ValidatorsManagement from "@/libs/blockchain/routines/validatorsManagement"
+import type { SolanaReadOptions } from "@/features/staking/solanaProof"
 import { requireSender } from "@/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 
@@ -21,10 +22,12 @@ export interface StakingTxResult {
  * via `GCRValidatorStakeRoutines.apply()` on every node.
  *
  * Called from `confirmTransaction` (RPC entry, before signing) so bad
- * tx is rejected before validityData is signed and broadcast.
+ * tx is rejected before validityData is signed and broadcast, and again by
+ * the mempool merge with `{ fresh: true }` (see SolanaReadOptions).
  */
 export async function handleStakingTx(
     tx: Transaction,
+    options: SolanaReadOptions = {},
 ): Promise<StakingTxResult> {
     const type = tx.content.type as string
     const sender = requireSender(tx)
@@ -38,14 +41,14 @@ export async function handleStakingTx(
 
     switch (type) {
         case "validatorStake": {
-            const r = await ValidatorsManagement.manageValidatorStakeTx(nodeTx)
+            const r = await ValidatorsManagement.manageValidatorStakeTx(nodeTx, options)
             log.debug(
                 `[handleStakingTx] validatorStake ${tx.hash ?? ""} → ${r.valid}: ${r.message}`,
             )
             return { success: r.valid, message: r.message, unreachable: r.unreachable }
         }
         case "validatorChallenge": {
-            const r = await ValidatorsManagement.manageValidatorChallengeTx(nodeTx)
+            const r = await ValidatorsManagement.manageValidatorChallengeTx(nodeTx, options)
             return { success: r.valid, message: r.message, unreachable: r.unreachable }
         }
         case "validatorUnstake": {

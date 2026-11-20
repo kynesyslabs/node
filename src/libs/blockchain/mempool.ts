@@ -1035,7 +1035,9 @@ export default class Mempool {
         const seats = (await this.getMempool()).filter(tx =>
             isStakingTxType(tx.content?.type ?? ""),
         )
-        const verdicts = await Promise.all(seats.map(tx => handleStakingTx(tx)))
+        const verdicts = await Promise.all(
+            seats.map(tx => handleStakingTx(tx, { fresh: true })),
+        )
         const refused = seats.filter((_, i) => !verdicts[i].success && !verdicts[i].unreachable)
         for (const tx of refused) {
             log.error(
@@ -1341,7 +1343,9 @@ export default class Mempool {
         // tx, not only by the RPC node that admitted it, so a seat needs a
         // voting quorum to agree the NFT proof holds. A tx no Solana
         // endpoint could answer for is left out and comes back at the next
-        // merge; one a healthy endpoint rejected is dropped. Only under
+        // merge; one a healthy endpoint rejected is dropped. Solana is read
+        // fresh here, past the admission caches, so members do not split on
+        // an outage or a refusal one of them saw earlier. Only under
         // nftValidatorGating: before it the staking policy reads the chain
         // alone, which the block's apply already judges.
         if (nftGatingAtTip()) {
@@ -1353,7 +1357,9 @@ export default class Mempool {
             // unanswerable proofs costs one timeout, not one per tx.
             const verdicts = await Promise.all(
                 validTransactions.map(tx =>
-                    isStakingTxType(tx.content?.type ?? "") ? handleStakingTx(tx) : null,
+                    isStakingTxType(tx.content?.type ?? "")
+                        ? handleStakingTx(tx, { fresh: true })
+                        : null,
                 ),
             )
             const policyVerified: Transaction[] = []

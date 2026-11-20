@@ -61,7 +61,20 @@ function remember<K, V>(cache: Map<K, V>, key: K, value: V): void {
     cache.set(key, value)
 }
 
-function recentlyUnreachable(key: string): Unreachable | null {
+/**
+ * How a check reads Solana. Admission takes the default and may answer from
+ * the unreachable cache. The merge and the block-building re-judge pass
+ * `fresh`: a cached outage there would keep one member refusing a seat its
+ * peers already read as recovered, and the members would build different
+ * blocks for up to UNREACHABLE_CACHE_MS. A fresh read still records an
+ * outage it meets, so admission stays throttled.
+ */
+export interface SolanaReadOptions {
+    fresh?: boolean
+}
+
+function recentlyUnreachable(key: string, options: SolanaReadOptions): Unreachable | null {
+    if (options.fresh) return null
     const recent = unreachableUntil.get(key)
     return recent !== undefined && recent.until > Date.now() ? recent.result : null
 }
@@ -69,6 +82,11 @@ function recentlyUnreachable(key: string): Unreachable | null {
 function markUnreachable(key: string, result: Unreachable): Unreachable {
     remember(unreachableUntil, key, { until: Date.now() + UNREACHABLE_CACHE_MS, result })
     return result
+}
+
+/** An answer came back, so admission need not wait out an outage already over. */
+function answered(key: string): void {
+    unreachableUntil.delete(key)
 }
 
 export function resetSolanaProofCacheForTesting(): void {
@@ -154,6 +172,7 @@ export async function verifyNftProof(
     validatorAddress: string,
     txTimestampMs: number,
     maxAgeSeconds: number = PROOF_MAX_AGE_SECONDS,
+    options: SolanaReadOptions = {},
 ): Promise<SolanaCheck> {
     for (const key of ["mint", "owner", "proofTx"] as const) {
         if (!BASE58.test(proof[key])) return invalid(`nft.${key} is not base58`)
@@ -161,12 +180,15 @@ export async function verifyNftProof(
     const cacheKey = `${proof.proofTx}:${proof.mint}:${proof.owner}`
     const cached = proofCache.get(cacheKey)
     if (cached === undefined) {
-        const recent = recentlyUnreachable(cacheKey)
+        const recent = recentlyUnreachable(cacheKey, options)
         if (recent !== null) return recent
     }
     const inspected = cached ?? (await inspectProof(proof))
     if (inspected.status === "unreachable") return markUnreachable(cacheKey, inspected)
-    if (cached === undefined) remember(proofCache, cacheKey, inspected)
+    if (cached === undefined) {
+        answered(cacheKey)
+        remember(proofCache, cacheKey, inspected)
+    }
     if (inspected.status === "invalid") return inspected
 
     const expected = validatorAddress.toLowerCase()
@@ -217,9 +239,10 @@ async function inspectProof(proof: ValidatorNftProof): Promise<InspectedProof> {
 export async function verifyCurrentOwner(
     mint: string,
     owner: string,
+    options: SolanaReadOptions = {},
 ): Promise<SolanaCheck> {
     const key = `owner:${mint}:${owner}`
-    const recent = recentlyUnreachable(key)
+    const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
     try {
         const accounts = await withSolana("getParsedTokenAccountsByOwner", connection =>
@@ -235,6 +258,7 @@ export async function verifyCurrentOwner(
                 | undefined
             return info?.tokenAmount?.amount === "1"
         })
+        answered(key)
         return held
             ? { status: "valid", slot: accounts.context.slot }
             : invalid("nft.owner no longer holds the NFT")
@@ -251,10 +275,11 @@ export async function verifyCurrentOwner(
 export async function verifyChallengeEvidence(
     evidenceTx: string,
     recorded: ValidatorNftProof,
+    options: SolanaReadOptions = {},
 ): Promise<SolanaCheck> {
     if (!BASE58.test(evidenceTx)) return invalid("evidenceTx is not base58")
     const key = `evidence:${evidenceTx}:${recorded.proofTx}`
-    const recent = recentlyUnreachable(key)
+    const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
     let proof: ParsedTransactionWithMeta
     let evidence: ParsedTransactionWithMeta
@@ -264,6 +289,7 @@ export async function verifyChallengeEvidence(
     } catch (e) {
         return markUnreachable(key, unreachable(e))
     }
+    answered(key)
     if (evidence.meta === null || evidence.meta === undefined) {
         return invalid("evidence has no metadata")
     }
@@ -284,10 +310,11 @@ export async function verifyChallengeEvidence(
 export async function verifyProofSupersedes(
     newSlot: number,
     recordedProofTx: string,
+    options: SolanaReadOptions = {},
 ): Promise<SolanaCheck> {
     if (!BASE58.test(recordedProofTx)) return invalid("recorded proof is not base58")
     const key = `supersedes:${recordedProofTx}`
-    const recent = recentlyUnreachable(key)
+    const recent = recentlyUnreachable(key, options)
     if (recent !== null) return recent
     let recorded: ParsedTransactionWithMeta
     try {
@@ -295,6 +322,7 @@ export async function verifyProofSupersedes(
     } catch (e) {
         return markUnreachable(key, unreachable(e))
     }
+    answered(key)
     if (newSlot <= recorded.slot) {
         return invalid(`proof at slot ${newSlot} is not later than the seat's proof at slot ${recorded.slot}`)
     }

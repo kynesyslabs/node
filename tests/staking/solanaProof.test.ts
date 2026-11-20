@@ -260,3 +260,55 @@ describe("verifyProofSupersedes", () => {
         expect((await verifyProofSupersedes(5, "not-a-signature")).status).toBe("invalid")
     })
 })
+
+describe("a fresh read (merge and block building)", () => {
+    const proof = { mint: MINT, owner: OWNER, proofTx: SIG }
+    const recorded = { mint: MINT, owner: OWNER, proofTx: SIG }
+    const fresh = { fresh: true }
+    const holds = { context: { slot: 7 }, value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: "1" } } } } } }] }
+
+    it("reads Solana again inside the minute an admission read was unreachable", async () => {
+        connection.getParsedTransaction.mockRejectedValueOnce(new Error("timeout"))
+        connection.getParsedTokenAccountsByOwner.mockRejectedValueOnce(new Error("timeout"))
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS)).status).toBe("unreachable")
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("unreachable")
+
+        connection.getParsedTokenAccountsByOwner.mockResolvedValue(holds)
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS, undefined, fresh)).status).toBe("valid")
+        expect((await verifyCurrentOwner(MINT, OWNER, fresh)).status).toBe("valid")
+        expect(connection.getParsedTransaction).toHaveBeenCalledTimes(2)
+        expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(2)
+    })
+
+    it("reads the challenge evidence and the superseded proof again too", async () => {
+        connection.getParsedTransaction.mockRejectedValue(new Error("timeout"))
+        expect((await verifyChallengeEvidence(SIG2, recorded)).status).toBe("unreachable")
+        expect((await verifyProofSupersedes(101, SIG)).status).toBe("unreachable")
+        expect(connection.getParsedTransaction).toHaveBeenCalledTimes(2)
+
+        connection.getParsedTransaction.mockImplementation(async (sig: string) =>
+            sig === SIG
+                ? parsedTx({ slot: 100 })
+                : parsedTx({ slot: 200, pre: [[MINT, OWNER, "1"]], post: [[MINT, BUYER, "1"]], memos: [] }),
+        )
+        expect(await verifyChallengeEvidence(SIG2, recorded, fresh)).toEqual({ status: "valid", slot: 200 })
+        expect(await verifyProofSupersedes(101, SIG, fresh)).toEqual({ status: "valid", slot: 101 })
+        expect(connection.getParsedTransaction).toHaveBeenCalledTimes(5)
+    })
+
+    it("still records an outage it meets, so admission does not read again", async () => {
+        connection.getParsedTokenAccountsByOwner.mockRejectedValueOnce(new Error("timeout"))
+        expect((await verifyCurrentOwner(MINT, OWNER, fresh)).status).toBe("unreachable")
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("unreachable")
+        expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(1)
+    })
+
+    it("clears the outage for admission once a fresh read is answered", async () => {
+        connection.getParsedTokenAccountsByOwner.mockRejectedValueOnce(new Error("timeout"))
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("unreachable")
+        connection.getParsedTokenAccountsByOwner.mockResolvedValue(holds)
+        expect((await verifyCurrentOwner(MINT, OWNER, fresh)).status).toBe("valid")
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("valid")
+        expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(3)
+    })
+})

@@ -128,7 +128,9 @@ the newer proof wins. The reverse also holds, so keep the NFT where it is.
 
 Seat transactions pay no gas, so each node holds a sender to 3 stakes or
 challenges a minute and 2 waiting in its pool, and a proof Solana refused
-stays refused on that node for 10 minutes without another read. After a
+stays refused on that node for 10 minutes without another read. These holds
+apply to pool admission only: every validator that merges the transaction
+reads Solana again, so the committee judges it as the chain is now. After a
 refused proof, sign a new one rather than resending the same signature.
 
 ### Re-stake

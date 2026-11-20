@@ -312,8 +312,11 @@ describe("Mempool.receive admission", () => {
 })
 
 const seatVerdicts = new Map<string, { success: boolean; message: string; unreachable?: boolean }>()
+const handleStakingTx = jest.fn(async (t: { hash: string }, _options?: unknown) =>
+    seatVerdicts.get(t.hash),
+)
 jest.mock("src/libs/network/routines/transactions/handleStakingTx", () => ({
-    handleStakingTx: jest.fn(async (t: { hash: string }) => seatVerdicts.get(t.hash)),
+    handleStakingTx,
 }))
 
 describe("Mempool.dropRefusedSeatTransactions", () => {
@@ -343,8 +346,41 @@ describe("Mempool.dropRefusedSeatTransactions", () => {
         seatVerdicts.set("0xheld", { success: true, message: "ok" })
         seatVerdicts.set("0xdown", { success: false, message: "timed out", unreachable: true })
 
+        handleStakingTx.mockClear()
         expect(await Mempool.dropRefusedSeatTransactions()).toEqual(["0xmoved"])
         expect(deleted).toEqual([["0xmoved"]])
+        // Past the admission caches, so the pool matches what peers read now.
+        expect(handleStakingTx.mock.calls.map(c => c[1])).toEqual([
+            { fresh: true },
+            { fresh: true },
+            { fresh: true },
+        ])
+    })
+})
+
+describe("Mempool.receive seat transactions", () => {
+    beforeEach(resetReceiveState)
+    afterEach(() => {
+        nftGatingOn = false
+    })
+
+    it("judges them again with a fresh Solana read, leaving out the unanswered ones", async () => {
+        nftGatingOn = true
+        const seat = (hash: string) => {
+            const t = tx(hash, 100)
+            t.content = { ...t.content, type: "validatorStake" }
+            return t
+        }
+        seatVerdicts.set("0xseat-ok", { success: true, message: "ok" })
+        seatVerdicts.set("0xseat-down", { success: false, message: "timed out", unreachable: true })
+        seatVerdicts.set("0xseat-bad", { success: false, message: "proof rejected" })
+        handleStakingTx.mockClear()
+
+        await Mempool.receive([seat("0xseat-ok"), seat("0xseat-down"), seat("0xseat-bad"), tx("0xpay", 100)])
+
+        expect(insertedRows.map(r => r.hash).sort()).toEqual(["0xpay", "0xseat-ok"])
+        expect(handleStakingTx).toHaveBeenCalledTimes(3)
+        for (const call of handleStakingTx.mock.calls) expect(call[1]).toEqual({ fresh: true })
     })
 })
 

@@ -140,8 +140,8 @@ describe("taking a seat", () => {
     it("accepts a first stake with a valid, allowlisted, unused proof", async () => {
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(r).toMatchObject({ valid: true })
-        expect(solana.proof).toHaveBeenCalledWith(nft, `0x${SENDER}`, 1_700_000_600_000)
-        expect(solana.owner).toHaveBeenCalledWith(MINT, OWNER)
+        expect(solana.proof).toHaveBeenCalledWith(nft, `0x${SENDER}`, 1_700_000_600_000, undefined, {})
+        expect(solana.owner).toHaveBeenCalledWith(MINT, OWNER, {})
     })
 
     it("rejects a first stake without a proof", async () => {
@@ -162,7 +162,7 @@ describe("taking a seat", () => {
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(r.valid).toBe(true)
         expect(r.message).toContain(`evicts ${OTHER}`)
-        expect(solana.order).toHaveBeenCalledWith(10, SIG)
+        expect(solana.order).toHaveBeenCalledWith(10, SIG, {})
     })
 
     it("rejects a proof not later than the held seat's, and reports its proof unreachable", async () => {
@@ -240,7 +240,7 @@ describe("challenging a seat", () => {
         asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
         const r = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
         expect(r.valid).toBe(true)
-        expect(solana.evidence).toHaveBeenCalledWith(SIG, { mint: MINT, owner: OWNER, proofTx: SIG })
+        expect(solana.evidence).toHaveBeenCalledWith(SIG, { mint: MINT, owner: OWNER, proofTx: SIG }, {})
     })
 
     it("also applies to a validator that is unstaking", async () => {
@@ -353,5 +353,44 @@ describe("the active-set floor at challenge admission", () => {
         asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ status: VALIDATOR_STATUS_UNSTAKING }) as never)
         asMock(GCR.getGCRValidatorsAtBlock).mockResolvedValue(activeSet(7) as never)
         expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).valid).toBe(true)
+    })
+})
+
+describe("the merge re-judge reads fresh", () => {
+    const fresh = { fresh: true }
+
+    it("passes { fresh: true } to every Solana read of a stake", async () => {
+        asMock(GCR.getGCRValidatorByMint).mockResolvedValue(seat({ address: OTHER }) as never)
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }), fresh)).valid).toBe(true)
+        expect(solana.proof).toHaveBeenCalledWith(nft, `0x${SENDER}`, 1_700_000_600_000, undefined, fresh)
+        expect(solana.owner).toHaveBeenCalledWith(MINT, OWNER, fresh)
+        expect(solana.order).toHaveBeenCalledWith(10, SIG, fresh)
+    })
+
+    it("passes { fresh: true } to the challenge evidence read", async () => {
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER), fresh)).valid).toBe(true)
+        expect(solana.evidence).toHaveBeenCalledWith(SIG, nft, fresh)
+    })
+
+    it("admission reads with the cached default", async () => {
+        await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
+        expect(solana.owner).toHaveBeenCalledWith(MINT, OWNER, {})
+    })
+
+    it("is not short-circuited by a refusal held at admission", async () => {
+        solana.owner.mockResolvedValue({ status: "invalid", reason: "no longer holds" })
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))).valid).toBe(false)
+        // The wallet holds the NFT again; peers that did not admit the tx read it so.
+        solana.owner.mockResolvedValue({ status: "valid", slot: 11 })
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }), fresh)).valid).toBe(true)
+        expect(solana.owner).toHaveBeenCalledTimes(2)
+
+        asMock(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        solana.evidence.mockResolvedValue({ status: "invalid", reason: "not finalized" })
+        await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))
+        solana.evidence.mockResolvedValue({ status: "valid", slot: 12 })
+        expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER), fresh)).valid).toBe(true)
+        expect(solana.evidence).toHaveBeenCalledTimes(2)
     })
 })

@@ -30,6 +30,7 @@ import {
     verifyCurrentOwner,
     verifyNftProof,
     type SolanaCheck,
+    type SolanaReadOptions,
 } from "src/features/staking/solanaProof"
 import {
     challengeVerdictKey,
@@ -125,11 +126,12 @@ export default class ValidatorsManagement {
      */
     static async manageValidatorStakeTx(
         tx: Transaction,
+        options: SolanaReadOptions = {},
     ): Promise<StakeTxResult> {
         if (!(await stakingOpen())) {
             return { valid: false, message: TOKEN_STAKING_REFUSAL }
         }
-        if (await nftGating()) return ValidatorsManagement.manageNftSeatStakeTx(tx)
+        if (await nftGating()) return ValidatorsManagement.manageNftSeatStakeTx(tx, options)
         const parsed = parseStakeTx(tx)
         if (parsed.valid === false) return parsed.result
         const { payload, sender, amount } = parsed
@@ -209,7 +211,10 @@ export default class ValidatorsManagement {
      * A `validatorStake` under `nftValidatorGating`: the seat is backed by an
      * NFT, not by DEM, so the amount is 0 and entering the set takes a proof.
      */
-    static async manageNftSeatStakeTx(tx: Transaction): Promise<StakeTxResult> {
+    static async manageNftSeatStakeTx(
+        tx: Transaction,
+        options: SolanaReadOptions = {},
+    ): Promise<StakeTxResult> {
         const payload = extractStakePayload(tx)
         if (!payload) {
             return { valid: false, message: "Missing stake payload" }
@@ -252,6 +257,7 @@ export default class ValidatorsManagement {
                 payload.nft,
                 sender,
                 tx.content.timestamp,
+                options,
             )
             if (!nft.valid) return nft
             return { valid: true, message: `Validator entrance valid (${nft.message})` }
@@ -271,12 +277,15 @@ export default class ValidatorsManagement {
     /**
      * The NFT rules for a stake that takes a seat: a proof is present, its
      * mint is allowlisted and free, the proof checks out on Solana, and the
-     * wallet still holds the NFT.
+     * wallet still holds the NFT. A `fresh` caller also skips the held
+     * refusals: one may say the wallet no longer held the NFT minutes ago,
+     * and members that did not admit the tx would read the chain as it is now.
      */
     static async checkEntranceNft(
         nft: ValidatorNftProof | undefined,
         sender: string,
         txTimestampMs: number,
+        options: SolanaReadOptions = {},
     ): Promise<StakeTxResult> {
         if (nft === undefined) {
             return {
@@ -289,18 +298,18 @@ export default class ValidatorsManagement {
         }
         const validator = sender.startsWith("0x") ? sender : `0x${sender}`
         const verdictKey = stakeVerdictKey(nft.proofTx, validator)
-        const held = refusedVerdict(verdictKey)
+        const held = options.fresh ? null : refusedVerdict(verdictKey)
         if (held !== null) return { valid: false, message: held }
-        const proof = await verifyNftProof(nft, validator, txTimestampMs)
+        const proof = await verifyNftProof(nft, validator, txTimestampMs, undefined, options)
         if (proof.status !== "valid") return judged(proof, "NFT proof", verdictKey)
-        const owner = await verifyCurrentOwner(nft.mint, nft.owner)
+        const owner = await verifyCurrentOwner(nft.mint, nft.owner, options)
         if (owner.status !== "valid") return judged(owner, "NFT ownership", verdictKey)
         // Another seat backed by this mint is evicted when the stake applies;
         // the new proof must be later than the one that seat was taken with.
         const holder = await GCR.getGCRValidatorByMint(nft.mint)
         if (holder && holder.address !== sender) {
             if (holder.nft_proof_tx) {
-                const order = await verifyProofSupersedes(proof.slot, holder.nft_proof_tx)
+                const order = await verifyProofSupersedes(proof.slot, holder.nft_proof_tx, options)
                 if (order.status !== "valid") return judged(order, "NFT proof", verdictKey)
             }
             return { valid: true, message: `NFT proof valid; evicts ${holder.address}` }
@@ -315,6 +324,7 @@ export default class ValidatorsManagement {
      */
     static async manageValidatorChallengeTx(
         tx: Transaction,
+        options: SolanaReadOptions = {},
     ): Promise<StakeTxResult> {
         if (!(await nftGating())) {
             return { valid: false, message: "validatorChallenge is not active on this network" }
@@ -356,13 +366,17 @@ export default class ValidatorsManagement {
             target.nft_proof_tx,
             payload.validator,
         )
-        const held = refusedVerdict(verdictKey)
+        const held = options.fresh ? null : refusedVerdict(verdictKey)
         if (held !== null) return { valid: false, message: held }
-        const evidence = await verifyChallengeEvidence(payload.evidenceTx, {
-            mint: target.nft_mint,
-            owner: target.nft_owner,
-            proofTx: target.nft_proof_tx,
-        })
+        const evidence = await verifyChallengeEvidence(
+            payload.evidenceTx,
+            {
+                mint: target.nft_mint,
+                owner: target.nft_owner,
+                proofTx: target.nft_proof_tx,
+            },
+            options,
+        )
         if (evidence.status !== "valid") {
             return judged(evidence, "Challenge evidence", verdictKey)
         }
