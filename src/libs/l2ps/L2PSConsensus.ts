@@ -15,11 +15,13 @@
  */
 
 import L2PSProofManager from "./L2PSProofManager"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { L2PSProof } from "@/model/entities/L2PSProofs"
 import HandleGCR, {
     isGCRMainEdit,
     type PendingGCRWrite,
 } from "@/libs/blockchain/gcr/handleGCR"
+import { applyTime, bindApplyTime, withBlockTime } from "@/libs/blockchain/gcr/applyTime"
 import Chain from "@/libs/blockchain/chain"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
@@ -27,6 +29,7 @@ import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { L2PS_GATE_REFUSAL, l2psOffAt } from "@/forks/l2psGate"
 
 /**
  * Result of applying a single proof
@@ -155,11 +158,24 @@ export default class L2PSConsensus {
      *
      * With `pending`, the proofs' edits and status changes join the block's
      * pending state and commit with the block; the bookkeeping that follows
-     * from them runs once the block is durable.
+     * from them runs once the block is durable. `timestampSec` is the
+     * block's timestamp: what the edits stamp commits with the block, so it
+     * must not be this node's clock.
      */
     static async applyPendingProofs(
         blockNumber: number,
         simulate = false,
+        pending?: PendingGCRWrite,
+        timestampSec?: number,
+    ): Promise<L2PSConsensusResult> {
+        return await withBlockTime(timestampSec, () =>
+            this.applyPendingProofsAt(blockNumber, simulate, pending),
+        )
+    }
+
+    private static async applyPendingProofsAt(
+        blockNumber: number,
+        simulate: boolean,
         pending?: PendingGCRWrite,
     ): Promise<L2PSConsensusResult> {
         const result: L2PSConsensusResult = {
@@ -171,6 +187,19 @@ export default class L2PSConsensus {
             affectedAccountsCount: 0,
             l1BatchTxHashes: [],
             proofResults: [],
+        }
+
+        // Block N is applied on tip N - 1, the height every gate reads.
+        if (l2psOffAt(blockNumber - 1)) {
+            result.message = L2PS_GATE_REFUSAL
+            return result
+        }
+
+        // Local proofs move balances on the entry node alone (DEM-816);
+        // under the fork balances move only through settlement batches.
+        if (l2psSettlementActive()) {
+            result.message = "L2PS proofs are not applied under l2psSettlement"
+            return result
         }
 
         try {
@@ -217,7 +246,7 @@ export default class L2PSConsensus {
                         result,
                     )
                 if (pending) {
-                    pending.sideEffects.push(process)
+                    pending.sideEffects.push(bindApplyTime(process))
                 } else {
                     await process()
                 }
@@ -253,7 +282,7 @@ export default class L2PSConsensus {
                 from: editAccount,
                 to: editAccount,
                 from_ed25519_address: editAccount,
-                timestamp: Date.now(),
+                timestamp: applyTime().getTime(),
                 gcr_edits: proof.gcr_edits,
             } as any,
             signature: null,
@@ -505,6 +534,9 @@ export default class L2PSConsensus {
             const l1BatchTx = {
                 type: "l2psBatch",
                 hash: `0x${batchHash}`,
+                // Top-level columns of the stored row, both NOT NULL.
+                blockNumber,
+                status: TRANSACTION_STATUS.CONFIRMED,
                 signature: {
                     type: "ed25519",
                     data: "", // System-generated, no actual signature needed
@@ -516,6 +548,14 @@ export default class L2PSConsensus {
                     amount: 0,
                     nonce: blockNumber,
                     timestamp: Date.now(),
+                    // Chain.insertTransaction stores the fee columns from
+                    // here; without it every insert threw on network_fee.
+                    transaction_fee: {
+                        network_fee: 0,
+                        rpc_fee: 0,
+                        additional_fee: 0,
+                        rpc_address: null,
+                    },
                     status: TRANSACTION_STATUS.CONFIRMED,
                     data: [
                         "l2psBatch",

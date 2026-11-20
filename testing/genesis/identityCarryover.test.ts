@@ -388,6 +388,21 @@ describe("genesis refusals under identityCarryover", () => {
         expect(err2.message).toContain("carries no validators.jsonl")
     })
 
+    it("genesis-hash reports what the import would refuse, only under identityCarryover at block 0", async () => {
+        const { carryoverImportProblems } = await import("../../scripts/genesis-hash")
+        const out = join(work, "out")
+        await buildCarryoverSnapshot({ inDir: source, validatorsFile: launchFile, outDir: out })
+        const atZero = { forks: { identityCarryover: { activationHeight: 0 } } }
+        expect(await carryoverImportProblems({ ...atZero, validators: LAUNCH }, out)).toEqual([])
+        const wrong = await carryoverImportProblems({ ...atZero, validators: [LAUNCH[0]] }, out)
+        expect(wrong.join("\n")).toContain(`validators.jsonl row ${LAUNCH[1].address} is not in the genesis validators`)
+        expect(wrong[0]).toStartWith("a node would refuse the identityCarryover import at boot")
+        const later = { forks: { identityCarryover: { activationHeight: 5 } }, validators: [LAUNCH[0]] }
+        expect(await carryoverImportProblems(later, out)).toEqual([])
+        expect(await carryoverImportProblems({ validators: [LAUNCH[0]] }, out)).toEqual([])
+        expect(process.env.DEMOS_SNAPSHOT_DIR).toBeUndefined()
+    })
+
     it("compares validator entries field by field", () => {
         const rows = launchValidatorRows(LAUNCH)
         expect(launchValidatorProblems(rows, LAUNCH)).toEqual([])
@@ -400,6 +415,22 @@ describe("genesis refusals under identityCarryover", () => {
             `genesis validator ${LAUNCH[0].address}: staked_amount must be a string or a number`,
         )
         expect(launchValidatorProblems(rows, [{ ...LAUNCH[0], status: true }, LAUNCH[1]]).join()).toContain("status must be")
+    })
+
+    it("compares the NFT fields, so a carried row cannot drop or swap the NFT it was sealed with", () => {
+        const nft = {
+            nft_mint: "7M7TxyCHoX3jmUNh68QxWWnUSbxJwEUTJoN5dHxTctGH",
+            nft_owner: "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e",
+            nft_proof_tx: "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+        }
+        const sealed = [{ ...LAUNCH[0], ...nft }, LAUNCH[1]]
+        const rows = launchValidatorRows(sealed)
+        expect(launchValidatorProblems(rows, sealed)).toEqual([])
+        const dropped = rows.map((r, i) => (i === 0 ? { ...r, nft_mint: null, nft_owner: null, nft_proof_tx: null } : r))
+        expect(launchValidatorProblems(dropped, sealed).join()).toContain(`validator ${sealed[0].address} differs`)
+        const swapped = rows.map(r => (r.nft_mint ? { ...r, nft_proof_tx: "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM9hxRbmg6uMLCpjxvBuHFTaN8wPBaDJVHxuN6Lw6dZZMCt" } : r))
+        expect(launchValidatorProblems(swapped, sealed).join()).toContain("differs")
+        expect(launchValidatorProblems(rows, [{ ...sealed[0], nft_mint: 7 }, LAUNCH[1]]).join()).toContain("nft_mint must be a string")
     })
 
     it("refuses a zero stake in validators.jsonl, with or without a genesis list", () => {

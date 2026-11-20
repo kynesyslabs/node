@@ -33,6 +33,18 @@ import log from "@/utilities/logger"
 export type TLSNotaryMode = "ffi" | "docker"
 
 /**
+ * No notary answers where docker mode expects one. Not fatal on its own: the
+ * requestTLSNproxy relay needs no local notary (provers notarize at the
+ * network's notary), so a relay-only node runs on without it.
+ */
+export class NotaryUnreachableError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "NotaryUnreachableError"
+    }
+}
+
+/**
  * Service configuration options
  */
 export interface TLSNotaryServiceConfig {
@@ -480,25 +492,25 @@ export class TLSNotaryService {
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error)
-            log.error(
-                `[TLSNotary] Failed to connect to Docker notary at ${host}:${this.config.port}: ${message}`,
-            )
-            log.error("[TLSNotary] Make sure the Docker container is running:")
-            log.error(
-                "[TLSNotary]   docker compose up -d tlsnotary    (root compose)",
-            )
-            log.error(
-                "[TLSNotary]   cd tlsnotary && docker compose up -d   (legacy standalone)",
-            )
-
             if (fatal) {
+                log.error(
+                    `[TLSNotary] Failed to connect to Docker notary at ${host}:${this.config.port}: ${message}`,
+                )
+                log.error("[TLSNotary] Make sure the Docker container is running:")
+                log.error(
+                    "[TLSNotary]   docker compose up -d tlsnotary    (root compose)",
+                )
+                log.error(
+                    "[TLSNotary]   cd tlsnotary && docker compose up -d   (legacy standalone)",
+                )
                 log.error(
                     "[TLSNotary] FATAL: Exiting due to Docker container not available",
                 )
                 process.exit(1)
             }
-            throw new Error(
-                `Docker notary container not accessible: ${message}`,
+            // The caller decides: a relay-only node runs on without a notary
+            throw new NotaryUnreachableError(
+                `no notary answers at ${host}:${this.config.port} (${message})`,
             )
         }
     }

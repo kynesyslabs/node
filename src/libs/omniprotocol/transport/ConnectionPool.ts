@@ -11,7 +11,7 @@ import {
     type ConnectionInfo,
     type ConnectionOrigin,
 } from "./types"
-import { PoolCapacityError } from "../types/errors"
+import { PoolCapacityError, RequestTimeoutError } from "../types/errors"
 import log from "@/utilities/logger"
 import { RateLimiter } from "../ratelimit"
 import { PeerManager } from "@/libs/peer"
@@ -53,20 +53,42 @@ import {
  *   3. Connection now usable for bidirectional messaging
  *   4. Automatic idle cleanup after timeout
  */
+/**
+ * The options for the send that follows a connect, with what is left of the
+ * request's timeout. Nothing left means the request is not sent at all.
+ */
+function remainingOptions(
+    options: ConnectionOptions,
+    deadline: number | undefined,
+): ConnectionOptions {
+    if (deadline === undefined) {
+        return options
+    }
+    const timeout = deadline - Date.now()
+    if (timeout <= 0) {
+        throw new RequestTimeoutError(
+            `Request timeout: connecting took the whole ${options.timeout}ms`,
+        )
+    }
+    return { ...options, timeout }
+}
+
 export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
-    private connections: Map<string, PeerConnection[]> = new Map()
-    private pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
+    private readonly connections: Map<string, PeerConnection[]> = new Map()
+    private readonly pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
     // Inbound connections that hold a per-IP slot in the rate limiter
     // (pending ones, and those authenticated as non-validators), with the IP
     // captured at accept time: remoteAddress is gone once the socket is
     // destroyed, and outbound connections never took a slot to give back.
-    private ipSlots: Map<PeerConnection, string> = new Map()
+    private readonly ipSlots: Map<PeerConnection, string> = new Map()
     // Callers between acquire() and release(), per connection. A caller
     // resumes after acquire() a turn later and only then puts its request in
     // flight, so an idle-looking socket may still be about to carry one.
-    private reservations: Map<PeerConnection, number> = new Map()
-    private config: PoolConfig
+    private readonly reservations: Map<PeerConnection, number> = new Map()
+    // Outbound connects in progress, by peer identity and address.
+    private readonly connecting: Map<string, Promise<PeerConnection>> = new Map()
+    private readonly config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     public rateLimiter?: RateLimiter
 
@@ -172,21 +194,47 @@ export class ConnectionPool extends EventEmitter {
         // Get existing connections for this peer
         const existing = this.connections.get(peerIdentity) || []
 
-        // Check if we're at max connections for this peer
-        const usableConnections = existing.filter(c =>
-            ConnectionStateUtils.isUsable(c.getState()),
+        // Only the peer's own inbound connections count against its cap, as
+        // only ours count on the outbound side: the sockets we opened to it
+        // are not its to spend, and counting them let a reconnect evict the
+        // only inbound connection it had.
+        const usableInbound = existing.filter(
+            c =>
+                c.origin === "inbound" &&
+                ConnectionStateUtils.isUsable(c.getState()),
         )
-        if (usableConnections.length >= this.config.maxConnectionsPerPeer) {
-            // INFO: Reject the connection
-            log.error(
-                `[ConnectionPool] Max connections per peer reached for ${peerIdentity}`,
+        if (usableInbound.length >= this.config.maxConnectionsPerPeer) {
+            // The new connection has just proved the key. Older inbound ones
+            // under the same identity can belong to a process that no longer
+            // speaks for it (a halted copy of the key, a restarted peer's
+            // half-open socket); refusing the newest would lock the live
+            // holder out of this node, so the least recently used one goes.
+            // Closing loses the replies still owed in either direction, so an
+            // idle one goes before any with work pending.
+            const stalest = usableInbound
+                .sort(
+                    (a, b) =>
+                        Number(a.hasPendingWork()) - Number(b.hasPendingWork()) ||
+                        a.getLastActivity() - b.getLastActivity(),
+                )[0]
+            if (!stalest) {
+                log.error(
+                    `[ConnectionPool] Max connections per peer reached for ${peerIdentity}`,
+                )
+                log.error(
+                    `[ConnectionPool] Rejecting connection ${connection.socketId} for ${peerIdentity}`,
+                )
+                connection.close().catch(() => {})
+                this.emit("connection_rejected", peerIdentity, "max_connections")
+                return
+            }
+            log.warning(
+                `[ConnectionPool] Max connections per peer reached for ${peerIdentity}: ` +
+                    `closing its least recently used inbound connection ${stalest.socketId} for ${connection.socketId}`,
             )
-            log.error(
-                `[ConnectionPool] Rejecting connection ${connection.socketId} for ${peerIdentity}`,
-            )
-            connection.close().catch(() => {})
-            this.emit("connection_rejected", peerIdentity, "max_connections")
-            return
+            existing.splice(existing.indexOf(stalest), 1)
+            stalest.close().catch(() => {})
+            this.emit("connection_evicted", peerIdentity, stalest.socketId)
         }
 
         // Add new connection
@@ -248,6 +296,7 @@ export class ConnectionPool extends EventEmitter {
             )
         }
         if (validator) {
+            connection.markProvenValidator()
             this.releaseIpSlot(connection, true)
         }
     }
@@ -297,6 +346,19 @@ export class ConnectionPool extends EventEmitter {
         if (existing) {
             this.reserve(existing)
             return existing
+        }
+
+        // A burst of first calls shares one connect: each extra socket would
+        // be over the per-peer cap and closed again by the receiver.
+        const connectKey = `${peerIdentity} ${connectionString}`
+        const connecting = this.connecting.get(connectKey)
+        if (connecting !== undefined) {
+            const connection = await this.joinConnect(
+                connecting,
+                options.timeout,
+            )
+            this.reserve(connection)
+            return connection
         }
 
         // Check pool capacity limits
@@ -370,33 +432,92 @@ export class ConnectionPool extends EventEmitter {
             }
         }
 
-        try {
-            connection.on("error", (error: Error) => {
-                log.error("Connection error in connection handler")
-                // throw error
-                removeConnectionFromPool(connection)
-                return null
-            })
-
-            await retiring
-
-            // The request timeout bounds the answer, not the TCP connect: a
-            // closed or filtered Omni port must fail within connectTimeout.
-            await connection.connect({
-                timeout: this.config.connectTimeout,
-                retries: options.retries,
-            })
-
-            log.debug(
-                `[ConnectionPool] Created outbound connection to ${peerIdentity}`,
-            )
-            this.reserve(connection)
-            return connection
-        } catch (error) {
-            // Remove failed connection from pool
+        connection.on("error", (error: Error) => {
+            log.error("Connection error in connection handler")
+            // throw error
             removeConnectionFromPool(connection)
-            throw error
+            return null
+        })
+
+        const connected = (async () => {
+            try {
+                await retiring
+
+                // The request timeout bounds the answer, not the TCP
+                // connect: a closed or filtered Omni port must fail within
+                // connectTimeout. A connect longer than the call itself
+                // would only stall the call past its own deadline.
+                await connection.connect({
+                    timeout: Math.min(
+                        this.config.connectTimeout,
+                        options.timeout ?? Infinity,
+                    ),
+                    retries: options.retries,
+                })
+
+                log.debug(
+                    `[ConnectionPool] Created outbound connection to ${peerIdentity}`,
+                )
+                return connection
+            } catch (error) {
+                // Remove failed connection from pool
+                removeConnectionFromPool(connection)
+                throw error
+            } finally {
+                this.connecting.delete(connectKey)
+            }
+        })()
+        this.connecting.set(connectKey, connected)
+
+        await connected
+        this.reserve(connection)
+        return connection
+    }
+
+    /**
+     * Wait for a connect another call started, within this call's own
+     * timeout: the connect runs on the starter's, possibly longer, budget.
+     * Giving up here leaves the connect running for the other callers.
+     */
+    private async joinConnect(
+        connecting: Promise<PeerConnection>,
+        timeout: number | undefined,
+    ): Promise<PeerConnection> {
+        if (timeout === undefined) {
+            return connecting
         }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const expired = new Promise<never>((_, reject) => {
+            timer = setTimeout(
+                () =>
+                    reject(
+                        new RequestTimeoutError(
+                            `No connection within ${timeout}ms`,
+                        ),
+                    ),
+                timeout,
+            )
+        })
+        try {
+            return await Promise.race([connecting, expired])
+        } finally {
+            clearTimeout(timer)
+        }
+    }
+
+    /**
+     * A request that timed out says the peer is slow, not that the socket is
+     * broken: its entry is already dropped and a late answer is ignored by
+     * sequence. Closing would fail every other request on the connection.
+     */
+    private async closeUnlessSlow(
+        connection: PeerConnection,
+        error: unknown,
+    ): Promise<void> {
+        if (error instanceof RequestTimeoutError) {
+            return
+        }
+        await this.closeConnection(connection)
     }
 
     private reserve(connection: PeerConnection): void {
@@ -439,35 +560,13 @@ export class ConnectionPool extends EventEmitter {
         payload: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
-        const peer = PeerManager.getInstance().getPeer(peerIdentity)
-        let connection: PeerConnection | null = null
-
-        try {
-            connection = await this.acquire(
-                peerIdentity,
-                connectionString,
-                options,
-            )
-
-            if (!connection) {
-                throw new Error("Connection not found")
-            }
-
-            const response = await connection.send(opcode, payload, options)
-            this.release(connection)
-            return response
-        } catch (error) {
-            log.error(
-                `[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`,
-            )
-            // On error, close the connection and remove from pool
-            if (connection) {
-                this.release(connection)
-                await this.closeConnection(connection)
-            }
-
-            throw error
-        }
+        return this.request(
+            peerIdentity,
+            connectionString,
+            options,
+            (connection, remaining) =>
+                connection.send(opcode, payload, remaining),
+        )
     }
 
     /**
@@ -491,6 +590,39 @@ export class ConnectionPool extends EventEmitter {
         publicKey: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
+        return this.request(
+            peerIdentity,
+            connectionString,
+            options,
+            (connection, remaining) =>
+                connection.sendAuthenticated(
+                    opcode,
+                    payload,
+                    privateKey,
+                    publicKey,
+                    remaining,
+                ),
+        )
+    }
+
+    /**
+     * One request on a pooled connection. options.timeout bounds the whole
+     * request, connect included: the answer gets only what the connect,
+     * our own or one we joined, left of it.
+     */
+    private async request(
+        peerIdentity: string,
+        connectionString: string,
+        options: ConnectionOptions,
+        sendOn: (
+            connection: PeerConnection,
+            remaining: ConnectionOptions,
+        ) => Promise<Buffer>,
+    ): Promise<Buffer> {
+        const deadline =
+            options.timeout === undefined
+                ? undefined
+                : Date.now() + options.timeout
         let connection: PeerConnection | null = null
 
         try {
@@ -504,20 +636,19 @@ export class ConnectionPool extends EventEmitter {
                 throw new Error("Connection not found")
             }
 
-            const response = await connection.sendAuthenticated(
-                opcode,
-                payload,
-                privateKey,
-                publicKey,
-                options,
+            const response = await sendOn(
+                connection,
+                remainingOptions(options, deadline),
             )
             this.release(connection)
             return response
         } catch (error) {
-            // On error, close the connection and remove from pool
+            log.error(
+                `[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`,
+            )
             if (connection) {
                 this.release(connection)
-                await this.closeConnection(connection)
+                await this.closeUnlessSlow(connection, error)
             }
 
             throw error

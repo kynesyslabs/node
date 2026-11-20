@@ -12,6 +12,7 @@ import {
 import { createHash } from "crypto"
 import { getRunConfig, writeJson } from "./framework/io"
 import { buildComplexPolicyScript } from "./token_script_complex_policy_shared"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -43,8 +44,8 @@ function parseBigintOrZero(value: any): bigint {
     if (typeof value === "bigint") return value
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     if (typeof value === "string") return BigInt(value)
-  } catch {
-    // ignore
+  } catch (error) {
+    logNonCriticalErrorOnce("token_script_complex_policy_smoke.parseBigintOrZero", "token_script_complex_policy_smoke.parseBigintOrZero", error, { value: textOrType(value).slice(0, 80) })
   }
   return 0n
 }
@@ -65,12 +66,13 @@ function stableHashJson(value: any): string {
   return sha256Hex(JSON.stringify(sortObjectDeep(value)))
 }
 
-function safeBigIntFromString(value: any): bigint {
+export function safeBigIntFromString(value: any): bigint {
   try {
     if (typeof value === "bigint") return value
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     return BigInt(String(value ?? "0"))
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce("token_script_complex_policy_smoke.safeBigIntFromString", "token_script_complex_policy_smoke.safeBigIntFromString", error, { value: textOrType(value).slice(0, 80) })
     return 0n
   }
 }

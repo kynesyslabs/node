@@ -182,7 +182,7 @@ last `historyBlocks` blocks.
 
 | Field | Value |
 |---|---|
-| `maxDataBytes` | largest program data accepted, 1,048,576 |
+| `maxDataBytes` | largest program size, 1,048,576; one create or whole-data write carries at most about 127 KiB of `json` data, or about 95 KiB of `binary` data (decoded), while gossip is on |
 | `measuredOver` | what that size counts: the data only, not the ACL or metadata. For `json`, the UTF-8 byte length of `JSON.stringify(data)` as submitted (for a field or item write, of the whole data after the write). For `binary`, the decoded length of the base64 data, `floor(length * 3 / 4)` minus its `=` padding characters |
 | `maxJsonDepth` | deepest JSON data accepted, 64; a top-level object or array is depth 1 |
 | `appliesFromBlock` | first block the size and depth limits apply at: 0, since no fork gates them |
@@ -190,6 +190,11 @@ last `historyBlocks` blocks.
 | `historyBlocks` | how far back `getStorageProof` can anchor, 64 |
 | `pricingChunkBytes`, `feePerChunk` | 1 DEM (`feePerChunk`, a decimal string) per started 10,240 bytes |
 | `maxProgramSizeBytes` | same as `maxDataBytes`, kept for older clients |
+
+With gossip on, one create or whole-data write is also bounded by the
+262,144-byte tx gossip envelope, which carries the data twice: about 127 KiB
+of `json` data, or about 95 KiB of `binary` data (decoded), since binary data
+is carried as base64.
 
 The size is measured on the data as submitted, so the bytes counted at write
 time are not the bytes a read returns (stored JSON comes back with its keys

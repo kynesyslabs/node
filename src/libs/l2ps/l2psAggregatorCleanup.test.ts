@@ -15,7 +15,13 @@ const cleanupBatchedWithoutEdits = jest.fn(async (..._args: unknown[]) => 0)
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: { cleanupByStatus, cleanupBatchedWithoutEdits },
-    L2PS_STATUS: { EXECUTED: "executed", BATCHED: "batched", CONFIRMED: "confirmed", PROCESSED: "processed" },
+    L2PS_STATUS: {
+        EXECUTED: "executed",
+        BATCHED: "batched",
+        CONFIRMED: "confirmed",
+        PROCESSED: "processed",
+        FAILED: "failed",
+    },
 }))
 mock.module("@/libs/l2ps/zk/L2PSBatchProver", () => ({ L2PSBatchProver: class {} }))
 mock.module("@/libs/blockchain/validation/txValidatorPool", () => ({ __esModule: true, default: {} }))
@@ -42,5 +48,13 @@ describe("aggregation cycle cleanup", () => {
         expect(cleanupBatchedWithoutEdits).toHaveBeenCalledTimes(10)
         expect(cleanupBatchedWithoutEdits.mock.calls[0][0]).toBe(aggregator.CLEANUP_AGE_MS)
         expect(aggregator.getStatistics().cleanedUpTransactions).toBe(30)
+    })
+
+    it("sweeps failed rows once they are as old as a confirmed row", async () => {
+        const aggregator = L2PSBatchAggregator.getInstance() as any
+
+        await aggregator.cleanupOldBatchedTransactions()
+
+        expect(cleanupByStatus.mock.calls).toContainEqual(["failed", aggregator.CLEANUP_AGE_MS])
     })
 })

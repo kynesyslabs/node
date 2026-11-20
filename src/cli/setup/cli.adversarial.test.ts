@@ -5,6 +5,8 @@ import { HELP, parseSetupArgs, UsageError } from "./args"
 import { runCli } from "./cli"
 import { AS_USER, HEX_IV, HEX_KEY, fakeRunner, isRoot, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
 import { byCodePoint } from "./zk"
+import { SUBNET_UID_MAX } from "./validate"
+import { L2PS_UID_MAX_LENGTH } from "../../libs/l2ps/settlement/encoding"
 
 let root: string
 beforeEach(() => {
@@ -135,9 +137,10 @@ describe("values are validated, not coerced", () => {
     }
 
     it("subnet ids: letters, digits, _ and - up to the documented length", () => {
-        expect(parseSetupArgs(["--l2ps-uid", "a".repeat(255)], {}).uid).toBe("a".repeat(255))
-        expect(HELP).toContain("up to 255")
-        for (const bad of ["a".repeat(256), "a".repeat(5000), "", "   ", "../x", "a/b", "a b", "..", ".", "ünï", "a\u0000b", "a;b", "-"+"/"]) {
+        expect(SUBNET_UID_MAX).toBe(L2PS_UID_MAX_LENGTH)
+        expect(parseSetupArgs(["--l2ps-uid", "a".repeat(128)], {}).uid).toBe("a".repeat(128))
+        expect(HELP).toContain("up to 128")
+        for (const bad of ["a".repeat(129), "a".repeat(256), "a".repeat(5000), "", "   ", "../x", "a/b", "a b", "..", ".", "ünï", "a\u0000b", "a;b", "-"+"/"]) {
             rejects(["--l2ps-uid", bad])
         }
         rejects([], { DEMOS_SETUP_L2PS_UID: "   " })

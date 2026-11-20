@@ -3,8 +3,9 @@
 # Demos Network Node - Production Image
 #
 # Multistage build:
-#   1. builder  - installs deps, native modules, applies falcon-sign patch
-#   2. runtime  - minimal image, non-root user, healthcheck, exec CMD
+#   0. node-base - Bun base plus pinned Node.js, shared by builder and runtime
+#   1. builder   - installs deps, native modules, applies falcon-sign patch
+#   2. runtime   - minimal image, non-root user, healthcheck, exec CMD
 #
 # Run with --no-tui (passed in CMD) since TUI requires a TTY.
 # All persistent state lives under /app and is intended to be bind/volume mounted:
@@ -12,6 +13,38 @@
 #   - /app/demos_peerlist.json      (file, bind-mount)
 #   - /app/data                     (dir,  volume)
 #   - /app/logs                     (dir,  volume)
+
+# Base images are pinned by digest: a tag like 1.3-debian moves, so two
+# builds of the same commit could otherwise start from different images.
+# Bump the tag and digest together with .bun-version.
+FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS node-base
+
+# Shared by the runtime and, for Node.js alone, the builder.
+# Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS,
+# xz to unpack Node. Node.js is required by the gossip sidecar (libp2p
+# cannot run under Bun for frames >1KB; see specs/gossip-sidecar.md).
+# The apt and dpkg logs are dropped in the same step because they carry
+# the time of the run, which would make two builds of one commit differ.
+# Node comes from one pinned release, checked against its published
+# sha256, so the image does not depend on what a package repository
+# serves on build day. Bump NODE_VERSION and NODE_SHA256 together
+# (sha256 from https://nodejs.org/dist/v<version>/SHASUMS256.txt).
+ARG NODE_VERSION=22.23.4
+ARG NODE_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
+         /var/log/alternatives.log /var/cache/ldconfig/aux-cache \
+    && case "$(dpkg --print-architecture)" in amd64) ;; *) \
+         echo >&2 "Node is pinned for amd64 only; add the sha256 for this architecture"; exit 1 ;; esac \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+         --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
+    && rm /tmp/node.tar.xz \
+    && node --version
 
 # =============================================================================
 # Stage 1: builder
@@ -41,6 +74,24 @@ COPY package.json bun.lock ./
 # with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
 
+# L2PS batch and settlement proving keys (about 190 MB, 100 MB of it the
+# settlement zkey that subnet members prove with). Not committed: they derive
+# deterministically from the public Hermez Powers of Tau, and the build fails
+# unless the derived verification keys equal the committed ones, so a swapped
+# or corrupted download cannot produce keys peers would reject. The Powers of
+# Tau files are only inputs and are dropped from the image. Built from the
+# circuits and the setup code alone, so a source edit elsewhere keeps the
+# cached layer instead of downloading and proving setup again. circom2 and
+# snarkjs run under the image's Node.js: run by Bun, the snarkjs CLI exits 0
+# without writing the key.
+COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
+COPY src/libs/l2ps/zk/circuits/ ./src/libs/l2ps/zk/circuits/
+COPY src/libs/l2ps/zk/keys/ ./src/libs/l2ps/zk/keys/
+COPY src/libs/l2ps/zk/batchArtifacts.ts src/libs/l2ps/zk/settlementArtifacts.ts ./src/libs/l2ps/zk/
+COPY src/cli/setup/ ./src/cli/setup/
+COPY scripts/build-l2ps-zk-keys.ts ./scripts/
+RUN bun scripts/build-l2ps-zk-keys.ts && rm -rf src/libs/l2ps/zk/ptau
+
 # Bring in the runtime payload. Explicit allow-list (rather than `COPY . .`)
 # so host-only files (run wrapper, captraf.sh, jest config, etc.) and any
 # new top-level files added later don't silently land in the image.
@@ -49,6 +100,9 @@ COPY scripts/     ./scripts/
 COPY data/        ./data/
 COPY sdk/         ./sdk/
 COPY libs/        ./libs/
+# Only the pinned TLSN verifier wasm; its Rust sources are rebuilt and
+# compared in CI (native/tlsn-verify/README.md), never in this image.
+COPY native/tlsn-verify/dist/ ./native/tlsn-verify/dist/
 COPY sidecar/     ./sidecar/
 COPY tsconfig.json bunfig.toml ormconfig.json ./
 
@@ -141,28 +195,12 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # Stage 2: runtime
 # Minimal image with only what the node needs at run time. Runs as non-root.
 # =============================================================================
-# ── wstcp (TLSNotary websocket↔TCP proxy) ─────────────────────────────
-# The TLSNotary flow spawns `wstcp` on demand to relay the browser's
-# WebSocket to the target TLS server (see proxyManager.ts). The runtime
-# image ships no Rust toolchain, so the on-demand `cargo install wstcp`
-# fallback in ensureWstcp() cannot run — bake the binary in instead.
-# Without it the proxy never binds its port and every verification fails
-# with an nginx 502 / CloseEvent 1006 on the prover.
-FROM rust:1.99.1-slim@sha256:e6cd1d294a300601eaaa4a294b337e5f0826f427fb2d481e9f76e69e7981e244 AS wstcp
-# Pin the version so an upstream wstcp release can't silently change
-# behaviour or break the build; scripts/install-deps.sh and ensureWstcp()
-# install the same version. `--locked` is intentionally omitted: the
-# crate's bundled Cargo.lock pins time 0.3.25, which does not compile on
-# Rust 1.80 or later, so we let cargo resolve compatible deps for this
-# exact wstcp version.
-RUN cargo install wstcp --version 0.2.1 --root /wstcp
-
 # ── provenance check ─────────────────────────────────────────────────
 # A node started with PROD=true refuses to boot without a commit, so the
 # image must carry the real one. The check lives in its own small stage
 # that the runtime stage mounts: BuildKit starts it alongside the builder
-# and wstcp stages, so a missing commit fails the build in seconds rather
-# than after the dependency install and the Rust compile.
+# stage, so a missing commit fails the build in seconds rather than after
+# the dependency install.
 # Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
 # git history.
 FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS provenance
@@ -183,39 +221,13 @@ RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
         fi; \
     fi
 
-FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS runtime
+FROM node-base AS runtime
 
 # OCI image metadata.
 LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
       org.opencontainers.image.description="Demos Network node (RPC + consensus runtime)" \
       org.opencontainers.image.licenses="CC-BY-NC-SA-4.0" \
       org.opencontainers.image.vendor="Kynesys Labs"
-
-# Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS,
-# xz to unpack Node. Node.js is required by the gossip sidecar (libp2p
-# cannot run under Bun for frames >1KB; see specs/gossip-sidecar.md).
-# The apt and dpkg logs are dropped in the same step because they carry
-# the time of the run, which would make two builds of one commit differ.
-# Node comes from one pinned release, checked against its published
-# sha256, so the image does not depend on what a package repository
-# serves on build day. Bump NODE_VERSION and NODE_SHA256 together
-# (sha256 from https://nodejs.org/dist/v<version>/SHASUMS256.txt).
-ARG NODE_VERSION=22.23.4
-ARG NODE_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        xz-utils \
-    && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
-         /var/log/alternatives.log /var/cache/ldconfig/aux-cache \
-    && case "$(dpkg --print-architecture)" in amd64) ;; *) \
-         echo >&2 "Node is pinned for amd64 only; add the sha256 for this architecture"; exit 1 ;; esac \
-    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
-    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
-    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
-         --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
-    && rm /tmp/node.tar.xz \
-    && node --version
 
 # Non-root user. The base image already ships a `bun` user/group at uid/gid
 # 1000; rename them to `demos` in-place so the uid stays predictable for
@@ -241,11 +253,6 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
     && chown demos:demos /app /app/data /app/logs /app/state \
     && chmod 0755 /app /app/data /app/logs /app/state
 
-# TLSNotary proxy binary, baked in so the on-demand proxy can spawn
-# without a Rust toolchain. Lands at $HOME/.cargo/bin/wstcp (HOME=/app) —
-# the exact path proxyManager.ts::ensureWstcp() probes via `test -x`.
-COPY --from=wstcp --chown=demos:demos /wstcp/bin/wstcp /app/.cargo/bin/wstcp
-
 # Build-time provenance. These ARGs are populated by the build driver
 # (./run --docker exports `git rev-parse HEAD` + `git rev-parse
 # --abbrev-ref HEAD` + a dirty flag + an ISO timestamp; compose forwards
@@ -261,8 +268,9 @@ ARG BUILT_AT=
 # its check passing. The mount adds nothing to the image.
 RUN --mount=type=bind,from=provenance,target=/mnt true
 
-# Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
-# IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
+# Sensible image-level defaults. Anything else (PG_HOST, PG_PORT, PG_USER,
+# PG_PASSWORD, PG_DATABASE, EXPOSED_URL, IDENTITY_FILE, PEER_LIST_FILE, etc.)
+# must be supplied at runtime.
 ENV NODE_ENV=production \
     RPC_PORT=53550 \
     METRICS_HOST=0.0.0.0 \

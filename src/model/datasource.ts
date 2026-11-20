@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url"
 import { DataSource } from "typeorm"
 import { Config } from "src/config"
 import log from "@/utilities/logger"
-import { describeDbConnectionFailure } from "./dbPreflight"
+import { connectWithRetry, describeDbConnectionFailure } from "./dbPreflight"
 
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
@@ -166,8 +166,13 @@ export async function assertNoPendingMigrations(
     }
 }
 
+// About half a minute of backoff: enough for a Postgres container started
+// alongside the node, short enough that a real outage still stops the boot.
+const DB_CONNECT_RETRY = { attempts: 10, baseDelayMs: 500, maxDelayMs: 5_000 }
+
 class Datasource {
     private static instance: Datasource
+    private static connecting: Promise<Datasource> | null = null
     private dataSource: DataSource
 
     private constructor() {
@@ -175,18 +180,37 @@ class Datasource {
     }
 
     public static async getInstance(): Promise<Datasource> {
-        if (!Datasource.instance) {
-            Datasource.instance = new Datasource()
-            try {
-                await Datasource.instance.dataSource.initialize()
-            } catch (error) {
-                const db = Config.getInstance().database
-                log.error(describeDbConnectionFailure(db, error))
-                // Same error as before, so the caller exits the way it did
-                throw error
-            }
+        if (Datasource.instance) return Datasource.instance
+        // One connect for every caller that arrives meanwhile; a failed one is
+        // not kept, so the next caller tries again instead of getting a
+        // DataSource that was never initialized.
+        if (!Datasource.connecting) {
+            Datasource.connecting = Datasource.connect().finally(() => {
+                Datasource.connecting = null
+            })
         }
-        return Datasource.instance
+        return Datasource.connecting
+    }
+
+    private static async connect(): Promise<Datasource> {
+        const candidate = new Datasource()
+        const db = Config.getInstance().database
+        try {
+            await connectWithRetry(() => candidate.dataSource.initialize(), {
+                ...DB_CONNECT_RETRY,
+                onRetry: (attempt, delayMs, error) =>
+                    log.warning(
+                        `${describeDbConnectionFailure(db, error)} Retrying in ${delayMs} ms ` +
+                            `(attempt ${attempt + 1} of ${DB_CONNECT_RETRY.attempts})`,
+                    ),
+            })
+        } catch (error) {
+            log.error(describeDbConnectionFailure(db, error))
+            // Same error as before, so the caller exits the way it did
+            throw error
+        }
+        Datasource.instance = candidate
+        return candidate
     }
 
     public getDataSource(): DataSource {

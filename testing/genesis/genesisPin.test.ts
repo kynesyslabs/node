@@ -110,6 +110,43 @@ describe("pinRequirementProblem", () => {
         expect(pinRequirementProblem("", { NODE_ENV: "development" })).toBeNull()
         expect(pinRequirementProblem("ab".repeat(32), { NODE_ENV: "production" })).toBeNull()
     })
+
+    it("requires a pin on a mainnet chain id whatever NODE_ENV and the opt-out say", () => {
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, 4242)).toContain(
+            "chain id 4242",
+        )
+        expect(pinRequirementProblem("", {}, 4242)).not.toBeNull()
+        expect(
+            pinRequirementProblem("", { DEMOS_ALLOW_UNPINNED_GENESIS: "true" }, 4242),
+        ).not.toBeNull()
+        expect(pinRequirementProblem("ab".repeat(32), {}, 4242)).toBeNull()
+    })
+
+    it("refuses the opt-out on a mainnet chain id, even beside a pin, with or without a stored block 0", () => {
+        for (const value of ["true", "1", "yes", " TRUE "]) {
+            for (const pin of ["", "ab".repeat(32)]) {
+                const problem = pinRequirementProblem(pin, { DEMOS_ALLOW_UNPINNED_GENESIS: value }, 4242)
+                expect(problem).toContain("DEMOS_ALLOW_UNPINNED_GENESIS is set and the genesis has chain id 4242")
+                expect(problem).toContain("remove it")
+            }
+        }
+        expect(pinRequirementProblem("ab".repeat(32), { DEMOS_ALLOW_UNPINNED_GENESIS: "false" }, 4242)).toBeNull()
+        expect(pinRequirementProblem("ab".repeat(32), { DEMOS_ALLOW_UNPINNED_GENESIS: "" }, 4242)).toBeNull()
+    })
+
+    it("still allows the opt-out on the testnet, the devnet and an id-less genesis", () => {
+        const env = { NODE_ENV: "production", DEMOS_ALLOW_UNPINNED_GENESIS: "true" }
+        for (const chainId of [1, 1337, undefined]) {
+            expect(pinRequirementProblem("", env, chainId)).toBeNull()
+        }
+    })
+
+    it("leaves the testnet, the devnet and an id-less genesis to NODE_ENV", () => {
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, 1)).toBeNull()
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, 1337)).toBeNull()
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, undefined)).toBeNull()
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, "4242")).toBeNull()
+    })
 })
 
 describe("freshGenesisProblems", () => {
@@ -184,6 +221,38 @@ describe("freshGenesisProblems", () => {
         expect(
             freshGenesisProblems({ ...ok, genesisData: unbound, pin: "", restore: true }),
         ).toEqual([])
+    })
+
+    it("refuses an undeclared snapshot when only block 0 is pinned", () => {
+        const { snapshot: _s, ...unbound } = genesis
+        const problems = freshGenesisProblems({
+            ...ok,
+            genesisData: unbound,
+            pin: "",
+            blockPin: "cd".repeat(32),
+        })
+        expect(problems.join()).toContain("EXPECTED_GENESIS_BLOCK_HASH does not bind it")
+        // No snapshot on disk: nothing is left unbound
+        expect(
+            freshGenesisProblems({
+                ...ok,
+                genesisData: unbound,
+                pin: "",
+                blockPin: "cd".repeat(32),
+                snapshotManifestHash: null,
+            }),
+        ).toEqual([])
+    })
+
+    it("refuses an address listed twice in the balances, pinned or not", () => {
+        const a = `0x${"1".repeat(64)}`
+        const b = `0x${"2".repeat(64)}`
+        const twice = { ...genesis, balances: [[a, "1"], [b, "2"], [a.toUpperCase().replace("0X", "0x"), "3"]] }
+        expect(freshGenesisProblems({ ...ok, genesisData: twice, pin: "" }).join()).toContain(
+            `name ${a} 2 times (entries 0, 2)`,
+        )
+        const once = { ...genesis, balances: [[a, "1"], [b, "2"]] }
+        expect(freshGenesisProblems({ ...ok, genesisData: once, pin: "" })).toEqual([])
     })
 
     it("refuses a malformed snapshot declaration", () => {

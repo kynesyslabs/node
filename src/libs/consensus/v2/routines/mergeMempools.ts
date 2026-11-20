@@ -47,6 +47,10 @@ export async function mergeMempools(
     blockRef: number,
 ) {
     const now = Date.now()
+    // Our own seat transactions are judged again in the background: Solana
+    // must not hold up the exchange. What it refuses leaves the pool at the
+    // start of a later round (see Mempool.startSeatRejudge).
+    void Mempool.startSeatRejudge()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
     // INFO: committee members we cannot resolve locally have no connection
@@ -90,9 +94,13 @@ export async function mergeMempools(
         const call = async (request: RPCRequest) => {
             const [outcome] = await Promise.allSettled([
                 withTimeout(
+                    // One attempt with the whole budget: a receiver still
+                    // validating a batch would otherwise be sent it again,
+                    // and a retry started after withTimeout gave up would
+                    // run on in the background with its reply discarded.
                     peer.longCall(request, true, {
-                        sleepTime: 250,
-                        retries: 2,
+                        retries: 1,
+                        timeoutMs: PEER_CALL_TIMEOUT_MS,
                     }),
                     PEER_CALL_TIMEOUT_MS,
                     peer,

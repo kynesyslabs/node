@@ -16,6 +16,7 @@ const quietLog = {
     custom: jest.fn(),
 }
 const received: Array<unknown[]> = []
+const startSeatRejudge = jest.fn(async (): Promise<string[]> => [])
 
 mock.module("src/utilities/logger", () => ({ __esModule: true, default: quietLog }))
 mock.module("@/utilities/logger", () => ({ __esModule: true, default: quietLog }))
@@ -38,6 +39,7 @@ mock.module("src/features/metrics/MetricsService", () => ({
 mock.module("@/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
+        startSeatRejudge,
         receive: jest.fn(async (txs: unknown[]) => {
             received.push(txs)
             return { success: true, mempool: [] }
@@ -170,5 +172,37 @@ describe("mergeMempools batching", () => {
         await mergeMempools([tx("a"), tx("b"), tx("c")], [bad, good], 7)
         expect(bad.requests).toHaveLength(1)
         expect(good.requests).toHaveLength(3)
+    })
+})
+
+describe("mergeMempools attempts", () => {
+    it("sends a batch that got no answer once, with the whole budget", async () => {
+        const { default: Peer } = await import("@/libs/peer/Peer")
+        const slow = {
+            identity: "0xslow",
+            connection: { string: "http://0xslow" },
+            call: jest.fn(async () => ({
+                result: 504,
+                response: "Request timeout",
+                require_reply: false,
+                extra: null,
+            })),
+            longCall: Peer.prototype.longCall,
+        } as any
+        await mergeMempools([tx("a")], [slow], 7)
+        await new Promise(resolve => setTimeout(resolve, 300))
+        expect(slow.call).toHaveBeenCalledTimes(1)
+        expect((slow.call.mock.calls[0] as any[])[2].timeoutMs).toBe(10_000)
+    })
+})
+
+describe("the own-pool seat re-judge", () => {
+    it("is started each round but not waited on, so a slow Solana does not hold up the exchange", async () => {
+        startSeatRejudge.mockClear()
+        startSeatRejudge.mockImplementationOnce(() => new Promise<string[]>(() => {}))
+        const peer = fakePeer("0xp1", () => ok())
+        await mergeMempools([tx("a")], [peer], 7)
+        expect(startSeatRejudge).toHaveBeenCalledTimes(1)
+        expect(peer.requests).toHaveLength(1)
     })
 })

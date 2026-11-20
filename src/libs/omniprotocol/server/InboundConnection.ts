@@ -47,6 +47,10 @@ export class InboundConnection extends EventEmitter {
     private rateLimiter?: RateLimiter
 
     private peerIdentity: string | null = null
+    // Set once the chain lists the proven identity as a validator: its
+    // requests then count on its own identity, not on the source IP it may
+    // share (NAT, proxy) with clients that can flood that IP's budget.
+    private provenValidator = false
     private createdAt: number = Date.now()
     private lastActivity: number = Date.now()
     private authTimer: NodeJS.Timeout | null = null
@@ -154,7 +158,9 @@ export class InboundConnection extends EventEmitter {
             const ipAddress = this.socket.remoteAddress || "unknown"
 
             // Check IP-based rate limit
-            const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
+            const ipResult: { allowed: boolean; reason?: string } = this.provenValidator
+                ? { allowed: true }
+                : this.rateLimiter.checkIPRequest(ipAddress)
             if (!ipResult.allowed) {
                 log.warning(
                     `[InboundConnection] ${this.connectionId} IP rate limit exceeded: ${ipResult.reason}`,
@@ -259,6 +265,7 @@ export class InboundConnection extends EventEmitter {
 
         this.peerIdentity = identity
         this.state = "AUTHENTICATED"
+        void this.markIfValidator(identity)
 
         if (this.authTimer) {
             clearTimeout(this.authTimer)
@@ -269,6 +276,24 @@ export class InboundConnection extends EventEmitter {
         log.info(
             `[InboundConnection] ${this.connectionId} authenticated via auth block as ${identity}`,
         )
+    }
+
+    /**
+     * Keys are free, so a proven identity alone keeps the per-IP limit; only
+     * one the chain lists as a validator is moved off it. Same rule as the
+     * connection pool's slot release.
+     */
+    private async markIfValidator(identity: string): Promise<void> {
+        try {
+            const { isMergePeerEligible } = await import(
+                "src/libs/consensus/mergePeerEligibility"
+            )
+            this.provenValidator = await isMergePeerEligible(identity)
+        } catch (error) {
+            log.warning(
+                `[InboundConnection] ${this.connectionId} validator lookup failed for ${identity}, keeping the per-IP limit: ${error instanceof Error ? error.message : String(error)}`,
+            )
+        }
     }
 
     /**

@@ -20,6 +20,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { getBoundCommittee } from "../routines/getShard"
+import { onShardMemberUnresponsive } from "@/libs/peer/routines/forkScheduleWatch"
 import {
     COMMITTED_HEIGHT_RESULT,
     type CommittedReport,
@@ -442,6 +443,7 @@ export async function broadcastPrecommit(
             log.error(
                 `[commitLock] precommitBlockHash to ${peer.identity} failed: ${e instanceof Error ? e.message : String(e)}`,
             )
+            void onShardMemberUnresponsive()
             return
         }
 
@@ -457,6 +459,8 @@ export async function broadcastPrecommit(
             log.warning(
                 `[commitLock] ${peer.identity} did not precommit ${hash}: result=${response.result} ${JSON.stringify(response.extra)}`,
             )
+            // An abstaining member refuses with "no open prevote" every round.
+            void onShardMemberUnresponsive()
             return
         }
         const extra = response.extra as { precommits?: unknown } | null

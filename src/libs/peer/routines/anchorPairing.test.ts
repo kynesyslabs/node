@@ -124,6 +124,14 @@ describe("pairWithAnchor at boot", () => {
 })
 
 describe("pairAnchorsAtBoot", () => {
+    it("drops a self anchor without pairing or marking it unreachable", async () => {
+        const net = network({ "0xanchor1": ["self"] })
+        const result = await pairAnchorsAtBoot([anchor(1)], net.deps, CHAIN)
+        expect(result).toEqual({ paired: [], unreachable: [] })
+        expect(net.deps.sayHello).toHaveBeenCalledTimes(1)
+        expect(net.sleeps).toEqual([])
+    })
+
     it("boots with every anchor down", async () => {
         const net = network({})
         const { paired, unreachable } = await pairAnchorsAtBoot(
@@ -195,6 +203,18 @@ describe("DeferredAnchorChecks", () => {
         )
     }
 
+    it("drops a self anchor without refusal or confirmation", async () => {
+        const net = network({ "0xanchor1": ["self"] })
+        const deferred = checks(net, [anchor(1)], false)
+        net.advance(DEFERRED_FIRST_DELAY_MS)
+        await deferred.tick()
+        expect(net.deps.sayHello).toHaveBeenCalledTimes(1)
+        expect(deferred.pendingIdentities).toEqual([])
+        expect(refusals).toEqual([])
+        expect(confirm).not.toHaveBeenCalled()
+        expect(deferred.isConfirmed).toBe(false)
+    })
+
     it("runs the bootstrap genesis checks on an anchor once it comes up", async () => {
         const net = network({ "0xanchor1": ["unreachable", "verified"] })
         const deferred = checks(net, [anchor(1)], false)
@@ -249,6 +269,18 @@ describe("DeferredAnchorChecks", () => {
         ])
         // Nothing else is checked once the node is stopping.
         expect(confirm).not.toHaveBeenCalled()
+    })
+
+    it("treats an invalid deferred hello as fatal before any anchor confirms it", async () => {
+        const net = network({ "0xanchor1": ["invalid"] })
+        const deferred = checks(net, [anchor(1)], false)
+        net.advance(DEFERRED_FIRST_DELAY_MS)
+        await deferred.tick()
+        expect(refusals).toEqual([
+            { identity: "0xanchor1", message: expect.stringContaining("failed identity verification"), fatal: true },
+        ])
+        expect(confirm).not.toHaveBeenCalled()
+        expect(deferred.pendingIdentities).toEqual([])
     })
 
     it("stops the node when the genesis checks refuse and nothing confirmed it", async () => {

@@ -45,7 +45,7 @@ RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps"
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps unpinnedCommittee telegramSenderBinding xmRemoveCanonical tokenStakingGate tokenStaking nftValidatorGating gasFeeSeparation web2ProofBinding tlsnProofEnforcement xmProofBinding storageFeeSettlement referenceBlockRoom10 l2psSettlement tlsnVerified keylessWeb2Identity"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -150,15 +150,37 @@ docker cp -q "${CP}:/app/data/genesis.json" "${FIX}/image/genesis.json" &&
     die2 "the image has no /app/data/genesis.json or /app/data/snapshot"
 docker rm -v "${CP}" >/dev/null
 
+# Under nftValidatorGating at 0 on this mainnet-like chain id, block 0 seats
+# only rows naming an allowlisted mint, an owner and a proof; the node checks
+# them offline, so well-formed stand-ins are enough here.
+python3 - "${FIX}/image/genesis.json" "${REPO_ROOT}/src/features/staking/nft-allowlist.json" \
+    "${FIX}/image/genesis.seats.json" <<'PY' >> "${RUNLOG}" 2>&1 || die2 "seat NFT fields failed (run.log)"
+import json, sys
+src, allowlist, out = sys.argv[1:4]
+with open(src) as f:
+    genesis = json.load(f)
+if isinstance(genesis, str):
+    genesis = json.loads(genesis)
+with open(allowlist) as f:
+    mints = json.load(f)["mints"]
+for i, v in enumerate(genesis.get("validators") or []):
+    v.pop("nft_exempt", None)
+    v["nft_mint"] = mints[i]
+    v["nft_owner"] = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
+    v["nft_proof_tx"] = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+with open(out, "w") as f:
+    json.dump(genesis, f, indent=2)
+PY
+
 # identityCarryover refuses a snapshot that carries balances or validators of
 # its own, so every scenario boots on the carry-over build of the bundled
 # snapshot, its validators taken from the image's genesis.
 (cd "${REPO_ROOT}" && bun scripts/state-snapshot/carryover.ts --in "${FIX}/image/snapshot" \
-    --validators "${FIX}/image/genesis.json" --out "${FIX}/snapshot") >> "${RUNLOG}" 2>&1 ||
+    --validators "${FIX}/image/genesis.seats.json" --out "${FIX}/snapshot") >> "${RUNLOG}" 2>&1 ||
     die2 "carry-over snapshot build failed (run.log)"
 cp "${FIX}/snapshot/manifest.json" "${FIX}/manifest/manifest.json"
 
-python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.json" --manifest "${FIX}/manifest/manifest.json" \
+python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.seats.json" --manifest "${FIX}/manifest/manifest.json" \
     --out "${FIX}" --chain-id "${CHAIN_ID}" --timestamp "${GENESIS_TS}" \
     --far-height "${FAR_HEIGHT}" --unknown-fork "${UNKNOWN_FORK}" >> "${RUNLOG}" 2>&1 ||
     die2 "fixture generation failed (run.log)"
@@ -167,9 +189,11 @@ python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.json" --manifest "${F
 cp -a "${FIX}/snapshot" "${FIX}/snapshot-ws"
 printf '\n' >> "${FIX}/snapshot-ws/manifest.json"
 
+# The fixtures copy the image genesis (fewer validators than its quorum): these
+# nodes boot and are refused, they never forge, so that finding is a warning here.
 genesis_hash() { # $1 genesis file -> JSON from scripts/genesis-hash.ts (log lines dropped)
     local out
-    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/snapshot" --json 2>>"${RUNLOG}")
+    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/snapshot" --json --allow-unforgeable 2>>"${RUNLOG}")
     local rc=$?
     echo "${out}" | sed -n '/^{/,$p'
     return ${rc}
@@ -279,6 +303,8 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
     [ "${pin}" != "-" ] && pin_env=(-e "EXPECTED_GENESIS_HASH=${pin}")
     local snap_env=(-v "${RID}-snap:/app/snapshot-carry:ro" -e DEMOS_SNAPSHOT_DIR=/app/snapshot-carry)
     [[ " $* " == *" DEMOS_SNAPSHOT_DIR="* ]] && snap_env=()
+    # The node is reached by name only inside the run's private docker network.
+    local exposed_url="http://${NODE}:${RPC_PORT}" # NOSONAR
     docker run -d --name "${NODE}" --network "${NET}" \
         --memory "${NODE_MEM}" --memory-swap "${NODE_MEM}" --cpus "${NODE_CPUS}" \
         -e PG_HOST="${PG}" -e PG_PORT=5432 -e PG_USER="${PG_USER}" -e PG_PASSWORD="${PG_PASSWORD}" \
@@ -288,6 +314,8 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
         -e GOSSIP_ENABLED=false -e OMNI_ENABLED=false -e OMNI_MODE=HTTP_ONLY \
         -e L2PS_MESSAGING_ENABLED=false -e L2PS_ZK_ENABLED=false \
         -e DEMOS_SKIP_SETUP_CHECK=true -e LOG_LEVEL=info \
+        -e PROD=true -e EXPOSED_URL="${exposed_url}" \
+        -e DEMOS_REQUIRE_VALIDATORS=true \
         "${pin_env[@]}" "${snap_env[@]}" "$@" \
         -v "${vol}:/app/state" \
         -v "${gen}:/app/data/genesis.json:ro" \
@@ -494,10 +522,12 @@ record s01 fresh-correct "boots, both pins + mainnet forks active" "${OBSERVED}"
 S01_PASS=${VERDICT}
 
 # ── 2-5. fresh refusals ─────────────────────────────────────────────────
-fresh_refused s02 fresh-genesis-1byte "${FIX}/onebyte.json" "${PIN}"
+NEEDLE='data/genesis.json hashes to [0-9a-f]{64}, EXPECTED_GENESIS_HASH is' \
+    fresh_refused s02 fresh-genesis-1byte "${FIX}/onebyte.json" "${PIN}"
 fresh_refused s03 fresh-no-pin "${FIX}/launch.json" -
 fresh_refused s04 fresh-bad-pin-format "${FIX}/launch.json" "${BAD_PIN}"
-fresh_refused s05 fresh-snapshot-changed "${FIX}/launch.json" "${PIN}" \
+NEEDLE='snapshot manifest hashes to [0-9a-f]{64}, genesis declares' \
+    fresh_refused s05 fresh-snapshot-changed "${FIX}/launch.json" "${PIN}" \
     -v "${RID}-snap-ws:/app/snapshot-ws:ro" -e DEMOS_SNAPSHOT_DIR=/app/snapshot-ws
 
 # ── 6. restart-same ─────────────────────────────────────────────────────

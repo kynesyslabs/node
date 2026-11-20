@@ -234,8 +234,8 @@ services:
       TLSNOTARY_MODE: ${TLSNOTARY_MODE:-docker}
       TLSNOTARY_FATAL: ${TLSNOTARY_FATAL:-false}
       TLSNOTARY_SIGNING_KEY: ${TLSNOTARY_SIGNING_KEY:-}
-      # wstcp proxy port window. The node spawns dynamic wstcp proxies in
-      # this range and the host reverse proxy forwards /tlsn/<port>/ to them,
+      # TLSNotary proxy port window. Each proxy session listens on one port
+      # of this range and the host reverse proxy forwards /tlsn/<port>/ to it,
       # so the SAME range must be host-published in `ports:` below — kept
       # narrow to avoid a 2000-port mapping. Both stanzas read these vars so
       # the allocation range and the published range can never drift.
@@ -244,6 +244,11 @@ services:
       TLSNOTARY_PROXY_PORT: ${TLSNOTARY_PROXY_PORT:-55688}
       TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
       TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
+      # Inside the container the proxy sessions must listen on every
+      # interface: Caddy reaches them over the compose network and a host
+      # nginx through the loopback-only publish below. Nothing outside the
+      # host reaches them either way. Bare metal defaults to 127.0.0.1.
+      WSTCP_BIND_HOST: ${WSTCP_BIND_HOST:-0.0.0.0}
       # Chain-wide values: every validator runs the ones in
       # docs/mainnet/parameters.env, copied into .env, and node-doctor
       # --production fails on any other value. Empty means the node's
@@ -262,7 +267,10 @@ services:
       # Logging & misc
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
+      # The only key the admin RPC answers to; empty, nobody may call it
+      SUDO_PUBKEY: ${SUDO_PUBKEY:-}
       L2PS_ZK_ENABLED: ${L2PS_ZK_ENABLED:-false}
+      L2PS_SETTLEMENT_PROVERS: ${L2PS_SETTLEMENT_PROVERS:-1}
       # Written by `bun run setup`; the defaults equal the node's built-in ones.
       L2PS_HISTORY_RETENTION_DAYS: ${L2PS_HISTORY_RETENTION_DAYS:-0}
       L2PS_HISTORY_STORE_PLAINTEXT: ${L2PS_HISTORY_STORE_PLAINTEXT:-false}
@@ -288,6 +296,10 @@ services:
       WEB2_MAX_RESPONSE_BYTES: ${WEB2_MAX_RESPONSE_BYTES:-}
       WEB2_SESSION_TTL_MS: ${WEB2_SESSION_TTL_MS:-}
       WEB2_INSECURE_TLS: ${WEB2_INSECURE_TLS:-}
+      WEB2_MAX_INFLIGHT_PER_CALLER: ${WEB2_MAX_INFLIGHT_PER_CALLER:-}
+      WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER: ${WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER:-}
+      WEB2_MAX_BYTES_PER_HOUR_PER_CALLER: ${WEB2_MAX_BYTES_PER_HOUR_PER_CALLER:-}
+      WEB2_MAX_INFLIGHT_TOTAL: ${WEB2_MAX_INFLIGHT_TOTAL:-}
       TLSNOTARY_ALLOWED_PORTS: ${TLSNOTARY_ALLOWED_PORTS:-}
       TLSNOTARY_ALLOW_PRIVATE_TARGETS: ${TLSNOTARY_ALLOW_PRIVATE_TARGETS:-}
       # Setup check at start and the `bun run setup` answers (empty = unset).
@@ -318,11 +330,13 @@ services:
       DEMOS_SETUP_ALLOW_INSECURE_PTAU: ${DEMOS_SETUP_ALLOW_INSECURE_PTAU:-}
       # Optional external API keys (passed through if set in .env)
       SOLANA_RPC: ${SOLANA_RPC:-}
+      VALIDATOR_SOLANA_RPCS: ${VALIDATOR_SOLANA_RPCS:-}
       ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY:-}
       HELIUS_API_KEY: ${HELIUS_API_KEY:-}
       NOMIS_API_KEY: ${NOMIS_API_KEY:-}
       NOMIS_CLIENT_ID: ${NOMIS_CLIENT_ID:-}
       RAPID_API_KEY: ${RAPID_API_KEY:-}
+      RAPID_API_HOST: ${RAPID_API_HOST:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       HUMAN_PASSPORT_API_KEY: ${HUMAN_PASSPORT_API_KEY:-}
@@ -349,9 +363,9 @@ services:
       # L2PS_MESSAGING_BIND says otherwise: operators who never enable messaging
       # must not expose the port, or lose `up` to a host-side port clash.
       - "${L2PS_MESSAGING_BIND:-127.0.0.1}:${L2PS_MESSAGING_PORT:-3006}:${L2PS_MESSAGING_PORT:-3006}"
-      # wstcp TLSNotary proxy range, bound to 127.0.0.1 so ONLY the host's
+      # TLSNotary proxy session range, bound to 127.0.0.1 so ONLY the host's
       # reverse proxy can reach it (not the public internet). The node
-      # allocates dynamic proxy ports here and nginx forwards
+      # allocates one port per proxy session here and nginx forwards
       # /tlsn/<port>/ to them — without this mapping every verification
       # 502s. MUST match TLSNOTARY_PROXY_PORT_MIN/MAX in `environment:`.
       - "127.0.0.1:${TLSNOTARY_PROXY_PORT_MIN:-55000}-${TLSNOTARY_PROXY_PORT_MAX:-55063}:${TLSNOTARY_PROXY_PORT_MIN:-55000}-${TLSNOTARY_PROXY_PORT_MAX:-55063}"
@@ -373,10 +387,11 @@ services:
       # METRICS_BIND to a private interface address; the bundled Prometheus
       # scrapes node:9090 over the compose network and is unaffected.
       - "${METRICS_BIND:-127.0.0.1}:${METRICS_HOST_PORT:-9090}:9090"
-      # TLSNotary wstcp proxy — publish only the single advertised proxy
-      # port from .env (TLSNOTARY_PROXY_PORT) so the URL the node hands to
-      # clients is reachable from the host.
-      - "${TLSNOTARY_PROXY_PORT:-55688}:${TLSNOTARY_PROXY_PORT:-55688}"
+      # The static proxy port tlsnotary.getInfo still advertises for older
+      # clients. Nothing in the node listens on it (every proxy is a session
+      # from requestTLSNproxy), so it is published on loopback only, like the
+      # session window, and never reachable from outside the host.
+      - "127.0.0.1:${TLSNOTARY_PROXY_PORT:-55688}:${TLSNOTARY_PROXY_PORT:-55688}"
     healthcheck:
       # Mirrors the Dockerfile HEALTHCHECK so compose-level wait + watch
       # commands work without depending on the image build (Epic 13 T11).
@@ -443,6 +458,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      # Minimum 7d: the consensus alert latch needs seven days of recorded samples.
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles

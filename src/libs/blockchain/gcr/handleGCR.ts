@@ -19,6 +19,7 @@
  * - Also implement the new GCROperation structure replacing the old Operation one
  */
 
+import { applyTime, bindApplyTime, withBlockTime } from "./applyTime"
 import _ from "lodash"
 
 import { Transaction, TransactionContent } from "@kynesyslabs/demosdk/types"
@@ -32,6 +33,7 @@ import {
 } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 import log from "src/utilities/logger"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { normalizePubkey } from "./normalizePubkey"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
@@ -43,16 +45,40 @@ import {
     carriesGovernance,
     governanceGateRefusal,
 } from "@/forks/governanceGate"
+import { tokenStakingRefusal } from "@/forks/tokenStakingGate"
+import { isL2psTx } from "@/forks/l2psGate"
+import { carriesTlsn } from "@/forks/tlsnDisabledGate"
+import {
+    type GCREditTlsnVerifiedStore,
+    isNodeDerivedTlsnEdit,
+    prepareTlsnTransitions,
+    shippedTlsnEditRefusal,
+    tlsnVerifiedAtTip,
+    withTlsnEdit,
+    withoutNodeDerivedTlsnEdits,
+} from "./tlsnTransitions"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
     derivedGasEdit,
     editBindingState,
+    featureGateRefusal,
     stakeSenderRefusal,
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
+import {
+    debitCredits,
+    isWorkReplay,
+    legacyGasCredited,
+    legacyGasRetired,
+    storageFeeCredited,
+    tlsnBurnCredited,
+    withStorageFeeCredit,
+    withTrailingDebitCredit,
+    withoutLegacyGas,
+} from "src/libs/blockchain/validation/legacyGas"
 import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
 import {
     blockTxTypeRefusal,
@@ -64,6 +90,13 @@ import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
+import GCRL2PSNonceRoutines from "./gcr_routines/GCRL2PSNonceRoutines"
+import {
+    hasL2PSNonces,
+    isL2PSNonceEdit,
+    L2PS_NONCE_EDIT,
+    type GCREditL2PSNonce,
+} from "@/libs/l2ps/settlement/l2psNonce"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
 import {
@@ -103,7 +136,10 @@ import {
     settledEdits,
     splitSettlement,
 } from "@/libs/atomic-work/feeAndNonce"
-import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
+import {
+    canonicallyOrderable,
+    orderDeterministically,
+} from "@/libs/consensus/v2/routines/deterministicOrder"
 import {
     applyAtomicStoragePut,
     type StoragePutEdit,
@@ -132,6 +168,19 @@ import {
     type ExecutionClock,
 } from "@/libs/atomic-work/executionClock"
 import { atomicWorkProfile } from "@/libs/atomic-work/profile"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import {
+    nativeTransferFeeOs,
+    parseSettlement,
+    settlementBatchesOverCap,
+    settlementChainId,
+    settlementEdits,
+    settlementFeeCreditRefusal,
+    settlementFeeRefusal,
+    settlementSignatureRefusal,
+    settlementStateRefusal,
+    type ParsedSettlement,
+} from "@/libs/l2ps/settlement/validation"
 import {
     buildWorkReceipt,
     type AppliedStorageWrite,
@@ -175,6 +224,12 @@ export interface GCRResult {
     /** A database write that belongs in the transaction the edits commit in. */
     deferredWrite?: DeferredWrite
     response?: any
+    /**
+     * A cached row the edit replaced beyond the ones its fields name (the
+     * request token a TLSN link uses), as it was before, so a failed
+     * transaction puts it back.
+     */
+    replacedRow?: RowSnapshot
 }
 
 /** A write issued through the entity manager of the committing transaction. */
@@ -206,6 +261,12 @@ export interface GCREntityCaches {
     zkNullifiers?: Map<string, true>
     /** What this set's identity unlinks removed, for their undo. */
     removedIdentities?: RemovedIdentities
+    /**
+     * Accounts absent from the database that only settlement batches name.
+     * Each is loaded so its batch can be judged; one no batch credited or
+     * debited is not written.
+     */
+    settlementPlaceholders?: Set<string>
 }
 
 /** The caches a set stages outside the entity maps, as one transaction saw them. */
@@ -242,6 +303,9 @@ function stagedKeyOf(edit: GCREdit): "zk" | "validators" | "gov" | null {
             return null
     }
 }
+
+/** Identity edit contexts that link or unlink a web2 account. */
+const WEB2_LINK_CONTEXTS: ReadonlySet<string> = new Set(["web2", "tlsn"])
 
 const STAGED_CACHES_BY_KEY: Record<"zk" | "validators" | "gov", (keyof StagedSnapshot)[]> = {
     zk: ["zkCommitments", "zkNullifiers"],
@@ -339,8 +403,9 @@ function snapshotRows(entities: GCREntityCaches, edits: GCREdit[]): RowSnapshot[
     return snapshots
 }
 
+/** Puts rows back, the earliest copy of a row last, so it is the one kept. */
 function restoreRows(snapshots: RowSnapshot[]) {
-    for (const { cache, key, present, row } of snapshots) {
+    for (const { cache, key, present, row } of [...snapshots].reverse()) {
         if (present) cache.set(key, row)
         else cache.delete(key)
     }
@@ -538,35 +603,104 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  * A tx that already starts with exactly those edits is returned as is: rows
  * stored before the fee edits were kept off the persisted tx still carry
  * them, and peers serve those rows during sync.
+ *
+ * Where the fee edits replace the SDK's gas edit (`legacyGasRetired`), the
+ * copy leaves that gas edit out, so the sender pays the fee once and every
+ * debit has its credit. Where the gas is a non-native transaction's whole
+ * fee (`legacyGasCredited`), the copy keeps it and credits it right after,
+ * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`)
+ * and the storage fee of a Storage Program write (`storageFeeCredited`).
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
+    if (legacyGasCredited(tx)) {
+        const signed = tx.content.gcr_edits ?? []
+        const withFee = storageFeeCredited(tx)
+            ? withStorageFeeCredit(signed, tx.hash ?? "")
+            : signed
+        const credited = withTrailingDebitCredit(withFee, tx.hash ?? "")
+        if (credited === signed) return tx
+        return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
+            content: {
+                ...tx.content,
+                gcr_edits: credited.map(edit => structuredClone(edit)),
+            },
+        }) as Transaction
+    }
+
     const feeEdits = deriveFeeEditsForApply(tx)
-    if (feeEdits.length === 0) return tx
+    const retireGas = legacyGasRetired(tx)
+    if (feeEdits.length === 0 && !retireGas) return tx
 
     const edits = tx.content.gcr_edits ?? []
     const alreadyCarried =
+        feeEdits.length > 0 &&
         edits.length >= feeEdits.length &&
         feeEdits.every((fee, i) => sameFeeEdit(fee, edits[i]))
-    if (alreadyCarried) return tx
+    const signed = alreadyCarried ? edits.slice(feeEdits.length) : edits
+    const withoutGas = retireGas ? withoutLegacyGas(signed) : signed
+    const kept = tlsnBurnCredited(tx)
+        ? withTrailingDebitCredit(withoutGas, tx.hash ?? "")
+        : withoutGas
+    if (kept === signed && (alreadyCarried || feeEdits.length === 0)) return tx
 
     // The edits are copied too, not just the array: apply writes into each
     // edit (its txhash), and those objects belong to the signed tx.
     return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
         content: {
             ...tx.content,
-            gcr_edits: [...feeEdits, ...edits.map(edit => structuredClone(edit))],
+            gcr_edits: [...feeEdits, ...kept.map(edit => structuredClone(edit))],
         },
     }) as Transaction
 }
 
 /**
+ * The settlement each derived `l2psBatch` copy applies, keyed by that copy:
+ * the copy exists only inside one applyTransactions call, and the signed tx
+ * the caller persists is never marked.
+ */
+const settlementOfTx = new WeakMap<Transaction, ParsedSettlement>()
+
+/**
+ * The batch with its settlement edits as `gcr_edits`, on a copy. The signed
+ * tx ships none (editBinding refuses one that does); carrying them on the copy
+ * lets prepareEntities load every settlement account and partitionIndependentTxs
+ * order the batch with every transaction touching one, so two batches over one
+ * account in a block see each other's effects.
+ */
+/**
+ * Every account a derived settlement copy reads, its zero-delta changes
+ * included: apply checks that each change's account covers it, and a change
+ * with no edit would otherwise be neither loaded nor ordered with the
+ * block's other transactions over that account.
+ */
+function settlementAccounts(tx: Transaction): string[] {
+    return settlementOfTx.get(tx)?.changes.map(c => c.account) ?? []
+}
+
+export function withSettlementEdits(
+    tx: Transaction,
+    settlement: ParsedSettlement | undefined,
+): Transaction {
+    if (!settlement) return tx
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
+        content: {
+            ...tx.content,
+            gcr_edits: settlementEdits(settlement, tx.hash ?? ""),
+        },
+    }) as Transaction
+    settlementOfTx.set(copy, settlement)
+    return copy
+}
+
+/**
  * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
- * Returns true for balance and nonce types which have the 'account' property
+ * Returns true for the edit types that act on one account row, which carry
+ * the 'account' property
  */
 export function isGCRMainEdit(
     edit: GCREdit,
 ): edit is GCREditBalance | GCREditNonce | GCREditIdentity {
-    const gcrMainEdits = new Set(["balance", "nonce", "identity"])
+    const gcrMainEdits = new Set(["balance", "nonce", "identity", L2PS_NONCE_EDIT])
     return gcrMainEdits.has(edit.type)
 }
 
@@ -591,6 +725,7 @@ function rowsEditWrites(edit: GCREdit, entities: GCREntityCaches): WrittenRows[]
     const all = (cache: string): WrittenRows => ({ cache, rows: caches[cache], keys: "all" })
     switch (edit.type as string) {
         case "identity":
+        case L2PS_NONCE_EDIT:
             return one("accounts", normalizePubkey(fields.account))
         case "storageProgram":
         case "storage-program-put":
@@ -642,6 +777,9 @@ function unstorableAfter(edit: GCREdit, entities: GCREntityCaches, stored: Store
         case "balance":
         case "nonce":
             return isKeyStorable(normalizePubkey(fields.account)) ? null : "accounts.pubkey"
+        case L2PS_NONCE_EDIT:
+            // The subnet uid becomes a jsonb key: judged with the row below.
+            if (!isKeyStorable(normalizePubkey(fields.account))) return "accounts.pubkey"
     }
     for (const written of rowsEditWrites(edit, entities)) {
         for (const [key, row] of writtenEntries(written)) {
@@ -694,12 +832,7 @@ function accountKeyProblem(
     return loaded && !stored.has(pubkey) ? uncreatableAccountKey(pubkey) : null
 }
 
-/**
- * Helper to normalize pubkey from different formats
- */
-export function normalizePubkey(account: string | Uint8Array): string {
-    return typeof account === "string" ? account : forgeToHex(account)
-}
+export { normalizePubkey }
 
 /**
  * Interface for tracking entity snapshots for rollback
@@ -723,6 +856,7 @@ export default class HandleGCR {
         "balance",
         "nonce",
         "identity",
+        L2PS_NONCE_EDIT,
 
         // These ⌄⌄⌄ are here because they don't have implemented handlers
         "subnetsTx",
@@ -816,8 +950,11 @@ export default class HandleGCR {
 
     static async prepareEntities(txs: Transaction[]): Promise<GCREntityCaches> {
         const affectedPubkeys = new Set<string>()
+        /** Accounts something other than a settlement batch's own edits names. */
+        const namedElsewhere = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
         const affectedTokenIds = new Set<string>()
+        const affectedAttestationIds = new Set<string>()
         const affectedWorkIds = new Set<string>()
         const affectedSlotKeys = new Set<string>()
 
@@ -826,11 +963,13 @@ export default class HandleGCR {
             const gcrEdits = tx.content.gcr_edits
             if (!gcrEdits || !Array.isArray(gcrEdits)) continue
 
+            const isSettlement = settlementOfTx.has(tx)
             for (const edit of gcrEdits) {
                 const editType = edit.type
                 if (isGCRMainEdit(edit)) {
                     const pubkey = normalizePubkey(edit.account)
                     affectedPubkeys.add(pubkey)
+                    if (!isSettlement) namedElsewhere.add(pubkey)
                 } else if (editType === "storageProgram") {
                     affectedStorageAddresses.add(
                         (edit as unknown as GCREditStorageProgram).target,
@@ -839,6 +978,13 @@ export default class HandleGCR {
                     affectedTokenIds.add(
                         (edit as unknown as GCREditTLSNotary).data.tokenId,
                     )
+                    // A store is judged against every row holding its
+                    // attestation id, which may belong to another token.
+                    if (isNodeDerivedTlsnEdit(edit)) {
+                        const attestationId = (edit as unknown as GCREditTlsnVerifiedStore)
+                            .data.attestationId
+                        if (attestationId) affectedAttestationIds.add(attestationId)
+                    }
                 } else if (
                     (editType as string) === "work-attempt" ||
                     (editType as string) === "work-receipt"
@@ -859,12 +1005,16 @@ export default class HandleGCR {
             }
 
             if (tx.content?.from_ed25519_address) {
-                affectedPubkeys.add(
-                    normalizePubkey(tx.content.from_ed25519_address),
-                )
+                const sender = normalizePubkey(tx.content.from_ed25519_address)
+                affectedPubkeys.add(sender)
+                namedElsewhere.add(sender)
+            }
+            for (const account of settlementAccounts(tx)) {
+                affectedPubkeys.add(normalizePubkey(account))
             }
         }
 
+        const createdAccounts = new Set<string>()
         // Parallel DB loads
         const [
             gcrMainCache,
@@ -873,19 +1023,44 @@ export default class HandleGCR {
             atomicWorkCache,
             resourceSlotCache,
         ] = await Promise.all([
-            this.loadGCRMainEntities(affectedPubkeys),
+            this.loadGCRMainEntities(affectedPubkeys, createdAccounts),
             this.loadStorageProgramEntities(affectedStorageAddresses),
-            this.loadTLSNotaryEntities(affectedTokenIds),
+            this.loadTLSNotaryEntities(affectedTokenIds, affectedAttestationIds),
             this.loadAtomicWorks(affectedWorkIds),
             this.loadResourceSlots(affectedSlotKeys),
         ])
 
+        const placeholders = [...createdAccounts].filter(p => !namedElsewhere.has(p))
         return {
             accounts: gcrMainCache,
             storagePrograms: storageProgramCache,
             tlsNotaries: tlsNotaryCache,
             atomicWorks: atomicWorkCache,
             resourceSlots: resourceSlotCache,
+            ...(placeholders.length > 0 && {
+                settlementPlaceholders: new Set(placeholders),
+            }),
+        }
+    }
+
+    /**
+     * Drops the settlement placeholders no batch moved: a failed batch, or a
+     * zero change, would otherwise create a stored account that no edit made.
+     * A settlement edits only balances and L2PS nonces, so an untouched one
+     * still has a zero balance and no L2PS nonce. A signer whose transfers
+     * net to zero keeps its row: its spent L2PS nonce must not be lost.
+     */
+    static dropUnmovedPlaceholders(entities: GCREntityCaches): void {
+        for (const pubkey of entities.settlementPlaceholders ?? []) {
+            const account = entities.accounts.get(pubkey)
+            if (!account) continue
+            if (
+                BigInt(account.balance ?? 0) === 0n &&
+                Number(account.nonce ?? 0) === 0 &&
+                !hasL2PSNonces(account)
+            ) {
+                entities.accounts.delete(pubkey)
+            }
         }
     }
 
@@ -918,6 +1093,7 @@ export default class HandleGCR {
 
     private static async loadGCRMainEntities(
         pubkeys: Set<string>,
+        created?: Set<string>,
     ): Promise<Map<string, GCRMain>> {
         const cache = new Map<string, GCRMain>()
         if (pubkeys.size === 0) return cache
@@ -940,6 +1116,7 @@ export default class HandleGCR {
                     true,
                 )
                 cache.set(pubkey, newEntity)
+                created?.add(pubkey)
             }
         }
 
@@ -967,13 +1144,19 @@ export default class HandleGCR {
 
     private static async loadTLSNotaryEntities(
         tokenIds: Set<string>,
+        attestationIds: Set<string> = new Set(),
     ): Promise<Map<string, GCRTLSNotary>> {
         const cache = new Map<string, GCRTLSNotary>()
         if (tokenIds.size === 0) return cache
 
         const repo = dataSource.getRepository(GCRTLSNotary)
         const existing = await repo.find({
-            where: { tokenId: In([...tokenIds]) },
+            where: [
+                { tokenId: In([...tokenIds]) },
+                ...(attestationIds.size > 0
+                    ? [{ attestationId: In([...attestationIds]) }]
+                    : []),
+            ],
         })
 
         for (const entry of existing) {
@@ -1004,6 +1187,11 @@ export default class HandleGCR {
         clock?: BlockClock,
         options: ApplyTransactionOptions = {},
     ): Promise<GCRApplyResult> {
+        const settlement = settlementOfTx.get(tx)
+        if (settlement && !isRollback && !simulate) {
+            return this.applySettlement(entities, tx, settlement, clock)
+        }
+
         const nonceEdit =
             options.nonceRule && !simulate && !isRollback
                 ? (tx.content.gcr_edits ?? []).find(
@@ -1081,6 +1269,35 @@ export default class HandleGCR {
     }
 
     /**
+     * A settlement batch, judged on the working state the block's earlier
+     * transactions left (L2PS nonces, then every touched account covering its
+     * net change, then the proof), and applied all or nothing. Every refusal
+     * fails the batch with no edits and never the block: every node reaches
+     * the same verdict. Its L2PS nonces are spent only when it applies, since
+     * nothing proves who would pay for a failed one.
+     */
+    private static async applySettlement(
+        entities: GCREntityCaches,
+        tx: Transaction,
+        settlement: ParsedSettlement,
+        clock?: BlockClock,
+    ): Promise<GCRApplyResult> {
+        const refusal = await settlementStateRefusal(settlement, entities.accounts)
+        if (refusal) {
+            log.error(`[applyTransaction] Refusing settlement ${tx.hash}: ${refusal}`)
+            return {
+                success: false,
+                entities,
+                message: refusal,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
+            }
+        }
+        return this.applyTransactionEdits(entities, tx, false, false, clock)
+    }
+
+    /**
      * Copies of the accounts a transaction's edits name, as they are now;
      * null for an account the caches do not hold yet.
      */
@@ -1108,7 +1325,9 @@ export default class HandleGCR {
      * the gas out of while editBinding is dormant. Identity and d402
      * transactions pay no gas, and a Work replay pays nothing because the
      * Work it reads back already paid. A type's own debits (a storage burn,
-     * a stake) are never charged.
+     * a stake) are never charged. Where the fee edits replace the gas
+     * (`legacyGasRetired`), the gas is not charged on top of them; where the
+     * gas is credited (`legacyGasCredited`), its credits are charged with it.
      *
      * Copied, because a failed apply reverses the edits it ran in place.
      */
@@ -1118,12 +1337,7 @@ export default class HandleGCR {
         osAmounts: boolean,
     ): Promise<GCREdit[]> {
         const edits = tx.content.gcr_edits ?? []
-        const isReplay = edits.some(
-            e =>
-                (e.type as string) === "work-attempt" &&
-                (e as unknown as WorkAttemptEdit).attemptClass === "replay",
-        )
-        if (isReplay) return []
+        if (isWorkReplay(edits)) return []
 
         const fee: GCREdit[] = []
         const derived = deriveFeeEditsForApply(tx)
@@ -1132,13 +1346,19 @@ export default class HandleGCR {
             edits.length >= derived.length &&
             derived.every((d, i) => sameFeeEdit(d, edits[i]))
         if (carriesDerived) fee.push(...edits.slice(0, derived.length))
+        if (legacyGasRetired(tx)) return fee.map(e => structuredClone(e))
 
         const gas = await derivedGasEdit(
             tx.content.type as string,
             normalizePubkey(nonceEdit.account),
             osAmounts,
         )
-        if (gas) fee.push(gas)
+        if (gas) {
+            fee.push(gas)
+            if (legacyGasCredited(tx)) {
+                fee.push(...(debitCredits(gas as GCREditBalance, tx.hash ?? "") as GCREdit[]))
+            }
+        }
         return fee.map(e => structuredClone(e))
     }
 
@@ -1188,6 +1408,43 @@ export default class HandleGCR {
         simulate: boolean,
         clock?: BlockClock,
     ): Promise<GCRApplyResult> {
+        // A block refuses these in its pre-pass. This covers the callers that
+        // apply one transaction directly: the simulation that issues a
+        // TLSNotary token and the L2PS proof apply. Ahead of the edit-free
+        // skip, since an l2psBatch ships none.
+        if (!isRollback && (isL2psTx(tx) || carriesTlsn(tx))) {
+            const refusal = featureGateRefusal(tx, await editBindingState())
+            if (refusal) {
+                log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${refusal}`)
+                return {
+                    success: false,
+                    entities,
+                    message: refusal,
+                    sideEffects: [],
+                    deferredWrites: [],
+                    appliedEditsCount: 0,
+                    unproven: true,
+                }
+            }
+        }
+
+        // Under tlsnVerified only the node writes the TLSN table.
+        if (!isRollback && tlsnVerifiedAtTip()) {
+            const refusal = shippedTlsnEditRefusal(tx)
+            if (refusal) {
+                log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${refusal}`)
+                return {
+                    success: false,
+                    entities,
+                    message: refusal,
+                    sideEffects: [],
+                    deferredWrites: [],
+                    appliedEditsCount: 0,
+                    unproven: true,
+                }
+            }
+        }
+
         // Skip txs without GCR edits (valid but no state changes)
         if (
             !tx.content.gcr_edits ||
@@ -1222,6 +1479,26 @@ export default class HandleGCR {
                     appliedEditsCount: 0,
                     unproven: true,
                 }
+            }
+        }
+
+        // Only a settlement batch spends an L2PS nonce, through the copy
+        // applyTransactions derives from its proven record; a shipped one
+        // would move any account's nonce in any subnet.
+        if (
+            !isRollback &&
+            !settlementOfTx.has(tx) &&
+            tx.content.gcr_edits.some(edit => isL2PSNonceEdit(edit))
+        ) {
+            const message = "l2psNonce edits come only from a settlement batch"
+            log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${message}`)
+            return {
+                success: false,
+                entities,
+                message,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
             }
         }
 
@@ -1264,7 +1541,8 @@ export default class HandleGCR {
             // Once editBinding binds the set at admission and in the apply
             // pre-pass, this check only has to agree with that comparison, which
             // ignores the order of an edit's keys.
-            const { match } = await verifyGcrEditsMatch(tx, {
+            // The derived TLSN edit is the node's, not part of what was signed.
+            const { match } = await verifyGcrEditsMatch(withoutNodeDerivedTlsnEdits(tx), {
                 expectFeeEdits,
                 keyOrderInsensitive: (await editBindingState()).active,
             })
@@ -1578,6 +1856,32 @@ export default class HandleGCR {
         const appliedPlaces: (EditPlace | undefined)[] = []
         const placeOf = HandleGCR.editPlaces(entities, tx, simulate)
 
+        const restoreFailedEdits = async (message: string): Promise<GCRApplyResult> => {
+            // An account not loaded before the transaction comes back as a
+            // fresh one, built in memory only (skipSave), so the builds can
+            // run together.
+            const restored = await Promise.all(
+                snapshots.map(
+                    async snap =>
+                        [
+                            snap.pubkey,
+                            snap.entity ?? (await HandleGCR.createAccount(snap.pubkey, {}, true)),
+                        ] as const,
+                ),
+            )
+            for (const [pubkey, entity] of restored) entities.accounts.set(pubkey, entity)
+            restoreRows(rowSnapshots)
+            restoreStaged(entities, staged)
+            return {
+                success: false,
+                entities,
+                message,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
+            }
+        }
+
         // Apply all edits for this tx
         for (const signedEdit of gcrEdits) {
             const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
@@ -1601,6 +1905,7 @@ export default class HandleGCR {
                     message: `Error applying GCREdit: ${error}`,
                 }
             }
+            if (result.replacedRow) rowSnapshots.push(result.replacedRow)
 
             if (!result.success) {
                 // INFO: If on a serious run, rollback hard edits
@@ -1609,38 +1914,15 @@ export default class HandleGCR {
                 }
                 // After the rollback, which also reverses the balance edits:
                 // reversing them on the restored accounts would refund them twice.
-                for (const snap of snapshots) {
-                    if (snap.entity === null) {
-                        // Entity was newly created - restore to fresh state
-                        const freshEntity = await HandleGCR.createAccount(
-                            snap.pubkey,
-                            {},
-                            true,
-                        )
-                        entities.accounts.set(snap.pubkey, freshEntity)
-                    } else {
-                        entities.accounts.set(snap.pubkey, snap.entity)
-                    }
-                }
-                restoreRows(rowSnapshots)
-                // After the rollback, which may have edited the staged rows
-                restoreStaged(entities, staged)
-
-                return {
-                    success: false,
-                    entities,
-                    message: result.message,
-                    sideEffects: [],
-                    deferredWrites: [],
-                    appliedEditsCount: 0,
-                }
+                return restoreFailedEdits(result.message)
             }
 
+            // They run after this call returns, still stamping the block's time.
             if (result.sideEffect) {
-                sideEffects.push(result.sideEffect)
+                sideEffects.push(bindApplyTime(result.sideEffect))
             }
             if (result.deferredWrite) {
-                deferredWrites.push(result.deferredWrite)
+                deferredWrites.push(bindApplyTime(result.deferredWrite))
             }
 
             appliedEdits.push(edit)
@@ -1652,13 +1934,20 @@ export default class HandleGCR {
         // This handles side-effects that aren't part of GCR edits (e.g., token creation)
         // Token creation happens during simulation (mempool entry) so user can immediately use it
         // The token is created optimistically - if tx fails consensus, token will expire unused
-        if (simulate && !isRollback && tx.content.type === "native") {
+        // Under tlsnVerified the token is the chain row a block writes, so
+        // admission changes nothing.
+        if (
+            simulate &&
+            !isRollback &&
+            tx.content.type === "native" &&
+            !tlsnVerifiedAtTip()
+        ) {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
-                log.error(
-                    `[simulateOne] Error processing native side-effects: ${error}`,
-                )
+                const message = `Error processing native side-effects: ${error instanceof Error ? error.message : String(error)}`
+                log.error(`[simulateOne] ${message}`)
+                return restoreFailedEdits(message)
             }
         }
 
@@ -1770,6 +2059,18 @@ export default class HandleGCR {
                     } else if (edit.type === "tlsnotary") {
                         const tlsEdit = edit as unknown as GCREditTLSNotary
                         keys.push("tls:" + tlsEdit.data.tokenId)
+                        // Two stores of one attestation must apply in order,
+                        // so the second sees the first's row.
+                        const attestationId = (
+                            tlsEdit.data as { attestationId?: unknown }
+                        ).attestationId
+                        if (typeof attestationId === "string" && attestationId) {
+                            keys.push("tlsatt:" + attestationId)
+                        }
+                        // A TLSN identity link uses a request token too, one
+                        // its edit does not name: tokens and links apply in
+                        // block order, in the links' group.
+                        if (isNodeDerivedTlsnEdit(edit)) keys.push("web2-links")
                         // Conservative: tlsnotary edits carry an account
                         // field; key it even though today's routine only
                         // touches entities.tlsNotaries.
@@ -1788,6 +2089,13 @@ export default class HandleGCR {
                     }
                     const stagedKey = stagedKeyOf(edit)
                     if (stagedKey) keys.push(stagedKey)
+                    // A TLSN link is refused when another account of the
+                    // block already holds the same web2 account, so links
+                    // and unlinks must apply in block order, not in
+                    // concurrent groups whose interleaving varies by node.
+                    if (edit.type === "identity" && WEB2_LINK_CONTEXTS.has(String((edit as { context?: unknown }).context))) {
+                        keys.push("web2-links")
+                    }
                     // A proposal reads the proposer's validator row as
                     // the stake edits before it in the block left it.
                     if ((edit.type as string) === "networkUpgrade") {
@@ -1800,6 +2108,9 @@ export default class HandleGCR {
                 keys.push(
                     "acc:" + normalizePubkey(tx.content.from_ed25519_address),
                 )
+            }
+            for (const account of settlementAccounts(tx)) {
+                keys.push("acc:" + normalizePubkey(account))
             }
 
             for (const k of keys) addKey(k)
@@ -1933,13 +2244,14 @@ export default class HandleGCR {
     /**
      * The transactions of a block refused before apply: those of a type the
      * node does not implement (`txTypeAllowList` fork), a fee-free message
-     * not signed by a staked validator (`instantMessagingBinding`), those the
-     * `networkGovernance` rule or a value rule (`nativeSendBinding`,
-     * `canonicalAddresses`, `feeBinding`) refuses, whether or not
-     * `editBinding` is active, and those whose shipped edits are not the ones
-     * their signed body implies (`editBinding` fork). Apply runs the shipped
-     * edits as they are, so a block must never reach it with edits nobody
-     * derived.
+     * not signed by a staked validator (`instantMessagingBinding`), those of
+     * a feature that is off (`l2psGate`, `tlsnDisabled`), those the
+     * `networkGovernance` or `tokenStakingGate` rule or a value rule
+     * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) refuses,
+     * whether or not `editBinding` is active, and those whose shipped edits
+     * are not the ones their signed body implies (`editBinding` fork). Apply
+     * runs the shipped edits as they are, so a block must never reach it with
+     * edits nobody derived.
      *
      * Judged on the transactions as received, before the node derives fee
      * edits or drops the edits of types that do not mutate entities, and not
@@ -1980,13 +2292,16 @@ export default class HandleGCR {
             typeAllowList,
             messageBinding,
             stakeChecks,
+            stakingOpen,
             tip,
         } = state
         for (const tx of txs) {
             const reason =
-                (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
+                (typeAllowList ? blockTxTypeRefusal(tx, state.nftGating) : null) ??
+                featureGateRefusal(tx, state) ??
                 governanceGateRefusal(tx, governance) ??
-                (stakeChecks ? stakeSenderRefusal(tx) : null)
+                tokenStakingRefusal(tx, stakingOpen) ??
+                (stakeChecks ? stakeSenderRefusal(tx, state.nftGating) : null)
             if (reason) {
                 refuse(tx, reason)
                 continue
@@ -2008,7 +2323,10 @@ export default class HandleGCR {
             if (refused.has(tx.hash)) continue
             let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
             try {
-                verdict = await verifyEditsAtApply(tx, { postFork })
+                verdict = await verifyEditsAtApply(tx, {
+                    postFork,
+                    nftGating: state.nftGating,
+                })
             } catch (error) {
                 verdict = { ok: false, reason: `could not be verified: ${error}` }
             }
@@ -2113,7 +2431,102 @@ export default class HandleGCR {
         }
     }
 
+    /**
+     * The settlement records of a block's `l2psBatch` transactions under the
+     * `l2psSettlement` fork. The stateless checks of Interface v1 (structure,
+     * limits, signatures, fees, the per-block cap) run here, once per block,
+     * and a batch that fails one joins `refused`: it is included as failed
+     * with no edits. Rollback only re-derives the edits of what applied.
+     */
+    private static async prepareSettlements(
+        txs: Transaction[],
+        refused: Set<string>,
+        isRollback: boolean,
+        blockNumber?: number,
+    ): Promise<Map<string, ParsedSettlement>> {
+        const prepared = new Map<string, ParsedSettlement>()
+        const batches = txs.filter(tx => (tx.content?.type as string) === "l2psBatch")
+        if (batches.length === 0 || !l2psSettlementActive()) return prepared
+
+        const refuse = (tx: Transaction, reason: string) => {
+            log.error(
+                `[applyTransactions] Refusing settlement ${tx.hash}` +
+                    (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                    `: ${reason}`,
+            )
+            refused.add(tx.hash)
+        }
+
+        if (isRollback) {
+            for (const tx of batches) {
+                const parsed = parseSettlement(tx)
+                if (parsed.ok) prepared.set(tx.hash, parsed.value)
+            }
+            return prepared
+        }
+
+        // The canonical order throws on a batch with no sender address; such
+        // a batch fails here instead, and forging leaves it out of the cap too.
+        for (const tx of batches) {
+            if (!canonicallyOrderable(tx)) refuse(tx, "no sender address to order it by")
+        }
+        // Counted over every orderable batch of the block, refused or not, in
+        // canonical order: the same set forge selection counts.
+        const overCap = settlementBatchesOverCap(
+            orderDeterministically(batches.filter(canonicallyOrderable)),
+        )
+        // Stale parameters would refuse correctly priced batches on this node alone.
+        await ensureNetworkParametersCurrent()
+        // The parameters are the same on every node, so a fee that is not an
+        // amount fails the batches everywhere instead of the whole block.
+        let minimumFee: bigint | null = null
+        let feeError = ""
+        try {
+            minimumFee = await nativeTransferFeeOs()
+        } catch (error) {
+            feeError = error instanceof Error ? error.message : String(error)
+        }
+        const chainId = settlementChainId()
+        for (const tx of batches) {
+            if (refused.has(tx.hash)) continue
+            if (overCap.has(tx.hash)) {
+                refuse(tx, "over the per-block settlement batch cap")
+                continue
+            }
+            if (minimumFee === null) {
+                refuse(tx, `the native transfer fee is not an amount: ${feeError}`)
+                continue
+            }
+            const parsed = parseSettlement(tx)
+            if (parsed.ok === false) {
+                refuse(tx, parsed.reason)
+                continue
+            }
+            const reason =
+                settlementFeeRefusal(parsed.value, minimumFee) ??
+                settlementFeeCreditRefusal(parsed.value) ??
+                settlementSignatureRefusal(parsed.value, chainId)
+            if (reason) {
+                refuse(tx, reason)
+                continue
+            }
+            prepared.set(tx.hash, parsed.value)
+        }
+        return prepared
+    }
+
     static async applyTransactions(
+        txs: Transaction[],
+        isRollback: boolean,
+        clock?: BlockClock,
+        options: ApplyTransactionsOptions = {},
+    ): Promise<ApplyTransactionsResult> {
+        return await withBlockTime(clock?.timestampSec, () =>
+            HandleGCR.applyTransactionsAt(txs, isRollback, clock, options),
+        )
+    }
+
+    private static async applyTransactionsAt(
         txs: Transaction[],
         isRollback: boolean,
         clock?: BlockClock,
@@ -2132,6 +2545,27 @@ export default class HandleGCR {
         if (nonceRule) {
             this.refuseUnboundNonceEdits(txs, refused, clock?.height)
         }
+        const settlements = await this.prepareSettlements(
+            txs,
+            refused,
+            isRollback,
+            clock?.height,
+        )
+        const tlsnEdits = prepareTlsnTransitions(
+            txs.filter(tx => !refused.has(tx.hash)),
+            {
+                height: clock?.height ?? (getSharedState.lastBlockNumber ?? 0) + 1,
+                isRollback,
+                refuse: (tx, reason) => {
+                    log.error(
+                        `[applyTransactions] Refusing TLSNotary tx ${tx.hash}` +
+                            (clock?.height !== undefined ? ` of block ${clock.height}` : "") +
+                            `: ${reason}`,
+                    )
+                    refused.add(tx.hash)
+                },
+            },
+        )
         const candidates =
             refused.size > 0 ? txs.filter(tx => !refused.has(tx.hash)) : txs
 
@@ -2250,6 +2684,14 @@ export default class HandleGCR {
         // forged-edit guard refused the tx it had just been sent. Rollback
         // derives too, because the stored tx no longer carries them.
         finalTxs = finalTxs.map(withDerivedFeeEdits)
+        if (settlements.size > 0) {
+            finalTxs = finalTxs.map(tx =>
+                withSettlementEdits(tx, settlements.get(tx.hash)),
+            )
+        }
+        if (tlsnEdits.size > 0) {
+            finalTxs = finalTxs.map(tx => withTlsnEdit(tx, tlsnEdits.get(tx.hash)))
+        }
 
         // A block touches each Work, slot and storage address from at most one
         // transaction; later ones are refused. Rollback depends on it: every
@@ -2362,6 +2804,8 @@ export default class HandleGCR {
             }
         }
 
+        if (!isRollback) HandleGCR.dropUnmovedPlaceholders(entities)
+
         let pending: PendingGCRWrite | undefined
         if (options.defer) {
             pending = HandleGCR.pendingWrite(
@@ -2431,6 +2875,25 @@ export default class HandleGCR {
                         const row = await repo.findOneBy(where)
                         cache.set(where.address, row)
                         return row
+                    }
+                }
+                if (property === "findBy") {
+                    // Rows holding a mint: the ones this block already
+                    // staged first, then the database, deduplicated by
+                    // address so a staged row shadows its stored version.
+                    return async (where: { nft_mint: string }) => {
+                        const byAddress = new Map<string, Validators>()
+                        for (const row of await repo.findBy(where)) {
+                            if (row.address) byAddress.set(row.address, row)
+                        }
+                        for (const row of cache.values()) {
+                            if (row && row.address && row.nft_mint === where.nft_mint) {
+                                byAddress.set(row.address, row)
+                            } else if (row && row.address) {
+                                byAddress.delete(row.address)
+                            }
+                        }
+                        return [...byAddress.values()]
                     }
                 }
                 return Reflect.get(target, property, receiver)
@@ -2884,7 +3347,11 @@ export default class HandleGCR {
         const where = unstorableAfter(edit, entities, stored)
         return where === null
             ? result
-            : { success: false, message: `${where} holds a value Postgres cannot store` }
+            : {
+                  success: false,
+                  message: `${where} holds a value Postgres cannot store`,
+                  replacedRow: result.replacedRow,
+              }
     }
 
     static async applyGCREdit(
@@ -2921,9 +3388,14 @@ export default class HandleGCR {
             }
         }
 
-        // Work edits are newer than some SDK builds' edit union, so they are
-        // matched as strings ahead of the typed switch.
+        // Work and L2PS nonce edits are newer than some SDK builds' edit
+        // union, so they are matched as strings ahead of the typed switch.
         switch (editOperation.type as string) {
+            case L2PS_NONCE_EDIT:
+                return GCRL2PSNonceRoutines.apply(
+                    editOperation as unknown as GCREditL2PSNonce,
+                    account,
+                )
             case "work-attempt":
                 return applyWorkAttempt(
                     editOperation as unknown as WorkAttemptEdit,
@@ -2952,7 +3424,7 @@ export default class HandleGCR {
             case "nonce":
                 result = await GCRNonceRoutines.apply(editOperation, account)
                 break
-            case "identity":
+            case "identity": {
                 result = await GCRIdentityRoutines.apply(
                     editOperation,
                     account,
@@ -2960,7 +3432,22 @@ export default class HandleGCR {
                     entities,
                     place,
                 )
+                // Under tlsnVerified a TLSN link uses its request token (and
+                // its undo frees it): the row is the block's like any other.
+                const token = result.success ? result.tlsNotary : undefined
+                if (token) {
+                    const cache = entities.tlsNotaries
+                    const before = cache.get(token.tokenId)
+                    result.replacedRow = {
+                        cache,
+                        key: token.tokenId,
+                        present: cache.has(token.tokenId),
+                        row: before ? structuredClone(before) : before,
+                    }
+                    cache.set(token.tokenId, token)
+                }
                 break
+            }
             case "assign":
             case "subnetsTx":
                 // TODO implementations
@@ -3000,6 +3487,7 @@ export default class HandleGCR {
                     editOperation,
                     tlsEntity ?? null,
                     simulate,
+                    entities.tlsNotaries,
                 )
 
                 if (
@@ -3239,13 +3727,10 @@ export default class HandleGCR {
                 log.debug(`[TLSNotary] Domain extracted: ${domain}`)
 
                 // Create the attestation token (idempotent - tokenManager handles duplicates)
-                const token = createToken(
+                createToken(
                     tx.content.from as string,
                     targetUrl,
                     tx.hash,
-                )
-                log.info(
-                    `[TLSNotary] Created token ${token.id} for tx ${tx.hash}`,
                 )
                 break
             }
@@ -3355,6 +3840,7 @@ export default class HandleGCR {
         }
 
         account.nonce = fillData["nonce"] || 0
+        account.l2psNonces = fillData["l2psNonces"] || {}
         account.points = fillData["points"] || {
             totalPoints: 0,
             breakdown: {
@@ -3367,7 +3853,7 @@ export default class HandleGCR {
                 referrals: 0,
                 demosFollow: 0,
             },
-            lastUpdated: new Date(),
+            lastUpdated: applyTime(),
         }
 
         account.referralInfo = fillData["referralInfo"] || {
@@ -3379,8 +3865,8 @@ export default class HandleGCR {
         account.flagged = fillData["flagged"] || false
         account.flaggedReason = fillData["flaggedReason"] || ""
         account.reviewed = fillData["reviewed"] || false
-        account.createdAt = fillData["createdAt"] || new Date()
-        account.updatedAt = fillData["updatedAt"] || new Date()
+        account.createdAt = fillData["createdAt"] || applyTime()
+        account.updatedAt = fillData["updatedAt"] || applyTime()
 
         if (skipSave) {
             return account

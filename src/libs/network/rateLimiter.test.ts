@@ -63,6 +63,7 @@ mock.module("@/utilities/sharedState", () => ({
 }))
 
 const rateLimiterModule = await import("./middleware/rateLimiter")
+const { xffModeProblem } = await import("@/libs/blockchain/genesis/genesisPin")
 
 describe("RateLimiter trusted internal requests", () => {
     let rateLimiter: InstanceType<typeof rateLimiterModule.RateLimiter>
@@ -444,6 +445,64 @@ describe("RateLimiter getClientIP — legacy mode", () => {
         })
         expect(limiter.getXffMode()).toBe("legacy")
         limiter.destroy()
+    })
+})
+
+// The boot check (findGenesisBlock) reads the mode through explicitXffMode, the
+// same function the constructor uses, so what it refuses is what the limiter
+// would run as.
+describe("explicitXffMode — boot refusal of XFF_MODE=legacy on a mainnet chain id", () => {
+    const saved = process.env.XFF_MODE
+    afterEach(() => {
+        if (saved === undefined) delete process.env.XFF_MODE
+        else process.env.XFF_MODE = saved
+    })
+
+    const bootProblem = (configValue: string | undefined, chainId: number) =>
+        xffModeProblem(rateLimiterModule.explicitXffMode(configValue), chainId)
+
+    it("refuses legacy from the config value or from the env override", () => {
+        delete process.env.XFF_MODE
+        expect(bootProblem("legacy", 4242)).toContain("XFF_MODE=legacy")
+        // the loader reads the env into the config; a bare limiter reads it itself
+        process.env.XFF_MODE = "legacy"
+        expect(bootProblem(undefined, 4242)).toContain("XFF_MODE=legacy")
+        expect(bootProblem("", 4242)).toContain("XFF_MODE=legacy")
+    })
+
+    it("treats the empty string docker-compose passes as unset", () => {
+        process.env.XFF_MODE = ""
+        expect(rateLimiterModule.explicitXffMode("")).toBeUndefined()
+        expect(bootProblem("", 4242)).toBeNull()
+    })
+
+    it("config wins over env, as in the constructor", () => {
+        process.env.XFF_MODE = "legacy"
+        expect(bootProblem("strict", 4242)).toBeNull()
+        process.env.XFF_MODE = "strict"
+        expect(bootProblem("legacy", 4242)).toContain("XFF_MODE=legacy")
+    })
+
+    it("allows legacy on the testnet and devnet ids", () => {
+        process.env.XFF_MODE = "legacy"
+        expect(bootProblem(undefined, 1)).toBeNull()
+        expect(bootProblem(undefined, 1337)).toBeNull()
+    })
+
+    it("agrees with the mode the limiter resolves", () => {
+        for (const [configValue, env] of [
+            ["", "legacy"],
+            ["legacy", ""],
+            ["strict", "legacy"],
+            ["", ""],
+            ["", "LEGACY"],
+        ] as const) {
+            process.env.XFF_MODE = env
+            const limiter = buildLimiter({ xffMode: configValue as "off" })
+            const refused = bootProblem(configValue, 4242) !== null
+            expect(refused).toBe(limiter.getXffMode() === "legacy")
+            limiter.destroy()
+        }
     })
 })
 

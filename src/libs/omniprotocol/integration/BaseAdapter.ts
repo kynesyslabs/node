@@ -20,9 +20,25 @@ import { ConnectionPool } from "../transport/ConnectionPool"
 import { OmniProtocolError } from "../types/errors"
 import { getNodePrivateKey, getNodePublicKey } from "./keys"
 import { RateLimiter } from "../ratelimit"
+import { MAX_HTTP_FALLBACK_COOLDOWN_MS } from "../constants"
 
 export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
+}
+
+/** Where a peer said, in a verified hello reply, its Omni server listens. */
+interface OmniEndpoint {
+    /** Origin of the HTTP URL the advertisement was verified for. */
+    origin: string
+    port: number
+}
+
+function originOf(httpUrl: string): string | null {
+    try {
+        return new URL(httpUrl).origin
+    } catch {
+        return null
+    }
 }
 
 /**
@@ -47,6 +63,9 @@ export abstract class BaseOmniAdapter {
     protected readonly connectionPool: ConnectionPool
     /** Peers answered over HTTP only, keyed by identity, until the given time. */
     private readonly httpOnlyUntil = new Map<string, number>()
+    private readonly omniEndpoints = new Map<string, OmniEndpoint>()
+    /** Omni failures in a row per peer, since its last Omni answer. */
+    private readonly omniFailures = new Map<string, number>()
 
     constructor(options: BaseAdapterOptions = {}) {
         this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
@@ -78,7 +97,7 @@ export abstract class BaseOmniAdapter {
      * A peer whose OmniProtocol call failed stays on HTTP for the cooldown,
      * so a closed Omni port costs one connect timeout, not one per call.
      */
-    shouldUseOmni(peerIdentity: string): boolean {
+    shouldUseOmni(peerIdentity: string, httpUrl?: string): boolean {
         const { mode, omniPeers } = this.config.migration
 
         if (this.isHttpOnly(peerIdentity)) {
@@ -89,7 +108,16 @@ export abstract class BaseOmniAdapter {
             case "HTTP_ONLY":
                 return false
             case "OMNI_PREFERRED":
-                return omniPeers.has(peerIdentity)
+                if (!omniPeers.has(peerIdentity)) {
+                    return false
+                }
+                // The port was advertised for one address; once the peer
+                // moves, it says nothing about the new host.
+                return (
+                    httpUrl === undefined ||
+                    this.endpointFor(peerIdentity, httpUrl) !== null ||
+                    !this.omniEndpoints.has(peerIdentity)
+                )
             case "OMNI_ONLY":
                 return true
             default:
@@ -121,14 +149,59 @@ export abstract class BaseOmniAdapter {
     }
 
     /**
+     * Record the Omni port a peer advertised in a hello reply that proved it
+     * serves httpUrl. Calls to it then dial that host at that port.
+     */
+    recordOmniEndpoint(peerIdentity: string, httpUrl: string, port: number) {
+        const origin = originOf(httpUrl)
+        if (!origin || !Number.isInteger(port) || port < 1 || port > 65535) {
+            this.forgetOmniPeer(peerIdentity)
+            return
+        }
+        const known = this.omniEndpoints.get(peerIdentity)
+        this.omniEndpoints.set(peerIdentity, { origin, port })
+        if (known?.origin === origin && known.port === port) {
+            // Hellos repeat: the same advert must not cut a backoff short.
+            this.config.migration.omniPeers.add(peerIdentity)
+            return
+        }
+        this.omniFailures.delete(peerIdentity)
+        this.markOmniPeer(peerIdentity)
+    }
+
+    /** The peer no longer advertises an Omni server: back to HTTP. */
+    forgetOmniPeer(peerIdentity: string): void {
+        this.omniEndpoints.delete(peerIdentity)
+        this.config.migration.omniPeers.delete(peerIdentity)
+    }
+
+    private endpointFor(
+        peerIdentity: string,
+        httpUrl: string,
+    ): OmniEndpoint | null {
+        const endpoint = this.omniEndpoints.get(peerIdentity)
+        return endpoint?.origin === originOf(httpUrl) ? endpoint : null
+    }
+
+    /**
      * Mark a peer as HTTP-only for the cooldown (e.g., after OmniProtocol failure).
      * Its Omni capability is kept, so it is retried over Omni afterwards.
      */
     markHttpPeer(peerIdentity: string): void {
-        this.httpOnlyUntil.set(
-            peerIdentity,
-            Date.now() + this.config.migration.httpFallbackCooldown,
+        // An advertised port that stays unreachable costs a connect timeout
+        // per cooldown; doubling keeps that cost from recurring every minute.
+        const failures = (this.omniFailures.get(peerIdentity) ?? 0) + 1
+        this.omniFailures.set(peerIdentity, failures)
+        const cooldown = Math.min(
+            this.config.migration.httpFallbackCooldown * 2 ** (failures - 1),
+            MAX_HTTP_FALLBACK_COOLDOWN_MS,
         )
+        this.httpOnlyUntil.set(peerIdentity, Date.now() + cooldown)
+    }
+
+    /** The peer answered over Omni: the next failure starts a fresh backoff. */
+    noteOmniAnswer(peerIdentity: string): void {
+        this.omniFailures.delete(peerIdentity)
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +224,20 @@ export abstract class BaseOmniAdapter {
         const omniPort = peerHttpPort + 1
 
         return `${protocol}://${host}:${omniPort}`
+    }
+
+    /**
+     * TCP connection string for a peer: the port it advertised for this
+     * address, else the HTTP port + 1 convention (OMNI_ONLY only).
+     */
+    protected omniConnectionString(peerIdentity: string, httpUrl: string) {
+        const endpoint = this.endpointFor(peerIdentity, httpUrl)
+        if (!endpoint) {
+            return this.httpToTcpConnectionString(httpUrl)
+        }
+        // Only plain-TCP servers advertise a port
+        const host = new URL(httpUrl).hostname
+        return `tcp://${host}:${endpoint.port}`
     }
 
     /**

@@ -11,7 +11,8 @@ export enum SignatureMode {
     SIGN_FULL_PAYLOAD = 0x03, // Sign full payload
     SIGN_MESSAGE_ID_PAYLOAD_HASH = 0x04, // Sign (Message ID + Payload hash)
     SIGN_MESSAGE_ID_TIMESTAMP = 0x05, // Sign (Message ID + Timestamp)
-    // Sign (domain + opcode + Message ID + Timestamp + Keccak256(Payload)).
+    // Sign (domain + genesis hash + recipient + opcode + Message ID +
+    // Timestamp + Keccak256(Payload)).
     // The only mode an auth-required opcode accepts: the others leave the
     // timestamp or the opcode unsigned, so a captured frame could be
     // re-dated and replayed indefinitely.

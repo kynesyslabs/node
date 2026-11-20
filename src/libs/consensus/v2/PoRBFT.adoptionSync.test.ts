@@ -141,6 +141,8 @@ beforeEach(() => {
         Object.values(stored).find(b => b.hash === hash) ?? null) as any)
     spyOn(chain, "getLastBlockNumber").mockImplementation((async () =>
         getSharedState.lastBlockNumber) as any)
+    spyOn(chain, "getLastStoredBlockNumber").mockImplementation((async () =>
+        Math.max(getSharedState.lastBlockNumber, ...Object.keys(stored).map(Number))) as any)
     spyOn(chain, "getExistingTransactionHashes").mockResolvedValue(new Set())
     spyOn(chain, "checkTxExists").mockResolvedValue(true)
     spyOn(gcr, "getAccountNonces").mockImplementation((async (
@@ -171,7 +173,6 @@ beforeEach(() => {
 
     getSharedState.lastBlockNumber = HEIGHT - 1
     getSharedState.lastBlockHash = PARENT_HASH
-    getSharedState.referenceBlockRoom = 1
     getSharedState.isInitialized = true
     getSharedState.inSyncLoop = false
     getSharedState.fastSyncCount = 1

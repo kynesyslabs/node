@@ -1,13 +1,14 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import type { HumanPassportClaim } from "@/libs/identity/humanPassportClaim"
 import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
-import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import readGCRForUser from "../blockchain/gcr/gcr_routines/readGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
-import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
+import { humanPassportClaimGate } from "@/libs/identity/humanPassportClaimGate"
 import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
 import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
@@ -15,15 +16,79 @@ import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { getSharedState } from "@/utilities/sharedState"
 import { syncLock } from "../blockchain/routines/Sync"
+import { rateLimitSubject } from "./middleware/rateLimitSubject"
+
+/** An account's identities for a read: nothing is created for an unknown address. */
+async function readIdentities(
+    address: string,
+    key?: "web2" | "xm" | "ud",
+): Promise<any> {
+    const { identities } = await readGCRForUser(address)
+    return key ? identities[key] : identities
+}
 
 interface GCRRoutinePayload {
     method: string
     params: any[] // ? Define the params type or nah
 }
 
+// Unsigned calls are limited per client, counted like the HTTP limiter does
+// (an IPv6 /64 is one client): one shared bucket would let a single client
+// starve every wallet on this node, and one bucket per IPv6 address would
+// hand a /64 holder a fresh quota per address.
+function claimCaller(sender: string, clientIP?: string): string {
+    if (sender) return sender
+    return clientIP ? `ip:${rateLimitSubject(clientIP)}` : ""
+}
+
+/**
+ * Answers a Human Passport read from the claim gate: 400 without an address
+ * or on a provider error, 429 with a retry time past the caller's fetches.
+ */
+async function answerHumanPassport(
+    response: RPCResponse,
+    options: unknown,
+    caller: string,
+    pick: (claim: HumanPassportClaim) => unknown,
+): Promise<void> {
+    // Positional (string) and object ({ address }) params are both accepted.
+    const address =
+        typeof options === "string"
+            ? options
+            : (options as { address?: unknown } | undefined)?.address
+    if (typeof address !== "string" || !address) {
+        response.result = 400
+        response.response = null
+        response.extra = { error: "address is required" }
+        return
+    }
+    try {
+        const gated = await humanPassportClaimGate(a =>
+            IdentityManager.getHumanPassportClaim(a),
+        ).get(caller, address)
+        if ("retryAfterMs" in gated) {
+            response.result = 429
+            response.response = null
+            response.extra = {
+                error: "Rate limit exceeded",
+                retryAfter: Math.ceil(gated.retryAfterMs / 1000),
+            }
+            return
+        }
+        response.response = pick(gated.claim)
+    } catch (error) {
+        response.result = 400
+        response.response = null
+        response.extra = {
+            error: error instanceof Error ? error.message : String(error),
+        }
+    }
+}
+
 export default async function manageGCRRoutines(
     sender: string,
     payload: GCRRoutinePayload,
+    clientIP?: string,
 ): Promise<RPCResponse> {
     let response = _.cloneDeep(emptyResponse)
     response.result = 200
@@ -40,28 +105,19 @@ export default async function manageGCRRoutines(
             break
 
         case "getIdentities":
-            response.response = await IdentityManager.getIdentities(params[0])
+            response.response = await readIdentities(params[0])
             break
 
         case "getWeb2Identities":
-            response.response = await IdentityManager.getIdentities(
-                params[0],
-                "web2",
-            )
+            response.response = await readIdentities(params[0], "web2")
             break
 
         case "getXmIdentities":
-            response.response = await IdentityManager.getIdentities(
-                params[0],
-                "xm",
-            )
+            response.response = await readIdentities(params[0], "xm")
             break
 
         case "getUDIdentities":
-            response.response = await IdentityManager.getIdentities(
-                params[0],
-                "ud",
-            )
+            response.response = await readIdentities(params[0], "ud")
             break
 
         case "getPoints":
@@ -73,9 +129,9 @@ export default async function manageGCRRoutines(
             break
 
         case "getReferralInfo": {
-            // Stored on purpose: validateReferralCode looks the code up in
-            // the table, so a code shown before the owner's first tx must exist.
-            const account = await ensureGCRForUser(params[0])
+            // The code is derived from the address, so an unknown address
+            // gets the one its account will have without a row being stored.
+            const account = await readGCRForUser(params[0])
             response.response = account.referralInfo
             break
         }
@@ -154,40 +210,14 @@ export default async function manageGCRRoutines(
             break
         }
 
-        case "getHumanPassportScore": {
-            const options = params[0]
-
-            // Support both positional (string) and object ({ address }) param styles
-            const address =
-                typeof options === "string" ? options : options?.address
-            // Always force refresh to get latest score from API
-            const forceRefresh = true
-
-            if (!address) {
-                response.result = 400
-                response.response = null
-                response.extra = { error: "address is required" }
-                break
-            }
-
-            try {
-                const provider = HumanPassportProvider.getInstance()
-                const verification = await provider.verifyAddress(
-                    address,
-                    forceRefresh,
-                )
-                // Return only the numeric score (method name implies a number, not full object)
-                response.response = verification.score
-            } catch (error) {
-                response.result = 400
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            }
+        case "getHumanPassportScore":
+            // Same provider quota as the claim, so the same cache and limit.
+            await answerHumanPassport(response, params[0], claimCaller(sender, clientIP), c => c.score)
             break
-        }
+
+        case "getHumanPassportClaim":
+            await answerHumanPassport(response, params[0], claimCaller(sender, clientIP), c => c)
+            break
 
         case "getHumanPassportIdentities": {
             try {

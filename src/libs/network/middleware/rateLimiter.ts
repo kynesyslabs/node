@@ -1,12 +1,13 @@
 import fs from "fs"
 import { Server } from "bun"
 import ipaddr from "ipaddr.js"
+import { rateLimitSubject } from "./rateLimitSubject"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import { getAuthContext, setAuthContext } from "../authContext"
-import { BODY_HASH_HEADER } from "../peerHttpAuth"
+import { AUDIENCE_HEADER, BODY_HASH_HEADER } from "../peerHttpAuth"
 import {
     verifySignature,
     isKeyWhitelisted,
@@ -42,25 +43,6 @@ interface RateLimitData {
      * The block expiry time in milliseconds
      */
     blockExpiry?: number
-}
-
-/**
- * What a client is counted as. An IPv6 customer is routinely handed a whole
- * /64, so counting each address separately would give one client as many
- * quotas as it has addresses; every address in a /64 shares one.
- */
-function rateLimitSubject(ip: string): string {
-    if (!ip.includes(":")) return ip
-    try {
-        const parsed = ipaddr.parse(ip)
-        if (parsed.kind() !== "ipv6") return ip
-        const v6 = parsed as ipaddr.IPv6
-        if (v6.isIPv4MappedAddress()) return v6.toIPv4Address().toString()
-        const network = ipaddr.IPv6.networkAddressFromCIDR(`${ip}/64`)
-        return `${network.toRFC5952String()}/64`
-    } catch {
-        return ip
-    }
 }
 
 /** Counter key: one per limit bucket per client subject. */
@@ -211,6 +193,21 @@ function normalizeIP(raw: string): string {
 }
 
 /**
+ * Whether `raw` is a loopback address in any spelling: all of 127.0.0.0/8
+ * (not only 127.0.0.1) and `::1`, including their IPv4-mapped and bracketed
+ * forms. Hostnames, unparseable values and values longer than any address
+ * spelling (64 characters) are not loopback.
+ */
+function isLoopbackIP(raw: string): boolean {
+    if (raw.length > 64) return false
+    try {
+        return ipaddr.parse(normalizeIP(raw)).range() === "loopback"
+    } catch {
+        return false
+    }
+}
+
+/**
  * Check whether an IP is inside any CIDR in the resolved trusted-proxy set.
  */
 function isWithinTrusted(
@@ -260,6 +257,25 @@ function resolveXffMode(
     return hasTrustedList ? "strict" : "off"
 }
 
+/**
+ * The XFF mode an operator asked for, or undefined when none was: the config
+ * value first, then the XFF_MODE env override. Empty means unset. The
+ * constructor and the boot check (xffModeProblem) both read the mode here. A
+ * value that is not one of the three modes is ignored by `resolveXffMode`, so
+ * it is not returned.
+ */
+export function explicitXffMode(
+    configValue?: string | null,
+    env: Record<string, string | undefined> = process.env,
+): XffMode | undefined {
+    const configMode =
+        configValue && configValue.length > 0 ? configValue : undefined
+    const mode = configMode ?? env.XFF_MODE
+    return mode === "off" || mode === "strict" || mode === "legacy"
+        ? mode
+        : undefined
+}
+
 export class RateLimiter {
     public ipRequests = new Map<string, RateLimitData>()
     public config: RateLimitConfig
@@ -267,11 +283,17 @@ export class RateLimiter {
     private static instance: RateLimiter
     /**
      * Loopback addresses that bypass proxy-header handling. When a header
-     * value is loopback we never trust it as a "real" client identifier;
-     * we fall through to the socket peer (which itself is whitelisted by
-     * `LOCALHOST_IPS` further down the pipeline if it's also loopback).
+     * value is loopback (in legacy and strict mode) we never trust it as a
+     * "real" client identifier; we skip it and fall through to the next
+     * header, then the socket peer (which itself is whitelisted by
+     * `isLoopbackIP` further down the pipeline if it's also loopback). Only
+     * the socket peer can make a request local.
      */
     private local_ips = ["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"]
+
+    private isLocalHeaderValue(value: string): boolean {
+        return this.local_ips.includes(value) || isLoopbackIP(value)
+    }
 
     /** Resolved trusted-proxy CIDRs. Empty when no list configured. */
     private trustedProxies: TrustedProxyCIDR[]
@@ -308,15 +330,10 @@ export class RateLimiter {
             : []
         this.trustedProxies = parseTrustedProxies(fromConfig ?? fromEnv)
 
-        // Config may pass "" to mean "auto" — coerce to undefined so the
-        // env-var override is consulted next.
-        const configMode =
-            config.xffMode && config.xffMode.length > 0
-                ? (config.xffMode as XffMode)
-                : undefined
-        const envOverride = process.env.XFF_MODE as XffMode | undefined
+        // Config may pass "" to mean "auto" — explicitXffMode coerces it to
+        // unset so the env-var override is consulted next.
         this.xffMode = resolveXffMode(
-            configMode ?? envOverride,
+            explicitXffMode(config.xffMode),
             this.trustedProxies.length > 0,
         )
 
@@ -559,14 +576,16 @@ export class RateLimiter {
         const cfIp = req.headers.get("cf-connecting-ip")
 
         if (this.xffMode === "legacy") {
+            // Check the normalised value, the same string the whitelist sees.
             if (forwardedFor) {
-                const firstIp = forwardedFor.split(",")[0].trim()
-                if (firstIp && !this.local_ips.includes(firstIp)) {
-                    return normalizeIP(firstIp)
+                const firstIp = normalizeIP(forwardedFor.split(",")[0].trim())
+                if (firstIp && !this.isLocalHeaderValue(firstIp)) {
+                    return firstIp
                 }
             }
-            if (realIp && !this.local_ips.includes(realIp)) {
-                return normalizeIP(realIp)
+            const realIpNorm = realIp ? normalizeIP(realIp) : ""
+            if (realIpNorm && !this.isLocalHeaderValue(realIpNorm)) {
+                return realIpNorm
             }
             return socketIp
         }
@@ -588,25 +607,30 @@ export class RateLimiter {
         }
 
         // Socket is trusted — walk XFF right-to-left, returning the
-        // left-most address that is NOT itself a trusted hop. Falls back
-        // to X-Real-IP, then CF-Connecting-IP, then socket.
+        // left-most address that is NOT itself a trusted hop or loopback.
+        // Falls back to X-Real-IP, then CF-Connecting-IP (each skipped when
+        // loopback), then socket. The walk examines at most the last 16
+        // entries.
         if (forwardedFor) {
             const chain = forwardedFor
                 .split(",")
                 .map(s => s.trim())
                 .filter(s => s.length > 0)
-            for (let i = chain.length - 1; i >= 0; i--) {
+            for (let i = chain.length - 1; i >= Math.max(0, chain.length - 16); i--) {
                 const candidate = normalizeIP(chain[i])
-                if (!isWithinTrusted(candidate, this.trustedProxies)) {
+                if (
+                    !isWithinTrusted(candidate, this.trustedProxies) &&
+                    !this.isLocalHeaderValue(candidate)
+                ) {
                     return candidate
                 }
             }
         }
-        if (realIp) {
-            return normalizeIP(realIp)
-        }
-        if (cfIp) {
-            return normalizeIP(cfIp)
+        for (const header of [realIp, cfIp]) {
+            const ip = header ? normalizeIP(header) : ""
+            if (ip && !this.isLocalHeaderValue(ip)) {
+                return ip
+            }
         }
         return socketIp
     }
@@ -692,11 +716,13 @@ export class RateLimiter {
             : AUTH_FAILURE_BUCKET
     }
 
+    /** Whether `ip` is on the operator's whitelist or is loopback. */
+    public isWhitelistedIP(ip: string | undefined): boolean {
+        return !!ip && (isLoopbackIP(ip) || this.config.whitelistedIPs.includes(ip))
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
-        if (
-            clientIP &&
-            this.config.whitelistedIPs.includes(clientIP)
-        ) {
+        if (this.isWhitelistedIP(clientIP)) {
             return true
         }
 
@@ -803,13 +829,14 @@ export class RateLimiter {
             }
 
             const clientIP = this.getClientIP(req, server)
-            const whitelistedIP = this.config.whitelistedIPs.includes(clientIP)
+            const whitelistedIP = this.isWhitelistedIP(clientIP)
 
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
             const timestamp = req.headers.get("timestamp")
             const bodyHash = req.headers.get(BODY_HASH_HEADER)
+            const audience = req.headers.get(AUDIENCE_HEADER)
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
@@ -844,6 +871,7 @@ export class RateLimiter {
                     timestamp,
                     requireTimestampBinding,
                     bodyHash,
+                    audience,
                 )
 
                 if (!verifyResult.valid) {
@@ -879,6 +907,8 @@ export class RateLimiter {
                     publicKey: verifyResult.publicKey,
                     algorithm: verifyResult.algorithm,
                     bodyHash: verifyResult.bodyHash ?? null,
+                    audienceBound: verifyResult.audienceBound ?? false,
+                    timestamp: verifyResult.timestamp,
                 })
             }
 

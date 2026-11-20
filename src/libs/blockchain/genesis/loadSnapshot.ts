@@ -141,6 +141,9 @@ export type ValidatorSeed = {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint: string | null
+    nft_owner: string | null
+    nft_proof_tx: string | null
 }
 
 // ----------------------------------------------------------------------------
@@ -395,15 +398,35 @@ function parseValidatorRow(line: string, lineNo: number): ValidatorSeed {
         valid_at: optionalInt(obj, "valid_at"),
         unstake_requested_at: optionalInt(obj, "unstake_requested_at"),
         unstake_available_at: optionalInt(obj, "unstake_available_at"),
+        nft_mint: optionalString(obj, "nft_mint"),
+        nft_owner: optionalString(obj, "nft_owner"),
+        nft_proof_tx: optionalString(obj, "nft_proof_tx"),
     }
 }
 
-async function* streamLines(path: string): AsyncIterable<{
+/**
+ * Streams the non-empty lines of one snapshot file and hashes the same bytes
+ * as they are read. When the stream ends, the digest must equal the manifest's
+ * `expectedSha256`; otherwise it throws, so the caller's transaction rolls back.
+ * Rows restored are therefore the rows the manifest lists, whatever the file
+ * held when `verifySnapshot` read it. One pass, bounded memory.
+ */
+async function* streamLines(
+    path: string,
+    file: string,
+    expectedSha256: string,
+): AsyncIterable<{
     line: string
     lineNo: number
 }> {
+    const input = createReadStream(path)
+    const hash = createHash("sha256")
+    // Registered before readline's own listener, so a chunk is hashed before its lines are yielded
+    input.on("data", chunk => {
+        hash.update(chunk)
+    })
     const rl = createInterface({
-        input: createReadStream(path),
+        input,
         crlfDelay: Infinity,
     })
     let lineNo = 0
@@ -411,6 +434,12 @@ async function* streamLines(path: string): AsyncIterable<{
         lineNo++
         if (line.length === 0) continue
         yield { line, lineNo }
+    }
+    const actual = hash.digest("hex")
+    if (actual !== expectedSha256) {
+        throw new Error(
+            `${file}: sha256 mismatch while restoring (got ${actual}, expected ${expectedSha256})`,
+        )
     }
 }
 
@@ -460,31 +489,35 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
     const storagePath = resolve(snapshotDir, "gcr_storageprogram.jsonl")
     const identityPath = resolve(snapshotDir, "identity_commitments.jsonl")
     const validatorsPath = resolve(snapshotDir, "validators.jsonl")
-    // validators.jsonl only exists in schemaVersion 2 snapshots; gate on the
-    // manifest entry (verifySnapshot has already confirmed the file if listed).
-    const hasValidators = manifest.files["validators.jsonl"] !== undefined
 
+    // The hashes are those of the manifest verifySnapshot just checked, not a re-read of it.
     async function* streamGcrMain(): AsyncIterable<GCRMainSeed> {
-        for await (const { line, lineNo } of streamLines(gcrMainPath)) {
+        const file = "gcr_main.jsonl"
+        for await (const { line, lineNo } of streamLines(gcrMainPath, file, manifest.files[file].sha256)) {
             yield parseGCRMainRow(line, lineNo)
         }
     }
 
     async function* streamGcrStorageProgram(): AsyncIterable<GCRStorageProgramSeed> {
-        for await (const { line, lineNo } of streamLines(storagePath)) {
+        const file = "gcr_storageprogram.jsonl"
+        for await (const { line, lineNo } of streamLines(storagePath, file, manifest.files[file].sha256)) {
             yield parseGCRStorageProgramRow(line, lineNo)
         }
     }
 
     async function* streamIdentityCommitments(): AsyncIterable<IdentityCommitmentSeed> {
-        for await (const { line, lineNo } of streamLines(identityPath)) {
+        const file = "identity_commitments.jsonl"
+        for await (const { line, lineNo } of streamLines(identityPath, file, manifest.files[file].sha256)) {
             yield parseIdentityCommitmentRow(line, lineNo)
         }
     }
 
+    // validators.jsonl only exists in schemaVersion 2 snapshots; gate on the manifest entry.
     async function* streamValidators(): AsyncIterable<ValidatorSeed> {
-        if (!hasValidators) return
-        for await (const { line, lineNo } of streamLines(validatorsPath)) {
+        const file = "validators.jsonl"
+        const entry = manifest.files[file]
+        if (!entry) return
+        for await (const { line, lineNo } of streamLines(validatorsPath, file, entry.sha256)) {
             yield parseValidatorRow(line, lineNo)
         }
     }
@@ -560,10 +593,11 @@ export async function openBoundGcrMain(
             reason: `gcr_main.jsonl: sha256 mismatch (got ${fileSha}, expected ${expected})`,
         }
     }
+    const expectedSha256 = expected
     return {
         status: "ok",
         async *streamGcrMain() {
-            for await (const { line, lineNo } of streamLines(gcrMainPath)) {
+            for await (const { line, lineNo } of streamLines(gcrMainPath, "gcr_main.jsonl", expectedSha256)) {
                 yield parseGCRMainRow(line, lineNo)
             }
         },

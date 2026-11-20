@@ -7,6 +7,7 @@
 import { describe, expect, it } from "bun:test"
 import {
     blockCapsRefusal,
+    oversizeTxRefusal,
     selectBlockTransactions,
     txContentBytes,
 } from "./blockCaps"
@@ -108,5 +109,16 @@ describe("blockCapsRefusal", () => {
         expect(
             blockCapsRefusal(pool(2, 1, 3 * 1024 * 1024), true),
         ).toMatch(/bytes of tx content/)
+    })
+})
+
+describe("oversizeTxRefusal", () => {
+    it("refuses exactly the txs an empty block cannot take", () => {
+        const fits = tx(1, 1, BLOCK_MAX_CONTENT_BYTES - 1024)
+        const over = tx(1, 1, BLOCK_MAX_CONTENT_BYTES)
+        expect(oversizeTxRefusal(fits, true)).toBeNull()
+        expect(selectBlockTransactions([fits], 1, true)).toEqual([fits])
+        expect(oversizeTxRefusal(over, true)).toMatch(/no block can take it/)
+        expect(selectBlockTransactions([over], 1, true)).toEqual([])
     })
 })

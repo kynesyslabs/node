@@ -23,12 +23,26 @@ import type {
     CanonicalAddressesConfig,
     FeeBindingConfig,
     BlockCapsConfig,
+    TokenStakingGateConfig,
+    TokenStakingConfig,
+    NftValidatorGatingConfig,
+    TelegramSenderBindingConfig,
+    XmRemoveCanonicalConfig,
+    L2psSettlementConfig,
+    L2psGateConfig,
+    TlsnDisabledConfig,
+    TlsnVerifiedConfig,
+    StorageFeeSettlementConfig,
+    ReferenceBlockRoom10Config,
+    KeylessWeb2IdentityConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
+    UnpinnedCommitteeConfig,
     Web2ProofBindingConfig,
     XmProofBindingConfig,
 } from "./forkConfig"
 import { NON_MAINNET_CHAIN_IDS } from "./forkConfig"
+import { tlsnVerifiedParamsOf, tlsnVerifiedProblems } from "./tlsnVerifiedPayload"
 
 // REVIEW: P2 + DEM-665 — genesis loader for fork heights + per-fork payloads.
 
@@ -407,6 +421,54 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "blockCaps":
             getSharedState.forkConfig.blockCaps = config as BlockCapsConfig
             return
+        case "tokenStakingGate":
+            getSharedState.forkConfig.tokenStakingGate =
+                config as TokenStakingGateConfig
+            return
+        case "tokenStaking":
+            getSharedState.forkConfig.tokenStaking = config as TokenStakingConfig
+            return
+        case "nftValidatorGating":
+            getSharedState.forkConfig.nftValidatorGating =
+                config as NftValidatorGatingConfig
+            return
+        case "unpinnedCommittee":
+            getSharedState.forkConfig.unpinnedCommittee =
+                config as UnpinnedCommitteeConfig
+            return
+        case "telegramSenderBinding":
+            getSharedState.forkConfig.telegramSenderBinding =
+                config as TelegramSenderBindingConfig
+            return
+        case "xmRemoveCanonical":
+            getSharedState.forkConfig.xmRemoveCanonical =
+                config as XmRemoveCanonicalConfig
+            return
+        case "l2psSettlement":
+            getSharedState.forkConfig.l2psSettlement =
+                config as L2psSettlementConfig
+            return
+        case "l2psGate":
+            getSharedState.forkConfig.l2psGate = config as L2psGateConfig
+            return
+        case "tlsnDisabled":
+            getSharedState.forkConfig.tlsnDisabled = config as TlsnDisabledConfig
+            return
+        case "storageFeeSettlement":
+            getSharedState.forkConfig.storageFeeSettlement =
+                config as StorageFeeSettlementConfig
+            return
+        case "referenceBlockRoom10":
+            getSharedState.forkConfig.referenceBlockRoom10 =
+                config as ReferenceBlockRoom10Config
+            return
+        case "tlsnVerified":
+            getSharedState.forkConfig.tlsnVerified = config as TlsnVerifiedConfig
+            return
+        case "keylessWeb2Identity":
+            getSharedState.forkConfig.keylessWeb2Identity =
+                config as KeylessWeb2IdentityConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -560,6 +622,32 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FeeBindingConfig
         case "blockCaps":
             return base as BlockCapsConfig
+        case "tokenStakingGate":
+            return base as TokenStakingGateConfig
+        case "tokenStaking":
+            return base as TokenStakingConfig
+        case "nftValidatorGating":
+            return base as NftValidatorGatingConfig
+        case "unpinnedCommittee":
+            return base as UnpinnedCommitteeConfig
+        case "telegramSenderBinding":
+            return base as TelegramSenderBindingConfig
+        case "xmRemoveCanonical":
+            return base as XmRemoveCanonicalConfig
+        case "l2psSettlement":
+            return base as L2psSettlementConfig
+        case "l2psGate":
+            return base as L2psGateConfig
+        case "tlsnDisabled":
+            return validateTlsnDisabledEntry(base, entry)
+        case "storageFeeSettlement":
+            return base as StorageFeeSettlementConfig
+        case "referenceBlockRoom10":
+            return base as ReferenceBlockRoom10Config
+        case "tlsnVerified":
+            return validateTlsnVerifiedEntry(base, entry)
+        case "keylessWeb2Identity":
+            return base as KeylessWeb2IdentityConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
@@ -613,4 +701,56 @@ function validateGasFeeSeparationEntry(
         description: base.description,
         treasuryAddress: ta,
     }
+}
+
+/**
+ * Validate the tlsnVerified payload (rules in `tlsnVerifiedPayload.ts`). A
+ * scheduled entry must carry the notary keys and verifier pin every validator
+ * checks presentations against; a node that booted without them would accept
+ * or refuse identity links differently from its peers.
+ */
+function validateTlsnVerifiedEntry(
+    base: BaseForkConfig,
+    entry: Record<string, unknown>,
+): TlsnVerifiedConfig {
+    const problems = tlsnVerifiedProblems(entry, base.activationHeight !== null)
+    if (problems.length > 0) {
+        throw new ForkConfigValidationError(
+            `[FORKS] Genesis fork "tlsnVerified" is invalid: ${problems.join("; ")}`,
+        )
+    }
+    const hasPayload = Object.hasOwn(entry, "notaryKeys")
+    return {
+        activationHeight: base.activationHeight,
+        description: base.description,
+        ...(hasPayload ? tlsnVerifiedParamsOf(entry) : {}),
+    }
+}
+
+/**
+ * Validate the optional `reenableAt` of tlsnDisabled: the block height from
+ * which TLSNotary is accepted again. It needs a scheduled kill switch and must
+ * be at least its activation height + 2: the switch at H first refuses block
+ * H + 1, so a lower value would refuse no block. Absent or null, the switch
+ * stays on, as before; the field is kept only when set, so the schedule digest
+ * of an entry without it is unchanged.
+ */
+function validateTlsnDisabledEntry(
+    base: BaseForkConfig,
+    entry: Record<string, unknown>,
+): TlsnDisabledConfig {
+    const reenableAt = entry.reenableAt
+    if (reenableAt === undefined || reenableAt === null) return base
+    if (
+        base.activationHeight === null ||
+        !Number.isSafeInteger(reenableAt) ||
+        (reenableAt as number) <= base.activationHeight + 1
+    ) {
+        throw new ForkConfigValidationError(
+            "[FORKS] Genesis fork \"tlsnDisabled\".reenableAt must be an integer block height of at least a scheduled " +
+                `activationHeight (${JSON.stringify(base.activationHeight)}) + 2, as a lower one would refuse no block, ` +
+                `got: ${JSON.stringify(reenableAt)}`,
+        )
+    }
+    return { ...base, reenableAt: reenableAt as number }
 }
