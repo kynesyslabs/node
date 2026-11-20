@@ -6,10 +6,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
-# Single files outside SUITE_DIRS that guard consensus, boot and launch
+# Single files outside SUITE_DIRS that guard consensus, boot, launch and logging
 # safety. A listed file that is gone fails its run instead of dropping out
 # silently
 SUITE_FILES=(
+    scripts/check-secret-logs.test.ts
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
@@ -26,6 +27,7 @@ SUITE_FILES=(
     src/config/loader.rapidApi.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/libs/crypto/keyErrorLogging.test.ts
     src/features/tlsnotary/proxyToken.test.ts
     src/features/tlsnotary/proxyRelay.test.ts
     src/features/tlsnotary/relayTarget.test.ts
