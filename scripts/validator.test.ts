@@ -190,3 +190,29 @@ describe("validator.ts peer list handling", () => {
         })
     }
 })
+
+describe("validator.ts --amount", () => {
+    it("keeps a bonded stake on a network without nftValidatorGating, or one that does not say", async () => {
+        const { amountRefusal } = await import("./validator")
+        expect(amountRefusal("stake", "1000", false)).toBeNull()
+        expect(amountRefusal("stake", "1000", null)).toBeNull()
+        expect(amountRefusal("stake", undefined, true)).toBeNull()
+    })
+
+    it("refuses it where nftValidatorGating is active, and on every command but stake", async () => {
+        const { amountRefusal } = await import("./validator")
+        expect(amountRefusal("stake", "1000", true)).toContain("this network runs nftValidatorGating")
+        for (const command of ["unstake", "exit", "challenge", "nft-proof"]) {
+            expect(amountRefusal(command, "1000", false)).toBe(`--amount is used only by stake, not by ${command}`)
+        }
+    })
+
+    it("refuses --amount on another command before any network use", () => {
+        const r = Bun.spawnSync([process.execPath, SCRIPT, "unstake", "--amount", "5", "--rpc", "http://127.0.0.1:9"], {
+            stdout: "pipe",
+            stderr: "pipe",
+        })
+        expect(r.exitCode).toBe(1)
+        expect(String(r.stderr)).toContain("--amount is used only by stake, not by unstake")
+    })
+})

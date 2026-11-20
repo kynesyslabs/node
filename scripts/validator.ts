@@ -387,6 +387,41 @@ function nftSeatBuilders(): NftSeatBuilders {
     return DemosTransactions as unknown as NftSeatBuilders
 }
 
+/**
+ * Why `--amount` may not be used with `command`, or null. It bonds DEM, so
+ * only `stake` takes it, and not on a network running nftValidatorGating,
+ * where a seat is backed by an NFT and the node refuses any DEM on it.
+ * `nftGating` null means the network did not say; the node then decides.
+ */
+export function amountRefusal(
+    command: string | undefined,
+    amount: string | undefined,
+    nftGating: boolean | null,
+): string | null {
+    if (amount === undefined) return null
+    if (command !== "stake") return `--amount is used only by stake, not by ${command ?? "(no command)"}`
+    if (nftGating === true) {
+        return (
+            "--amount is refused: this network runs nftValidatorGating, where a seat is backed " +
+            "by an NFT and carries no DEM; stake with --nft-proof <signature> instead"
+        )
+    }
+    return null
+}
+
+/** Whether the node reports nftValidatorGating active, or null when it does not say. */
+async function nftGatingActiveOn(demos: Demos): Promise<boolean | null> {
+    try {
+        const info = (await demos.getNetworkInfo()) as {
+            forks?: { nftValidatorGating?: { activated?: unknown } }
+        } | null
+        const activated = info?.forks?.nftValidatorGating?.activated
+        return typeof activated === "boolean" ? activated : null
+    } catch {
+        return null
+    }
+}
+
 /** A stake bonded in DEM, the rule of a network that does not run nftValidatorGating. */
 async function cmdStakeDem(amountDem: string): Promise<void> {
     let amountOs: string
@@ -399,13 +434,15 @@ async function cmdStakeDem(amountDem: string): Promise<void> {
         exitWith(`stake amount must be greater than 0 (got ${amountDem} DEM)`)
     }
     const demos = await connect()
+    const refused = amountRefusal("stake", amountDem, await nftGatingActiveOn(demos))
+    if (refused) exitWith(refused)
     const tx = await DemosTransactions.stake(amountOs, globalThis.validatorCtx.rpc, demos)
     await submit(demos, tx, `Staking ${amountDem} DEM`)
 }
 
 async function cmdStake(): Promise<void> {
     const { flags } = globalThis.validatorCtx
-    if (flags.amount) return cmdStakeDem(flags.amount)
+    if (flags.amount !== undefined) return cmdStakeDem(flags.amount)
 
     // The seat records this node's public URL, not the node the tx goes through.
     const connectionUrl = process.env.EXPOSED_URL?.trim() ?? ""
@@ -487,7 +524,7 @@ const USAGE =
     "[--identity <file>] [--rpc <url>] [--solana-rpc <url>]\n" +
     "  nft-proof --mint <MINT> --keypair <key file> [--account <n>] [--demos-address <0x...>]\n" +
     "    signs the proof, sends it to Solana, waits for finality\n" +
-    "  stake --amount <DEM>   (a network without nftValidatorGating)\n" +
+    "  stake --amount <DEM>   bonded stake; refused where nftValidatorGating is active\n" +
     "  stake --nft-proof <signature>\n" +
     "  stake --nft-mint <MINT> --solana-keypair <key file> [--account <n>]\n" +
     `  key file: ${ACCEPTED_SECRET_FORMATS}; --account picks the mnemonic account index\n` +
@@ -496,9 +533,9 @@ const USAGE =
 async function main(): Promise<void> {
     const { positionals, flags } = parseArgs(process.argv.slice(2))
     const command = positionals[0]
-    if (flags.amount !== undefined) {
-        exitWith("--amount is no longer used: a seat carries no DEM")
-    }
+    // Which network runs nftValidatorGating is known only once connected
+    const misplaced = amountRefusal(command, flags.amount, null)
+    if (misplaced) exitWith(`${misplaced}\n${USAGE}`)
 
     const solanaRpc =
         flags["solana-rpc"] ||
@@ -530,4 +567,4 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch(e => exitWith(e))
+if (import.meta.main) main().catch(e => exitWith(e))
