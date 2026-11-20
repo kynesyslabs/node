@@ -32,6 +32,7 @@ import {
     GCREditTLSNotary,
 } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 import log from "src/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { normalizePubkey } from "./normalizePubkey"
 
@@ -1401,6 +1402,42 @@ export default class HandleGCR {
         return { nonceCharged: nonceOnly.success, feeCharged: false }
     }
 
+    /**
+     * Puts back the accounts, rows and staged caches of a transaction whose
+     * edits failed, and returns its failed result.
+     */
+    private static async restoreFailedEdits(
+        entities: GCREntityCaches,
+        snapshots: GCRMainSnapshot[],
+        rowSnapshots: RowSnapshot[],
+        staged: Partial<StagedSnapshot>,
+        message: string,
+    ): Promise<GCRApplyResult> {
+        // An account not loaded before the transaction comes back as a
+        // fresh one, built in memory only (skipSave), so the builds can
+        // run together.
+        const restored = await Promise.all(
+            snapshots.map(
+                async snap =>
+                    [
+                        snap.pubkey,
+                        snap.entity ?? (await HandleGCR.createAccount(snap.pubkey, {}, true)),
+                    ] as const,
+            ),
+        )
+        for (const [pubkey, entity] of restored) entities.accounts.set(pubkey, entity)
+        restoreRows(rowSnapshots)
+        restoreStaged(entities, staged)
+        return {
+            success: false,
+            entities,
+            message,
+            sideEffects: [],
+            deferredWrites: [],
+            appliedEditsCount: 0,
+        }
+    }
+
     private static async applyTransactionEdits(
         entities: GCREntityCaches,
         tx: Transaction,
@@ -1856,32 +1893,6 @@ export default class HandleGCR {
         const appliedPlaces: (EditPlace | undefined)[] = []
         const placeOf = HandleGCR.editPlaces(entities, tx, simulate)
 
-        const restoreFailedEdits = async (message: string): Promise<GCRApplyResult> => {
-            // An account not loaded before the transaction comes back as a
-            // fresh one, built in memory only (skipSave), so the builds can
-            // run together.
-            const restored = await Promise.all(
-                snapshots.map(
-                    async snap =>
-                        [
-                            snap.pubkey,
-                            snap.entity ?? (await HandleGCR.createAccount(snap.pubkey, {}, true)),
-                        ] as const,
-                ),
-            )
-            for (const [pubkey, entity] of restored) entities.accounts.set(pubkey, entity)
-            restoreRows(rowSnapshots)
-            restoreStaged(entities, staged)
-            return {
-                success: false,
-                entities,
-                message,
-                sideEffects: [],
-                deferredWrites: [],
-                appliedEditsCount: 0,
-            }
-        }
-
         // Apply all edits for this tx
         for (const signedEdit of gcrEdits) {
             const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
@@ -1914,7 +1925,13 @@ export default class HandleGCR {
                 }
                 // After the rollback, which also reverses the balance edits:
                 // reversing them on the restored accounts would refund them twice.
-                return restoreFailedEdits(result.message)
+                return HandleGCR.restoreFailedEdits(
+                    entities,
+                    snapshots,
+                    rowSnapshots,
+                    staged,
+                    result.message,
+                )
             }
 
             // They run after this call returns, still stamping the block's time.
@@ -1945,9 +1962,15 @@ export default class HandleGCR {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
-                const message = `Error processing native side-effects: ${error instanceof Error ? error.message : String(error)}`
+                const message = `Error processing native side-effects: ${getErrorMessage(error)}`
                 log.error(`[simulateOne] ${message}`)
-                return restoreFailedEdits(message)
+                return HandleGCR.restoreFailedEdits(
+                    entities,
+                    snapshots,
+                    rowSnapshots,
+                    staged,
+                    message,
+                )
             }
         }
 
