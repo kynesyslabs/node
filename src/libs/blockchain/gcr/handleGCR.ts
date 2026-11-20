@@ -1818,6 +1818,27 @@ export default class HandleGCR {
         const appliedPlaces: (EditPlace | undefined)[] = []
         const placeOf = HandleGCR.editPlaces(entities, tx, simulate)
 
+        const restoreFailedEdits = async (message: string): Promise<GCRApplyResult> => {
+            for (const snap of snapshots) {
+                if (snap.entity === null) {
+                    const freshEntity = await HandleGCR.createAccount(snap.pubkey, {}, true)
+                    entities.accounts.set(snap.pubkey, freshEntity)
+                } else {
+                    entities.accounts.set(snap.pubkey, snap.entity)
+                }
+            }
+            restoreRows(rowSnapshots)
+            restoreStaged(entities, staged)
+            return {
+                success: false,
+                entities,
+                message,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
+            }
+        }
+
         // Apply all edits for this tx
         for (const signedEdit of gcrEdits) {
             const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
@@ -1850,31 +1871,7 @@ export default class HandleGCR {
                 }
                 // After the rollback, which also reverses the balance edits:
                 // reversing them on the restored accounts would refund them twice.
-                for (const snap of snapshots) {
-                    if (snap.entity === null) {
-                        // Entity was newly created - restore to fresh state
-                        const freshEntity = await HandleGCR.createAccount(
-                            snap.pubkey,
-                            {},
-                            true,
-                        )
-                        entities.accounts.set(snap.pubkey, freshEntity)
-                    } else {
-                        entities.accounts.set(snap.pubkey, snap.entity)
-                    }
-                }
-                restoreRows(rowSnapshots)
-                // After the rollback, which may have edited the staged rows
-                restoreStaged(entities, staged)
-
-                return {
-                    success: false,
-                    entities,
-                    message: result.message,
-                    sideEffects: [],
-                    deferredWrites: [],
-                    appliedEditsCount: 0,
-                }
+                return restoreFailedEdits(result.message)
             }
 
             // They run after this call returns, still stamping the block's time.
@@ -1905,9 +1902,9 @@ export default class HandleGCR {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (error) {
-                log.error(
-                    `[simulateOne] Error processing native side-effects: ${error}`,
-                )
+                const message = `Error processing native side-effects: ${error}`
+                log.error(`[simulateOne] ${message}`)
+                return restoreFailedEdits(message)
             }
         }
 
@@ -3660,13 +3657,10 @@ export default class HandleGCR {
                 log.debug(`[TLSNotary] Domain extracted: ${domain}`)
 
                 // Create the attestation token (idempotent - tokenManager handles duplicates)
-                const token = createToken(
+                createToken(
                     tx.content.from as string,
                     targetUrl,
                     tx.hash,
-                )
-                log.info(
-                    `[TLSNotary] Created token ${token.id} for tx ${tx.hash}`,
                 )
                 break
             }
