@@ -139,8 +139,10 @@ apply to pool admission only: every validator that merges the transaction
 reads Solana again, so the committee judges it as the chain is now. A node
 runs at most 8 Solana reads at once, shares one read of the same record
 for about a round, and judges at most 16 seat transactions per merge (the
-16 with the lowest hashes, so every member judges the same ones); a seat
-transaction past either bound waits for a later round. After a
+16 with the lowest hashes, so every member judges the same ones). A block
+takes at most 16 seat transactions, again the lowest hashes; a seat
+transaction past any of
+these bounds waits for a later round. After a
 refused proof, sign a new one rather than resending the same signature.
 
 ### Re-stake

@@ -372,6 +372,43 @@ describe("a gossiped seat transaction", () => {
     })
 })
 
+describe("the round's seat transactions", () => {
+    const realLockedHashes = (Mempool as any).lockedHashes
+    let locked = new Set<string>()
+    const hashes = (n: number) => Array.from({ length: n }, (_, i) => `0x${i.toString(16).padStart(4, "0")}`)
+
+    beforeEach(() => {
+        nftGatingOn = true
+        locked = new Set()
+        ;(Mempool as any).lockedHashes = () => new Set(locked)
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        ;(Mempool as any).lockedHashes = realLockedHashes
+    })
+
+    it("are the lowest hashes of the pool, whichever member holds more of them", async () => {
+        const seats = hashes(SEAT_TXS_JUDGED_PER_BATCH + 1)
+        // One member pooled them all; a peer's merge imported only the lowest ones.
+        const full = [...seats].reverse().map(seatTx)
+        const peer = seats.slice(0, SEAT_TXS_JUDGED_PER_BATCH).map(seatTx)
+        const bound = async (pool: any[]) =>
+            (await Mempool.boundSeatTransactions([tx("0xpay", 100), ...pool])).map(t => t.hash).sort()
+        expect(await bound(full)).toEqual(await bound(peer))
+        expect(await bound(full)).not.toContain(seats[SEAT_TXS_JUDGED_PER_BATCH])
+        expect(await bound(full)).toContain("0xpay")
+    })
+
+    it("keep the locked block's txs and every tx before nftValidatorGating", async () => {
+        const seats = hashes(SEAT_TXS_JUDGED_PER_BATCH + 2)
+        locked = new Set([seats[SEAT_TXS_JUDGED_PER_BATCH + 1]])
+        const kept = (await Mempool.boundSeatTransactions(seats.map(seatTx))).map(t => t.hash)
+        expect(kept).toEqual([...seats.slice(0, SEAT_TXS_JUDGED_PER_BATCH), seats[SEAT_TXS_JUDGED_PER_BATCH + 1]])
+        nftGatingOn = false
+        expect(await Mempool.boundSeatTransactions(seats.map(seatTx))).toHaveLength(SEAT_TXS_JUDGED_PER_BATCH + 2)
+    })
+})
+
 describe("the own-pool seat re-judge", () => {
     const realLockedHashes = (Mempool as any).lockedHashes
     let locked = new Set<string>()

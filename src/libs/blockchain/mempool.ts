@@ -1132,6 +1132,30 @@ export default class Mempool {
     }
 
     /**
+     * The round's candidate `txs` without the seat txs past the
+     * SEAT_TXS_JUDGED_PER_BATCH lowest hashes; those stay pooled for a later
+     * round. A merge judges and imports that
+     * many per peer batch, so one member may hold more than another, but
+     * the lowest hashes of all of them reach every member's pool, and taking
+     * only those keeps the members' blocks equal. Our locked block's txs are
+     * left as they are: the merge does not judge them either.
+     */
+    public static async boundSeatTransactions<T extends Transaction>(txs: T[]): Promise<T[]> {
+        if (!nftGatingAtTip()) return txs
+        const { isStakingTxType } = await import("src/features/staking/types")
+        const locked = this.lockedHashes()
+        const counted = (tx: T) => isStakingTxType(tx.content?.type ?? "") && !locked.has(tx.hash)
+        const kept = new Set(
+            txs
+                .filter(counted)
+                .map(tx => tx.hash)
+                .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+                .slice(0, SEAT_TXS_JUDGED_PER_BATCH),
+        )
+        return txs.filter(tx => !counted(tx) || kept.has(tx.hash))
+    }
+
+    /**
      * Fresh staking verdicts on the SEAT_TXS_JUDGED_PER_BATCH seat txs with
      * the lowest hashes, each unanswered after SEAT_JUDGE_TIMEOUT_MS; null
      * for the rest, which are not judged this round. By hash rather than by

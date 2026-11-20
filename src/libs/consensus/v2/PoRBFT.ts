@@ -976,7 +976,13 @@ async function mergeAndOrderMempools(
 
     const existingHashes = preExisting.union(newlyExisting)
     log.only(`[mergeAndOrderMempools] Existing hashes: ${existingHashes.size}`)
-    const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
+    const unexecuted = postMempool.filter(tx => !existingHashes.has(tx.hash))
+    const finalMempool = await Mempool.boundSeatTransactions(unexecuted)
+    if (finalMempool.length < unexecuted.length) {
+        log.info(
+            `[mergeAndOrderMempools] Leaving ${unexecuted.length - finalMempool.length} seat txs for a later round`,
+        )
+    }
     log.only(
         `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs`,
     )
