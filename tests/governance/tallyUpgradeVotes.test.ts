@@ -128,6 +128,42 @@ describe("tallyUpgradeVotes", () => {
         expect(proposals._rows[0].status).toBe("activating")
     })
 
+    it("weighs each seat as one once nftValidatorGating holds at the snapshot", async () => {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        const state = getSharedState as unknown as { forkConfig: unknown }
+        const saved = state.forkConfig
+        state.forkConfig = { nftValidatorGating: { activationHeight: 0 } }
+        try {
+            (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+                { staked_amount: "0" },
+                { staked_amount: "0" },
+                { staked_amount: "0" },
+            ] as never)
+            const proposals = makeProposalRepo([
+                {
+                    proposalId: "p1",
+                    status: "pending",
+                    snapshotBlock: 100,
+                    tallyBlock: 200,
+                    effectiveAtBlock: 300,
+                },
+            ])
+            const votes = makeVoteRepo({
+                // ceil(2*3/3) = 2 seats; 2 approve -> pass
+                p1: [
+                    { approve: true, weight: "1" },
+                    { approve: true, weight: "1" },
+                ],
+            })
+            const outcomes = await tallyUpgradeVotes(200, proposals as any, votes as any)
+            expect(outcomes[0].status).toBe("approved")
+            expect(outcomes[0].snapshotWeight).toBe(3n)
+            expect(outcomes[0].threshold).toBe(2n)
+        } finally {
+            state.forkConfig = saved
+        }
+    })
+
     it("rejects one vote below the threshold (abstention = NO)", async () => {
         (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "100" },

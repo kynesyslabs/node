@@ -45,6 +45,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 // TODO insert it in the gcr automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
 
+import {
+    VALIDATOR_STATUS_ACTIVE,
+    VALIDATOR_STATUS_UNSTAKING,
+} from "src/features/staking/constants"
 import _ from "lodash"
 import { In, LessThan, LessThanOrEqual, Not, Repository } from "typeorm"
 
@@ -310,6 +314,13 @@ export default class GCR {
             log.error(`Error fetching validator status: ${e}`)
             return null
         }
+    }
+
+    /** The validator row whose seat `mint` currently backs, active or unstaking, or null. */
+    static async getGCRValidatorByMint(mint: string): Promise<Validators | null> {
+        const repository = await GCR.validatorsRepository()
+        const rows = await repository.findBy({ nft_mint: mint })
+        return rows.find(row => isSeatHolding(row.status)) ?? null
     }
 
     private static async validatorsRepository(): Promise<Repository<Validators>> {
@@ -1365,4 +1376,9 @@ export default class GCR {
     // TODO Build objects for tokens and nfts and write setters for them
 
     // !SECTION Setters
+}
+
+/** Whether a validator status still holds its NFT's seat. */
+function isSeatHolding(status: string | null): boolean {
+    return status === VALIDATOR_STATUS_ACTIVE || status === VALIDATOR_STATUS_UNSTAKING
 }

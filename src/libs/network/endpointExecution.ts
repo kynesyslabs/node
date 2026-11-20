@@ -267,7 +267,7 @@ export async function handleExecuteTransaction(
         result.success = true
     }
 
-    switch (tx.content.type) {
+    switch (tx.content.type as string) {
         case "crosschainOperation": {
             if (refusedAsDisabled(result, "xm")) break
             payload = tx.content.data
@@ -460,6 +460,7 @@ export async function handleExecuteTransaction(
         case "validatorStake":
         case "validatorUnstake":
         case "validatorExit":
+        case "validatorChallenge":
         case "networkUpgrade":
         case "networkUpgradeVote": {
             // No-op — dispatcher already ran in confirmTransaction.

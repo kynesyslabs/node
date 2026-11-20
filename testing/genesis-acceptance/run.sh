@@ -45,7 +45,7 @@ RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps unpinnedCommittee telegramSenderBinding xmRemoveCanonical tokenStakingGate gasFeeSeparation web2ProofBinding tlsnProofEnforcement xmProofBinding storageFeeSettlement referenceBlockRoom10 l2psSettlement tlsnVerified keylessWeb2Identity"
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps unpinnedCommittee telegramSenderBinding xmRemoveCanonical tokenStakingGate tokenStaking nftValidatorGating gasFeeSeparation web2ProofBinding tlsnProofEnforcement xmProofBinding storageFeeSettlement referenceBlockRoom10 l2psSettlement tlsnVerified keylessWeb2Identity"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -150,15 +150,37 @@ docker cp -q "${CP}:/app/data/genesis.json" "${FIX}/image/genesis.json" &&
     die2 "the image has no /app/data/genesis.json or /app/data/snapshot"
 docker rm -v "${CP}" >/dev/null
 
+# Under nftValidatorGating at 0 on this mainnet-like chain id, block 0 seats
+# only rows naming an allowlisted mint, an owner and a proof; the node checks
+# them offline, so well-formed stand-ins are enough here.
+python3 - "${FIX}/image/genesis.json" "${REPO_ROOT}/src/features/staking/nft-allowlist.json" \
+    "${FIX}/image/genesis.seats.json" <<'PY' >> "${RUNLOG}" 2>&1 || die2 "seat NFT fields failed (run.log)"
+import json, sys
+src, allowlist, out = sys.argv[1:4]
+with open(src) as f:
+    genesis = json.load(f)
+if isinstance(genesis, str):
+    genesis = json.loads(genesis)
+with open(allowlist) as f:
+    mints = json.load(f)["mints"]
+for i, v in enumerate(genesis.get("validators") or []):
+    v.pop("nft_exempt", None)
+    v["nft_mint"] = mints[i]
+    v["nft_owner"] = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
+    v["nft_proof_tx"] = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+with open(out, "w") as f:
+    json.dump(genesis, f, indent=2)
+PY
+
 # identityCarryover refuses a snapshot that carries balances or validators of
 # its own, so every scenario boots on the carry-over build of the bundled
 # snapshot, its validators taken from the image's genesis.
 (cd "${REPO_ROOT}" && bun scripts/state-snapshot/carryover.ts --in "${FIX}/image/snapshot" \
-    --validators "${FIX}/image/genesis.json" --out "${FIX}/snapshot") >> "${RUNLOG}" 2>&1 ||
+    --validators "${FIX}/image/genesis.seats.json" --out "${FIX}/snapshot") >> "${RUNLOG}" 2>&1 ||
     die2 "carry-over snapshot build failed (run.log)"
 cp "${FIX}/snapshot/manifest.json" "${FIX}/manifest/manifest.json"
 
-python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.json" --manifest "${FIX}/manifest/manifest.json" \
+python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.seats.json" --manifest "${FIX}/manifest/manifest.json" \
     --out "${FIX}" --chain-id "${CHAIN_ID}" --timestamp "${GENESIS_TS}" \
     --far-height "${FAR_HEIGHT}" --unknown-fork "${UNKNOWN_FORK}" >> "${RUNLOG}" 2>&1 ||
     die2 "fixture generation failed (run.log)"

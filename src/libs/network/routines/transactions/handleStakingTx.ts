@@ -1,11 +1,14 @@
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import ValidatorsManagement from "@/libs/blockchain/routines/validatorsManagement"
+import type { SolanaReadOptions } from "@/features/staking/solanaProof"
 import { requireSender } from "@/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 
-interface StakingTxResult {
+export interface StakingTxResult {
     success: boolean
     message: string
+    /** No Solana endpoint answered; the tx is undecided rather than bad. */
+    unreachable?: boolean
 }
 
 /**
@@ -19,12 +22,14 @@ interface StakingTxResult {
  * via `GCRValidatorStakeRoutines.apply()` on every node.
  *
  * Called from `confirmTransaction` (RPC entry, before signing) so bad
- * tx is rejected before validityData is signed and broadcast.
+ * tx is rejected before validityData is signed and broadcast, and again by
+ * the mempool merge with `{ fresh: true }` (see SolanaReadOptions).
  */
 export async function handleStakingTx(
     tx: Transaction,
+    options: SolanaReadOptions = {},
 ): Promise<StakingTxResult> {
-    const type = tx.content.type
+    const type = tx.content.type as string
     const sender = requireSender(tx)
     if (!sender) {
         return { success: false, message: "Missing sender" }
@@ -36,15 +41,15 @@ export async function handleStakingTx(
 
     switch (type) {
         case "validatorStake": {
-            const payload = extractStakePayload(tx)
-            if (!payload) {
-                return { success: false, message: "Missing stake payload" }
-            }
-            const r = await ValidatorsManagement.manageValidatorStakeTx(nodeTx)
+            const r = await ValidatorsManagement.manageValidatorStakeTx(nodeTx, options)
             log.debug(
                 `[handleStakingTx] validatorStake ${tx.hash ?? ""} → ${r.valid}: ${r.message}`,
             )
-            return { success: r.valid, message: r.message }
+            return { success: r.valid, message: r.message, unreachable: r.unreachable }
+        }
+        case "validatorChallenge": {
+            const r = await ValidatorsManagement.manageValidatorChallengeTx(nodeTx, options)
+            return { success: r.valid, message: r.message, unreachable: r.unreachable }
         }
         case "validatorUnstake": {
             const r = await ValidatorsManagement.manageValidatorUnstakeTx(
@@ -63,18 +68,3 @@ export async function handleStakingTx(
             }
     }
 }
-
-function extractStakePayload(
-    tx: Transaction,
-): { amount: string; connectionUrl: string } | null {
-    const data = tx.content?.data as unknown as [string, unknown] | undefined
-    if (!Array.isArray(data) || data.length < 2) return null
-    const p = data[1] as { amount?: unknown; connectionUrl?: unknown } | null
-    if (!p || typeof p.amount !== "string") return null
-    return {
-        amount: p.amount,
-        connectionUrl:
-            typeof p.connectionUrl === "string" ? p.connectionUrl : "",
-    }
-}
-

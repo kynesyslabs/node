@@ -34,6 +34,15 @@ import {
     nativeSendRefusal,
     nonCanonicalAddressRefusal,
 } from "../validation/nativeValueRules"
+import {
+    nftGatingActive,
+    SEAT_TX_TYPES,
+} from "@/forks/nftValidatorGatingGate"
+import {
+    SOLANA_SEAT_TX_TYPES,
+    recordSeatVerdict,
+    seatRateRefusal,
+} from "src/features/staking/seatAdmission"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -83,7 +92,7 @@ export async function confirmTransaction(
         return validityData
     }
 
-    const typeRefusal = clientTxTypeRefusal(tx)
+    const typeRefusal = clientTxTypeRefusal(tx, nftGatingActive(referenceBlock))
     if (typeRefusal) {
         validityData.data.message =
             "[Tx Validation] [TYPE ERROR] " + typeRefusal + "\n"
@@ -97,6 +106,7 @@ export async function confirmTransaction(
     const featureRefusal = featureGateRefusal(tx, {
         l2psOff: l2psOff(),
         tlsnOff: tlsnDisabled(),
+        nftGating: nftGatingActive(referenceBlock),
     })
     if (featureRefusal) {
         validityData.data.message =
@@ -242,7 +252,13 @@ export async function confirmTransaction(
     // The fee-distribution write MUST happen before
     // `signValidityData(validityData)` so the appended edits are part
     // of the signed hash (peers compute the same hash).
-    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+    //
+    // Seat transactions pay no fee under nftValidatorGating: a new validator
+    // may hold no DEM at all.
+    if (
+        isForkActive("gasFeeSeparation", referenceBlock) &&
+        !(nftGatingActive(referenceBlock) && SEAT_TX_TYPES.has(tx.content.type))
+    ) {
         const feeBoundsResult = await applyGasFeeSeparation(tx)
         if (feeBoundsResult.ok === false) {
             validityData.data.valid = false
@@ -257,7 +273,7 @@ export async function confirmTransaction(
     // becomes part of the signed hash, so peers compute the same hash.
     let dispatchResult: { ok: true } | { ok: false; message: string }
     try {
-        dispatchResult = await runTypeDispatcher(tx)
+        dispatchResult = await runTypeDispatcher(tx, nftGatingActive(referenceBlock))
     } catch (e) {
         dispatchResult = {
             ok: false,
@@ -281,18 +297,29 @@ export async function confirmTransaction(
 
 async function runTypeDispatcher(
     tx: Transaction,
+    nftGating: boolean,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
     const type = (tx?.content?.type ?? "") as string
+    // Counted here, after the signature and nonce checks, so only the key
+    // holder can spend a sender's allowance, and before the Solana reads.
+    if (nftGating && SOLANA_SEAT_TX_TYPES.has(type)) {
+        const raw = tx.content.from
+        const from = typeof raw === "string" ? raw : forgeToHex(raw)
+        const refusal = seatRateRefusal(from)
+        if (refusal) return { ok: false, message: refusal }
+    }
     if (
         type === "validatorStake" ||
         type === "validatorUnstake" ||
-        type === "validatorExit"
+        type === "validatorExit" ||
+        type === "validatorChallenge"
     ) {
         const { handleStakingTx } =
             await import("@/libs/network/routines/transactions/handleStakingTx")
         const r = await handleStakingTx(
             tx as unknown as Parameters<typeof handleStakingTx>[0],
         )
+        if (typeof tx.hash === "string") recordSeatVerdict(tx.hash, r)
         return r.success ? { ok: true } : { ok: false, message: r.message }
     }
     if (type === "networkUpgrade" || type === "networkUpgradeVote") {

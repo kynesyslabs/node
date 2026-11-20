@@ -54,6 +54,7 @@ import { checkClockAtBoot, startClockProbe } from "./libs/utils/clockProbe"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { ensureNftGatingReady } from "./features/staking/boot"
 import { ensureValidatorSetSnapshot } from "./libs/blockchain/finality/validatorSet"
 import { pruneStorageHistory } from "./libs/blockchain/finality/storageHistory"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
@@ -62,7 +63,10 @@ import {
     holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
 } from "./libs/identity/signingRecord"
-import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
+import {
+    armRestartSigningFloor,
+    waitForRestartSigningFloor,
+} from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -651,6 +655,7 @@ async function preMainLoop() {
             )
         }
         await ensureValidatorSeed(genesisData)
+        await ensureNftGatingReady()
         // Committee selection under finalityProofs reads the set from here
         await ensureValidatorSetSnapshot(await Chain.getLastBlockNumber())
         await pruneStorageHistory(await Chain.getLastBlockNumber())
@@ -695,6 +700,9 @@ async function preMainLoop() {
     if (!l2psOff()) {
         await loadL2PSNetworks()
     }
+
+    // Peers start a round as soon as they see this node.
+    await waitForRestartSigningFloor(getNetworkTimestamp)
 
     await startInboundServers()
 

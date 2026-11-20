@@ -2295,11 +2295,11 @@ export default class HandleGCR {
         } = state
         for (const tx of txs) {
             const reason =
-                (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
+                (typeAllowList ? blockTxTypeRefusal(tx, state.nftGating) : null) ??
                 featureGateRefusal(tx, state) ??
                 governanceGateRefusal(tx, governance) ??
                 tokenStakingRefusal(tx, stakingOpen) ??
-                (stakeChecks ? stakeSenderRefusal(tx) : null)
+                (stakeChecks ? stakeSenderRefusal(tx, state.nftGating) : null)
             if (reason) {
                 refuse(tx, reason)
                 continue
@@ -2321,7 +2321,10 @@ export default class HandleGCR {
             if (refused.has(tx.hash)) continue
             let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
             try {
-                verdict = await verifyEditsAtApply(tx, { postFork })
+                verdict = await verifyEditsAtApply(tx, {
+                    postFork,
+                    nftGating: state.nftGating,
+                })
             } catch (error) {
                 verdict = { ok: false, reason: `could not be verified: ${error}` }
             }
@@ -2870,6 +2873,25 @@ export default class HandleGCR {
                         const row = await repo.findOneBy(where)
                         cache.set(where.address, row)
                         return row
+                    }
+                }
+                if (property === "findBy") {
+                    // Rows holding a mint: the ones this block already
+                    // staged first, then the database, deduplicated by
+                    // address so a staged row shadows its stored version.
+                    return async (where: { nft_mint: string }) => {
+                        const byAddress = new Map<string, Validators>()
+                        for (const row of await repo.findBy(where)) {
+                            if (row.address) byAddress.set(row.address, row)
+                        }
+                        for (const row of cache.values()) {
+                            if (row && row.address && row.nft_mint === where.nft_mint) {
+                                byAddress.set(row.address, row)
+                            } else if (row && row.address) {
+                                byAddress.delete(row.address)
+                            }
+                        }
+                        return [...byAddress.values()]
                     }
                 }
                 return Reflect.get(target, property, receiver)

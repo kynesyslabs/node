@@ -25,6 +25,7 @@ import type {
     BlockCapsConfig,
     TokenStakingGateConfig,
     TokenStakingConfig,
+    NftValidatorGatingConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
     L2psSettlementConfig,
@@ -427,6 +428,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "tokenStaking":
             getSharedState.forkConfig.tokenStaking = config as TokenStakingConfig
             return
+        case "nftValidatorGating":
+            getSharedState.forkConfig.nftValidatorGating =
+                config as NftValidatorGatingConfig
+            return
         case "unpinnedCommittee":
             getSharedState.forkConfig.unpinnedCommittee =
                 config as UnpinnedCommitteeConfig
@@ -621,6 +626,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as TokenStakingGateConfig
         case "tokenStaking":
             return base as TokenStakingConfig
+        case "nftValidatorGating":
+            return base as NftValidatorGatingConfig
         case "unpinnedCommittee":
             return base as UnpinnedCommitteeConfig
         case "telegramSenderBinding":

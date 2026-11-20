@@ -14,12 +14,30 @@ import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import { TOKEN_STAKING_REFUSAL, tokenStakingOpen } from "@/forks/tokenStakingGate"
+import { nftGatingActive } from "@/forks/nftValidatorGatingGate"
 import { chainMinValidatorStake } from "src/features/staking/chainMinStake"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import type {
     ValidatorStakePayload,
+    ValidatorChallengePayload,
+    ValidatorNftProof,
     GCREditValidatorStake,
 } from "src/features/staking/types"
+import { isAllowlistedMint } from "src/features/staking/nftAllowlist"
+import {
+    verifyChallengeEvidence,
+    verifyProofSupersedes,
+    verifyCurrentOwner,
+    verifyNftProof,
+    type SolanaCheck,
+    type SolanaReadOptions,
+} from "src/features/staking/solanaProof"
+import {
+    challengeVerdictKey,
+    refusedVerdict,
+    rememberRefused,
+    stakeVerdictKey,
+} from "src/features/staking/seatAdmission"
 import {
     DEFAULT_MIN_VALIDATOR_STAKE,
     UNSTAKE_LOCK_BLOCKS,
@@ -61,12 +79,22 @@ async function stakingOpen(): Promise<boolean> {
     return tokenStakingOpen(await Chain.getLastBlockNumber())
 }
 
-type StakeTxResult = { valid: boolean; message: string }
+/** Whether `nftValidatorGating` holds for the block applied on the current tip. */
+async function nftGating(): Promise<boolean> {
+    return nftGatingActive(await Chain.getLastBlockNumber())
+}
+
+/**
+ * `unreachable` marks a verdict that no Solana endpoint could answer: the
+ * tx is neither accepted nor known bad, and a consensus caller leaves it
+ * out of its candidate without treating it as invalid.
+ */
+export type StakeTxResult = { valid: boolean; message: string; unreachable?: boolean }
 
 function parseStakeTx(tx: Transaction):
     | { valid: true; payload: ValidatorStakePayload; sender: string; amount: bigint }
     | { valid: false; result: StakeTxResult } {
-    const payload = extractStakePayload(tx)
+    const payload = extractStakePayload(tx, false)
     if (!payload) {
         return { valid: false, result: { valid: false, message: "Missing stake payload" } }
     }
@@ -98,10 +126,12 @@ export default class ValidatorsManagement {
      */
     static async manageValidatorStakeTx(
         tx: Transaction,
+        options: SolanaReadOptions = {},
     ): Promise<StakeTxResult> {
         if (!(await stakingOpen())) {
             return { valid: false, message: TOKEN_STAKING_REFUSAL }
         }
+        if (await nftGating()) return ValidatorsManagement.manageNftSeatStakeTx(tx, options)
         const parsed = parseStakeTx(tx)
         if (parsed.valid === false) return parsed.result
         const { payload, sender, amount } = parsed
@@ -178,6 +208,182 @@ export default class ValidatorsManagement {
     }
 
     /**
+     * A `validatorStake` under `nftValidatorGating`: the seat is backed by an
+     * NFT, not by DEM, so the amount is 0 and entering the set takes a proof.
+     */
+    static async manageNftSeatStakeTx(
+        tx: Transaction,
+        options: SolanaReadOptions = {},
+    ): Promise<StakeTxResult> {
+        const payload = extractStakePayload(tx)
+        if (!payload) {
+            return { valid: false, message: "Missing stake payload" }
+        }
+
+        const sender = requireSender(tx)
+        if (!sender) return { valid: false, message: "Missing sender" }
+
+        let amount: bigint
+        try {
+            amount = BigInt(payload.amount)
+        } catch {
+            return { valid: false, message: "Invalid stake amount encoding" }
+        }
+        if (amount !== 0n) {
+            return { valid: false, message: "Stake amount must be 0; a seat is backed by its NFT" }
+        }
+
+        const existing = await GCR.getGCRValidatorStatus(sender)
+        const entering = !existing || existing.status === VALIDATOR_STATUS_EXITED
+        if (
+            !entering &&
+            existing.status !== VALIDATOR_STATUS_ACTIVE &&
+            existing.status !== VALIDATOR_STATUS_UNSTAKING
+        ) {
+            return {
+                valid: false,
+                message: `Validator not eligible for stake (status=${existing.status})`,
+            }
+        }
+
+        if (entering) {
+            if (!payload.connectionUrl && !existing?.connection_url) {
+                return {
+                    valid: false,
+                    message: "connectionUrl required for first stake",
+                }
+            }
+            const nft = await ValidatorsManagement.checkEntranceNft(
+                payload.nft,
+                sender,
+                tx.content.timestamp,
+                options,
+            )
+            if (!nft.valid) return nft
+            return { valid: true, message: `Validator entrance valid (${nft.message})` }
+        }
+
+        // A proof on a top-up is never checked against Solana, so one must
+        // not ride in and be recorded as the seat's NFT.
+        if (payload.nft !== undefined) {
+            return {
+                valid: false,
+                message: "A top-up cannot carry an NFT proof",
+            }
+        }
+        return { valid: true, message: "Validator stake increase valid" }
+    }
+
+    /**
+     * The NFT rules for a stake that takes a seat: a proof is present, its
+     * mint is allowlisted and free, the proof checks out on Solana, and the
+     * wallet still holds the NFT. A `fresh` caller also skips the held
+     * refusals: one may say the wallet no longer held the NFT minutes ago,
+     * and members that did not admit the tx would read the chain as it is now.
+     */
+    static async checkEntranceNft(
+        nft: ValidatorNftProof | undefined,
+        sender: string,
+        txTimestampMs: number,
+        options: SolanaReadOptions = {},
+    ): Promise<StakeTxResult> {
+        if (nft === undefined) {
+            return {
+                valid: false,
+                message: "An allowlisted node NFT proof is required to become a validator",
+            }
+        }
+        if (!isAllowlistedMint(nft.mint)) {
+            return { valid: false, message: `NFT ${nft.mint} is not eligible` }
+        }
+        const validator = sender.startsWith("0x") ? sender : `0x${sender}`
+        const verdictKey = stakeVerdictKey(nft.proofTx, validator)
+        const held = options.fresh ? null : refusedVerdict(verdictKey)
+        if (held !== null) return { valid: false, message: held }
+        const proof = await verifyNftProof(nft, validator, txTimestampMs, undefined, options)
+        if (proof.status !== "valid") return judged(proof, "NFT proof", verdictKey)
+        const owner = await verifyCurrentOwner(nft.mint, nft.owner, options)
+        if (owner.status !== "valid") return judged(owner, "NFT ownership", verdictKey)
+        // Another seat backed by this mint is evicted when the stake applies;
+        // the new proof must be later than the one that seat was taken with.
+        const holder = await GCR.getGCRValidatorByMint(nft.mint)
+        if (holder && holder.address !== sender) {
+            if (holder.nft_proof_tx) {
+                const order = await verifyProofSupersedes(proof.slot, holder.nft_proof_tx, options)
+                if (order.status !== "valid") return judged(order, "NFT proof", verdictKey)
+            }
+            return { valid: true, message: `NFT proof valid; evicts ${holder.address}` }
+        }
+        return { valid: true, message: "NFT proof valid" }
+    }
+
+    /**
+     * Validate a `validatorChallenge` tx: the target holds a seat backed by
+     * an NFT, and the evidence is a finalized transfer of that NFT out of
+     * the recorded wallet after the proof.
+     */
+    static async manageValidatorChallengeTx(
+        tx: Transaction,
+        options: SolanaReadOptions = {},
+    ): Promise<StakeTxResult> {
+        if (!(await nftGating())) {
+            return { valid: false, message: "validatorChallenge is not active on this network" }
+        }
+        const sender = requireSender(tx)
+        if (!sender) return { valid: false, message: "Missing sender" }
+        const payload = extractChallengePayload(tx)
+        if (!payload) {
+            return { valid: false, message: "Missing challenge payload" }
+        }
+        const target = await GCR.getGCRValidatorStatus(payload.validator)
+        if (!target) return { valid: false, message: "Challenged validator not found" }
+        if (
+            target.status !== VALIDATOR_STATUS_ACTIVE &&
+            target.status !== VALIDATOR_STATUS_UNSTAKING
+        ) {
+            return {
+                valid: false,
+                message: `Challenged validator holds no seat (status=${target.status})`,
+            }
+        }
+        if (!target.nft_mint || !target.nft_owner || !target.nft_proof_tx) {
+            return { valid: false, message: "Challenged validator has no NFT on record" }
+        }
+        if (payload.proofTx !== target.nft_proof_tx) {
+            return {
+                valid: false,
+                message: `Challenge names proof ${payload.proofTx}, but the seat rests on ${target.nft_proof_tx}`,
+            }
+        }
+        // Apply refuses an eviction that would leave no committee, so the
+        // challenge is refused here before it costs a Solana read.
+        if (target.status === VALIDATOR_STATUS_ACTIVE) {
+            const floor = await activeFloorRefusal("Eviction")
+            if (floor) return { valid: false, message: floor }
+        }
+        const verdictKey = challengeVerdictKey(
+            payload.evidenceTx,
+            target.nft_proof_tx,
+            payload.validator,
+        )
+        const held = options.fresh ? null : refusedVerdict(verdictKey)
+        if (held !== null) return { valid: false, message: held }
+        const evidence = await verifyChallengeEvidence(
+            payload.evidenceTx,
+            {
+                mint: target.nft_mint,
+                owner: target.nft_owner,
+                proofTx: target.nft_proof_tx,
+            },
+            options,
+        )
+        if (evidence.status !== "valid") {
+            return judged(evidence, "Challenge evidence", verdictKey)
+        }
+        return { valid: true, message: "Challenge valid" }
+    }
+
+    /**
      * Validate a `validatorUnstake` tx — the sender is an active validator
      * and does not already have an unstake in progress.
      */
@@ -206,19 +412,10 @@ export default class ValidatorsManagement {
                 message: "Unstake already requested",
             }
         }
-        if (await stakeChecksActive()) {
-            const active = (
-                (await GCR.getGCRValidatorsAtBlock(
-                    await Chain.getLastBlockNumber(),
-                )) as unknown[]
-            ).length
-            const floor = quorumThreshold(getSharedState.shardSize)
-            if (active - 1 < floor) {
-                return {
-                    valid: false,
-                    message: `Unstake would leave ${active - 1} active validators, below the committee floor of ${floor}`,
-                }
-            }
+        // Apply holds an unstake to the floor under either fork.
+        if ((await stakeChecksActive()) || (await nftGating())) {
+            const floor = await activeFloorRefusal("Unstake")
+            if (floor) return { valid: false, message: floor }
         }
         return { valid: true, message: "Unstake valid" }
     }
@@ -335,6 +532,46 @@ export default class ValidatorsManagement {
     }
 }
 
+/**
+ * Why taking one validator out of the active set at the tip would leave
+ * fewer than the committee floor, or null.
+ */
+async function activeFloorRefusal(what: string): Promise<string | null> {
+    const active = (
+        (await GCR.getGCRValidatorsAtBlock(await Chain.getLastBlockNumber())) as unknown[]
+    ).length
+    const floor = quorumThreshold(getSharedState.shardSize)
+    if (active - 1 < floor) {
+        return `${what} would leave ${active - 1} active validators, below the committee floor of ${floor}`
+    }
+    return null
+}
+
+/**
+ * `fromCheck`, holding a refusal under `verdictKey` so the same proof or
+ * evidence is not read from Solana again while it stays refused.
+ */
+function judged(check: SolanaCheck, what: string, verdictKey: string): StakeTxResult {
+    const result = fromCheck(check, what)
+    if (!result.valid && !result.unreachable) rememberRefused(verdictKey, result.message)
+    return result
+}
+
+/** A tx verdict from a Solana check, keeping "unreachable" distinct from "invalid". */
+function fromCheck(check: SolanaCheck, what: string): StakeTxResult {
+    if (check.status === "unreachable") {
+        return {
+            valid: false,
+            unreachable: true,
+            message: `${what} could not be verified: ${check.reason}`,
+        }
+    }
+    if (check.status === "invalid") {
+        return { valid: false, message: `${what} rejected: ${check.reason}` }
+    }
+    return { valid: true, message: `${what} valid` }
+}
+
 function maxOf(a: bigint, b: bigint): bigint {
     return a > b ? a : b
 }
@@ -377,17 +614,51 @@ function checkBondedStake(
     return { valid: true, message: "Validator entrance valid" }
 }
 
-/** Pull the `ValidatorStakePayload` out of a tx, or return null if malformed. */
-function extractStakePayload(tx: Transaction): ValidatorStakePayload | null {
+/**
+ * Pull the `ValidatorStakePayload` out of a tx, or return null if malformed.
+ * The NFT proof is read only under `nftValidatorGating`; before it the
+ * payload is judged as it always was.
+ */
+function extractStakePayload(
+    tx: Transaction,
+    withNft = true,
+): ValidatorStakePayload | null {
     const data = tx.content?.data as unknown as [string, unknown] | undefined
     if (!Array.isArray(data) || data.length < 2) return null
     const payload = data[1]
     if (!payload || typeof payload !== "object") return null
-    const { amount, connectionUrl } = payload as Partial<ValidatorStakePayload>
+    const { amount, connectionUrl, nft } = payload as Partial<ValidatorStakePayload>
     if (typeof amount !== "string") return null
-    return {
+    const out: ValidatorStakePayload = {
         amount,
         connectionUrl: typeof connectionUrl === "string" ? connectionUrl : "",
     }
+    if (withNft && nft !== undefined) {
+        if (
+            nft === null ||
+            typeof nft !== "object" ||
+            typeof nft.mint !== "string" ||
+            typeof nft.owner !== "string" ||
+            typeof nft.proofTx !== "string"
+        ) {
+            return null
+        }
+        out.nft = { mint: nft.mint, owner: nft.owner, proofTx: nft.proofTx }
+    }
+    return out
 }
 
+/** Pull the `ValidatorChallengePayload` out of a tx, or return null if malformed. */
+function extractChallengePayload(
+    tx: Transaction,
+): ValidatorChallengePayload | null {
+    const data = tx.content?.data as unknown as [string, unknown] | undefined
+    if (!Array.isArray(data) || data.length < 2) return null
+    const payload = data[1]
+    if (!payload || typeof payload !== "object") return null
+    const { validator, evidenceTx, proofTx } = payload as Partial<ValidatorChallengePayload>
+    if (typeof validator !== "string" || typeof evidenceTx !== "string" || typeof proofTx !== "string") {
+        return null
+    }
+    return { validator: validator.toLowerCase(), evidenceTx, proofTx }
+}

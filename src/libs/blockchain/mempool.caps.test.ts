@@ -29,6 +29,7 @@ const sharedState = {
     inConsensusLoop: false,
 }
 let nonceEnforced = false
+let nftGated = false
 const balances = new Map<string, bigint>()
 const getAccountBalance = jest.fn(async (addr: string) => balances.get(addr) ?? 0n)
 
@@ -65,7 +66,10 @@ mock.module("src/libs/network/manageBridge", () => ({
 const realForks = await import("@/forks")
 mock.module("@/forks", () => ({
     ...realForks,
-    isForkActive: jest.fn((name: string) => name === "nonceEnforcement" && nonceEnforced),
+    isForkActive: jest.fn(
+        (name: string) =>
+            (name === "nonceEnforcement" && nonceEnforced) || (name === "nftValidatorGating" && nftGated),
+    ),
     pendingTxSignatureContext: jest.fn(() => ({})),
 }))
 mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
@@ -143,6 +147,10 @@ function installPool() {
         }
         return counts
     }
+    m.listPendingBySenders = async (addresses: string[]) =>
+        pool
+            .filter(h => addresses.map(a => a.toLowerCase()).includes(senderOf(h)))
+            .map(h => ({ hash: h.hash, sender: senderOf(h), nonce: h.tx.content.nonce, type: h.tx.content.type }))
     m.listEvictionCandidates = async () =>
         pool.map(h => ({
             hash: h.hash,
@@ -238,6 +246,7 @@ beforeEach(() => {
     blockCapsOn = false
     nonceOfAccount = 0
     sharedState.inConsensusLoop = false
+    nftGated = false
     balances.clear()
     getAccountBalance.mockClear()
     clock = NOW
@@ -700,5 +709,37 @@ describe("block caps", () => {
     it("admits the oversize tx before the fork", async () => {
         __setMempoolLimits({ maxBytes: 64 * 1024 * 1024 })
         expect((await rpc(oversize())).error).toBe("")
+    })
+})
+
+describe("seat transactions per sender under nftValidatorGating", () => {
+    const gate = () => {
+        nftGated = true
+    }
+    const seatTx = (type: string) => makeTx({ from: "0xSeat", type, fee: 0 })
+
+    it("holds at most two stakes and challenges of one sender, on every intake path", async () => {
+        gate()
+        expect((await rpc(seatTx("validatorStake"))).error).toBe("")
+        expect((await gossip(seatTx("validatorChallenge"))).error).toBe("")
+        for (const add of [rpc, gossip, internal]) {
+            const out = await add(seatTx("validatorChallenge"))
+            expect(out.error).toBe("Sender already holds 2 seat transactions in the pool (at most 2)")
+        }
+        expect(pool).toHaveLength(2)
+    })
+
+    it("does not count other transactions of the sender, nor limit their own types", async () => {
+        gate()
+        fund("0xseat", 100)
+        await rpc(seatTx("validatorStake"))
+        expect((await rpc(makeTx({ from: "0xseat" }))).error).toBe("")
+        expect((await rpc(seatTx("validatorUnstake"))).error).toBe("")
+        expect((await rpc(seatTx("validatorChallenge"))).error).toBe("")
+        expect((await rpc(makeTx({ from: "0xseat" }))).error).toBe("")
+    })
+
+    it("leaves the pool alone before the fork", async () => {
+        for (let i = 0; i < 3; i++) expect((await rpc(seatTx("validatorStake"))).error).toBe("")
     })
 })

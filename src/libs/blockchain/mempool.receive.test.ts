@@ -50,6 +50,12 @@ jest.mock("@/forks/blockCapsGate", () => ({
     blockCapsActiveForPendingBlock: () => blockCapsOn,
 }))
 
+let nftGatingOn = false
+jest.mock("@/forks/nftValidatorGatingGate", () => ({
+    nftGatingActive: () => nftGatingOn,
+    nftGatingAtTip: () => nftGatingOn,
+}))
+
 let badSignatures = new Set<string>()
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
@@ -122,6 +128,13 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 import Mempool from "./mempool"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "src/utilities/sharedState"
+import {
+    SEAT_JUDGE_TIMEOUT_MS,
+    SEAT_TXS_JUDGED_PER_BATCH,
+    recordSeatVerdict,
+    resetSeatAdmissionForTesting,
+    seatAdmittedHere,
+} from "src/features/staking/seatAdmission"
 
 // lastBlock=100, referenceBlockRoom=1: deep window cutoff 100 - 5*1 = 95.
 let mempoolRows: Array<{ hash: string }> = []
@@ -302,6 +315,369 @@ describe("Mempool.receive admission", () => {
 
         editsVerdict.ok = true
         editsVerdict.reason = undefined
+    })
+})
+
+const seatVerdicts = new Map<string, { success: boolean; message: string; unreachable?: boolean }>()
+const handleStakingTx = jest.fn(async (t: { hash: string }, _options?: unknown) =>
+    seatVerdicts.get(t.hash),
+)
+jest.mock("src/libs/network/routines/transactions/handleStakingTx", () => ({
+    handleStakingTx,
+}))
+
+const seatTx = (hash: string) => {
+    const t = tx(hash, 100)
+    t.content = { ...t.content, type: "validatorStake" }
+    return t
+}
+
+/** A pool whose rows are `rows`, recording the hashes deleted from it. */
+function seatPool(rows: any[]) {
+    const deleted: string[] = []
+    ;(Mempool as any).repo = {
+        find: jest.fn(async () => rows.filter(r => !deleted.includes(r.hash))),
+        delete: jest.fn(async (where: { hash: { _value: string[] } }) => {
+            deleted.push(...where.hash._value)
+        }),
+    }
+    return deleted
+}
+
+function resetSeatRejudge() {
+    ;(Mempool as any).pendingSeatRefusals.clear()
+    ;(Mempool as any).pendingSeatVerdicts.clear()
+    handleStakingTx.mockClear()
+    handleStakingTx.mockImplementation(async (t: { hash: string }) => seatVerdicts.get(t.hash))
+}
+
+describe("a gossiped seat transaction", () => {
+    beforeEach(() => {
+        resetSeatRejudge()
+        nftGatingOn = true
+    })
+    afterEach(() => {
+        nftGatingOn = false
+    })
+
+    it("enters the pool only once Solana confirms its proof, read fresh", async () => {
+        seatVerdicts.set("0xheld", { success: true, message: "ok" })
+        seatVerdicts.set("0xinvented", { success: false, message: "NFT proof invalid" })
+        seatVerdicts.set("0xdown", { success: false, message: "timed out", unreachable: true })
+
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xheld"))).toBeNull()
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xinvented"))).toBe("NFT proof invalid")
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xdown"))).toBe("timed out")
+        expect(handleStakingTx.mock.calls.map(c => c[1])).toEqual([{ fresh: true }, { fresh: true }, { fresh: true }])
+        // Only the confirmed one may enter a candidate of this node.
+        expect(seatAdmittedHere("0xheld")).toBe(true)
+        expect(seatAdmittedHere("0xinvented")).toBe(false)
+        expect(seatAdmittedHere("0xdown")).toBe(false)
+    })
+
+    it("is not judged before nftValidatorGating, nor is any other type", async () => {
+        expect(await Mempool.gossipSeatRefusal(tx("0xpay", 100))).toBeNull()
+        nftGatingOn = false
+        expect(await Mempool.gossipSeatRefusal(seatTx("0xinvented"))).toBeNull()
+        expect(handleStakingTx).not.toHaveBeenCalled()
+    })
+})
+
+describe("the round's seat transactions", () => {
+    const realLockedHashes = (Mempool as any).lockedHashes
+    let locked = new Set<string>()
+    const hashes = (n: number) => Array.from({ length: n }, (_, i) => `0x${i.toString(16).padStart(4, "0")}`)
+
+    beforeEach(() => {
+        nftGatingOn = true
+        locked = new Set()
+        ;(Mempool as any).lockedHashes = () => new Set(locked)
+        resetSeatAdmissionForTesting()
+        for (const hash of hashes(SEAT_TXS_JUDGED_PER_BATCH + 2)) recordSeatVerdict(hash, { success: true })
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        ;(Mempool as any).lockedHashes = realLockedHashes
+        resetSeatAdmissionForTesting()
+    })
+
+    it("take only what this node admitted itself, leaving the rest pooled", async () => {
+        const seats = hashes(3)
+        recordSeatVerdict(seats[1], { success: false, message: "NFT proof invalid" } as any)
+        recordSeatVerdict(seats[2], { success: false, unreachable: true })
+        const kept = (await Mempool.boundSeatTransactions([...seats, "0xfeed"].map(seatTx))).map(t => t.hash)
+        // A refusal withdraws the admission; an unanswered read leaves it.
+        expect(kept).toEqual([seats[0], seats[2]])
+    })
+
+    it("take a seat tx a merge admitted", async () => {
+        resetSeatAdmissionForTesting()
+        resetSeatRejudge()
+        seatVerdicts.set("0xmerged", { success: true, message: "ok" })
+        await Mempool.receive([seatTx("0xmerged")])
+        expect((await Mempool.boundSeatTransactions([seatTx("0xmerged")])).map(t => t.hash)).toEqual(["0xmerged"])
+    })
+
+    it("are the lowest hashes of the pool, whichever member holds more of them", async () => {
+        const seats = hashes(SEAT_TXS_JUDGED_PER_BATCH + 1)
+        // One member pooled them all; a peer's merge imported only the lowest ones.
+        const full = [...seats].reverse().map(seatTx)
+        const peer = seats.slice(0, SEAT_TXS_JUDGED_PER_BATCH).map(seatTx)
+        const bound = async (pool: any[]) =>
+            (await Mempool.boundSeatTransactions([tx("0xpay", 100), ...pool])).map(t => t.hash).sort()
+        expect(await bound(full)).toEqual(await bound(peer))
+        expect(await bound(full)).not.toContain(seats[SEAT_TXS_JUDGED_PER_BATCH])
+        expect(await bound(full)).toContain("0xpay")
+    })
+
+    it("keep the locked block's txs and every tx before nftValidatorGating", async () => {
+        const seats = hashes(SEAT_TXS_JUDGED_PER_BATCH + 2)
+        locked = new Set([seats[SEAT_TXS_JUDGED_PER_BATCH + 1]])
+        const kept = (await Mempool.boundSeatTransactions(seats.map(seatTx))).map(t => t.hash)
+        expect(kept).toEqual([...seats.slice(0, SEAT_TXS_JUDGED_PER_BATCH), seats[SEAT_TXS_JUDGED_PER_BATCH + 1]])
+        nftGatingOn = false
+        expect(await Mempool.boundSeatTransactions(seats.map(seatTx))).toHaveLength(SEAT_TXS_JUDGED_PER_BATCH + 2)
+    })
+})
+
+describe("the own-pool seat re-judge", () => {
+    const realLockedHashes = (Mempool as any).lockedHashes
+    let locked = new Set<string>()
+    beforeEach(() => {
+        resetReceiveState()
+        resetSeatRejudge()
+        nftGatingOn = true
+        locked = new Set()
+        ;(Mempool as any).lockedHashes = () => new Set(locked)
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        ;(Mempool as any).lockedHashes = realLockedHashes
+    })
+
+    it("judges nothing again before nftValidatorGating", async () => {
+        nftGatingOn = false
+        seatPool([seatTx("0xmoved")])
+        expect((await Mempool.startSeatRejudge()).size).toBe(0)
+        expect(handleStakingTx).not.toHaveBeenCalled()
+    })
+
+    it("records what a healthy Solana now refuses, reading fresh, and drops it at the next round start", async () => {
+        const deleted = seatPool([seatTx("0xmoved"), seatTx("0xheld"), seatTx("0xdown"), tx("0xpay", 100)])
+        seatVerdicts.set("0xmoved", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xheld", { success: true, message: "ok" })
+        seatVerdicts.set("0xdown", { success: false, message: "timed out", unreachable: true })
+
+        expect([...(await Mempool.startSeatRejudge()).keys()]).toEqual(["0xmoved"])
+        expect(deleted).toEqual([])
+        // Past the admission caches, so the pool matches what peers read now.
+        expect(handleStakingTx.mock.calls.map(c => c[1])).toEqual([{ fresh: true }, { fresh: true }, { fresh: true }])
+
+        expect(await Mempool.applySeatRefusals(101)).toEqual(["0xmoved"])
+        expect(deleted).toEqual(["0xmoved"])
+        // Applied once.
+        expect(await Mempool.applySeatRefusals(101)).toEqual([])
+    })
+
+    it("leaves a tx refused mid-round in the pool for that round; the next round start drops it unless locked", async () => {
+        const deleted = seatPool([seatTx("0xX")])
+        let refuse: () => void = () => {}
+        handleStakingTx.mockImplementation(
+            () =>
+                new Promise(resolve => {
+                    refuse = () => resolve({ success: false, message: "nft.owner no longer holds the NFT" })
+                }),
+        )
+        // The round starts the re-judge and reads its pool while Solana is read.
+        const rejudge = Mempool.startSeatRejudge()
+        expect(await Mempool.applySeatRefusals(101)).toEqual([])
+        expect((await Mempool.getMempool()).map(t => t.hash)).toEqual(["0xX"])
+        // The refusal lands after the pool read, before the precommit.
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        refuse()
+        await rejudge
+        expect(deleted).toEqual([])
+        expect((await Mempool.getMempool()).map(t => t.hash)).toEqual(["0xX"])
+
+        // The precommit locks the block with X: the next round keeps it.
+        locked.add("0xX")
+        expect(await Mempool.applySeatRefusals(101)).toEqual([])
+        expect(deleted).toEqual([])
+    })
+
+    it("keeps a round's seat eligibility fixed: the re-judge's verdicts apply at the next round start", async () => {
+        seatPool([seatTx("0xmoved"), seatTx("0xlate")])
+        recordSeatVerdict("0xmoved", { success: true })
+        seatVerdicts.set("0xmoved", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xlate", { success: true, message: "ok" })
+        await Mempool.startSeatRejudge()
+        // Landed mid-round: the candidate still sees what it saw at the round's start.
+        expect(seatAdmittedHere("0xmoved")).toBe(true)
+        expect(seatAdmittedHere("0xlate")).toBe(false)
+        const before = (await Mempool.boundSeatTransactions([seatTx("0xmoved"), seatTx("0xlate")])).map(t => t.hash)
+        expect(before).toEqual(["0xmoved"])
+
+        await Mempool.applySeatRefusals(101)
+        expect(seatAdmittedHere("0xmoved")).toBe(false)
+        expect(seatAdmittedHere("0xlate")).toBe(true)
+    })
+
+    it("drops a refused tx at the next round start when no lock holds it", async () => {
+        const deleted = seatPool([seatTx("0xX")])
+        seatVerdicts.set("0xX", { success: false, message: "moved" })
+        await Mempool.startSeatRejudge()
+        expect(await Mempool.applySeatRefusals(101)).toEqual(["0xX"])
+        expect(deleted).toEqual(["0xX"])
+    })
+
+    it("never drops a tx of the candidate an open prevote names", async () => {
+        const deleted = seatPool([seatTx("0xX")])
+        seatVerdicts.set("0xX", { success: false, message: "moved" })
+        await Mempool.startSeatRejudge()
+        expect(await Mempool.applySeatRefusals(101, new Set(["0xX"]))).toEqual([])
+        expect(deleted).toEqual([])
+    })
+
+    it("does not judge the locked block's txs at all", async () => {
+        locked.add("0xlocked")
+        seatPool([seatTx("0xlocked"), seatTx("0xloose")])
+        seatVerdicts.set("0xlocked", { success: false, message: "moved" })
+        seatVerdicts.set("0xloose", { success: false, message: "moved" })
+        expect([...(await Mempool.startSeatRejudge()).keys()]).toEqual(["0xloose"])
+        expect(handleStakingTx.mock.calls.map(c => (c[0] as { hash: string }).hash)).toEqual(["0xloose"])
+    })
+
+    it("runs one at a time, and the round does not wait for it", async () => {
+        let finish: () => void = () => {}
+        handleStakingTx.mockImplementation(
+            () => new Promise(resolve => (finish = () => resolve({ success: true, message: "ok" }))),
+        )
+        seatPool([seatTx("0xmine")])
+        const first = Mempool.startSeatRejudge()
+        expect(Mempool.startSeatRejudge()).toBe(first)
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        expect(handleStakingTx).toHaveBeenCalledTimes(1)
+        finish()
+        expect((await first).size).toBe(0)
+        const next = Mempool.startSeatRejudge()
+        expect(next).not.toBe(first)
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        finish()
+        await next
+    })
+})
+
+describe("bounded seat judgement", () => {
+    // Hashes in a known order, offered in another.
+    const hashes = Array.from({ length: 30 }, (_, i) => `0xs${String(i).padStart(2, "0")}`)
+    const lowest = hashes.slice(0, SEAT_TXS_JUDGED_PER_BATCH)
+    const shuffled = (order: number[]) => order.map(i => seatTx(hashes[i]))
+    const reversed = hashes.map((_, i) => 29 - i)
+    const interleaved = hashes.map((_, i) => (i % 2 === 0 ? i / 2 + 15 : (i - 1) / 2))
+
+    beforeEach(() => {
+        resetReceiveState()
+        resetSeatRejudge()
+        nftGatingOn = true
+        for (const hash of hashes) seatVerdicts.set(hash, { success: true, message: "ok" })
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        jest.useRealTimers()
+    })
+
+    const judgedHashes = () => handleStakingTx.mock.calls.map(c => (c[0] as { hash: string }).hash).sort()
+
+    it("judges the same lowest-hash seat txs of a received batch whatever order they arrive in", async () => {
+        await Mempool.receive([...shuffled(reversed), tx("0xpay", 100)])
+        expect(judgedHashes()).toEqual(lowest)
+        expect(insertedRows.map(r => r.hash).sort()).toEqual([...lowest, "0xpay"].sort())
+
+        resetReceiveState()
+        handleStakingTx.mockClear()
+        await Mempool.receive(shuffled(interleaved))
+        expect(judgedHashes()).toEqual(lowest)
+        expect(insertedRows.map(r => r.hash).sort()).toEqual(lowest)
+    })
+
+    it("re-judges the same lowest-hash own seat txs whatever order the pool reads in", async () => {
+        for (const hash of hashes) seatVerdicts.set(hash, { success: false, message: "moved" })
+        seatPool(shuffled(reversed))
+        expect([...(await Mempool.startSeatRejudge()).keys()].sort()).toEqual(lowest)
+        expect(judgedHashes()).toEqual(lowest)
+
+        resetSeatRejudge()
+        seatPool(shuffled(interleaved))
+        expect([...(await Mempool.startSeatRejudge()).keys()].sort()).toEqual(lowest)
+        expect(judgedHashes()).toEqual(lowest)
+    })
+
+    it("counts a verdict not back within SEAT_JUDGE_TIMEOUT_MS as unanswered and keeps its tx", async () => {
+        jest.useFakeTimers()
+        handleStakingTx.mockImplementation(async (t: { hash: string }) =>
+            t.hash === "0xslow" ? new Promise(() => {}) : seatVerdicts.get(t.hash),
+        )
+        seatVerdicts.set("0xgone", { success: false, message: "moved" })
+        seatPool([seatTx("0xslow"), seatTx("0xgone")])
+        const done = Mempool.startSeatRejudge()
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+        jest.advanceTimersByTime(SEAT_JUDGE_TIMEOUT_MS)
+        expect([...(await done).keys()]).toEqual(["0xgone"])
+    })
+})
+
+describe("seat transactions of a locked block", () => {
+    const realLockedHashes = (Mempool as any).lockedHashes
+    beforeEach(() => {
+        resetReceiveState()
+        resetSeatRejudge()
+        nftGatingOn = true
+        ;(Mempool as any).lockedHashes = () => new Set(["0xlocked"])
+        seatVerdicts.set("0xlocked", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xloose", { success: false, message: "nft.owner no longer holds the NFT" })
+    })
+    afterEach(() => {
+        nftGatingOn = false
+        ;(Mempool as any).lockedHashes = realLockedHashes
+    })
+
+    it("are taken in for a rebuild without a Solana judgement, so the locked block rebuilds", async () => {
+        ;(Mempool as any).lockedHashes = () => new Set()
+        await Mempool.receive([seatTx("0xlocked")], false, { rebuild: true })
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlocked"])
+        expect(handleStakingTx).not.toHaveBeenCalled()
+    })
+
+    it("are not judged again when a peer sends them in a merge", async () => {
+        await Mempool.receive([seatTx("0xlocked"), seatTx("0xloose")])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlocked"])
+        expect(handleStakingTx.mock.calls.map(c => (c[0] as { hash: string }).hash)).toEqual(["0xloose"])
+    })
+})
+
+describe("Mempool.receive seat transactions", () => {
+    beforeEach(resetReceiveState)
+    afterEach(() => {
+        nftGatingOn = false
+    })
+
+    it("judges them again with a fresh Solana read, leaving out the unanswered ones", async () => {
+        nftGatingOn = true
+        const seat = (hash: string) => {
+            const t = tx(hash, 100)
+            t.content = { ...t.content, type: "validatorStake" }
+            return t
+        }
+        seatVerdicts.set("0xseat-ok", { success: true, message: "ok" })
+        seatVerdicts.set("0xseat-down", { success: false, message: "timed out", unreachable: true })
+        seatVerdicts.set("0xseat-bad", { success: false, message: "proof rejected" })
+        handleStakingTx.mockClear()
+
+        await Mempool.receive([seat("0xseat-ok"), seat("0xseat-down"), seat("0xseat-bad"), tx("0xpay", 100)])
+
+        expect(insertedRows.map(r => r.hash).sort()).toEqual(["0xpay", "0xseat-ok"])
+        expect(handleStakingTx).toHaveBeenCalledTimes(3)
+        for (const call of handleStakingTx.mock.calls) expect(call[1]).toEqual({ fresh: true })
     })
 })
 

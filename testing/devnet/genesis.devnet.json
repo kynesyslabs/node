@@ -76,6 +76,9 @@
     "tlsnDisabled": {
       "activationHeight": null
     },
+    "nftValidatorGating": {
+      "activationHeight": null
+    },
     "tlsnVerified": {
       "activationHeight": 0,
       "notaryKeys": [
