@@ -98,6 +98,19 @@ async function carriesOurSignature(block: Block): Promise<boolean> {
     }
 }
 
+/** Check a newly seen certificate for a block whose hash is already trusted. */
+export async function checkKnownBlockOwnSignature(block: Block): Promise<void> {
+    if (await carriesOurSignature(block)) {
+        checkOwnSignature({
+            number: block.number,
+            hash: block.hash,
+            timestamp: commitLockActive(block.number)
+                ? (block.validation_data as { round: number }).round
+                : block.content.timestamp,
+        })
+    }
+}
+
 /**
  * The members of `eligible` whose signature in `signatures` verifies over
  * `signedMessage`: the block hash, or under commitLock the vote message.
@@ -310,17 +323,7 @@ export async function verifyBlock(
 
     // After the quorum so a peer replaying one stray signature of ours on an
     // unaccepted block cannot stop this node from signing.
-    if (await carriesOurSignature(block)) {
-        // Under commitLock the signing record keeps the round of each
-        // precommit, so that is the time the record is compared against.
-        checkOwnSignature({
-            number: block.number,
-            hash: block.hash,
-            timestamp: commitLockActive(block.number)
-                ? (block.validation_data as { round: number }).round
-                : blockTimestamp,
-        })
-    }
+    await checkKnownBlockOwnSignature(block)
 
     // Last, because it is the expensive check: only a block that already has
     // its quorum is worth verifying transaction by transaction.

@@ -79,6 +79,8 @@ SUITE_FILES=(
     src/libs/crypto/canonicalJson.test.ts
     src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
+    src/libs/gossip/blockValidator.test.ts
+    sidecar/src/blockPolicy.test.js
     src/libs/gossip/sidecarHealth.test.ts
     src/libs/gossip/txPublishPeers.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
