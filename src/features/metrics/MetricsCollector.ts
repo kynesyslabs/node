@@ -104,6 +104,9 @@ export class MetricsCollector {
         // Own timer, not collectAll, and started before the first collectAll,
         // which has unbounded steps: the DbDown alert needs a steady probe
         // period, and a tick ends within its timeout even on a hung database.
+        // A start() whose first collectAll threw left running false and its
+        // probe ticking: stop that one so a retry does not add a second timer.
+        this.dbProbe?.stop()
         this.dbProbe = new DbProbe({
             probe: pingDatabase,
             report: (up, seconds) => {
@@ -197,7 +200,7 @@ export class MetricsCollector {
         )
         ms.createGauge(
             "db_probe_duration_seconds",
-            "Seconds the last successful Postgres probe (SELECT 1) took",
+            "Seconds the last successful Postgres probe (SELECT 1) took; stale while demos_db_up is 0",
             [],
         )
 

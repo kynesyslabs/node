@@ -87,6 +87,15 @@ describe("block-stall alerting is loaded", () => {
         )
         expect(read("src/features/metrics/MetricsCollector.ts")).toContain("\"db_up\"")
     })
+
+    it("says the probe duration gauge is stale while demos_db_up is 0", () => {
+        expect(read("src/features/metrics/MetricsCollector.ts")).toContain(
+            "\"Seconds the last successful Postgres probe (SELECT 1) took; stale while demos_db_up is 0\"",
+        )
+        expect(read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " ")).toContain(
+            "It is not updated by failed probes, so it is stale while `demos_db_up` is 0.",
+        )
+    })
 })
 
 describe("disk-space checks in Docker", () => {
