@@ -12,11 +12,31 @@
  * (validateTx) with osDenomination on and off. A propose edited after signing
  * must be refused. Only the SDK's network lookups are stubbed.
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
+
+// The edit binding reads the chain tip; the mocks are the ones
+// src/libs/blockchain/validation/editBinding.test.ts uses.
+const TIP = 100
+mock.module("src/libs/blockchain/chain", () => ({
+    __esModule: true,
+    default: { getLastBlockNumber: async () => TIP },
+}))
+mock.module("src/utilities/logger", () => ({
+    __esModule: true,
+    default: {
+        debug: () => {},
+        info: () => {},
+        warning: () => {},
+        error: () => {},
+        only: () => {},
+    },
+}))
+
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import TransactionClass from "@/libs/blockchain/transaction"
 import { validateTx } from "@/libs/blockchain/validation/txValidator"
+import { verifyAdmissionEdits } from "@/libs/blockchain/validation/editBinding"
 import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -147,12 +167,20 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
         })
     }
 
-    // The node must hash any wire form of the content the way the SDK does,
-    // not only the exact bytes the builder emits. Before #1074 the node's own
+    // The node hashes any wire form of the content the way the SDK does, not
+    // only the exact bytes the builder emits. Before #1074 the node's own
     // post-fork serializer passed gcr_edits amounts through as sent, so a
-    // propose whose fee edit was written in DEM hashed differently from what
-    // the signer committed to.
-    it("osDenomination on: a propose with its fee edit written in DEM is still admitted", async () => {
+    // propose whose fee edit was written in DEM failed with "Transaction hash
+    // mismatch".
+    //
+    // This form passes only the hash and signature checks. Edit binding
+    // refuses it: it compares a shipped amount in the shape apply uses (see
+    // the module comment of src/libs/blockchain/validation/editBinding.ts),
+    // and apply would read the number as OS (BigInt(amount) in
+    // GCRBalanceRoutines), as editBinding.test.ts already pins ("refuses a
+    // gas edit shipped as a DEM number after osDenomination"). Here it is
+    // refused at peer admission with editBinding dormant.
+    it("osDenomination on: a propose whose fee edit is written in DEM still hashes and verifies as the SDK signed it", async () => {
         const demos = await sdkSigner(true)
         const tx = (await DemosTransactions.proposeNetworkUpgrade(
             ISSUE_PROPOSAL,
@@ -163,10 +191,24 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
             e => e.type === "balance" && e.operation === "remove",
         ) as { amount: unknown }
         expect(fee.amount).toBe("1000000000")
-        fee.amount = 1 // 1 DEM, the same value
+
+        // Governance on, so the edit check alone decides; the canonical
+        // form passes it.
+        getSharedState.forkConfig.networkGovernance.activationHeight = 0
+        expect(getSharedState.forkConfig.editBinding.activationHeight).toBeNull()
+        expect(await verifyAdmissionEdits(tx)).toEqual({ ok: true })
+
+        // A number here is OS at apply, so this is not the same value.
+        fee.amount = 1
 
         const { rpc, mempool } = admit(tx, true)
         expect(rpc).toEqual({ coherent: true })
         expect(await mempool).toEqual({ hash: tx.hash, valid: true })
+
+        const edits = await verifyAdmissionEdits(tx)
+        expect(edits.ok).toBe(false)
+        expect(edits.reason).toStartWith(
+            "value edits with no counterpart in the regenerated set",
+        )
     })
 })
