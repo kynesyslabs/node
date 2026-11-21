@@ -214,7 +214,7 @@ describe("getFinalizedHead", () => {
     describe("a head stored with one signer under two cases of its key", () => {
         const stored = { "0xaa": "sig-a", "0xAA": "sig-a-upper", "0xbb": "sig-b", "0xBB": "sig-b-upper", "0xCC": "sig-c" }
 
-        it("counts and serves one signature per signer under canonicalSigners, the first spelling in map order", async () => {
+        it("counts and serves one signature per signer under canonicalSigners, keyed in lowercase, the first spelling in map order", async () => {
             sharedState.forkConfig = {
                 finalityProofs: { activationHeight: 0 },
                 canonicalSigners: { activationHeight: 0 },
@@ -222,7 +222,7 @@ describe("getFinalizedHead", () => {
             getLastBlock.mockResolvedValue(block({ validation_data: { signatures: stored } }))
             const reply = await getFinalizedHead()
             expect(reply.response.signatureCount).toBe(3)
-            expect(reply.response.signatures).toEqual({ "0xaa": "sig-a", "0xbb": "sig-b", "0xCC": "sig-c" })
+            expect(reply.response.signatures).toEqual({ "0xaa": "sig-a", "0xbb": "sig-b", "0xcc": "sig-c" })
         })
 
         it("applies the rule from the fork's height on", async () => {
@@ -244,7 +244,7 @@ describe("getFinalizedHead", () => {
                 finalityProofs: { activationHeight: 0 },
                 canonicalSigners: { activationHeight: 0 },
             }
-            const signatures = JSON.parse('{"__proto__": "sig-p", "0xaa": "sig-a"}')
+            const signatures = JSON.parse("{\"__proto__\": \"sig-p\", \"0xaa\": \"sig-a\"}")
             getLastBlock.mockResolvedValue(block({ validation_data: { signatures } }))
             const reply = await getFinalizedHead()
             expect(reply.response.signatureCount).toBe(2)

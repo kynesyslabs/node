@@ -25,17 +25,18 @@ function toSeconds(value: unknown): number | null {
 /**
  * Under canonicalSigners a member counts once however many spellings of its
  * key the stored map holds, and a producer that has not rebuilt its
- * certificate can store two: the first spelling in map order is kept, the
- * one the quorum count tries.
+ * certificate can store two: the signature of the first spelling in map
+ * order is kept, the one the quorum count tries, under the lowercase key
+ * that `committee` lists and the count verifies with.
  */
 function oncePerSigner<T>(height: number, signatures: Record<string, T>): Record<string, T> {
     if (!isForkActive("canonicalSigners", height)) return signatures
-    const first = new Map<string, [string, T]>()
+    const first = new Map<string, T>()
     for (const [key, signature] of Object.entries(signatures)) {
         const identity = key.toLowerCase()
-        if (!first.has(identity)) first.set(identity, [key, signature])
+        if (!first.has(identity)) first.set(identity, signature)
     }
-    return Object.fromEntries(first.values())
+    return Object.fromEntries(first)
 }
 
 /**
