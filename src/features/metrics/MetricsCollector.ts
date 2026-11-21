@@ -14,6 +14,7 @@ import { MetricsService } from "./MetricsService"
 import log from "@/utilities/logger"
 import { diskSpacePath, freeDiskBytes } from "@/utilities/diskSpace"
 import { Config } from "src/config"
+import { DbProbe } from "./dbProbe"
 import type { MetricsCollectorConfig } from "./types"
 import {
     DEFAULT_COLLECTOR_CONFIG,
@@ -27,6 +28,21 @@ export type { MetricsCollectorConfig } from "./types"
 const execAsync = promisify(exec)
 
 /**
+ * The DbProbe query. Through the node's own DataSource, so it fails exactly
+ * when the node's own queries cannot reach Postgres. Never initializes the
+ * DataSource (that retries for half a minute): boot has done it before the
+ * collector starts.
+ */
+async function pingDatabase(): Promise<void> {
+    // Lazy import to avoid circular dependencies
+    const { dataSource } = await import("@/model/datasource")
+    if (!dataSource.isInitialized) {
+        throw new Error("the DataSource is not initialized")
+    }
+    await dataSource.query("SELECT 1")
+}
+
+/**
  * MetricsCollector - Actively collects metrics from node subsystems
  *
  * This service runs on a timer and updates the MetricsService
@@ -37,6 +53,7 @@ export class MetricsCollector {
     private metricsService: MetricsService
     private config: MetricsCollectorConfig
     private collectionInterval: Timer | null = null
+    private dbProbe: DbProbe | null = null
     private running = false
 
     // CPU usage tracking
@@ -84,6 +101,29 @@ export class MetricsCollector {
         // Register additional metrics
         this.registerAdditionalMetrics()
 
+        // Own timer, not collectAll, and started before the first collectAll,
+        // which has unbounded steps: the DbDown alert needs a steady probe
+        // period, and a tick ends within its timeout even on a hung database.
+        this.dbProbe = new DbProbe({
+            probe: pingDatabase,
+            report: (up, seconds) => {
+                this.metricsService.setGauge("db_up", up)
+                if (seconds !== null) {
+                    this.metricsService.setGauge(
+                        "db_probe_duration_seconds",
+                        seconds,
+                    )
+                }
+            },
+            onChange: (up, reason) =>
+                up
+                    ? log.info("[DB] Postgres answers the probe again")
+                    : log.warning(
+                          `[DB] Postgres probe failed (demos_db_up=0): ${reason}`,
+                      ),
+        })
+        this.dbProbe.start()
+
         // Initial collection
         await this.collectAll()
 
@@ -104,6 +144,8 @@ export class MetricsCollector {
             clearInterval(this.collectionInterval)
             this.collectionInterval = null
         }
+        this.dbProbe?.stop()
+        this.dbProbe = null
         this.running = false
         log.info("[METRICS COLLECTOR] Stopped")
     }
@@ -143,6 +185,21 @@ export class MetricsCollector {
         ms.createGauge("system_load_average_1m", "1-minute load average", [])
         ms.createGauge("system_load_average_5m", "5-minute load average", [])
         ms.createGauge("system_load_average_15m", "15-minute load average", [])
+
+        // === Database (DbProbe, every 15 s; the DbDown alert reads db_up) ===
+        // Registered here, not in the core set: a gauge without labels reads
+        // 0 from registration, so a node whose collector never started must
+        // not export it.
+        ms.createGauge(
+            "db_up",
+            "1 when the last SELECT 1 through the node's Postgres pool answered within 5 s, else 0",
+            [],
+        )
+        ms.createGauge(
+            "db_probe_duration_seconds",
+            "Seconds the last successful Postgres probe (SELECT 1) took",
+            [],
+        )
 
         // === Network I/O Metrics ===
         ms.createGauge(

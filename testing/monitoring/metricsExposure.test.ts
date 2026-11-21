@@ -80,6 +80,13 @@ describe("block-stall alerting is loaded", () => {
             'absent(up{job="demos-node"})',
         )
     })
+
+    it("DbDown reads a gauge the node registers", () => {
+        expect(read("monitoring/prometheus/alerts/node-health.yml")).toMatch(
+            /alert: DbDown\s+expr: demos_db_up == 0/,
+        )
+        expect(read("src/features/metrics/MetricsCollector.ts")).toContain("\"db_up\"")
+    })
 })
 
 describe("disk-space checks in Docker", () => {
