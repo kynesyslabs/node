@@ -3,7 +3,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { appendJsonl, getRunConfig, writeJson } from "../../framework/io"
 import { ReservoirSampler, summarizeLatency } from "../../framework/metrics"
 import { envBool, envFloat, envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeHexAddress, normalizeRpcUrl, nowMs, sleep } from "../../framework/common"
-import { BroadcastError, ConfirmError, ConvergenceError, RpcTimeoutError, SetupError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
+import { BroadcastError, ConfirmError, ConvergenceError, RateLimitError, RpcTimeoutError, SetupError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
 import {
   getTokenTargets,
@@ -18,12 +18,14 @@ type LoadgenConfig = {
   wallets: string[]
   durationSec: number
   concurrency: number
+  workerCap: number
   algorithm: string
   sampleLimit: number
   emitTimeseries: boolean
   maxErrorRate: number
   minLoopDelayMs: number
   stopOnRateLimit: boolean
+  rateLimitMaxRetries: number
   settleTimeoutSec: number
   settlePollMs: number
   opTimeoutMs: number
@@ -44,6 +46,8 @@ type LoadgenCounters = {
   validationError: number
   networkError: number
   rateLimited: number
+  /** HTTP 429 answers that were waited out (next block) and retried; not errors. */
+  rateLimitRetries: number
   cleanupError: number
 }
 
@@ -99,18 +103,81 @@ function extractTransportErrorMessage(label: string, operation: "add" | "remove"
   return `${label} (${operation}): ${typeof raw === "string" ? raw : stringifyForError(raw)}`
 }
 
+/**
+ * HTTP status of a failed `demos.call`. The SDK does not throw: it returns
+ * `{ result: 500, response: TransportError }`, and the node's status (e.g. the
+ * 429 of the identity confirm cap) is only on the error's axios `cause`.
+ */
+export function httpStatusOf(response: any): number | null {
+  const status = response?.response?.cause?.response?.status ?? response?.response?.cause?.status
+  return typeof status === "number" ? status : null
+}
+
+function throwIfRateLimited(label: string, operation: "add" | "remove", response: any, context: Record<string, unknown>) {
+  if (response?.result !== 429 && httpStatusOf(response) !== 429) return
+  throw new RateLimitError(`${label} (${operation}): node answered HTTP 429 (rate limit)`, { ...context, status: 429 })
+}
+
+/**
+ * Identity confirms (`execute` / `confirmTx` with identity data) one source
+ * address may send to one node per block. Mirrors the node's
+ * RATE_LIMIT_TX_PER_BLOCK (src/utilities/constants.ts, enforced in
+ * src/libs/network/rpcRateLimit.ts); any further confirm in that block gets
+ * HTTP 429. Every worker in this process shares one source address.
+ */
+export const IDENTITY_CONFIRMS_PER_BLOCK = 4
+
+/**
+ * How many workers to start. Each worker sends at most one identity confirm per
+ * block (every add and remove waits for the next block to show it), and workers
+ * are spread round-robin over the targets, so up to 4 workers per target stays
+ * within the node's cap. The default is that cap, and no more than one worker
+ * per wallet (workers sharing a wallet race on its nonce). An explicit
+ * CONCURRENCY wins, with a warning when it is above the cap.
+ */
+export function resolveWorkerCount(params: {
+  requested: string | undefined
+  targetCount: number
+  walletCount: number
+}): { workers: number; cap: number; warning: string | null } {
+  const targets = Math.max(1, params.targetCount)
+  const cap = IDENTITY_CONFIRMS_PER_BLOCK * targets
+  const parsed = params.requested ? Number.parseInt(params.requested, 10) : Number.NaN
+  if (!Number.isFinite(parsed)) {
+    return { workers: Math.max(1, Math.min(cap, params.walletCount)), cap, warning: null }
+  }
+  const workers = Math.max(1, parsed)
+  const warning = workers > cap
+    ? `[gcr_identity_loadgen] CONCURRENCY=${workers} is above ${cap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${targets} target(s) from one source address). ` +
+      "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry."
+    : null
+  return { workers, cap, warning }
+}
+
 function getConfig(wallets: string[]): LoadgenConfig {
+  const rpcUrls = getTokenTargets().map(normalizeRpcUrl)
+  const workerCount = resolveWorkerCount({
+    requested: process.env.CONCURRENCY,
+    targetCount: rpcUrls.length,
+    walletCount: wallets.length,
+  })
+  if (workerCount.warning) console.warn(workerCount.warning)
   return {
-    rpcUrls: getTokenTargets().map(normalizeRpcUrl),
+    rpcUrls,
     wallets,
     durationSec: envInt("DURATION_SEC", 30),
-    concurrency: Math.max(1, envInt("CONCURRENCY", 6)),
+    concurrency: workerCount.workers,
+    workerCap: workerCount.cap,
     algorithm: process.env.GCR_IDENTITY_ALGO?.trim() || "falcon",
     sampleLimit: envInt("SAMPLE_LIMIT", 200_000),
     emitTimeseries: envBool("EMIT_TIMESERIES", true),
     maxErrorRate: envFloat("MAX_ERROR_RATE", 0.05),
     minLoopDelayMs: Math.max(0, envInt("MIN_LOOP_DELAY_MS", 75)),
-    stopOnRateLimit: envBool("STOP_ON_RATE_LIMIT", true),
+    // A 429 is back-pressure: wait for the next block and retry the step.
+    // STOP_ON_RATE_LIMIT=true restores the old behaviour (first 429 ends the run).
+    stopOnRateLimit: envBool("STOP_ON_RATE_LIMIT", false),
+    // Blocks one step may wait out before its 429 counts as an error.
+    rateLimitMaxRetries: Math.max(0, envInt("RATE_LIMIT_MAX_RETRIES", 10)),
     // PQC add/remove visibility is block-driven. With a 10s default block time,
     // a serialized add/remove cycle can legitimately span two consensus rounds.
     settleTimeoutSec: Math.max(1, envInt("SETTLE_TIMEOUT_SEC", 20)),
@@ -175,7 +242,7 @@ function buildIdentityAddress(workerId: number, sequence: number): string {
   return normalizeHexAddress("0x" + raw)
 }
 
-async function submitPqcTx(params: {
+export async function submitPqcTx(params: {
   demos: Demos
   ownerAddress: string
   algorithm: string
@@ -235,6 +302,12 @@ async function submitPqcTx(params: {
     params.opTimeoutMs,
     executeTx(params.demos, signedTx, "confirmTx"),
   )
+  const errorContext = {
+    operation: params.operation,
+    ownerAddress: params.ownerAddress,
+    identityAddress: params.identityAddress,
+  }
+  throwIfRateLimited("confirm", params.operation, validity, errorContext)
   if (validity?.error) {
     throw loadgenErrorFromMessage(extractTransportErrorMessage("confirm transport failed", params.operation, validity), {
       operation: params.operation,
@@ -256,6 +329,7 @@ async function submitPqcTx(params: {
     params.opTimeoutMs,
     executeTx(params.demos, validity, "broadcastTx"),
   )
+  throwIfRateLimited("broadcast", params.operation, broadcast, errorContext)
   if (broadcast?.error) {
     throw loadgenErrorFromMessage(extractTransportErrorMessage("broadcast transport failed", params.operation, broadcast), {
       operation: params.operation,
@@ -316,6 +390,80 @@ async function waitForIdentityPresence(params: {
       timeoutSec: params.timeoutSec,
     },
   )
+}
+
+async function readLastBlockNumber(rpcUrl: string): Promise<number | null> {
+  const res = await nodeCall(rpcUrl, "getLastBlockNumber", {}, "gcr:getLastBlockNumber:loadgen", NO_FALLBACKS)
+  if (res?.result !== 200) return null
+  const value = typeof res.response === "string" ? Number.parseInt(res.response, 10) : res.response
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+/**
+ * Waits until the node's last block number moves past the one it reports now:
+ * the identity confirm cap counts per block, so a new block frees the slots.
+ * Returns false if no new block shows up within timeoutMs.
+ */
+export async function waitForNextBlock(rpcUrl: string, timeoutMs: number, pollMs: number): Promise<boolean> {
+  const deadlineMs = nowMs() + timeoutMs
+  let start = await readLastBlockNumber(rpcUrl)
+  while (nowMs() < deadlineMs) {
+    await sleep(pollMs)
+    const current = await readLastBlockNumber(rpcUrl)
+    if (current === null) continue
+    if (start === null) start = current
+    else if (current > start) return true
+  }
+  return false
+}
+
+export type RateLimitRetry = {
+  stopOnRateLimit: boolean
+  maxRetries: number
+  shouldStop: () => boolean
+  waitForNextBlock: () => Promise<unknown>
+  onRetry: () => void
+}
+
+/**
+ * Runs one step (a confirm + broadcast). An HTTP 429 is back-pressure from the
+ * node's per-block identity confirm cap, so the step is retried after the next
+ * block, up to maxRetries times. Other errors, and every 429 when
+ * stopOnRateLimit is set, are thrown to the caller.
+ */
+export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await step()
+    } catch (error) {
+      const retry =
+        classifyFailure(error) === "rateLimited" &&
+        !opts.stopOnRateLimit &&
+        attempt < opts.maxRetries &&
+        !opts.shouldStop()
+      if (!retry) throw error
+      opts.onRetry()
+      await opts.waitForNextBlock()
+    }
+  }
+}
+
+function rateLimitRetryFor(params: {
+  rpcUrl: string
+  cfg: LoadgenConfig
+  counters: LoadgenCounters
+  shouldStop: () => boolean
+  stopOnRateLimit: boolean
+}): RateLimitRetry {
+  return {
+    stopOnRateLimit: params.stopOnRateLimit,
+    maxRetries: params.cfg.rateLimitMaxRetries,
+    shouldStop: params.shouldStop,
+    waitForNextBlock: () => waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs),
+    onRetry: () => {
+      params.counters.rateLimitRetries++
+    },
+  }
 }
 
 function pushErrorSample(samples: ErrorSample[], stage: ErrorSample["stage"], error: unknown) {
@@ -388,19 +536,33 @@ async function worker(params: {
     }
   }
 
+  const rateLimitRetry = rateLimitRetryFor({
+    rpcUrl: params.rpcUrl,
+    cfg: params.cfg,
+    counters: params.counters,
+    shouldStop: () => params.sharedStop.value,
+    stopOnRateLimit: params.cfg.stopOnRateLimit,
+  })
+  const submit = (identityAddress: string, operation: "add" | "remove") =>
+    retryOnRateLimit(
+      () =>
+        submitPqcTx({
+          demos,
+          ownerAddress,
+          algorithm: params.algorithm,
+          identityAddress,
+          operation,
+          opTimeoutMs: params.cfg.opTimeoutMs,
+        }),
+      rateLimitRetry,
+    )
+
   while (nowMs() < params.stopAtMs && !params.sharedStop.value) {
     const identityAddress = buildIdentityAddress(params.workerId, sequence++)
     const started = performance.now()
     params.counters.total++
     try {
-      await submitPqcTx({
-        demos,
-        ownerAddress,
-        algorithm: params.algorithm,
-        identityAddress,
-        operation: "add",
-        opTimeoutMs: params.cfg.opTimeoutMs,
-      })
+      await submit(identityAddress, "add")
       outstanding.add(identityAddress)
       await waitForIdentityPresence({
         rpcUrl: params.rpcUrl,
@@ -412,14 +574,7 @@ async function worker(params: {
         pollMs: params.cfg.settlePollMs,
       })
 
-      await submitPqcTx({
-        demos,
-        ownerAddress,
-        algorithm: params.algorithm,
-        identityAddress,
-        operation: "remove",
-        opTimeoutMs: params.cfg.opTimeoutMs,
-      })
+      await submit(identityAddress, "remove")
       outstanding.delete(identityAddress)
       await waitForIdentityPresence({
         rpcUrl: params.rpcUrl,
@@ -516,6 +671,7 @@ export async function runGcrIdentityLoadgen() {
     validationError: 0,
     networkError: 0,
     rateLimited: 0,
+    rateLimitRetries: 0,
     cleanupError: 0,
   }
   const errorSamples: ErrorSample[] = []
@@ -660,14 +816,19 @@ export async function runGcrIdentityLoadgen() {
           cfg.opTimeoutMs,
           demos.connectWallet(cfg.wallets[report.workerId % cfg.wallets.length]!, { algorithm: "ed25519" }),
         )
-        await submitPqcTx({
-          demos,
-          ownerAddress: report.ownerAddress,
-          algorithm: cfg.algorithm,
-          identityAddress: address,
-          operation: "remove",
-          opTimeoutMs: cfg.opTimeoutMs,
-        })
+        // Cleanup always waits out a 429: leaving the identity behind fails the run.
+        await retryOnRateLimit(
+          () =>
+            submitPqcTx({
+              demos,
+              ownerAddress: report.ownerAddress,
+              algorithm: cfg.algorithm,
+              identityAddress: address,
+              operation: "remove",
+              opTimeoutMs: cfg.opTimeoutMs,
+            }),
+          rateLimitRetryFor({ rpcUrl: report.rpcUrl, cfg, counters, shouldStop: () => false, stopOnRateLimit: false }),
+        )
       } catch (error) {
         counters.cleanupError++
         pushErrorSample(errorSamples, "cleanup", error)
