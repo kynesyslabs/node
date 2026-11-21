@@ -135,7 +135,7 @@ export class EVMSmartContractManagement {
         } catch (e) {
             const kind = keyErrorKind(e)
             throw new Error(
-                `Failed to read the bridge private key for ${chainKey}: keys file unreadable or not valid JSON (${kind})`,
+                `Failed to read the bridge private key for ${chainKey}: keys file unreadable, not valid JSON, or not a JSON object (${kind})`,
             )
         }
 

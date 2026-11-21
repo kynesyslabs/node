@@ -8,6 +8,9 @@
  * file. The logger and the console are spied; every argument they receive is
  * rendered and searched for the synthetic key text. A thrown message names
  * the cause only by the error's string code, else its name.
+ *
+ * Run this file in its own `bun test` process, because its `mock.module`
+ * stubs last for the whole process.
  */
 import {
     afterAll,
@@ -213,7 +216,7 @@ describe("bridge private key logging", () => {
 
             expect(error.message).toBe(
                 `Failed to read the bridge private key for ${CHAIN_KEY}: ` +
-                    `keys file unreadable or not valid JSON (${kind})`,
+                    `keys file unreadable, not valid JSON, or not a JSON object (${kind})`,
             )
             expect(error.cause).toBeUndefined()
             expectNoKeyText(Bun.inspect(error))
