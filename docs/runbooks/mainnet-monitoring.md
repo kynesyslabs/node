@@ -329,7 +329,8 @@ timeout, on a timer of its own, never on the consensus path:
 - `demos_db_up`: 1 when the last probe answered, 0 when it failed or got no
   answer within 5 s. While an unanswered probe is still pending, the next ones
   report 0 without sending another query.
-- `demos_db_probe_duration_seconds`: how long the last successful probe took.
+- `demos_db_probe_duration_seconds`: how long the last successful probe took,
+  including getting a pool connection, so a busy node pool also raises it.
   It is not updated by failed probes, so it is stale while `demos_db_up` is 0.
 
 The log has `[DB] Postgres probe failed (demos_db_up=0): <error>` when the

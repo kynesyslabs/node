@@ -226,7 +226,7 @@ export class MetricsCollector {
         )
         ms.createGauge(
             "db_probe_duration_seconds",
-            "Seconds the last successful Postgres probe (SELECT 1) took; stale while demos_db_up is 0",
+            "Seconds the last successful Postgres probe took, including getting a pool connection and SELECT 1; stale while demos_db_up is 0",
             [],
         )
 
