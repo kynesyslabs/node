@@ -96,6 +96,31 @@ describe("block-stall alerting is loaded", () => {
             "It is not updated by failed probes, so it is stale while `demos_db_up` is 0.",
         )
     })
+
+    // YAML comment lines joined into one line of text.
+    const flat = (s: string) => s.replace(/\n\s*#/g, " ").replace(/\s+/g, " ")
+
+    it("says DbDown also fires when the node's own pool is full", () => {
+        const rules = flat(read("monitoring/prometheus/alerts/node-health.yml"))
+        const runbook = flat(read("docs/runbooks/mainnet-monitoring.md"))
+        expect(rules).toContain(
+            "SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted.",
+        )
+        expect(runbook).toContain(
+            "`no answer within 5000 ms`: Postgres, or the network path to it, hangs, or the node's own connection pool is fully in use. Check the node's connections in `pg_stat_activity` before you restart Postgres.",
+        )
+    })
+
+    it("says DbDown does not page an outage with a good probe each minute", () => {
+        const rules = flat(read("monitoring/prometheus/alerts/node-health.yml"))
+        const runbook = flat(read("docs/runbooks/mainnet-monitoring.md"))
+        expect(rules).toContain(
+            "An outage with at least one good probe each minute (for example Postgres crash-looping and restarting) does not fire DbDown either; it is seen only through HeightStalled, if blocks stop.",
+        )
+        expect(runbook).toContain(
+            "An outage with at least one good probe each minute, for example Postgres crash-looping and restarting, does not fire it; it is seen only through `HeightStalled`, if blocks stop",
+        )
+    })
 })
 
 describe("disk-space checks in Docker", () => {

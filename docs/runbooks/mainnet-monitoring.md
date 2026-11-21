@@ -344,11 +344,18 @@ Postgres drops while the node is storing a block, the node cannot tell
 whether the block committed and stops (`[SIGNING] stopped until this process
 exits:`), which is `NodeDown`.
 
+`DbDown` fires once `demos_db_up` has been 0 for 1 min. An outage with at
+least one good probe each minute, for example Postgres crash-looping and
+restarting, does not fire it; it is seen only through `HeightStalled`, if
+blocks stop (the node's own queries succeed between restarts).
+
 When `DbDown` fires, on the validator:
 
 1. Read the error in the `[DB] Postgres probe failed` log line. `ECONNREFUSED`
    or `ENOTFOUND`: Postgres is not running, or `PG_HOST` / `PG_PORT` are wrong.
-   `no answer within 5000 ms`: Postgres, or the network path to it, hangs.
+   `no answer within 5000 ms`: Postgres, or the network path to it, hangs, or
+   the node's own connection pool is fully in use. Check the node's connections
+   in `pg_stat_activity` before you restart Postgres.
 2. Docker: `docker compose ps postgres` and `docker compose logs --tail 50
    postgres`, then `docker compose up -d postgres`. Bare-metal `./run`: the
    container is `postgres_<PG_PORT>` (`docker ps -a --filter name=postgres_`,

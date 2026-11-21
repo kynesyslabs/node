@@ -118,8 +118,11 @@ groups:
       # goes away after boot, and HeightStalled cannot see it: the collector
       # stops updating demos_seconds_since_last_block when its query fails.
       # `for: 1m` is four failed probes in a row, so a Postgres restart of a few
-      # seconds does not page. A node that stops exporting metrics is NodeDown;
-      # a node too old to export demos_db_up never fires this rule.
+      # seconds does not page. An outage with at least one good probe each
+      # minute (for example Postgres crash-looping and restarting) does not fire
+      # DbDown either; it is seen only through HeightStalled, if blocks stop.
+      # A node that stops exporting metrics is NodeDown; a node too old to
+      # export demos_db_up never fires this rule.
       - alert: DbDown
         expr: demos_db_up == 0
         for: 1m
@@ -127,7 +130,7 @@ groups:
           severity: critical
         annotations:
           summary: Validator cannot reach its Postgres
-          description: "demos_db_up has been 0 for >1m on {{ $labels.instance }}: SELECT 1 through the node's connection pool fails or gets no answer within 5 s. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+          description: "demos_db_up has been 0 for >1m on {{ $labels.instance }}: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
 
   # Dead-man's switch: always firing on purpose. Alertmanager routes it to the
   # `deadman` receiver, which should be an external watchdog that pages when the

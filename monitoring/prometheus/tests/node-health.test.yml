@@ -243,7 +243,7 @@ tests:
               instance: validator-1
             exp_annotations:
               summary: Validator cannot reach its Postgres
-              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
       # validator-3 failed one probe at minute 5: pending, so without `for: 1m` it would fire
       # here next to validator-1. It is back at minute 6 and never fires.
       - eval_time: 5m
@@ -255,7 +255,7 @@ tests:
               instance: validator-1
             exp_annotations:
               summary: Validator cannot reach its Postgres
-              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
       - eval_time: 8m
         alertname: DbDown
         exp_alerts:
@@ -265,7 +265,7 @@ tests:
               instance: validator-1
             exp_annotations:
               summary: Validator cannot reach its Postgres
-              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
       # Recovered at minute 9: resolved at once.
       - eval_time: 9m
         alertname: DbDown
