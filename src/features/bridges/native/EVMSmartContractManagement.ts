@@ -38,9 +38,10 @@ interface ShardRotationData {
     executed: boolean
 }
 
-// Names the cause of a bridge key failure without its value: the error's
-// code when it is a string (ENOENT, ethers' INVALID_ARGUMENT), else its name.
-// Never the message or other fields: they can quote the keys file or the key
+// Names the cause of a bridge key failure without its value: the ethers error
+// code when there is one (for example INVALID_ARGUMENT), otherwise the error's
+// class name. Never the message or other fields: they can quote the keys file
+// or the key
 function keyErrorKind(e: unknown): string {
     if (!(e instanceof Error)) return typeof e
     const code = (e as { code?: unknown }).code
@@ -134,7 +135,7 @@ export class EVMSmartContractManagement {
         } catch (e) {
             const kind = keyErrorKind(e)
             throw new Error(
-                `Failed to read the bridge private key for ${chainKey} (${kind})`,
+                `Failed to read the bridge private key for ${chainKey}: keys file unreadable or not valid JSON (${kind})`,
             )
         }
 

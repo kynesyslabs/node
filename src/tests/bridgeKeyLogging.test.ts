@@ -170,8 +170,11 @@ describe("bridge private key logging", () => {
         expectNoKeyText(emitted())
     })
 
+    // JsonConfig.readJsonFromFile rewraps every read and parse error in a
+    // plain Error with no code, its message holding the original error
     test.each([
         [
+            "a parse error",
             "Error",
             new Error(
                 "Failed to read JSON from file config/bridgePrivateKeys.json: " +
@@ -179,25 +182,29 @@ describe("bridge private key logging", () => {
             ),
         ],
         [
-            "EACCES",
-            Object.assign(
-                new Error(
-                    `EACCES: permission denied, open '${MARKER}${KEY_BODY}'`,
-                ),
-                { code: "EACCES", path: `${MARKER}${KEY_BODY}` },
+            "a read error",
+            "Error",
+            new Error(
+                "Failed to read JSON from file config/bridgePrivateKeys.json: " +
+                    `Error: EACCES: permission denied, open '${MARKER}${KEY_BODY}'`,
             ),
         ],
         [
             // A code that is not a string falls back to the error's name
+            "a TypeError with a numeric code",
             "TypeError",
             Object.assign(new TypeError(`bad key ${MARKER}${KEY_BODY}`), {
                 code: 13,
             }),
         ],
-        ["string", `Unexpected identifier "${MARKER}${KEY_BODY}"`],
+        [
+            "a thrown string",
+            "string",
+            `Unexpected identifier "${MARKER}${KEY_BODY}"`,
+        ],
     ])(
-        "a keys file read error (%s) fails with its kind and is not logged",
-        async (tag, thrown) => {
+        "a keys file read failure (%s) fails with a fixed message and is not logged",
+        async (_label, kind, thrown) => {
             getBridgePrivateKey.mockImplementation(() => {
                 throw thrown
             })
@@ -205,7 +212,8 @@ describe("bridge private key logging", () => {
             const error = await initializeError()
 
             expect(error.message).toBe(
-                `Failed to read the bridge private key for ${CHAIN_KEY} (${tag})`,
+                `Failed to read the bridge private key for ${CHAIN_KEY}: ` +
+                    `keys file unreadable or not valid JSON (${kind})`,
             )
             expect(error.cause).toBeUndefined()
             expectNoKeyText(Bun.inspect(error))
