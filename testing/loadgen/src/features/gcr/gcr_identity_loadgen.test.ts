@@ -7,11 +7,16 @@
  * The fake node below applies the same per-block rule. Requests reach it
  * through the real SDK transport (Demos.call), so the 429 arrives in the shape
  * the loadgen sees against a real node; only signing and nonces are stubbed.
+ *
+ * Block numbers are read through the fake node's own reader (the
+ * readBlockNumber option), never through framework/rpc's nodeCall: other
+ * loadgen tests mock that module, and bun keeps a module mock for the whole
+ * process, so these tests must pass whichever nodeCall is loaded.
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
-import { ConfirmError, RateLimitError, normalizeLoadgenError } from "../../framework/errors"
+import { ConfirmError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import {
   IDENTITY_CONFIRMS_PER_BLOCK,
   countStepFailure,
@@ -27,6 +32,7 @@ import {
   type LoadgenConfig,
   type LoadgenCounters,
   type RateLimitRetry,
+  type ReadBlockNumber,
 } from "./gcr_identity_loadgen"
 
 describe("resolveWorkerCount", () => {
@@ -125,6 +131,8 @@ type FakeNode = {
   rejected: number[]
   broadcasts: number
   nextBlock: () => void
+  /** The node's last block number, for waitForNextBlock's readBlockNumber. */
+  readBlock: ReadBlockNumber
   stop: () => void
 }
 
@@ -145,9 +153,6 @@ function startFakeNode(): FakeNode {
       if (req.method === "GET") return new Response("ok")
       const body: any = await req.json()
       const param = body?.params?.[0]
-      if (body?.method === "nodeCall" && param?.message === "getLastBlockNumber") {
-        return Response.json({ result: 200, response: block, require_reply: false, extra: null })
-      }
       if (body?.method === "execute" && param?.extra === "confirmTx" && param?.data?.content?.data?.[0] === "identity") {
         // Same rule as handleIdentityTxRateLimit: count, then refuse past the cap.
         if (countedBlock === block) countInBlock++
@@ -174,6 +179,7 @@ function startFakeNode(): FakeNode {
     nextBlock: () => {
       block++
     },
+    readBlock: async () => block,
     stop: () => server.stop(true),
   })
 }
@@ -219,6 +225,11 @@ function freshCounters(): LoadgenCounters {
   }
 }
 const identity = (i: number) => "0x" + i.toString(16).padStart(64, "0")
+/** The error submitPqcTx throws for the per-block cap's HTTP 429. */
+const http429 = () =>
+  new RateLimitError("confirm (add): node answered HTTP 429 (Rate limit exceeded)", { operation: "add", status: 429, httpStatus: 429 })
+/** A rate-limit error from the node's text, with no HTTP 429 (loadgenErrorFromMessage). */
+const ipBlocked = () => loadgenErrorFromMessage("confirm failed (add): IP blocked due to rate limiting", { operation: "add" })
 
 describe("identity confirm 429", () => {
   let node: FakeNode | null = null
@@ -240,7 +251,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
-      waitForNextBlock: () => waitForNextBlock(fake.url, 5000, 10),
+      waitForNextBlock: () => waitForNextBlock(fake.url, 5000, 10, fake.readBlock),
       onRetry: () => {
         retries++
       },
@@ -274,7 +285,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: true,
       maxRetries: 10,
       shouldStop: () => false,
-      waitForNextBlock: () => waitForNextBlock(fake.url, 5000, 10),
+      waitForNextBlock: () => waitForNextBlock(fake.url, 5000, 10, fake.readBlock),
       onRetry: () => {
         retries++
       },
@@ -302,7 +313,7 @@ describe("identity confirm 429", () => {
     }
     const limited = await retryOnRateLimit(async () => {
       attempts++
-      throw new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)")
+      throw http429()
     }, retry).catch((caught: unknown) => caught)
     expect(limited).toBeInstanceOf(RateLimitError)
     expect(attempts).toBe(3)
@@ -323,7 +334,7 @@ describe("identity confirm 429", () => {
     let attempts = 0
     const limited = await retryOnRateLimit(async () => {
       attempts++
-      throw new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)")
+      throw http429()
     }, {
       stopOnRateLimit: false,
       maxRetries: 10,
@@ -338,7 +349,7 @@ describe("identity confirm 429", () => {
   it("does not run the step again when the run ends during the block wait", async () => {
     let attempts = 0
     let stopping = false
-    const refused = new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)")
+    const refused = http429()
     const limited = await retryOnRateLimit(async () => {
       attempts++
       throw refused
@@ -366,7 +377,14 @@ describe("identity confirm 429", () => {
     const sharedStop = { value: false }
     // The run ends while the step waits for a block that never comes (the
     // wait gives up after settleTimeoutSec, past the deadline).
-    const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop, stopAtMs: Date.now() + 300 })
+    const retry = workerRateLimitRetry({
+      rpcUrl: fake.url,
+      cfg,
+      counters,
+      sharedStop,
+      stopAtMs: Date.now() + 300,
+      readBlockNumber: fake.readBlock,
+    })
     const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(RateLimitError)
@@ -393,7 +411,14 @@ describe("identity confirm 429", () => {
     // for a block that never comes, so its 429 is rethrown to the worker after the deadline.
     const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
     const stopAtMs = Date.now() + 300
-    const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop: { value: false }, stopAtMs })
+    const retry = workerRateLimitRetry({
+      rpcUrl: fake.url,
+      cfg,
+      counters,
+      sharedStop: { value: false },
+      stopAtMs,
+      readBlockNumber: fake.readBlock,
+    })
     counters.total++
     const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(RateLimitError)
@@ -411,8 +436,44 @@ describe("identity confirm 429", () => {
     const counters = freshCounters()
     counters.total = 2
     counters.ok = 1
-    const error = new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)")
-    expect(countStepFailure(counters, error, Date.now() + 60_000)).toBe("rateLimited")
+    expect(countStepFailure(counters, http429(), Date.now() + 60_000)).toBe("rateLimited")
+    expect(counters.rateLimited).toBe(1)
+    expect(counters.rateLimitedAtDeadline).toBe(0)
+    expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
+  })
+
+  it.each([
+    { label: "IP blocked", error: ipBlocked() },
+    { label: "rate limit text", error: loadgenErrorFromMessage("confirm failed (add): rate limit") },
+    { label: "RPC result 429 without an HTTP status", error: new RateLimitError("rate limit", { status: 429, httpStatus: null }) },
+    { label: "HTTP 403", error: new RateLimitError("rate limit", { status: 429, httpStatus: 403 }) },
+  ])("does not retry $label", async ({ error: blocked }) => {
+    let attempts = 0
+    let waits = 0
+    const retry: RateLimitRetry = {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => false,
+      waitForNextBlock: async () => {
+        waits++
+      },
+      onRetry: () => {},
+    }
+    expect(blocked).toBeInstanceOf(RateLimitError)
+    const error = await retryOnRateLimit(async () => {
+      attempts++
+      throw blocked
+    }, retry).catch((caught: unknown) => caught)
+    expect(error).toBe(blocked)
+    expect(attempts).toBe(1)
+    expect(waits).toBe(0)
+  })
+
+  it("an 'IP blocked' error after the run deadline is still counted as rateLimited", () => {
+    const counters = freshCounters()
+    counters.total = 2
+    counters.ok = 1
+    expect(countStepFailure(counters, ipBlocked(), Date.now() - 1)).toBe("rateLimited")
     expect(counters.rateLimited).toBe(1)
     expect(counters.rateLimitedAtDeadline).toBe(0)
     expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
@@ -421,9 +482,9 @@ describe("identity confirm 429", () => {
   it("waitForNextBlock returns once the block moves, and false when it does not", async () => {
     node = startFakeNode()
     const fake = node
-    expect(await waitForNextBlock(fake.url, 100, 10)).toBe(false)
+    expect(await waitForNextBlock(fake.url, 100, 10, fake.readBlock)).toBe(false)
     setTimeout(() => fake.nextBlock(), 30)
-    expect(await waitForNextBlock(fake.url, 2000, 10)).toBe(true)
+    expect(await waitForNextBlock(fake.url, 2000, 10, fake.readBlock)).toBe(true)
   })
 })
 

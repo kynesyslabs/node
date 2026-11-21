@@ -119,8 +119,15 @@ export function httpStatusOf(response: any): number | null {
 }
 
 function throwIfRateLimited(label: string, operation: "add" | "remove", response: any, context: Record<string, unknown>) {
-  if (response?.result !== 429 && httpStatusOf(response) !== 429) return
-  throw new RateLimitError(`${label} (${operation}): node answered HTTP 429 (rate limit)`, { ...context, status: 429 })
+  const httpStatus = httpStatusOf(response)
+  if (response?.result !== 429 && httpStatus !== 429) return
+  throw new RateLimitError(`${label} (${operation}): node answered HTTP 429 (rate limit)`, { ...context, status: 429, httpStatus })
+}
+
+/** Only an HTTP 429, verified by httpStatusOf, qualifies for block-based retries. */
+function isHttpRateLimit(error: unknown): boolean {
+  const info = normalizeLoadgenError(error)
+  return info.code === "RATE_LIMIT" && info.context?.httpStatus === 429
 }
 
 /**
@@ -245,16 +252,18 @@ function classifyFailure(error: unknown): keyof Pick<LoadgenCounters, "confirmEr
 }
 
 /**
- * Counts a worker step that failed. A 429 that ends the step once the run
- * deadline has passed goes to rateLimitedAtDeadline, not rateLimited: the
- * worker's retry stops waiting for the next block at the deadline, so the node
- * did not refuse the step for good, the run just ended before the retry. The
- * step stays in total as unfinished, and errorRateOf leaves it out. It is not
- * an error, but a run with no successful step still fails (runVerdict).
+ * Counts a worker step that failed. An HTTP 429 that
+ * ends the step once the run deadline has passed goes to rateLimitedAtDeadline,
+ * not rateLimited: the worker's retry stops waiting for the next block at the
+ * deadline, so the node did not refuse the step for good, the run just ended
+ * before the retry. The step stays in total as unfinished, and errorRateOf
+ * leaves it out. It is not an error, but a run with no successful step still
+ * fails (runVerdict). Other rate-limit errors, which are not retried, stay in
+ * rateLimited.
  */
 export function countStepFailure(counters: LoadgenCounters, error: unknown, stopAtMs: number) {
   const classified = classifyFailure(error)
-  const bucket = classified === "rateLimited" && nowMs() >= stopAtMs ? "rateLimitedAtDeadline" : classified
+  const bucket = isHttpRateLimit(error) && nowMs() >= stopAtMs ? "rateLimitedAtDeadline" : classified
   counters[bucket]++
   return bucket
 }
@@ -486,17 +495,25 @@ async function readLastBlockNumber(rpcUrl: string): Promise<number | null> {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
+/** Reads a node's last block number, or null when the read fails. */
+export type ReadBlockNumber = (rpcUrl: string) => Promise<number | null>
+
 /**
  * Waits until the node's last block number moves past the one it reports now:
  * the identity confirm cap counts per block, so a new block frees the slots.
  * Returns false if no new block shows up within timeoutMs.
  */
-export async function waitForNextBlock(rpcUrl: string, timeoutMs: number, pollMs: number): Promise<boolean> {
+export async function waitForNextBlock(
+  rpcUrl: string,
+  timeoutMs: number,
+  pollMs: number,
+  readBlockNumber: ReadBlockNumber = readLastBlockNumber,
+): Promise<boolean> {
   const deadlineMs = nowMs() + timeoutMs
-  let start = await readLastBlockNumber(rpcUrl)
+  let start = await readBlockNumber(rpcUrl)
   while (nowMs() < deadlineMs) {
     await sleep(pollMs)
-    const current = await readLastBlockNumber(rpcUrl)
+    const current = await readBlockNumber(rpcUrl)
     if (current === null) continue
     if (start === null) start = current
     else if (current > start) return true
@@ -515,8 +532,8 @@ export type RateLimitRetry = {
 /**
  * Runs one step (a confirm + broadcast). An HTTP 429 is back-pressure from the
  * node's per-block identity confirm cap, so the step is retried after the next
- * block, up to maxRetries times. Other errors, and every 429 when
- * stopOnRateLimit is set, are thrown to the caller.
+ * block, up to maxRetries times. Rate-limit messages without an HTTP 429,
+ * other errors, and every 429 when stopOnRateLimit is set, are thrown to the caller.
  */
 export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -524,7 +541,7 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
       return await step()
     } catch (error) {
       const retry =
-        classifyFailure(error) === "rateLimited" &&
+        isHttpRateLimit(error) &&
         !opts.stopOnRateLimit &&
         attempt < opts.maxRetries &&
         !opts.shouldStop()
@@ -543,12 +560,14 @@ function rateLimitRetryFor(params: {
   counters: LoadgenCounters
   shouldStop: () => boolean
   stopOnRateLimit: boolean
+  readBlockNumber?: ReadBlockNumber
 }): RateLimitRetry {
   return {
     stopOnRateLimit: params.stopOnRateLimit,
     maxRetries: params.cfg.rateLimitMaxRetries,
     shouldStop: params.shouldStop,
-    waitForNextBlock: () => waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs),
+    waitForNextBlock: () =>
+      waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs, params.readBlockNumber),
     onRetry: () => {
       params.counters.rateLimitRetries++
     },
@@ -562,6 +581,7 @@ export function workerRateLimitRetry(params: {
   counters: LoadgenCounters
   sharedStop: { value: boolean }
   stopAtMs: number
+  readBlockNumber?: ReadBlockNumber
 }): RateLimitRetry {
   return rateLimitRetryFor({
     rpcUrl: params.rpcUrl,
@@ -569,6 +589,7 @@ export function workerRateLimitRetry(params: {
     counters: params.counters,
     shouldStop: () => params.sharedStop.value || nowMs() >= params.stopAtMs,
     stopOnRateLimit: params.cfg.stopOnRateLimit,
+    readBlockNumber: params.readBlockNumber,
   })
 }
 
