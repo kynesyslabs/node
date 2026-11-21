@@ -11,8 +11,9 @@
  * payload reported in the issue, and must pass the RPC hash check
  * (Transaction.checkCoherence) and the mempool hash and signature check
  * (validateTx) with osDenomination on and off. A propose edited after signing
- * must be refused. Only the SDK's network lookups are stubbed. These six cases
- * do not run the edit checks or the governance gate.
+ * must be refused. Only the SDK's network lookups, the chain tip and the
+ * logger are stubbed. These six cases do not run the edit checks or the
+ * governance gate.
  */
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
 
@@ -49,7 +50,8 @@ const CHAIN_ID = 1337
 const OS_DENOMINATION_HEIGHT = 10
 const PRE_FORK_HEIGHT = 5
 
-// The propose captured in #941 (scripts/governance-diag.ts).
+// The propose captured in #941 (captured by the reporter's
+// `scripts/governance-diag.ts`, see #941).
 const ISSUE_PROPOSAL = {
     proposalId: "9cfe50df-09dd-44d1-9fd2-8d83f97b25ac",
     proposedParameters: { blockTimeMs: 1100 },
