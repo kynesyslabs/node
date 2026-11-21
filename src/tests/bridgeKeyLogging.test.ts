@@ -4,42 +4,60 @@
  * EVMSmartContractManagement.initialize() logs the error of a failed tank
  * and rethrows it to callers that log it again, so the key path is checked
  * end to end: a well-formed key, a malformed key (ethers quotes it in its
- * error) and a keys file read error that quotes the file. The logger and the
- * console are spied; every argument they receive is rendered and searched
- * for the synthetic key text.
+ * error), a malformed mnemonic, and a keys file read error that quotes the
+ * file. The logger and the console are spied; every argument they receive is
+ * rendered and searched for the synthetic key text. A thrown message names
+ * the cause only by the error's string code, else its name.
  */
-import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
-import { Wallet } from "ethers"
+import {
+    afterAll,
+    beforeEach,
+    describe,
+    expect,
+    mock,
+    spyOn,
+    test,
+} from "bun:test"
+import { Contract, Wallet } from "ethers"
+import { EVM as SdkEVM } from "@kynesyslabs/demosdk/xmcore/evm"
 
-// Synthetic key text only, never a real key
+// Synthetic key text only, never a real key or phrase
 const KEY_BODY = "5e".repeat(32)
 const GOOD_KEY = "0x" + KEY_BODY
 const MARKER = "KEYMARKERzz"
 const BAD_KEY = "0x5e5e" + MARKER
+// Has spaces, so the SDK takes it as a mnemonic; not a valid BIP-39 phrase
+const BAD_PHRASE = `${MARKER} lunar orbit ${KEY_BODY} quartz`
 const CHAIN_KEY = "evm.eth.sepolia"
 const TANK = "0x" + "ab".repeat(20)
 
-const levels = ["debug", "info", "warning", "warn", "error", "critical", "only", "custom"]
+const levels = [
+    "debug",
+    "info",
+    "warning",
+    "warn",
+    "error",
+    "critical",
+    "only",
+    "custom",
+]
 const logger: Record<string, ReturnType<typeof mock>> = {}
 for (const level of levels) logger[level] = mock(() => {})
 
 const getBridgePrivateKey = mock((): string | null => GOOD_KEY)
 
-class StubEVM {
-    wallet: Wallet | null = null
-    async connect() {
+// The SDK's own connectWallet and getAddress, so a malformed key or mnemonic
+// fails the way it does in the node. No RPC URL, so no provider and no
+// network; only the network calls are stubbed
+class StubEVM extends SdkEVM {
+    constructor() {
+        super("")
+    }
+    override async connect() {
         return true
     }
-    // Real ethers parsing, so a malformed key fails the way it does in the node
-    async connectWallet(privateKey: string) {
-        this.wallet = new Wallet(privateKey.trim())
-        return this.wallet
-    }
-    getAddress() {
-        return this.wallet.address
-    }
-    async getContractInstance() {
-        return { initialized: async () => true }
+    override async getContractInstance() {
+        return { initialized: async () => true } as unknown as Contract
     }
 }
 
@@ -122,8 +140,25 @@ describe("bridge private key logging", () => {
         expectNoKeyText(text)
     })
 
-    test("a malformed key fails with a fixed tag and is not logged", async () => {
+    test("a malformed key fails with the ethers code and is not logged", async () => {
         getBridgePrivateKey.mockReturnValue(BAD_KEY)
+
+        const error = await initializeError()
+
+        expect(error.message).toBe(
+            `Failed to load the bridge private key for ${CHAIN_KEY} (INVALID_ARGUMENT)`,
+        )
+        expect(error.cause).toBeUndefined()
+        expectNoKeyText(Bun.inspect(error))
+        expectNoKeyText(emitted())
+    })
+
+    test("a malformed mnemonic fails with a fixed tag and is not logged", async () => {
+        // The real SDK path: a phrase with spaces is checked as a mnemonic
+        await expect(new SdkEVM("").connectWallet(BAD_PHRASE)).rejects.toThrow(
+            "Invalid mnemonic phrase",
+        )
+        getBridgePrivateKey.mockReturnValue(BAD_PHRASE)
 
         const error = await initializeError()
 
@@ -143,9 +178,25 @@ describe("bridge private key logging", () => {
                     `SyntaxError: JSON Parse error: Unexpected identifier "${MARKER}${KEY_BODY}"`,
             ),
         ],
+        [
+            "EACCES",
+            Object.assign(
+                new Error(
+                    `EACCES: permission denied, open '${MARKER}${KEY_BODY}'`,
+                ),
+                { code: "EACCES", path: `${MARKER}${KEY_BODY}` },
+            ),
+        ],
+        [
+            // A code that is not a string falls back to the error's name
+            "TypeError",
+            Object.assign(new TypeError(`bad key ${MARKER}${KEY_BODY}`), {
+                code: 13,
+            }),
+        ],
         ["string", `Unexpected identifier "${MARKER}${KEY_BODY}"`],
     ])(
-        "a keys file read error (%s) fails with a fixed tag and is not logged",
+        "a keys file read error (%s) fails with its kind and is not logged",
         async (tag, thrown) => {
             getBridgePrivateKey.mockImplementation(() => {
                 throw thrown
