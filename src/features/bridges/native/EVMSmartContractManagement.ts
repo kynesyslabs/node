@@ -116,8 +116,19 @@ export class EVMSmartContractManagement {
             throw new Error(`Unsupported chain configuration: ${chainKey}`)
         }
 
-        const bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
-        log.debug("bridgePrivateKey: " + bridgePrivateKey)
+        // The key errors below carry only a fixed tag and no cause, because
+        // initialize() and its callers log the message: a JSON parse error
+        // can quote the keys file, and ethers quotes a malformed key
+        let bridgePrivateKey: string | null
+        try {
+            bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
+        } catch (e) {
+            throw new Error(
+                `Failed to read the bridge private key for ${chainKey} (${
+                    e instanceof Error ? "Error" : typeof e
+                })`,
+            )
+        }
 
         if (!bridgePrivateKey) {
             log.error(`Bridge private key not found for ${chainKey}`)
@@ -128,7 +139,15 @@ export class EVMSmartContractManagement {
         // Create EVM instance
         const evmInstance = new EVM(rpcUrl, chainId)
         await evmInstance.connect()
-        await evmInstance.connectWallet(bridgePrivateKey)
+        try {
+            await evmInstance.connectWallet(bridgePrivateKey)
+        } catch (e) {
+            throw new Error(
+                `Failed to load the bridge private key for ${chainKey} (${
+                    e instanceof Error ? "Error" : typeof e
+                })`,
+            )
+        }
 
         log.debug("public key: " + evmInstance.getAddress())
 
