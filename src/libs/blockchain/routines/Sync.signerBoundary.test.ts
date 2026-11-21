@@ -145,7 +145,6 @@ beforeEach(() => {
     getSharedState.signingAlgorithm = "ed25519" as any
     getSharedState.lastBlockNumber = HEIGHT - 1
     getSharedState.fastSyncCount = 0
-    getSharedState.referenceBlockRoom = 1
     now = getNetworkTimestamp()
 
     validatorSet = members.map(m => m.identity)
