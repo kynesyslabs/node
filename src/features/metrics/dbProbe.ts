@@ -35,7 +35,10 @@ export interface DbProbeOptions {
     probe: (signal: AbortSignal) => Promise<unknown>
     /** Called once per tick: up, and the probe's duration in seconds when it succeeded. */
     report: (up: 0 | 1, seconds: number | null) => void
-    /** Called when the result changes, and on a first result of 0. */
+    /**
+     * Called when the result changes, on a first result of 0, and when the
+     * reason of a 0 differs from the last one passed here.
+     */
     onChange?: (up: 0 | 1, reason: string | null) => void
     intervalMs?: number
     timeoutMs?: number
@@ -53,12 +56,15 @@ export class DbProbe {
     private controller: AbortController | null = null
     private stopped = false
     private lastUp: 0 | 1 | null = null
+    private lastReason: string | null = null
     private readonly intervalMs: number
     private readonly timeoutMs: number
+    private readonly noAnswer: string
 
     constructor(private readonly options: DbProbeOptions) {
         this.intervalMs = options.intervalMs ?? DB_PROBE_INTERVAL_MS
         this.timeoutMs = options.timeoutMs ?? DB_PROBE_TIMEOUT_MS
+        this.noAnswer = `no answer within ${this.timeoutMs} ms`
     }
 
     public start(): void {
@@ -80,7 +86,8 @@ export class DbProbe {
     public async tick(): Promise<void> {
         if (this.stopped) return
         if (this.inFlight) {
-            this.record(0, null, `no answer to the probe started over ${this.timeoutMs} ms ago`)
+            // Still the timed-out probe: same reason, so no new log line.
+            this.record(0, null, this.noAnswer)
             return
         }
 
@@ -112,9 +119,8 @@ export class DbProbe {
             if (outcome === "ok") {
                 this.record(1, (performance.now() - started) / 1000, null)
             } else {
-                const reason = `no answer within ${this.timeoutMs} ms`
-                controller.abort(new Error(reason))
-                this.record(0, null, reason)
+                controller.abort(new Error(this.noAnswer))
+                this.record(0, null, this.noAnswer)
             }
         } catch (error) {
             this.record(0, null, reasonOf(error))
@@ -123,12 +129,21 @@ export class DbProbe {
         }
     }
 
-    private record(up: 0 | 1, seconds: number | null, reason: string | null): void {
+    private record(
+        up: 0 | 1,
+        seconds: number | null,
+        reason: string | null,
+    ): void {
         // A stopped probe may have been replaced: its late result is stale.
         if (this.stopped) return
         this.options.report(up, seconds)
-        const changed = this.lastUp === null ? up === 0 : this.lastUp !== up
+        // A 0 is logged when it follows a 1 or nothing, or has a new reason.
+        const changed =
+            up === 0
+                ? this.lastUp !== 0 || reason !== this.lastReason
+                : this.lastUp === 0
         this.lastUp = up
+        this.lastReason = up === 0 ? reason : null
         if (changed) this.options.onChange?.(up, reason)
     }
 }

@@ -91,7 +91,8 @@ describe("DbProbe", () => {
             [0, null],
         ])
         expect(h.calls()).toBe(1)
-        // Still down: no second log line.
+        // Still down for the same reason (the first probe still has no
+        // answer): no second log line.
         expect(h.changes).toHaveLength(1)
 
         // Once the stuck query settles, the next tick probes again.
@@ -108,7 +109,9 @@ describe("DbProbe", () => {
     it("goes back to 1 when the database answers again, logging each change once", async () => {
         let down = false
         const h = harness(() =>
-            down ? Promise.reject(new Error("Connection terminated")) : Promise.resolve(),
+            down
+                ? Promise.reject(new Error("Connection terminated"))
+                : Promise.resolve(),
         )
         await h.db.tick()
         down = true
@@ -121,6 +124,51 @@ describe("DbProbe", () => {
             [0, "Connection terminated"],
             [1, null],
         ])
+    })
+
+    it("logs a new failure reason while still down, once per reason, and clears it on recovery", async () => {
+        // Runbook step 1 triages on the latest `[DB] Postgres probe failed`
+        // line, so a timeout followed by ECONNREFUSED (Postgres restarted)
+        // must log both. Before the fix only the first reason was logged:
+        // [[0, "no answer within 50 ms"], [1, null]].
+        const refused = "connect ECONNREFUSED 127.0.0.1:5332"
+        let mode: "hang" | "refused" | "up" = "hang"
+        const h = harness(signal => {
+            if (mode === "up") return Promise.resolve()
+            if (mode === "refused") return Promise.reject(new Error(refused))
+            // Gives up its connection on abort, as pingDatabase does.
+            return new Promise((_, reject) =>
+                signal.addEventListener("abort", () => reject(signal.reason)),
+            )
+        })
+        const step = async (next: typeof mode) => {
+            mode = next
+            await h.db.tick()
+            // Let an aborted probe settle so the next tick probes again.
+            await sleep(0)
+        }
+
+        for (const next of [
+            "hang",
+            "hang",
+            "refused",
+            "refused",
+            "up",
+        ] as const) {
+            await step(next)
+        }
+        expect(h.calls()).toBe(5)
+        expect(h.reports.map(r => r[0])).toEqual([0, 0, 0, 0, 1])
+        expect(h.changes).toEqual([
+            [0, `no answer within ${TIMEOUT_MS} ms`],
+            [0, refused],
+            [1, null],
+        ])
+
+        // The recovery cleared the stored reason: the same error logs again.
+        await step("refused")
+        expect(h.changes).toHaveLength(4)
+        expect(h.changes[3]).toEqual([0, refused])
     })
 
     it("start() probes at once, and a second start() adds no second tick or timer", async () => {
@@ -217,7 +265,10 @@ describe("DbProbe", () => {
         const gauge: Array<[string, 0 | 1]> = []
         const changes: string[] = []
         const pending: { fail?: (error: Error) => void } = {}
-        const make = (name: string, probe: (signal: AbortSignal) => Promise<unknown>) =>
+        const make = (
+            name: string,
+            probe: (signal: AbortSignal) => Promise<unknown>,
+        ) =>
             new DbProbe({
                 probe,
                 report: up => gauge.push([name, up]),

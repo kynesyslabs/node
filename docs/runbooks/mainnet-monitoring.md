@@ -334,8 +334,8 @@ timeout, on a timer of its own, never on the consensus path:
   It is not updated by failed probes, so it is stale while `demos_db_up` is 0.
 
 The log has `[DB] Postgres probe failed (demos_db_up=0): <error>` when the
-probe starts failing and `[DB] Postgres answers the probe again` when it
-recovers, once each.
+probe starts failing and again each time the error changes while it keeps
+failing, and `[DB] Postgres answers the probe again` once when it recovers.
 
 When Postgres goes away after boot the node does not exit. Its queries fail
 (`[SCHEDULER] Task "consensus_trigger" tick failed: ...` in the log), `/health`
@@ -352,7 +352,8 @@ blocks stop (the node's own queries succeed between restarts).
 
 When `DbDown` fires, on the validator:
 
-1. Read the error in the `[DB] Postgres probe failed` log line. `ECONNREFUSED`,
+1. Read the error in the latest `[DB] Postgres probe failed` log line (a new
+   line is logged when the error changes). `ECONNREFUSED`,
    `ENOTFOUND` or `EAI_AGAIN`: Postgres is not running, or `PG_HOST` /
    `PG_PORT` are wrong.
    `no answer within 5000 ms`: Postgres, or the network path to it, hangs, or
