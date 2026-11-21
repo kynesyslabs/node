@@ -1,10 +1,10 @@
 /**
  * kynesyslabs/node#941: a governance propose signed by the SDK was refused at
- * confirm with "Transaction hash mismatch". The node now derives the hash of
- * post-osDenomination content with the SDK's own serializer
- * (src/libs/crypto/txContentSerializer.ts), so at the same SDK version and the
- * same osDenomination state the two cannot disagree on a governance
- * transaction's hash.
+ * confirm with "Transaction hash mismatch". After osDenomination, at the
+ * same SDK version, the node and the SDK cannot disagree on a governance
+ * transaction's hash: the node uses the SDK's own serializer
+ * (src/libs/crypto/txContentSerializer.ts). Before osDenomination, the node
+ * hashes the content as sent.
  *
  * This pins that on the node side: a propose and a vote are built and signed
  * by the real SDK builders (proposeNetworkUpgrade, voteOnUpgrade), with the
