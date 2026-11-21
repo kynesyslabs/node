@@ -2,7 +2,7 @@
 // fails, or never answers, that a hung probe never stalls the next tick, that a
 // timed-out probe is aborted and replaced once it has given up its connection,
 // and that a stopped probe reports nothing more.
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { DbProbe } from "./dbProbe"
 
 const TIMEOUT_MS = 50
@@ -123,13 +123,28 @@ describe("DbProbe", () => {
         ])
     })
 
-    it("start() probes at once and then on every interval; stop() ends it", async () => {
+    it("start() probes at once, and a second start() adds no second tick or timer", async () => {
+        const intervals = spyOn(globalThis, "setInterval")
+        // No interval can elapse during this test: only start() probes.
+        const h = harness(() => Promise.resolve(), 60_000)
+        try {
+            h.db.start()
+            h.db.start()
+            expect(intervals).toHaveBeenCalledTimes(1)
+            await sleep(5)
+            expect(h.calls()).toBe(1)
+            // A second tick would have reported 0 (the first probe was in flight).
+            expect(h.reports.map(r => r[0])).toEqual([1])
+        } finally {
+            h.db.stop()
+            intervals.mockRestore()
+        }
+    })
+
+    it("start() probes on every interval; stop() ends it", async () => {
         const h = harness(() => Promise.resolve(), 20)
         h.db.start()
-        h.db.start() // a second start does not add a second timer
-        await sleep(5)
-        expect(h.calls()).toBe(1)
-        await sleep(70)
+        await sleep(75)
         h.db.stop()
         const afterStop = h.calls()
         // About 4 (one at start, one every 20 ms); timers run late on a loaded host.

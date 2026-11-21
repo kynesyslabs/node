@@ -33,11 +33,12 @@ const execAsync = promisify(exec)
  * Postgres. Never initializes the DataSource (that retries for half a
  * minute): boot has done it before the collector starts.
  *
- * When `signal` aborts, the pg client is ended before the runner is released:
- * pg destroys the socket of a client with a query in flight, so that query
- * rejects, and pg-pool drops an ending client instead of reusing it. The
- * returned promise then settles without waiting for the query, which on a
- * half-open connection would never answer.
+ * When `signal` aborts after SELECT 1 was sent, the pg client is ended before
+ * the runner is released: pg destroys the socket of a client with a query in
+ * flight, so that query rejects, and pg-pool drops an ending client instead of
+ * reusing it. The returned promise then settles without waiting for the query,
+ * which on a half-open connection would never answer. A client that arrives
+ * from the pool only after the abort carries no query: it is released as usual.
  */
 export async function pingDatabase(signal: AbortSignal): Promise<void> {
     // Lazy import to avoid circular dependencies
@@ -47,6 +48,7 @@ export async function pingDatabase(signal: AbortSignal): Promise<void> {
     }
     const runner = dataSource.createQueryRunner()
     let client: { end(): Promise<void> } | undefined
+    let sent = false
     try {
         client = await runner.connect()
         signal.throwIfAborted()
@@ -55,10 +57,11 @@ export async function pingDatabase(signal: AbortSignal): Promise<void> {
                 once: true,
             }),
         )
+        sent = true
         await Promise.race([runner.query("SELECT 1"), aborted])
     } catch (error) {
-        // An aborted probe never gives its client back to the pool.
-        if (signal.aborted) client?.end().catch(() => undefined)
+        // An aborted query never gives its client back to the pool.
+        if (signal.aborted && sent) client?.end().catch(() => undefined)
         throw error
     } finally {
         await runner.release()

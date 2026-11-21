@@ -3,8 +3,10 @@
 // must not leave the first probe's timer ticking next to the new one.
 //
 // pingDatabase, the probe query: on abort it must give up its pool client even
-// though Postgres never answers (a half-open connection), with real pg, pg-pool
-// and a TypeORM query runner against a fake Postgres server.
+// though Postgres never answers (a half-open connection), but a client that
+// only arrives from the pool after the abort carries no query and goes back to
+// the pool. With real pg, pg-pool and a TypeORM query runner against a fake
+// Postgres server.
 import { describe, expect, it, mock, spyOn } from "bun:test"
 import net from "node:net"
 import { DataSource } from "typeorm"
@@ -126,41 +128,48 @@ function fakePostgres() {
 interface PgPool {
     totalCount: number
     idleCount: number
+    connect(): Promise<{ release(): void }>
     on(event: "error", listener: (error: unknown) => void): void
     end(): Promise<void>
 }
 
+/** The node's dataSource (mocked) on a fake Postgres, with a pool of one. */
+async function probePool() {
+    const pg = fakePostgres()
+    const port = await pg.listen()
+    const dataSource = new DataSource({
+        type: "postgres",
+        host: "127.0.0.1",
+        port,
+        username: "probe",
+        database: "probe",
+    })
+    // The pg that TypeORM loaded, one connection at most: the second probe
+    // only gets one if the first gave its slot back.
+    const pgModule = (
+        dataSource.driver as unknown as {
+            postgres: { Pool: new (options: object) => PgPool }
+        }
+    ).postgres
+    const pool = new pgModule.Pool({
+        host: "127.0.0.1",
+        port,
+        user: "probe",
+        database: "probe",
+        max: 1,
+    })
+    // As TypeORM's createPool does; nothing should reach it here.
+    const poolErrors: unknown[] = []
+    pool.on("error", error => poolErrors.push(error))
+    ;(dataSource.driver as unknown as { master: PgPool }).master = pool
+    ;(dataSource as unknown as { isInitialized: boolean }).isInitialized = true
+    mock.module("@/model/datasource", () => ({ dataSource }))
+    return { pg, pool, poolErrors }
+}
+
 describe("pingDatabase", () => {
     it("on abort ends its pool client and settles without an answer; the next probe connects afresh", async () => {
-        const pg = fakePostgres()
-        const port = await pg.listen()
-        const dataSource = new DataSource({
-            type: "postgres",
-            host: "127.0.0.1",
-            port,
-            username: "probe",
-            database: "probe",
-        })
-        // The pg that TypeORM loaded, one connection at most: the second probe
-        // only gets one if the first gave its slot back.
-        const pgModule = (
-            dataSource.driver as unknown as {
-                postgres: { Pool: new (options: object) => PgPool }
-            }
-        ).postgres
-        const pool = new pgModule.Pool({
-            host: "127.0.0.1",
-            port,
-            user: "probe",
-            database: "probe",
-            max: 1,
-        })
-        // As TypeORM's createPool does; nothing should reach it here.
-        const poolErrors: unknown[] = []
-        pool.on("error", error => poolErrors.push(error))
-        ;(dataSource.driver as unknown as { master: PgPool }).master = pool
-        ;(dataSource as unknown as { isInitialized: boolean }).isInitialized = true
-        mock.module("@/model/datasource", () => ({ dataSource }))
+        const { pg, pool, poolErrors } = await probePool()
 
         const unhandled: unknown[] = []
         const onUnhandled = (reason: unknown) => unhandled.push(reason)
@@ -208,6 +217,57 @@ describe("pingDatabase", () => {
             process.off("unhandledRejection", onUnhandled)
             // Server first: that also frees a client a failing run left hung,
             // so pool.end() does not wait for it forever.
+            pg.close()
+            await pool.end()
+        }
+    })
+
+    it("a client that arrives after the tick timed out is released to the pool, not ended, and the tick still reports 0", async () => {
+        const { pg, pool, poolErrors } = await probePool()
+        pg.state.hang = false
+        const reports: Array<0 | 1> = []
+        let first: Promise<void> | undefined
+        const probe = new DbProbe({
+            probe: signal => {
+                const ping = pingDatabase(signal)
+                first ??= ping
+                return ping
+            },
+            report: up => reports.push(up),
+            timeoutMs: 50,
+            intervalMs: 60_000,
+        })
+
+        try {
+            // The node's own queries hold the only pool slot: the probe
+            // waits for a connection until the tick times out.
+            const held = await pool.connect()
+            await probe.tick()
+            expect(reports).toEqual([0])
+            expect(pg.state.queries).toBe(0)
+
+            // The slot frees up after the abort. The probe gets a healthy
+            // client with no query on it and gives it back.
+            held.release()
+            const outcome = await first?.then(
+                () => "resolved",
+                (error: Error) => error.message,
+            )
+            expect(outcome).toBe("no answer within 50 ms")
+            // Before the fix it was ended: totalCount 0, socket closed.
+            expect(pool.totalCount).toBe(1)
+            expect(pool.idleCount).toBe(1)
+            expect(pg.state.queries).toBe(0)
+
+            // The next tick runs SELECT 1 on that same connection.
+            await new Promise(r => setTimeout(r, 0))
+            await probe.tick()
+            expect(reports).toEqual([0, 1])
+            expect(pg.state.connections).toBe(1)
+            expect(pg.state.queries).toBe(1)
+            expect(poolErrors).toEqual([])
+        } finally {
+            probe.stop()
             pg.close()
             await pool.end()
         }
