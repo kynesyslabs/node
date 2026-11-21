@@ -18,14 +18,18 @@ import {
   retryOnRateLimit,
   submitPqcTx,
   waitForNextBlock,
+  workerCountWarnings,
+  workerRateLimitRetry,
+  type LoadgenConfig,
+  type LoadgenCounters,
   type RateLimitRetry,
 } from "./gcr_identity_loadgen"
 
 describe("resolveWorkerCount", () => {
   it("defaults to 4 workers per target", () => {
     expect(IDENTITY_CONFIRMS_PER_BLOCK).toBe(4)
-    expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4, warning: null })
-    expect(resolveWorkerCount({ requested: "", targetCount: 2, walletCount: 8 })).toEqual({ workers: 8, cap: 8, warning: null })
+    expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4 })
+    expect(resolveWorkerCount({ requested: "", targetCount: 2, walletCount: 8 })).toEqual({ workers: 8, cap: 8 })
     expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 10 }).workers).toBe(4)
   })
 
@@ -35,19 +39,48 @@ describe("resolveWorkerCount", () => {
     expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 0 }).workers).toBe(1)
   })
 
-  it("lets an explicit CONCURRENCY win, with a warning above the cap", () => {
-    const over = resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4 })
-    expect(over.workers).toBe(6)
-    expect(over.cap).toBe(4)
-    expect(over.warning).toContain("CONCURRENCY=6 is above 4")
-
-    expect(resolveWorkerCount({ requested: "8", targetCount: 2, walletCount: 4 })).toEqual({ workers: 8, cap: 8, warning: null })
-    expect(resolveWorkerCount({ requested: "1", targetCount: 1, walletCount: 4 })).toEqual({ workers: 1, cap: 4, warning: null })
+  it("lets an explicit CONCURRENCY win", () => {
+    expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4 })).toEqual({ workers: 6, cap: 4 })
+    expect(resolveWorkerCount({ requested: "8", targetCount: 2, walletCount: 4 })).toEqual({ workers: 8, cap: 8 })
+    expect(resolveWorkerCount({ requested: "1", targetCount: 1, walletCount: 4 })).toEqual({ workers: 1, cap: 4 })
     expect(resolveWorkerCount({ requested: "0", targetCount: 1, walletCount: 4 }).workers).toBe(1)
   })
 
   it("ignores a CONCURRENCY that is not a number", () => {
-    expect(resolveWorkerCount({ requested: "many", targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4, warning: null })
+    expect(resolveWorkerCount({ requested: "many", targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4 })
+  })
+})
+
+describe("workerCountWarnings", () => {
+  const config = (concurrency: number, workerCap: number, walletCount: number, targetCount = 1) => ({
+    concurrency,
+    workerCap,
+    rpcUrls: Array.from({ length: targetCount }, (_, i) => `http://node${i}:53550`),
+    wallets: Array.from({ length: walletCount }, (_, i) => `wallet ${i}`),
+  })
+
+  it("warns above the cap, with the cap from config.workerCap", () => {
+    const over = workerCountWarnings(config(6, 4, 6))
+    expect(over).toHaveLength(1)
+    expect(over[0]).toContain("CONCURRENCY=6 is above 4 (4 identity confirms per block per node x 1 target(s)")
+    expect(workerCountWarnings(config(9, 8, 9, 2))[0]).toContain("CONCURRENCY=9 is above 8")
+    // The printed cap is the configured one, not recomputed from the targets.
+    expect(workerCountWarnings(config(6, 5, 6))[0]).toContain("CONCURRENCY=6 is above 5")
+    expect(workerCountWarnings(config(4, 4, 4))).toEqual([])
+    expect(workerCountWarnings(config(8, 8, 8, 2))).toEqual([])
+  })
+
+  it("warns once when workers share a wallet", () => {
+    expect(workerCountWarnings(config(3, 4, 2))).toEqual([
+      "[gcr_identity_loadgen] 3 workers but 2 wallet(s): workers will share wallets and their nonces.",
+    ])
+    expect(workerCountWarnings(config(2, 4, 2))).toEqual([])
+    expect(workerCountWarnings(config(1, 4, 1))).toEqual([])
+
+    const both = workerCountWarnings(config(6, 4, 2))
+    expect(both).toHaveLength(2)
+    expect(both[0]).toContain("CONCURRENCY=6 is above 4")
+    expect(both[1]).toContain("6 workers but 2 wallet(s): workers will share wallets and their nonces")
   })
 })
 
@@ -249,6 +282,28 @@ describe("identity confirm 429", () => {
     }).catch((caught: unknown) => caught)
     expect(limited).toBeInstanceOf(RateLimitError)
     expect(attempts).toBe(1)
+  })
+
+  it("a worker's step waiting out 429s stops retrying once the run deadline passes", async () => {
+    node = startFakeNode()
+    const fake = node
+    const demos = await demosWithSdkTransport(fake.url)
+    for (let i = 0; i < IDENTITY_CONFIRMS_PER_BLOCK; i++) await addStep(demos, i)()
+
+    const counters = { rateLimitRetries: 0 } as LoadgenCounters
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
+    const sharedStop = { value: false }
+    // The run ends while the step waits for a block that never comes (the
+    // wait gives up after settleTimeoutSec and the confirm is refused again).
+    const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop, stopAtMs: Date.now() + 300 })
+    const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(RateLimitError)
+    expect(sharedStop.value).toBe(false)
+    // One wait, started before the deadline; the 429 after it ends the step.
+    expect(counters.rateLimitRetries).toBe(1)
+    expect(fake.rejected).toEqual([1, 1])
+    expect(fake.accepted).toEqual([1, 1, 1, 1])
   })
 
   it("waitForNextBlock returns once the block moves, and false when it does not", async () => {

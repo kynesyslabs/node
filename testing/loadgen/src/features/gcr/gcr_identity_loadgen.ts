@@ -13,7 +13,7 @@ import {
   waitForTxReady,
 } from "../../token_shared"
 
-type LoadgenConfig = {
+export type LoadgenConfig = {
   rpcUrls: string[]
   wallets: string[]
   durationSec: number
@@ -36,7 +36,7 @@ type WalletIdentityProbe = {
   ownerAddress: string
 }
 
-type LoadgenCounters = {
+export type LoadgenCounters = {
   startedAtMs: number
   endedAtMs: number
   total: number
@@ -133,25 +133,37 @@ export const IDENTITY_CONFIRMS_PER_BLOCK = 4
  * are spread round-robin over the targets, so up to 4 workers per target stays
  * within the node's cap. The default is that cap, and no more than one worker
  * per wallet (workers sharing a wallet race on its nonce). An explicit
- * CONCURRENCY wins, with a warning when it is above the cap.
+ * CONCURRENCY wins (see workerCountWarnings).
  */
 export function resolveWorkerCount(params: {
   requested: string | undefined
   targetCount: number
   walletCount: number
-}): { workers: number; cap: number; warning: string | null } {
-  const targets = Math.max(1, params.targetCount)
-  const cap = IDENTITY_CONFIRMS_PER_BLOCK * targets
+}): { workers: number; cap: number } {
+  const cap = IDENTITY_CONFIRMS_PER_BLOCK * Math.max(1, params.targetCount)
   const parsed = params.requested ? Number.parseInt(params.requested, 10) : Number.NaN
-  if (!Number.isFinite(parsed)) {
-    return { workers: Math.max(1, Math.min(cap, params.walletCount)), cap, warning: null }
+  if (!Number.isFinite(parsed)) return { workers: Math.max(1, Math.min(cap, params.walletCount)), cap }
+  return { workers: Math.max(1, parsed), cap }
+}
+
+/**
+ * Warnings for the configured worker count: above the identity confirm cap
+ * (config.workerCap), and more workers than wallets.
+ */
+export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "workerCap" | "rpcUrls" | "wallets">): string[] {
+  const warnings: string[] = []
+  if (cfg.concurrency > cfg.workerCap) {
+    warnings.push(
+      `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, cfg.rpcUrls.length)} target(s) from one source address). ` +
+        "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry.",
+    )
   }
-  const workers = Math.max(1, parsed)
-  const warning = workers > cap
-    ? `[gcr_identity_loadgen] CONCURRENCY=${workers} is above ${cap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${targets} target(s) from one source address). ` +
-      "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry."
-    : null
-  return { workers, cap, warning }
+  if (cfg.concurrency > cfg.wallets.length) {
+    warnings.push(
+      `[gcr_identity_loadgen] ${cfg.concurrency} workers but ${cfg.wallets.length} wallet(s): workers will share wallets and their nonces.`,
+    )
+  }
+  return warnings
 }
 
 function getConfig(wallets: string[]): LoadgenConfig {
@@ -161,8 +173,7 @@ function getConfig(wallets: string[]): LoadgenConfig {
     targetCount: rpcUrls.length,
     walletCount: wallets.length,
   })
-  if (workerCount.warning) console.warn(workerCount.warning)
-  return {
+  const config: LoadgenConfig = {
     rpcUrls,
     wallets,
     durationSec: envInt("DURATION_SEC", 30),
@@ -184,6 +195,8 @@ function getConfig(wallets: string[]): LoadgenConfig {
     settlePollMs: Math.max(50, envInt("SETTLE_POLL_MS", 200)),
     opTimeoutMs: Math.max(1000, envInt("GCR_OP_TIMEOUT_MS", 15000)),
   }
+  for (const warning of workerCountWarnings(config)) console.warn(warning)
+  return config
 }
 
 async function withTimeout<T>(label: string, timeoutMs: number, promise: Promise<T>): Promise<T> {
@@ -466,6 +479,23 @@ function rateLimitRetryFor(params: {
   }
 }
 
+/** A worker's retry: it also ends at the run deadline, so a step waiting out 429s does not outlive the run. */
+export function workerRateLimitRetry(params: {
+  rpcUrl: string
+  cfg: LoadgenConfig
+  counters: LoadgenCounters
+  sharedStop: { value: boolean }
+  stopAtMs: number
+}): RateLimitRetry {
+  return rateLimitRetryFor({
+    rpcUrl: params.rpcUrl,
+    cfg: params.cfg,
+    counters: params.counters,
+    shouldStop: () => params.sharedStop.value || nowMs() >= params.stopAtMs,
+    stopOnRateLimit: params.cfg.stopOnRateLimit,
+  })
+}
+
 function pushErrorSample(samples: ErrorSample[], stage: ErrorSample["stage"], error: unknown) {
   if (samples.length >= 10) return
   const info = normalizeLoadgenError(error)
@@ -536,13 +566,7 @@ async function worker(params: {
     }
   }
 
-  const rateLimitRetry = rateLimitRetryFor({
-    rpcUrl: params.rpcUrl,
-    cfg: params.cfg,
-    counters: params.counters,
-    shouldStop: () => params.sharedStop.value,
-    stopOnRateLimit: params.cfg.stopOnRateLimit,
-  })
+  const rateLimitRetry = workerRateLimitRetry(params)
   const submit = (identityAddress: string, operation: "add" | "remove") =>
     retryOnRateLimit(
       () =>
