@@ -531,6 +531,8 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
       if (!retry) throw error
       opts.onRetry()
       await opts.waitForNextBlock()
+      // The run may have ended during the wait: do not start another step.
+      if (opts.shouldStop()) throw error
     }
   }
 }

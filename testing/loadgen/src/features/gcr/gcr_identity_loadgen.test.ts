@@ -335,6 +335,26 @@ describe("identity confirm 429", () => {
     expect(attempts).toBe(1)
   })
 
+  it("does not run the step again when the run ends during the block wait", async () => {
+    let attempts = 0
+    let stopping = false
+    const refused = new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)")
+    const limited = await retryOnRateLimit(async () => {
+      attempts++
+      throw refused
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => stopping,
+      waitForNextBlock: async () => {
+        stopping = true
+      },
+      onRetry: () => {},
+    }).catch((caught: unknown) => caught)
+    expect(limited).toBe(refused)
+    expect(attempts).toBe(1)
+  })
+
   it("a worker's step waiting out 429s stops retrying once the run deadline passes", async () => {
     node = startFakeNode()
     const fake = node
@@ -345,15 +365,16 @@ describe("identity confirm 429", () => {
     const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
     const sharedStop = { value: false }
     // The run ends while the step waits for a block that never comes (the
-    // wait gives up after settleTimeoutSec and the confirm is refused again).
+    // wait gives up after settleTimeoutSec, past the deadline).
     const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop, stopAtMs: Date.now() + 300 })
     const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(RateLimitError)
     expect(sharedStop.value).toBe(false)
-    // One wait, started before the deadline; the 429 after it ends the step.
+    // One wait, started before the deadline. The run has ended when it gives
+    // up, so the step is not sent again and its first 429 ends it.
     expect(counters.rateLimitRetries).toBe(1)
-    expect(fake.rejected).toEqual([1, 1])
+    expect(fake.rejected).toEqual([1])
     expect(fake.accepted).toEqual([1, 1, 1, 1])
   })
 
@@ -369,7 +390,7 @@ describe("identity confirm 429", () => {
     }
 
     // A fifth step in the same block is refused. The run ends while it waits
-    // for a block that never comes, so its 429 reaches the worker after the deadline.
+    // for a block that never comes, so its 429 is rethrown to the worker after the deadline.
     const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
     const stopAtMs = Date.now() + 300
     const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop: { value: false }, stopAtMs })
