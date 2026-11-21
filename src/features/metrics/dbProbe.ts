@@ -6,10 +6,17 @@
  * 0 otherwise. It runs on its own timer, never on the consensus path, and a
  * tick always ends within the timeout whatever the database does.
  *
- * At most one probe query is in flight. If the previous one is still
- * unanswered when the next tick comes, that tick reports 0 without queueing
- * another query, so a database that never answers ties up one pool
- * connection at most.
+ * At most one probe query is in flight. When a tick times out it aborts the
+ * probe's signal, and the probe gives up its connection (pingDatabase in
+ * MetricsCollector.ts ends its pool client instead of returning it) and then
+ * settles. Until it has settled, ticks report 0 without starting another
+ * query, so a database that never answers ties up one pool connection at
+ * most. The first tick after that probes on a fresh connection, so the result
+ * goes back to 1 once Postgres answers again, even when the timed-out query
+ * never gets an answer (a half-open connection).
+ *
+ * stop() is final: it aborts a query still in flight, and a stopped probe
+ * reports nothing more, so it cannot overwrite its replacement's result.
  *
  * @module features/metrics
  */
@@ -20,8 +27,12 @@ export const DB_PROBE_INTERVAL_MS = 15_000
 export const DB_PROBE_TIMEOUT_MS = 5_000
 
 export interface DbProbeOptions {
-    /** The query; resolves when Postgres answered. */
-    probe: () => Promise<unknown>
+    /**
+     * The query; resolves when Postgres answered. `signal` aborts when the
+     * tick times out or the probe stops: the probe then gives up its
+     * connection and settles, without waiting for the query.
+     */
+    probe: (signal: AbortSignal) => Promise<unknown>
     /** Called once per tick: up, and the probe's duration in seconds when it succeeded. */
     report: (up: 0 | 1, seconds: number | null) => void
     /** Called when the result changes, and on a first result of 0. */
@@ -39,6 +50,8 @@ function reasonOf(error: unknown): string {
 export class DbProbe {
     private timer: ReturnType<typeof setInterval> | null = null
     private inFlight: Promise<unknown> | null = null
+    private controller: AbortController | null = null
+    private stopped = false
     private lastUp: 0 | 1 | null = null
     private readonly intervalMs: number
     private readonly timeoutMs: number
@@ -49,29 +62,41 @@ export class DbProbe {
     }
 
     public start(): void {
-        if (this.timer) return
+        if (this.timer || this.stopped) return
         void this.tick()
         this.timer = setInterval(() => void this.tick(), this.intervalMs)
         this.timer.unref?.()
     }
 
+    /** Final: aborts a query still in flight; nothing is reported after it. */
     public stop(): void {
+        this.stopped = true
         if (this.timer) clearInterval(this.timer)
         this.timer = null
+        this.controller?.abort(new Error("the probe was stopped"))
     }
 
     /** One probe. Never rejects, and resolves within the timeout. */
     public async tick(): Promise<void> {
+        if (this.stopped) return
         if (this.inFlight) {
             this.record(0, null, `no answer to the probe started over ${this.timeoutMs} ms ago`)
             return
         }
 
         const started = performance.now()
-        const query = Promise.resolve().then(() => this.options.probe())
+        const controller = new AbortController()
+        const query = Promise.resolve().then(() =>
+            this.options.probe(controller.signal),
+        )
         this.inFlight = query
+        this.controller = controller
+        // An aborted probe settles once it has given up its connection; only
+        // then may the next tick start a query.
         const settle = () => {
-            if (this.inFlight === query) this.inFlight = null
+            if (this.inFlight !== query) return
+            this.inFlight = null
+            this.controller = null
         }
         query.then(settle, settle)
 
@@ -87,7 +112,9 @@ export class DbProbe {
             if (outcome === "ok") {
                 this.record(1, (performance.now() - started) / 1000, null)
             } else {
-                this.record(0, null, `no answer within ${this.timeoutMs} ms`)
+                const reason = `no answer within ${this.timeoutMs} ms`
+                controller.abort(new Error(reason))
+                this.record(0, null, reason)
             }
         } catch (error) {
             this.record(0, null, reasonOf(error))
@@ -97,6 +124,8 @@ export class DbProbe {
     }
 
     private record(up: 0 | 1, seconds: number | null, reason: string | null): void {
+        // A stopped probe may have been replaced: its late result is stale.
+        if (this.stopped) return
         this.options.report(up, seconds)
         const changed = this.lastUp === null ? up === 0 : this.lastUp !== up
         this.lastUp = up

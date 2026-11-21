@@ -1,18 +1,23 @@
 // DbProbe (dbProbe.ts): what demos_db_up reports for a database that answers,
-// fails, or never answers, and that a hung probe never stalls the next tick.
+// fails, or never answers, that a hung probe never stalls the next tick, that a
+// timed-out probe is aborted and replaced once it has given up its connection,
+// and that a stopped probe reports nothing more.
 import { describe, expect, it } from "bun:test"
 import { DbProbe } from "./dbProbe"
 
 const TIMEOUT_MS = 50
 
-function harness(probe: () => Promise<unknown>, intervalMs = 10_000) {
+function harness(
+    probe: (signal: AbortSignal) => Promise<unknown>,
+    intervalMs = 10_000,
+) {
     const reports: Array<[0 | 1, number | null]> = []
     const changes: Array<[0 | 1, string | null]> = []
     let calls = 0
     const db = new DbProbe({
-        probe: () => {
+        probe: signal => {
             calls++
-            return probe()
+            return probe(signal)
         },
         report: (up, seconds) => reports.push([up, seconds]),
         onChange: (up, reason) => changes.push([up, reason]),
@@ -133,5 +138,107 @@ describe("DbProbe", () => {
         await sleep(60)
         expect(h.calls()).toBe(afterStop)
         expect(h.reports.every(r => r[0] === 1)).toBe(true)
+    })
+
+    it("aborts a probe that times out, and later ticks probe again and report 1 once the database answers", async () => {
+        // Like pingDatabase on a half-open connection: the query never gets an
+        // answer; on abort the probe gives up its connection and rejects.
+        const signals: AbortSignal[] = []
+        let hang = true
+        const h = harness(signal => {
+            signals.push(signal)
+            if (!hang) return Promise.resolve()
+            return new Promise((_, reject) =>
+                signal?.addEventListener("abort", () => reject(signal.reason)),
+            )
+        })
+
+        await h.db.tick()
+        expect(h.reports).toEqual([[0, null]])
+
+        // The database is back. Before the fix the first query held the probe
+        // forever: {"calls":1,"reports":[0,0,0]}.
+        hang = false
+        await h.db.tick()
+        await h.db.tick()
+        expect(h.calls()).toBeGreaterThanOrEqual(2)
+        expect(h.reports.at(-1)).toEqual([1, expect.any(Number)])
+        expect(h.changes.at(-1)).toEqual([1, null])
+        // The timeout aborted the first probe's signal, and only that one.
+        expect(signals[0]?.aborted).toBe(true)
+        expect(signals.slice(1).every(s => !s.aborted)).toBe(true)
+    })
+
+    it("starts no second query while an aborted probe has not finished giving up its connection", async () => {
+        const pending: { release?: () => void } = {}
+        let first = true
+        const h = harness(signal => {
+            if (!first) return Promise.resolve()
+            first = false
+            // On abort, the release takes a while; the probe settles after it.
+            return new Promise((_, reject) =>
+                signal?.addEventListener("abort", () => {
+                    pending.release = () => reject(signal.reason)
+                }),
+            )
+        })
+
+        await h.db.tick()
+        expect(pending.release).toBeDefined()
+        await h.db.tick()
+        await sleep(TIMEOUT_MS * 2)
+        await h.db.tick()
+        expect(h.calls()).toBe(1)
+        expect(h.reports.map(r => r[0])).toEqual([0, 0, 0])
+
+        pending.release?.()
+        await sleep(0)
+        await h.db.tick()
+        expect(h.calls()).toBe(2)
+        expect(h.reports.at(-1)?.[0]).toBe(1)
+    })
+
+    it("a stopped probe's late result does not overwrite its replacement's", async () => {
+        const gauge: Array<[string, 0 | 1]> = []
+        const changes: string[] = []
+        const pending: { fail?: (error: Error) => void } = {}
+        const make = (name: string, probe: (signal: AbortSignal) => Promise<unknown>) =>
+            new DbProbe({
+                probe,
+                report: up => gauge.push([name, up]),
+                onChange: up => changes.push(`${name}:${up}`),
+                timeoutMs: 10_000,
+                intervalMs: 10_000,
+            })
+        const signals: AbortSignal[] = []
+        const old = make("old", signal => {
+            signals.push(signal)
+            return new Promise((_, reject) => {
+                pending.fail = reject
+            })
+        })
+        const fresh = make("new", () => Promise.resolve())
+
+        old.start()
+        await sleep(0)
+        expect(pending.fail).toBeDefined()
+        old.stop()
+
+        fresh.start()
+        await sleep(0)
+        pending.fail?.(new Error("Connection terminated"))
+        await sleep(0)
+        fresh.stop()
+
+        // Before the fix: [["new",1],["old",0]].
+        expect(gauge).toEqual([["new", 1]])
+        expect(changes).toEqual([])
+        // stop() aborted the query still in flight.
+        expect(signals[0]?.aborted).toBe(true)
+
+        // A stopped probe cannot be started again.
+        old.start()
+        await sleep(0)
+        expect(signals).toHaveLength(1)
     })
 })
