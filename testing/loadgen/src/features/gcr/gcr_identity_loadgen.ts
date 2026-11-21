@@ -167,17 +167,23 @@ export const IDENTITY_CONFIRMS_PER_BLOCK = 4
  * (its identity change, or getLastBlockNumber after a 429). That 429 is retried
  * (retryOnRateLimit). The default is that cap, and no more than one worker
  * per wallet (workers sharing a wallet race on its nonce). An explicit
- * CONCURRENCY wins (see workerCountWarnings).
+ * CONCURRENCY at or below the cap is used as given. One above the cap (the
+ * Docker perf compose passes 50) is clamped to the cap (clampedFrom is the
+ * requested number), unless overCap (GCR_IDENTITY_OVER_CAP=true) is set; then
+ * it is used as given (see workerCountWarnings).
  */
 export function resolveWorkerCount(params: {
   requested: string | undefined
   targetCount: number
   walletCount: number
-}): { workers: number; cap: number } {
+  overCap?: boolean
+}): { workers: number; cap: number; clampedFrom?: number } {
   const cap = IDENTITY_CONFIRMS_PER_BLOCK * Math.max(1, params.targetCount)
   const parsed = params.requested ? Number.parseInt(params.requested, 10) : Number.NaN
   if (!Number.isFinite(parsed)) return { workers: Math.max(1, Math.min(cap, params.walletCount)), cap }
-  return { workers: Math.max(1, parsed), cap }
+  const requested = Math.max(1, parsed)
+  if (requested > cap && !params.overCap) return { workers: cap, cap, clampedFrom: requested }
+  return { workers: requested, cap }
 }
 
 /**
@@ -195,7 +201,8 @@ export function workerRpcUrl(cfg: Pick<LoadgenConfig, "targetUrls">, idx: number
 
 /**
  * Warnings for the configured worker count: above the identity confirm cap
- * (config.workerCap), and more workers than wallets.
+ * (config.workerCap, only with GCR_IDENTITY_OVER_CAP=true), and more workers
+ * than wallets.
  */
 export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "workerCap" | "rpcUrls" | "wallets">): string[] {
   const warnings: string[] = []
@@ -221,7 +228,15 @@ export function getConfig(wallets: string[]): LoadgenConfig {
     requested: process.env.CONCURRENCY,
     targetCount: targetUrls.length,
     walletCount: wallets.length,
+    overCap: envBool("GCR_IDENTITY_OVER_CAP", false),
   })
+  const clampNotice =
+    workerCount.clampedFrom === undefined
+      ? []
+      : [
+          `[gcr_identity_loadgen] CONCURRENCY=${workerCount.clampedFrom} is above the identity confirm cap of ${workerCount.cap}; ` +
+            `using ${workerCount.cap}, set GCR_IDENTITY_OVER_CAP=true to keep ${workerCount.clampedFrom}.`,
+        ]
   const config: LoadgenConfig = {
     rpcUrls,
     targetUrls,
@@ -245,7 +260,7 @@ export function getConfig(wallets: string[]): LoadgenConfig {
     settlePollMs: Math.max(50, envInt("SETTLE_POLL_MS", 200)),
     opTimeoutMs: Math.max(1000, envInt("GCR_OP_TIMEOUT_MS", 15000)),
   }
-  for (const warning of workerCountWarnings(config)) console.warn(warning)
+  for (const warning of [...clampNotice, ...workerCountWarnings(config)]) console.warn(warning)
   return config
 }
 
@@ -559,14 +574,17 @@ export type RateLimitRetry = {
   stopOnRateLimit: boolean
   maxRetries: number
   shouldStop: () => boolean
-  waitForNextBlock: () => Promise<unknown>
+  /** Resolves true once a new block shows up, false if none did in time. */
+  waitForNextBlock: () => Promise<boolean>
+  /** Called once per extra attempt, just before it is sent. */
   onRetry: () => void
 }
 
 /**
  * Runs one step (a confirm + broadcast). An HTTP 429 from the node's per-block
  * identity confirm cap is back-pressure, so the step is retried after the next
- * block, up to maxRetries times. The general limiter's 429 (http429LimiterOf),
+ * block, up to maxRetries times. If no new block shows up in time, or the run
+ * ends during the wait, the 429 is thrown. The general limiter's 429 (http429LimiterOf),
  * rate-limit messages without an HTTP 429, other errors, and every 429 when
  * stopOnRateLimit is set, are thrown to the caller.
  */
@@ -581,10 +599,10 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
         attempt < opts.maxRetries &&
         !opts.shouldStop()
       if (!retry) throw error
+      // No new block in time (the cap is still spent), or the run ended
+      // during the wait: do not start another step.
+      if (!(await opts.waitForNextBlock()) || opts.shouldStop()) throw error
       opts.onRetry()
-      await opts.waitForNextBlock()
-      // The run may have ended during the wait: do not start another step.
-      if (opts.shouldStop()) throw error
     }
   }
 }

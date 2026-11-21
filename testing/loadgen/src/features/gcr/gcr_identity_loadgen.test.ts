@@ -14,7 +14,7 @@
  * process, so these tests must pass whichever nodeCall is loaded.
  */
 
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { ConfirmError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import {
@@ -52,11 +52,18 @@ describe("resolveWorkerCount", () => {
     expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 0 }).workers).toBe(1)
   })
 
-  it("lets an explicit CONCURRENCY win", () => {
-    expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4 })).toEqual({ workers: 6, cap: 4 })
+  it("uses an explicit CONCURRENCY at or below the cap as given", () => {
     expect(resolveWorkerCount({ requested: "8", targetCount: 2, walletCount: 4 })).toEqual({ workers: 8, cap: 8 })
+    expect(resolveWorkerCount({ requested: "3", targetCount: 1, walletCount: 4 })).toEqual({ workers: 3, cap: 4 })
     expect(resolveWorkerCount({ requested: "1", targetCount: 1, walletCount: 4 })).toEqual({ workers: 1, cap: 4 })
     expect(resolveWorkerCount({ requested: "0", targetCount: 1, walletCount: 4 }).workers).toBe(1)
+  })
+
+  it("clamps an explicit CONCURRENCY above the cap, unless overCap is set", () => {
+    expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4, clampedFrom: 6 })
+    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 50 })).toEqual({ workers: 16, cap: 16, clampedFrom: 50 })
+    expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4, overCap: true })).toEqual({ workers: 6, cap: 4 })
+    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 50, overCap: true })).toEqual({ workers: 50, cap: 16 })
   })
 
   it("ignores a CONCURRENCY that is not a number", () => {
@@ -103,12 +110,53 @@ describe("workerCountWarnings", () => {
 })
 
 describe("getConfig", () => {
-  const saved = { TARGETS: process.env.TARGETS, CONCURRENCY: process.env.CONCURRENCY }
+  const saved = {
+    TARGETS: process.env.TARGETS,
+    CONCURRENCY: process.env.CONCURRENCY,
+    GCR_IDENTITY_OVER_CAP: process.env.GCR_IDENTITY_OVER_CAP,
+  }
   afterEach(() => {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+  })
+
+  /** getConfig's result and the lines it logged with console.warn. */
+  function configWithWarnings(wallets: string[]): { cfg: LoadgenConfig; warnings: string[] } {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const cfg = getConfig(wallets)
+      return { cfg, warnings: warn.mock.calls.map(call => String(call[0])) }
+    } finally {
+      warn.mockRestore()
+    }
+  }
+
+  it("clamps CONCURRENCY=50 (the Docker perf default) to the cap of 4 distinct targets", () => {
+    const wallets = Array.from({ length: 50 }, (_, i) => `wallet ${i}`)
+    process.env.TARGETS = "http://a:1,http://b:1,http://c:1,http://d:1,http://a:1/"
+    process.env.CONCURRENCY = "50"
+    delete process.env.GCR_IDENTITY_OVER_CAP
+    const clamped = configWithWarnings(wallets)
+    expect(clamped.cfg.workerCap).toBe(16)
+    expect(clamped.cfg.concurrency).toBe(16)
+    expect(clamped.warnings).toEqual([
+      "[gcr_identity_loadgen] CONCURRENCY=50 is above the identity confirm cap of 16; using 16, set GCR_IDENTITY_OVER_CAP=true to keep 50.",
+    ])
+
+    process.env.GCR_IDENTITY_OVER_CAP = "true"
+    const over = configWithWarnings(wallets)
+    expect(over.cfg.concurrency).toBe(50)
+    // The flag keeps the over-cap warning, and there is no clamp line.
+    expect(over.warnings).toHaveLength(1)
+    expect(over.warnings[0]).toContain("CONCURRENCY=50 is above 16")
+
+    delete process.env.GCR_IDENTITY_OVER_CAP
+    process.env.CONCURRENCY = "3"
+    const below = configWithWarnings(wallets)
+    expect(below.cfg.concurrency).toBe(3)
+    expect(below.warnings).toEqual([])
   })
 
   it("gives TARGETS=a,a the same worker cap as TARGETS=a", () => {
@@ -298,11 +346,15 @@ describe("identity confirm 429", () => {
     const fake = node
     const demos = await demosWithSdkTransport(fake.url)
     let retries = 0
+    let waits = 0
     const retry: RateLimitRetry = {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
-      waitForNextBlock: () => waitForNextBlock(fake.url, 5000, 10, fake.readBlock),
+      waitForNextBlock: () => {
+        waits++
+        return waitForNextBlock(fake.url, 5000, 10, fake.readBlock)
+      },
       onRetry: () => {
         retries++
       },
@@ -313,11 +365,13 @@ describe("identity confirm 429", () => {
     await until(() => fake.accepted.length + fake.rejected.length === 6)
     expect(fake.accepted).toEqual([1, 1, 1, 1])
     expect(fake.rejected).toEqual([1, 1])
-    await until(() => retries === 2 && fake.broadcasts === 4)
+    await until(() => waits === 2 && fake.broadcasts === 4)
 
-    // The two refused steps are still waiting for block 2, not failed.
+    // The two refused steps are still waiting for block 2, not failed, and
+    // are not counted as retries until they are sent again.
     await Bun.sleep(50)
     expect(fake.accepted.length).toBe(4)
+    expect(retries).toBe(0)
     fake.nextBlock()
 
     await Promise.all(steps)
@@ -359,6 +413,7 @@ describe("identity confirm 429", () => {
       shouldStop: () => false,
       waitForNextBlock: async () => {
         waits++
+        return true
       },
       onRetry: () => {},
     }
@@ -390,11 +445,58 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => true,
-      waitForNextBlock: async () => {},
+      waitForNextBlock: async () => true,
       onRetry: () => {},
     }).catch((caught: unknown) => caught)
     expect(limited).toBeInstanceOf(RateLimitError)
     expect(attempts).toBe(1)
+  })
+
+  it("ends the step with its 429 when no new block arrives in time", async () => {
+    let attempts = 0
+    let waits = 0
+    let retries = 0
+    const refused = http429()
+    const limited = await retryOnRateLimit(async () => {
+      attempts++
+      throw refused
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => false,
+      waitForNextBlock: async () => {
+        waits++
+        return false
+      },
+      onRetry: () => {
+        retries++
+      },
+    }).catch((caught: unknown) => caught)
+    expect(limited).toBe(refused)
+    expect(attempts).toBe(1)
+    expect(waits).toBe(1)
+    expect(retries).toBe(0)
+  })
+
+  it("counts one retry when the next block arrives and the second attempt succeeds", async () => {
+    let attempts = 0
+    let retries = 0
+    const result = await retryOnRateLimit(async () => {
+      attempts++
+      if (attempts === 1) throw http429()
+      return "added"
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => false,
+      waitForNextBlock: async () => true,
+      onRetry: () => {
+        retries++
+      },
+    })
+    expect(result).toBe("added")
+    expect(attempts).toBe(2)
+    expect(retries).toBe(1)
   })
 
   it("does not run the step again when the run ends during the block wait", async () => {
@@ -410,6 +512,7 @@ describe("identity confirm 429", () => {
       shouldStop: () => stopping,
       waitForNextBlock: async () => {
         stopping = true
+        return true
       },
       onRetry: () => {},
     }).catch((caught: unknown) => caught)
@@ -441,8 +544,9 @@ describe("identity confirm 429", () => {
     expect(error).toBeInstanceOf(RateLimitError)
     expect(sharedStop.value).toBe(false)
     // One wait, started before the deadline. The run has ended when it gives
-    // up, so the step is not sent again and its first 429 ends it.
-    expect(counters.rateLimitRetries).toBe(1)
+    // up, so the step is not sent again, its first 429 ends it, and no retry
+    // is counted.
+    expect(counters.rateLimitRetries).toBe(0)
     expect(fake.rejected).toEqual([1])
     expect(fake.accepted).toEqual([1, 1, 1, 1])
   })
@@ -518,6 +622,7 @@ describe("identity confirm 429", () => {
       shouldStop: () => false,
       waitForNextBlock: async () => {
         waits++
+        return true
       },
       onRetry: () => {},
     }
@@ -551,6 +656,7 @@ describe("identity confirm 429", () => {
       waitForNextBlock: async () => {
         waits++
         fake.nextBlock()
+        return true
       },
       onRetry: () => {},
     }).catch((caught: unknown) => caught)
@@ -584,6 +690,7 @@ describe("identity confirm 429", () => {
       shouldStop: () => false,
       waitForNextBlock: async () => {
         fake.nextBlock()
+        return true
       },
       onRetry: () => {},
     })
