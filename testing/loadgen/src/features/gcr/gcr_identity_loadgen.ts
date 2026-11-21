@@ -155,6 +155,11 @@ export function resolveWorkerCount(params: {
   return { workers: Math.max(1, parsed), cap }
 }
 
+/** Distinct nodes in TARGETS: a repeated URL is the same node with the same cap. */
+function distinctTargetCount(rpcUrls: string[]): number {
+  return new Set(rpcUrls.map(normalizeRpcUrl)).size
+}
+
 /**
  * Warnings for the configured worker count: above the identity confirm cap
  * (config.workerCap), and more workers than wallets.
@@ -163,7 +168,7 @@ export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "wo
   const warnings: string[] = []
   if (cfg.concurrency > cfg.workerCap) {
     warnings.push(
-      `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, cfg.rpcUrls.length)} target(s) from one source address). ` +
+      `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, distinctTargetCount(cfg.rpcUrls))} target(s) from one source address). ` +
         "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry.",
     )
   }
@@ -175,11 +180,12 @@ export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "wo
   return warnings
 }
 
-function getConfig(wallets: string[]): LoadgenConfig {
+export function getConfig(wallets: string[]): LoadgenConfig {
+  // rpcUrls stays as given: workers are spread round-robin over it.
   const rpcUrls = getTokenTargets().map(normalizeRpcUrl)
   const workerCount = resolveWorkerCount({
     requested: process.env.CONCURRENCY,
-    targetCount: rpcUrls.length,
+    targetCount: distinctTargetCount(rpcUrls),
     walletCount: wallets.length,
   })
   const config: LoadgenConfig = {
@@ -243,7 +249,8 @@ function classifyFailure(error: unknown): keyof Pick<LoadgenCounters, "confirmEr
  * deadline has passed goes to rateLimitedAtDeadline, not rateLimited: the
  * worker's retry stops waiting for the next block at the deadline, so the node
  * did not refuse the step for good, the run just ended before the retry. The
- * step stays in total as unfinished, and errorRateOf leaves it out.
+ * step stays in total as unfinished, and errorRateOf leaves it out. It is not
+ * an error, but a run with no successful step still fails (runVerdict).
  */
 export function countStepFailure(counters: LoadgenCounters, error: unknown, stopAtMs: number) {
   const classified = classifyFailure(error)
@@ -252,7 +259,10 @@ export function countStepFailure(counters: LoadgenCounters, error: unknown, stop
   return bucket
 }
 
-/** Errors over all steps, checked against MAX_ERROR_RATE. rateLimitedAtDeadline is not an error. */
+/**
+ * Errors over all steps, checked against MAX_ERROR_RATE. rateLimitedAtDeadline
+ * is not an error, but runVerdict fails a run with no successful step.
+ */
 export function errorRateOf(counters: LoadgenCounters): { errorCount: number; errorRate: number } {
   const errorCount =
     counters.confirmError +
@@ -262,6 +272,35 @@ export function errorRateOf(counters: LoadgenCounters): { errorCount: number; er
     counters.rateLimited +
     counters.cleanupError
   return { errorCount, errorRate: counters.total > 0 ? errorCount / counters.total : 1 }
+}
+
+/**
+ * Whether the run passes, and its primary issues. It passes when at least one
+ * step succeeded, the error rate is within MAX_ERROR_RATE and no identity
+ * leaked. A 429 cut off at the run deadline is not an error, but it is listed
+ * as a rate_limit issue, and a run with no successful step fails.
+ */
+export function runVerdict(params: {
+  counters: LoadgenCounters
+  maxErrorRate: number
+  leakedIdentityCount: number
+  sampleCodeCounts: Record<string, number>
+}): { ok: boolean; primaryIssues: string[] } {
+  const { counters, sampleCodeCounts } = params
+  const primaryIssues = [
+    counters.rateLimited > 0 || counters.rateLimitedAtDeadline > 0 || (sampleCodeCounts.RATE_LIMIT ?? 0) > 0 ? "rate_limit" : null,
+    counters.validationError > 0 || (sampleCodeCounts.VALIDATION ?? 0) > 0 ? "validation" : null,
+    counters.confirmError > 0 || counters.broadcastError > 0 ? "tx_pipeline" : null,
+    counters.networkError > 0 ? "network" : null,
+    counters.cleanupError > 0 ? "cleanup" : null,
+    params.leakedIdentityCount > 0 ? "leaked_identities" : null,
+  ].filter((issue): issue is string => issue !== null)
+  const ok =
+    counters.total > 0 &&
+    counters.ok > 0 &&
+    errorRateOf(counters).errorRate <= params.maxErrorRate &&
+    params.leakedIdentityCount === 0
+  return { ok, primaryIssues }
 }
 
 function parseMaybeJson(value: any): any {
@@ -916,15 +955,14 @@ export async function runGcrIdentityLoadgen() {
     acc[key] = (acc[key] ?? 0) + 1
     return acc
   }, {})
+  const { ok, primaryIssues } = runVerdict({
+    counters,
+    maxErrorRate: cfg.maxErrorRate,
+    leakedIdentityCount: leakedIdentities.length,
+    sampleCodeCounts,
+  })
   const operatorSummary = {
-    primaryIssues: [
-      counters.rateLimited > 0 || (sampleCodeCounts.RATE_LIMIT ?? 0) > 0 ? "rate_limit" : null,
-      counters.validationError > 0 || (sampleCodeCounts.VALIDATION ?? 0) > 0 ? "validation" : null,
-      counters.confirmError > 0 || counters.broadcastError > 0 ? "tx_pipeline" : null,
-      counters.networkError > 0 ? "network" : null,
-      counters.cleanupError > 0 ? "cleanup" : null,
-      leakedIdentities.length > 0 ? "leaked_identities" : null,
-    ].filter(Boolean),
+    primaryIssues,
     counterWarnings: [
       counters.rateLimited === 0 && (sampleCodeCounts.RATE_LIMIT ?? 0) > 0
         ? "rate-limit samples were observed even though counters.rateLimited remained 0"
@@ -932,7 +970,6 @@ export async function runGcrIdentityLoadgen() {
     ].filter(Boolean),
     sampleCodeCounts,
   }
-  const ok = counters.total > 0 && errorRate <= cfg.maxErrorRate && leakedIdentities.length === 0
 
   const summary = {
     scenario: "gcr_identity_loadgen",

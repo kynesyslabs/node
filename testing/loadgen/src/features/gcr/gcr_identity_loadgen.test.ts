@@ -16,8 +16,10 @@ import {
   IDENTITY_CONFIRMS_PER_BLOCK,
   countStepFailure,
   errorRateOf,
+  getConfig,
   resolveWorkerCount,
   retryOnRateLimit,
+  runVerdict,
   submitPqcTx,
   waitForNextBlock,
   workerCountWarnings,
@@ -83,6 +85,36 @@ describe("workerCountWarnings", () => {
     expect(both).toHaveLength(2)
     expect(both[0]).toContain("CONCURRENCY=6 is above 4")
     expect(both[1]).toContain("6 workers but 2 wallet(s): workers will share wallets and their nonces")
+  })
+
+  it("counts a target listed twice once", () => {
+    const cfg = { ...config(6, 4, 6), rpcUrls: ["http://node0:53550", "http://node0:53550/"] }
+    expect(workerCountWarnings(cfg)[0]).toContain("CONCURRENCY=6 is above 4 (4 identity confirms per block per node x 1 target(s)")
+  })
+})
+
+describe("getConfig", () => {
+  const saved = { TARGETS: process.env.TARGETS, CONCURRENCY: process.env.CONCURRENCY }
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it("gives TARGETS=a,a the same worker cap as TARGETS=a", () => {
+    const wallets = Array.from({ length: 8 }, (_, i) => `wallet ${i}`)
+    delete process.env.CONCURRENCY
+    process.env.TARGETS = "http://node0:53550"
+    const single = getConfig(wallets)
+    process.env.TARGETS = "http://node0:53550,http://node0:53550/"
+    const twice = getConfig(wallets)
+
+    expect(single.workerCap).toBe(4)
+    expect(twice.workerCap).toBe(single.workerCap)
+    expect(twice.concurrency).toBe(single.concurrency)
+    // rpcUrls stays as given: workers are spread round-robin over it.
+    expect(twice.rpcUrls).toEqual(["http://node0:53550/", "http://node0:53550/"])
   })
 })
 
@@ -371,5 +403,37 @@ describe("identity confirm 429", () => {
     expect(await waitForNextBlock(fake.url, 100, 10)).toBe(false)
     setTimeout(() => fake.nextBlock(), 30)
     expect(await waitForNextBlock(fake.url, 2000, 10)).toBe(true)
+  })
+})
+
+describe("runVerdict", () => {
+  const verdict = (counters: LoadgenCounters) =>
+    runVerdict({ counters, maxErrorRate: 0.05, leakedIdentityCount: 0, sampleCodeCounts: {} })
+
+  it("fails a run with no successful step, even when every step ended in a 429 at the deadline", () => {
+    // A node that answers 429 for the whole run: no step succeeds, and every
+    // step is cut off at the deadline, so the error rate stays 0.
+    const counters = { ...freshCounters(), total: 4, rateLimitedAtDeadline: 4 }
+    expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 0 })
+
+    const result = verdict(counters)
+    expect(result.ok).toBe(false)
+    expect(result.primaryIssues).toContain("rate_limit")
+  })
+
+  it("passes a run with successful steps and a few 429s at the deadline", () => {
+    const counters = { ...freshCounters(), total: 24, ok: 20, rateLimitedAtDeadline: 4 }
+    expect(verdict(counters)).toEqual({ ok: true, primaryIssues: ["rate_limit"] })
+  })
+
+  it("still fails on the error rate and on leaked identities", () => {
+    const counters = { ...freshCounters(), total: 10, ok: 8, confirmError: 2 }
+    expect(verdict(counters)).toEqual({ ok: false, primaryIssues: ["tx_pipeline"] })
+    const clean = { ...freshCounters(), total: 10, ok: 10 }
+    expect(verdict(clean)).toEqual({ ok: true, primaryIssues: [] })
+    expect(runVerdict({ counters: clean, maxErrorRate: 0.05, leakedIdentityCount: 1, sampleCodeCounts: {} })).toEqual({
+      ok: false,
+      primaryIssues: ["leaked_identities"],
+    })
   })
 })
