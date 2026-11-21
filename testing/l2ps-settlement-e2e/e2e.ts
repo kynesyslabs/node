@@ -13,9 +13,14 @@
  *                  transfer to a fresh receiver settles
  *   03-restart     a member is killed while holding admitted transfers and
  *                  catches up via Sync to the same state
- *   04-throughput  3N transfers (TP_TRANSFERS) with L1 load beside them: L2PS TPS, proof
+ *   04-l2ps-nonce  private transfers spend the per-subnet L2PS nonce, not the
+ *                  L1 one: (a) an L1 send right behind a private transfer
+ *                  lands at once; (b) L1 credits into a batch's accounts while
+ *                  it proves do not void it; (c) a signer that spends its L1
+ *                  balance while its batch proves is dropped, the rest settle
+ *   05-throughput  3N transfers (TP_TRANSFERS) with L1 load beside them: L2PS TPS, proof
  *                  time, submit-to-applied time, block times, main TPS
- *   05-final       every height's block hash and the whole state agree
+ *   06-final       every height's block hash and the whole state agree
  *
  * Batch size and limits come from the node's settlement code, never assumed.
  */
@@ -24,9 +29,10 @@ import { SETTLEMENT_TRANSFERS } from "../../src/libs/l2ps/settlement/encoding"
 import { MAX_NONCE_AHEAD } from "../../src/libs/l2ps/settlement/transfer"
 import {
     EVIDENCE_DIR, MEMBERS, NODES, RUN_DIR, UID, accountOn, blockAt, blockTimeMs, changedAccounts, check, checks,
-    client, compose, docker, evidence, followSettlement, json, nodeCall, quantiles, quiescentStates, replayEnvelope,
-    say, sendTransfer, sleep, stateDifferences, stateSummary, step, tip, tips, txStatus, waitBlocks, waitHeight,
-    type NodeState, type SendResult, type Settlement,
+    client, compose, docker, evidence, followSettlement, json, l2psNonceOn, logMatches, nodeCall, quantiles,
+    quiescentStates, replayEnvelope, say, sendL1, sendTransfer, sleep, stateDifferences, stateSummary, step, tip, tips,
+    txStatus, waitBlocks, waitHeight, waitLogLine, waitTx,
+    type L1Send, type Movement, type NodeState, type SendResult, type Settlement,
 } from "./lib"
 import { DEM, throughputTransfers, type Wallet } from "./wallets"
 
@@ -57,16 +63,22 @@ function agree(id: string, label: string, states: NodeState[]): boolean {
     )
 }
 
-type Expected = Map<string, { delta: bigint; nonceDelta: number }>
+type Expected = Map<string, Movement>
+function expectMove(exp: Expected, a: string, delta: bigint, nonceDelta = 0, l2psNonceDelta = 0) {
+    const e = exp.get(a) ?? { delta: 0n, nonceDelta: 0, l2psNonceDelta: 0 }
+    e.delta += delta
+    e.nonceDelta += nonceDelta
+    e.l2psNonceDelta += l2psNonceDelta
+    exp.set(a, e)
+}
+/** A settled transfer spends the sender's L2PS nonce in the subnet and leaves its L1 nonce alone. */
 function expectTransfer(exp: Expected, s: SendResult) {
-    const add = (a: string, d: bigint, n: number) => {
-        const e = exp.get(a) ?? { delta: 0n, nonceDelta: 0 }
-        e.delta += d
-        e.nonceDelta += n
-        exp.set(a, e)
-    }
-    add(s.sender, -(s.amount + s.fee), 1)
-    add(s.to, s.amount, 0)
+    expectMove(exp, s.sender, -(s.amount + s.fee), 0, 1)
+    expectMove(exp, s.to, s.amount)
+}
+/** An included L1 native send: its amount and fee off the sender, one L1 nonce. */
+function expectL1(exp: Expected, sender: string, s: L1Send) {
+    expectMove(exp, sender, -(s.amount + s.fee), 1, 0)
 }
 
 /**
@@ -83,17 +95,21 @@ function checkDeltas(
     let othersNet = 0n
     for (const [a, m] of changedAccounts(before[0], after[0])) {
         if (accounts.has(a)) continue
-        others[label(a)] = `${m.delta}/${m.nonceDelta}`
+        others[label(a)] = `${m.delta}/${m.nonceDelta}/${m.l2psNonceDelta}`
         othersNet += m.delta
     }
     evidence(`${id}-other-movers`, { node: after[0].node, net: othersNet, accounts: others })
     for (let k = 0; k < after.length; k++) {
         const moved = changedAccounts(before[k], after[k])
         for (const a of accounts) {
-            const e = exp.get(a) ?? { delta: 0n, nonceDelta: 0 }
-            const m = moved.get(a) ?? { delta: 0n, nonceDelta: 0 }
-            if (m.delta !== e.delta || m.nonceDelta !== e.nonceDelta) {
-                problems.push(`${after[k].node} ${label(a)}: moved ${m.delta}/${m.nonceDelta}, expected ${e.delta}/${e.nonceDelta}`)
+            const zero: Movement = { delta: 0n, nonceDelta: 0, l2psNonceDelta: 0 }
+            const e = exp.get(a) ?? zero
+            const m = moved.get(a) ?? zero
+            if (m.delta !== e.delta || m.nonceDelta !== e.nonceDelta || m.l2psNonceDelta !== e.l2psNonceDelta) {
+                problems.push(
+                    `${after[k].node} ${label(a)}: moved ${m.delta}/${m.nonceDelta}/${m.l2psNonceDelta}, ` +
+                        `expected ${e.delta}/${e.nonceDelta}/${e.l2psNonceDelta} (balance/L1 nonce/L2PS nonce)`,
+                )
             }
         }
         if (checkSupply && after[k].totalSupply !== before[k].totalSupply) {
@@ -102,7 +118,7 @@ function checkDeltas(
     }
     return check(
         id,
-        `balances and nonces of ${accounts.size} accounts moved exactly as the transfers say on all 4 validators${checkSupply ? "; supply unchanged" : ""}`,
+        `balances, L1 nonces and L2PS nonces of ${accounts.size} accounts moved exactly as the transfers say on all 4 validators${checkSupply ? "; supply unchanged" : ""}`,
         problems.length === 0,
         problems.slice(0, 20).join("; "),
     )
@@ -167,8 +183,16 @@ async function send(tag: string, from: string, via: typeof n1, o: Parameters<typ
     return s
 }
 
-async function nonceOf(address: string): Promise<number> {
+/** The account's L1 nonce, as a non-member reads it. */
+async function l1NonceOf(address: string): Promise<number> {
     return (await accountOn(n3, address))?.nonce ?? 0
+}
+
+/** The account's L2PS nonce in the subnet, as a non-member answers getL2PSNonce. */
+async function nonceOf(address: string): Promise<number> {
+    const nonce = await l2psNonceOn(n3, address)
+    if (nonce === null) throw new Error(`node-3 did not answer getL2PSNonce for ${label(address)}`)
+    return nonce
 }
 
 async function pool<T, R>(items: T[], width: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -183,6 +207,11 @@ async function pool<T, R>(items: T[], width: number, fn: (t: T) => Promise<R>): 
         }),
     )
     return out
+}
+
+/** One transfer's settlement as a map entry list, or none when it was never followed. */
+function settledEntry(s: SendResult, st: Settlement | undefined): [string, Settlement][] {
+    return st ? [[s.innerHash, st]] : []
 }
 
 function settledHashes(settled: Map<string, Settlement>, status = "confirmed"): string[] {
@@ -213,6 +242,9 @@ await step("00-network", async () => {
     genesisSupply = states[0].totalSupply
     metrics.settlementTransfersPerBatch = N
     metrics.maxNonceAhead = Number(MAX_NONCE_AHEAD)
+    const nonces = await Promise.all(NODES.map(n => l2psNonceOn(n, W.hs0.address)))
+    check("00.l2ps-nonce", "every validator, member or not, answers getL2PSNonce (0 before any settlement)",
+        nonces.every(x => x === 0), `answers ${nonces.join("/")}`)
 })
 
 await step("01-happy", async () => {
@@ -272,7 +304,7 @@ await step("02-failures", async () => {
     const aheadBase = await nonceOf(W.fahead.address)
     await refused("ahead", await send("nonce-too-far-ahead", "fahead", n1, {
         to: fr, amount: DEM, nonce: aheadBase + Number(MAX_NONCE_AHEAD) + 1, outerNonce: aheadBase + 1,
-    }), /past the account nonce|too far ahead/i, `a nonce more than MAX_NONCE_AHEAD (${MAX_NONCE_AHEAD}) past the account nonce`)
+    }), /past the L2PS nonce|too far ahead/i, `a nonce more than MAX_NONCE_AHEAD (${MAX_NONCE_AHEAD}) past the L2PS nonce`)
     await refused("overdraft", await send("overdraft", "fover", n1, { to: fr, amount: 5n * DEM }), /insufficient/i,
         "a transfer of the whole balance plus fee (overdraft)")
     // a fresh envelope nonce, so the refusal is the settlement layer's own
@@ -395,12 +427,130 @@ await step("03-restart", async () => {
     checkDeltas("03.deltas", before, after, exp)
 })
 
-await step("04-throughput", async () => {
+await step("04-l2ps-nonce", async () => {
+    const before = await quiescentStates()
+    const exp: Expected = new Map()
+    const watch = ["na", "nar", "nal", "nb", "nbr", "nfund", "nc", "nk0", "nk1", "ncr", "nkr", "nsink"].map(l => W[l].address)
+    const PROVING = new RegExp(`Proving a (\\d+)-transfer batch for ${UID}(?!\\w)`)
+    const INCLUDE_MS = 120_000
+    const included = (st: any) => (st?.state === "included" ? Number(st.blockNumber) : null)
+    const l1Line = (s: L1Send | null, st: any) =>
+        s === null ? "not sent" : s.accepted ? `${st?.state ?? "unseen"}@${st?.blockNumber ?? "-"}` : `refused ${s.message.slice(0, 160)}`
+
+    // (a) An L1 send right behind a private transfer from the same account.
+    // Both took the L1 nonce before, so the L1 send waited behind the
+    // transfer's batch and expired.
+    const aNonce = await l1NonceOf(W.na.address)
+    const aPrivate = await send("nonce-a-private", "na", n1, { to: W.nar.address, amount: 5n * DEM })
+    const aL1 = await sendL1(W.na, n3, W.nal.address, 3n * DEM, aNonce + 1)
+    const aL1St = aL1.accepted ? await waitTx(n3, aL1.hash, INCLUDE_MS) : null
+    const aL1Ms = aL1St?.state === "included" ? Date.now() - aL1.sentAt : null
+    const aSettled = (await followSettlement([aPrivate], W, SETTLE_MS)).get(aPrivate.innerHash)
+    const aBlock = included(aL1St)
+    check("04.a-l1-first",
+        "an L1 send right behind a private transfer from the same account is included without waiting for the transfer's batch",
+        aPrivate.accepted && aBlock !== null && aSettled?.l1Block != null && aBlock < aSettled.l1Block,
+        `private ${aPrivate.accepted ? `${aSettled?.status} in block ${aSettled?.l1Block}` : `refused ${aPrivate.message.slice(0, 160)}`}; ` +
+            `L1 ${l1Line(aL1, aL1St)}${aL1Ms !== null ? ` within ${aL1Ms} ms` : ""}`)
+    check("04.a-settled", "the private transfer still settles", aSettled?.status === "confirmed", json(aSettled))
+    if (aSettled?.status === "confirmed") expectTransfer(exp, aPrivate)
+    if (aBlock !== null) {
+        expectL1(exp, W.na.address, aL1)
+        expectMove(exp, W.nal.address, aL1.amount)
+    }
+    metrics.l1BehindPrivateMs = aL1Ms
+
+    // (b) L1 credits into both accounts of a batch while it proves.
+    const bSince = new Date()
+    const bPrivate = await send("nonce-b-private", "nb", n1, { to: W.nbr.address, amount: 4n * DEM })
+    const bProving = bPrivate.accepted ? await waitLogLine(n1, bSince, PROVING, 180_000) : null
+    const credits: L1Send[] = []
+    if (bProving) {
+        const fundNonce = await l1NonceOf(W.nfund.address)
+        credits.push(await sendL1(W.nfund, n3, W.nb.address, 2n * DEM, fundNonce + 1))
+        credits.push(await sendL1(W.nfund, n3, W.nbr.address, 2n * DEM, fundNonce + 2))
+    }
+    const creditSt = await Promise.all(credits.map(c => (c.accepted ? waitTx(n3, c.hash, INCLUDE_MS) : null)))
+    const bSettled = (await followSettlement([bPrivate], W, SETTLE_MS)).get(bPrivate.innerHash)
+    const bProofs = logMatches(n1, bSince, PROVING).length
+    const creditBlocks = creditSt.map(included)
+    check("04.b-credits-in-window",
+        "L1 credits into the sender and the receiver of a batch are sent once it proves and included before it lands",
+        bProving !== null && credits.length === 2 && creditBlocks.every(b => b !== null && bSettled?.l1Block != null && b < bSettled.l1Block),
+        `proving ${bProving?.[0] ?? "never seen"}; credits ${credits.map((c, k) => l1Line(c, creditSt[k])).join(", ")}; batch in block ${bSettled?.l1Block}`)
+    check("04.b-not-voided", "the batch is not voided: the transfer settles from its one proof",
+        bSettled?.status === "confirmed" && bProofs === 1, `${bSettled?.status}, ${bProofs} proof(s) since it was sent`)
+    if (bSettled?.status === "confirmed") expectTransfer(exp, bPrivate)
+    credits.forEach((c, k) => {
+        if (creditBlocks[k] === null) return
+        expectL1(exp, W.nfund.address, c)
+        expectMove(exp, k === 0 ? W.nb.address : W.nbr.address, c.amount)
+    })
+
+    // (c) A signer that spends its L1 balance while its batch proves: its
+    // transfer is dropped and the others in the batch settle.
+    const cSince = new Date()
+    const cSends = await Promise.all([
+        send("nonce-c-drainer", "nc", n1, { to: W.ncr.address, amount: 10n * DEM }),
+        send("nonce-c-keeper", "nk0", n1, { to: W.nkr.address, amount: 3n * DEM }),
+        send("nonce-c-keeper", "nk1", n1, { to: W.nkr.address, amount: 4n * DEM }),
+    ])
+    const [drainer, ...keepers] = cSends
+    // Admitted in one go, so normally one batch; a split is waited out too.
+    let cProving: RegExpMatchArray[] = []
+    for (const t0 = Date.now(); cSends.every(s => s.accepted) && Date.now() - t0 < 180_000; await sleep(1000)) {
+        cProving = logMatches(n1, cSince, PROVING)
+        if (cProving.reduce((a, m) => a + Number(m[1]), 0) >= cSends.length) break
+    }
+    // 20 DEM less 15 DEM and the L1 fee cannot cover a 10 DEM transfer and its fee.
+    const drain = cProving.length > 0 ? await sendL1(W.nc, n3, W.nsink.address, 15n * DEM, (await l1NonceOf(W.nc.address)) + 1) : null
+    const drainSt = drain?.accepted ? await waitTx(n3, drain.hash, INCLUDE_MS) : null
+    const cSettled = await followSettlement(cSends, W, SETTLE_MS)
+    for (const [k, v] of [...settledEntry(aPrivate, aSettled), ...settledEntry(bPrivate, bSettled), ...cSettled]) allSettled.set(k, v)
+    record("04-l2ps-nonce-transfers", [aPrivate, bPrivate, ...cSends], new Map([...settledEntry(aPrivate, aSettled), ...settledEntry(bPrivate, bSettled), ...cSettled]))
+    const drained = cSettled.get(drainer.innerHash)
+    const drainBlock = included(drainSt)
+    // The batches the three last sat in: the one that failed on L1 for the
+    // drainer, if it got that far, and the one the others settled in.
+    const cBatches = [...new Set(cSends.flatMap(s => {
+        const h = cSettled.get(s.innerHash)?.l1BatchHash
+        return h ? [h] : []
+    }))]
+    const batchStates = await Promise.all(cBatches.map(h => txStatus(n3, h)))
+    evidence("04-l2ps-nonce-drain", {
+        proving: cProving.map(m => m[0]), drain: drain && { ...drain, status: drainSt }, batches: cBatches.map((h, k) => ({ h, st: batchStates[k] })),
+        l1: { a: aL1St, credits: creditSt },
+    })
+    check("04.c-drain-in-window", "the drainer's L1 send is accepted once its batch proves and is included",
+        drain?.accepted === true && drainBlock !== null, `proving ${cProving.map(m => m[0]).join(" | ") || "never seen"}; drain ${l1Line(drain, drainSt)}`)
+    check("04.c-dropped", "the drainer's transfer is dropped as no longer covered and never settles",
+        drained?.status === "failed" && /no longer covers|does not cover/i.test(drained.message ?? ""), json(drained))
+    check("04.c-others-settle", "the other transfers of that batch settle",
+        keepers.every(s => cSettled.get(s.innerHash)?.status === "confirmed"),
+        keepers.map(s => `${s.from}=${cSettled.get(s.innerHash)?.status}`).join(", "))
+    for (const s of keepers) if (cSettled.get(s.innerHash)?.status === "confirmed") expectTransfer(exp, s)
+    if (drainBlock !== null) {
+        expectL1(exp, W.nc.address, drain!)
+        expectMove(exp, W.nsink.address, drain!.amount)
+    }
+    metrics.drainPath = batchStates.some(st => st?.state === "failed")
+        ? "batch included as failed on L1, drainer dropped, the rest re-planned"
+        : "drainer dropped without a failed batch"
+
+    await waitBlocks(1)
+    const after = await quiescentStates()
+    agree("04.agree", "after the L2PS nonce scenarios", after)
+    // Every account of the three scenarios moved exactly as its settled
+    // transfers and included L1 sends say, L1 and L2PS nonces apart.
+    checkDeltas("04.deltas", before, after, exp, watch)
+})
+
+await step("05-throughput", async () => {
     const before = await quiescentStates()
     const startHeight = before[0].height
     // L1 load beside the subnet traffic, from an account no transfer touches
     const l1 = await client(W.l1, n3)
-    let l1Nonce = await nonceOf(W.l1.address)
+    let l1Nonce = await l1NonceOf(W.l1.address)
     const l1Sends: { hash: string; at: number; ok: boolean; message?: string }[] = []
     let loading = L1_TPS > 0
     const l1Loop = (async () => {
@@ -426,16 +576,16 @@ await step("04-throughput", async () => {
     const sends = await pool(Array.from({ length: throughputTransfers(N) }, (_, i) => i), 8, i =>
         send("throughput", `tp${i}`, i % 2 === 0 ? n1 : n2, { to: W[`tq${i}`].address, amount: BigInt(1 + (i % 7)) * DEM }))
     const submitSeconds = (Date.now() - t0) / 1000
-    check("04.admitted", `${sends.length} transfers admitted`, sends.every(s => s.accepted), `submitted in ${submitSeconds.toFixed(1)} s`)
+    check("05.admitted", `${sends.length} transfers admitted`, sends.every(s => s.accepted), `submitted in ${submitSeconds.toFixed(1)} s`)
     const settled = await followSettlement(sends, W, SETTLE_MS)
     loading = false
     await l1Loop
     for (const [k, v] of settled) allSettled.set(k, v)
-    record("04-throughput-transfers", sends, settled)
+    record("05-throughput-transfers", sends, settled)
     const confirmed = sends.filter(s => settled.get(s.innerHash)?.status === "confirmed")
-    check("04.settled", "all throughput transfers settle", confirmed.length === sends.length, `${confirmed.length}/${sends.length}`)
+    check("05.settled", "all throughput transfers settle", confirmed.length === sends.length, `${confirmed.length}/${sends.length}`)
     const batches = settledHashes(settled)
-    await checkBatches("04.batches", batches)
+    await checkBatches("05.batches", batches)
 
     // applied time = timestamp of the block that carries the batch
     const blockTimes = new Map<number, number | null>()
@@ -478,21 +628,21 @@ await step("04-throughput", async () => {
         windowSeconds: l1Last > l1First ? Math.round((l1Last - l1First) / 1000) : 0,
         refusals: l1Sends.filter(s => !s.ok).slice(0, 5).map(s => s.message),
     }
-    check("04.l1load", "L1 load ran beside settlement and was included", L1_TPS === 0 || included.length > 0, json(metrics.l1Load))
+    check("05.l1load", "L1 load ran beside settlement and was included", L1_TPS === 0 || included.length > 0, json(metrics.l1Load))
 
     await waitBlocks(1)
     const after = await quiescentStates()
-    agree("04.agree", "after throughput with L1 load", after)
+    agree("05.agree", "after throughput with L1 load", after)
     const exp: Expected = new Map()
     for (const s of confirmed) expectTransfer(exp, s)
     // Settlement accounts are checked exactly; the L1 load's own conservation is judged apart.
-    checkDeltas("04.deltas", before, after, exp, [], false)
+    checkDeltas("05.deltas", before, after, exp, [], false)
     const supplyMoves = after.map((s, k) => s.totalSupply - before[k].totalSupply)
     l1SupplyDelta = supplyMoves[0]
     const l1Included = (metrics.l1Load as { included: number }).included
-    check("04.l1-supply", `total supply unchanged by the ${l1Included} included L1 native transfers and the settlement batches`,
+    check("05.l1-supply", `total supply unchanged by the ${l1Included} included L1 native transfers and the settlement batches`,
         supplyMoves.every(d => d === 0n),
-        `supply moved ${supplyMoves.join("/")} OS (${l1Included > 0 ? `${supplyMoves[0] / BigInt(l1Included)} OS per L1 tx` : "no L1 tx"}); other movers in evidence/04.deltas-other-movers.json`)
+        `supply moved ${supplyMoves.join("/")} OS (${l1Included > 0 ? `${supplyMoves[0] / BigInt(l1Included)} OS per L1 tx` : "no L1 tx"}); other movers in evidence/05.deltas-other-movers.json`)
 
     // block times inside the window
     const endHeight = after[0].height
@@ -507,7 +657,7 @@ await step("04-throughput", async () => {
     metrics.throughputHeights = [startHeight, endHeight]
 })
 
-await step("05-final", async () => {
+await step("06-final", async () => {
     const top = Math.min(...(await tips()))
     const mismatches: number[] = []
     const gaps: number[] = []
@@ -519,13 +669,13 @@ await step("05-final", async () => {
         if (prev !== null && t !== null && h > firstHeight) gaps.push(t - prev)
         prev = t
     }
-    check("05.hashes", `every block hash 1..${top} is identical on all 4 validators`, mismatches.length === 0,
+    check("06.hashes", `every block hash 1..${top} is identical on all 4 validators`, mismatches.length === 0,
         mismatches.length ? `differs at ${mismatches.slice(0, 20).join(",")}` : "")
     metrics.blockTimeMs = quantiles(gaps)
     metrics.heights = top
     const states = await quiescentStates()
-    agree("05.agree", "final", states)
-    check("05.supply", "total supply equals genesis supply on every validator, apart from what 04.l1-supply reports for the L1 load",
+    agree("06.agree", "final", states)
+    check("06.supply", "total supply equals genesis supply on every validator, apart from what 05.l1-supply reports for the L1 load",
         states.every(s => s.totalSupply === genesisSupply + l1SupplyDelta),
         states.map(s => `${s.node}=${s.totalSupply}`).join(" ") + ` genesis ${genesisSupply}, L1 load ${l1SupplyDelta}`)
 
@@ -538,7 +688,7 @@ await step("05-final", async () => {
             if (hit && hit[2] === UID) proofs.push({ node: m.name, transfers: Number(hit[1]), ms: Number(hit[3]) })
         }
     }
-    evidence("05-proofs", proofs)
+    evidence("06-proofs", proofs)
     metrics.proofMs = quantiles(proofs.map(p => p.ms))
     metrics.proofs = proofs.length
     metrics.proofTransfers = quantiles(proofs.map(p => p.transfers))

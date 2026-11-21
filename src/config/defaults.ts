@@ -208,6 +208,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         rapidApiKey: "",
         rapidApiHost: "twitter-api45.p.rapidapi.com",
         solanaRpc: "",
+        validatorSolanaRpcs: "",
         zkAttestationPoints: 10,
     },
 

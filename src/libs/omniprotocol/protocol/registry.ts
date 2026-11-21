@@ -383,18 +383,6 @@ const DESCRIPTORS: HandlerDescriptor[] = [
 
     // 0x5X Browser / Client
     {
-        opcode: OmniOpcode.LOGIN_REQUEST,
-        name: "login_request",
-        authRequired: true,
-        handler: createHttpFallbackHandler(),
-    },
-    {
-        opcode: OmniOpcode.LOGIN_RESPONSE,
-        name: "login_response",
-        authRequired: true,
-        handler: createHttpFallbackHandler(),
-    },
-    {
         opcode: OmniOpcode.WEB2_PROXY_REQUEST,
         name: "web2ProxyRequest",
         authRequired: true,

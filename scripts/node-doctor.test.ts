@@ -1,10 +1,13 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { spawnSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { SHARD_SIZE_MAX, SHARD_SIZE_MIN } from "src/libs/consensus/genesisShardSize"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
+import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
+import { genesisScheduleProblems } from "src/libs/blockchain/genesis/genesisPin"
 
 // `--env-from env` keeps docker out of it: the doctor reads the process
 // environment we pass, over a .env this checkout may hold.
@@ -60,6 +63,32 @@ function writeSheet(name: string, body: string): string {
 const line = (lines: string[], key: string) =>
     lines.find(l => l.startsWith(`PASS ${key}:`) || l.startsWith(`FAIL ${key}:`))
 
+it("runs the production debug assertion guard test in the consensus suite", () => {
+    const suite = fs.readFileSync(path.join(repo, "scripts/test-consensus.sh"), "utf8")
+    expect(/^\s*src\/config\/loader\.debugAssertions\.test\.ts$/m.test(suite)).toBe(true)
+})
+
+it("lists debug assertions in the install guide's production doctor checklist", () => {
+    const guide = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const checklist = guide.match(/^A validator never leaves these enabled in `.env`:.*$/m)?.[0]
+    expect(checklist).toContain("DEBUG_ASSERTIONS_ENABLED")
+})
+
+it("lists every production doctor unset check in both operator checklists", () => {
+    const script = fs.readFileSync(doctor, "utf8")
+    const keys = [...script.matchAll(/^\s*check_unset ([A-Z_]+) /gm)].map(m => m[1])
+    expect(keys.length).toBeGreaterThan(0)
+
+    const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const installList = install.match(/^A validator never leaves these enabled in `.env`:.*$/m)?.[0]
+    const parameters = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.md"), "utf8")
+    const mainnetList = parameters.split("### Must stay disabled\n")[1]?.split("\n### ")[0]
+    for (const key of keys) {
+        expect(installList).toContain(`\`${key}\``)
+        expect(mainnetList).toContain(`\`${key}\``)
+    }
+})
+
 describe("node-doctor --production against the parameter sheet", () => {
     it("passes every published value when the node runs exactly the sheet", () => {
         const sheet = readSheet(path.join(repo, "docs/mainnet/parameters.env"))
@@ -86,6 +115,16 @@ describe("node-doctor --production against the parameter sheet", () => {
         const { lines } = run({ PROD: "1" }, "--parameters", sheet)
         expect(line(lines, "PROD")).toStartWith("FAIL PROD: is '1'")
     }, 60_000)
+
+    it("refuses debug assertions in the effective production environment", () => {
+        for (const value of ["true", "1"]) {
+            const { status, lines } = run({ DEBUG_ASSERTIONS_ENABLED: value })
+            expect(status).toBe(1)
+            expect(line(lines, "DEBUG_ASSERTIONS_ENABLED")).toStartWith(
+                "FAIL DEBUG_ASSERTIONS_ENABLED: is set",
+            )
+        }
+    }, 120_000)
 
     it("compares a published genesis pin, case and 0x aside", () => {
         const pin = "ab".repeat(32)
@@ -671,5 +710,159 @@ describe("node-doctor identity file mode", () => {
         expect(sourced(`check_identity_file; echo "failed=$CHECKS_FAILED"`, { IDENTITY_FILE: file })[0]).toBe(
             "failed=0",
         )
+    })
+})
+
+describe("node-doctor --production genesis fork schedule", () => {
+    let dir: string
+    let tools: string
+    const BUN = process.execPath
+    // Pins of the right shape, derived so no key-looking literal is committed
+    const PIN = createHash("sha256").update("node-doctor schedule pin").digest("hex")
+
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-schedule-"))
+        tools = path.join(dir, "bin")
+        fs.mkdirSync(tools)
+        for (const name of ["env", "grep", "tail"]) {
+            fs.symlinkSync(Bun.which(name) as string, path.join(tools, name))
+        }
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    /** A mainnet chain id genesis declaring every fork this build knows, minus `leave`. */
+    function writeGenesis(leave: string[] = []): string {
+        const forks: Record<string, unknown> = {}
+        for (const name of Object.keys(DEFAULT_FORK_CONFIG)) {
+            if (!leave.includes(name)) forks[name] = { activationHeight: null }
+        }
+        const file = path.join(dir, "genesis.json")
+        fs.writeFileSync(file, JSON.stringify({ properties: { id: 4242, shardSize: 10 }, forks }))
+        return file
+    }
+
+    function check(settings: Record<string, string>, composeJson = "", env: Record<string, string> = {}) {
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ") || ":"
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; COMPOSE_CONFIG_JSON="$DOCTOR_COMPOSE"; check_genesis_schedule; echo "fails=$PROD_FAILS warns=$PROD_WARNS"`],
+            { cwd: repo, env: { PATH: tools, DOCTOR_COMPOSE: composeJson, ...env } },
+        )
+        const lines = run.stdout.toString().trim().split("\n")
+        return { lines: lines.slice(0, -1), counts: lines.at(-1) }
+    }
+
+    const withBun = () => fs.symlinkSync(BUN, path.join(tools, "bun"))
+
+    it("fails a genesis the node refuses at boot, with the node's own reason", () => {
+        withBun()
+        const file = writeGenesis(["l2psSettlement", "tlsnVerified"])
+        const [reason] = genesisScheduleProblems({
+            fileGenesisData: JSON.parse(fs.readFileSync(file, "utf8")),
+            pin: PIN,
+            blockPin: PIN,
+        })
+        expect(reason).toStartWith("the genesis does not declare l2psSettlement, tlsnVerified")
+        const out = check({ DEMOS_GENESIS_FILE: file, EXPECTED_GENESIS_HASH: PIN, EXPECTED_GENESIS_BLOCK_HASH: PIN })
+        expect(out.lines).toEqual([`FAIL genesis fork schedule: the node refuses to boot on it: ${reason}`])
+        expect(out.counts).toBe("fails=1 warns=0")
+    }, 30_000)
+
+    it("passes a genesis the node's boot check accepts", () => {
+        withBun()
+        const out = check({ DEMOS_GENESIS_FILE: writeGenesis(), EXPECTED_GENESIS_HASH: PIN, EXPECTED_GENESIS_BLOCK_HASH: PIN })
+        expect(out.lines).toEqual(["PASS genesis fork schedule: the node's boot check accepts it"])
+        expect(out.counts).toBe("fails=0 warns=0")
+    }, 30_000)
+
+    it("warns that the check was skipped on a bare-metal host without bun", () => {
+        const out = check({ DEMOS_GENESIS_FILE: writeGenesis(["tlsnVerified"]) })
+        expect(out.lines[0]).toStartWith("WARN genesis fork schedule: skipped: bun is needed")
+        expect(out.counts).toBe("fails=0 warns=1")
+    })
+
+    it("runs the check in the node image under compose, with the container's settings", () => {
+        // Stands in for `docker compose run`: the container gets the node's environment
+        const expected = "compose run --rm --no-deps -T node bun scripts/genesis-schedule-check.ts"
+        fs.writeFileSync(
+            path.join(tools, "docker"),
+            `#!${BASH}\n[ "$*" = "${expected}" ] || { echo "unexpected docker $*" >&2; exit 125; }\nshift 7\nexec "${BUN}" "$@"\n`,
+        )
+        fs.chmodSync(path.join(tools, "docker"), 0o755)
+        const compose = JSON.stringify({ services: { node: {} } })
+        const file = writeGenesis(["tlsnVerified"])
+        const refused = check({}, compose, { DEMOS_GENESIS_FILE: file, EXPECTED_GENESIS_HASH: PIN })
+        expect(refused.lines).toHaveLength(1)
+        expect(refused.lines[0]).toStartWith(
+            "FAIL genesis fork schedule: the node refuses to boot on it: the genesis does not declare tlsnVerified",
+        )
+
+        fs.writeFileSync(path.join(tools, "docker"), `#!${BASH}\necho "no such service: node" >&2\nexit 1\n`)
+        const broken = check({}, compose)
+        expect(broken.lines).toEqual([
+            "FAIL genesis fork schedule: the node's boot check did not run (exit 1): no such service: node",
+        ])
+    }, 30_000)
+})
+
+describe("node-doctor --production web2 identity credentials under keylessWeb2Identity", () => {
+    let dir: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-keyless-"))
+        fs.symlinkSync(PYTHON3, path.join(dir, "python3"))
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    function genesisWith(keyless: unknown, raw?: string): string {
+        const file = path.join(dir, "genesis.json")
+        const forks = keyless === undefined ? {} : { keylessWeb2Identity: keyless }
+        fs.writeFileSync(file, raw ?? JSON.stringify({ properties: { id: 4242, shardSize: 3 }, forks }))
+        return file
+    }
+
+    /** The credential lines after check_genesis_file read `file`, every credential empty. */
+    function credentialLines(file: string, token = ""): string[] {
+        const settings = { DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir, GITHUB_TOKEN: token }
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ")
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; check_genesis_file >/dev/null; check_web2_identity_credentials; check_github_token`],
+            { env: { PATH: dir } },
+        )
+        return run.stdout.toString().trim().split("\n")
+    }
+
+    it("reports the credentials as not needed when the genesis schedules the fork at 0", () => {
+        const lines = credentialLines(genesisWith({ activationHeight: 0 }), "ghp_expired")
+        expect(lines).toEqual([
+            "PASS GITHUB_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so GitHub identity links go through TLSNotary only",
+            "PASS DISCORD_BOT_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so Discord identity links go through TLSNotary only",
+            "PASS RAPID_API_KEY: not needed: the genesis schedules keylessWeb2Identity at 0, so Twitter/X identity links go through TLSNotary only",
+        ])
+    })
+
+    it("reads a height written as 0.0 as 0, like the node", () => {
+        const raw = '{"properties":{"id":4242,"shardSize":3},"forks":{"keylessWeb2Identity":{"activationHeight":0.0}}}'
+        const lines = credentialLines(genesisWith(undefined, raw))
+        expect(lines.filter(l => l.startsWith("FAIL"))).toEqual([])
+        expect(lines).toHaveLength(3)
+    })
+
+    it("still fails empty credentials when the fork is absent, unscheduled or later", () => {
+        for (const keyless of [
+            undefined,
+            { activationHeight: null },
+            { activationHeight: 10 },
+            { activationHeight: "0" },
+            { activationHeight: false },
+        ]) {
+            const lines = credentialLines(genesisWith(keyless))
+            expect([keyless, lines.filter(l => l.startsWith("FAIL")).map(l => l.split(":")[0])]).toEqual([
+                keyless,
+                ["FAIL GITHUB_TOKEN", "FAIL DISCORD_BOT_TOKEN", "FAIL RAPID_API_KEY"],
+            ])
+        }
     })
 })

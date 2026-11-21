@@ -98,6 +98,14 @@ async function mnemonicToSeed(mnemonic: string): Promise<Uint8Array> {
         process.exit(1)
     }
 
+    if (mnemonic.normalize("NFKD") !== mnemonic) {
+        console.error(
+            "Error: Invalid mnemonic - the phrase is not in canonical form (full-width letters, ideographic or no-break spaces). " +
+                "Retype it in plain lowercase ASCII letters with ASCII spaces between the words",
+        )
+        process.exit(1)
+    }
+
     // Use raw mnemonic string to match wallet/SDK derivation
     const hashable = mnemonic
     const seedHash = Hashing.sha3_512(hashable)

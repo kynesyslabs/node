@@ -213,6 +213,55 @@ describe("the points an undone web2 link takes back", () => {
     })
 })
 
+describe("the points an undone TLSN link takes back", () => {
+    // As a link made before tlsnVerified stores it: no request token to free.
+    const tlsnAdd = (username: string, userId: string) =>
+        edit("tlsn", "add", { context: "github", data: { username, userId, proof: "{}" } })
+    const linkY = (acc: any, add: any) =>
+        acc.identities.web2.github.push({
+            userId: add.data.data.userId,
+            username: add.data.data.username,
+            proof: {},
+            proofHash: "hy",
+            proofType: "tlsn",
+            timestamp: 5,
+        })
+
+    let spy: ReturnType<typeof spyOn> | undefined
+    const unlinked = () => (spy = spyOn(IncentiveManager, "githubUnlinked").mockResolvedValue(undefined as never))
+    afterEach(() => spy?.mockRestore())
+
+    it("are none while the account's older github link remains: the add found them paid", async () => {
+        // X (alice, 99) earned the account's github points; Y earned nothing.
+        const acc = account()
+        const add = tlsnAdd("bob", "1234")
+        linkY(acc, add)
+        const spy = unlinked()
+
+        const undone = await undo(add, acc)
+        await undone.sideEffect?.()
+
+        expect(undone.success).toBe(true)
+        expect(acc.identities.web2.github).toEqual([expect.objectContaining({ username: "alice", userId: 99 })])
+        expect(spy).not.toHaveBeenCalled()
+    })
+
+    it("are the context's when the undone link was its only one", async () => {
+        const acc = account()
+        acc.identities.web2.github = []
+        const add = tlsnAdd("bob", "1234")
+        linkY(acc, add)
+        const spy = unlinked()
+
+        const undone = await undo(add, acc)
+        await undone.sideEffect?.()
+
+        expect(undone.success).toBe(true)
+        expect(spy).toHaveBeenCalledTimes(1)
+        expect(spy).toHaveBeenCalledWith(ACCOUNT, "1234")
+    })
+})
+
 describe("undoing a web2 unlink", () => {
     it("puts the removed link back as it was, in its place", async () => {
         const acc = account()

@@ -15,8 +15,10 @@ mockEntityDatasource()
 
 // Every token the simulation would issue for a tlsn_request.
 const issuedTokens: unknown[] = []
+let tokenCreationError: unknown = null
 mock.module("@/features/tlsnotary/tokenManager", () => ({
     createToken: (...args: unknown[]) => {
+        if (tokenCreationError !== null) throw tokenCreationError
         issuedTokens.push(args)
         return { id: "token-1" }
     },
@@ -93,6 +95,77 @@ describe("the attestation token", () => {
     it("is issued in the simulation while the fork is dormant", async () => {
         issuedTokens.length = 0
         disabled(null)
+        await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
+        expect(issuedTokens).toHaveLength(1)
+    })
+
+    it("refuses a request and restores its balance when token creation fails", async () => {
+        disabled(null)
+        issuedTokens.length = 0
+        tokenCreationError = new Error("token creation failed")
+        const before = { ...(block.caches.accounts.get(SENDER) as any) }
+        try {
+            const out = await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
+            expect(out.success).toBe(false)
+            // The error's message, not its default "Error: ..." stringification.
+            expect(out.message).toBe("Error processing native side-effects: token creation failed")
+            expect((block.caches.accounts.get(SENDER) as any).balance).toBe(before.balance)
+            expect((block.caches.accounts.get(SENDER) as any).nonce).toBe(before.nonce)
+            expect(issuedTokens).toEqual([])
+        } finally {
+            tokenCreationError = null
+        }
+    })
+
+    it("reports the message of a thrown non-Error value, not [object Object]", async () => {
+        disabled(null)
+        issuedTokens.length = 0
+        tokenCreationError = { message: "token store down" }
+        const before = { ...(block.caches.accounts.get(SENDER) as any) }
+        try {
+            const out = await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
+            expect(out.success).toBe(false)
+            expect(out.message).toBe("Error processing native side-effects: token store down")
+            expect((block.caches.accounts.get(SENDER) as any).balance).toBe(before.balance)
+            expect(issuedTokens).toEqual([])
+        } finally {
+            tokenCreationError = null
+        }
+    })
+})
+
+describe("tlsnDisabled lifted by reenableAt", () => {
+    const block = stubBlockApply(handleGCR)
+    const validation = () => import("@/libs/blockchain/validation/editBinding")
+
+    /** The switch from tip 50, lifted at block `reenableAt`; the tip is 100, so block 101 is next. */
+    const lifted = async (reenableAt: number) => {
+        disabled(null)
+        const { getSharedState } = await import("@/utilities/sharedState")
+        getSharedState.forkConfig.tlsnDisabled = { activationHeight: 50, reenableAt }
+    }
+
+    it("still refuses at RPC intake, pool admission and the pre-pass while the next block is in the window", async () => {
+        await lifted(102)
+        const { verifyAdmissionEdits, verifyRpcEdits } = await validation()
+        for (const tx of await tlsnTxs()) {
+            expect(await verifyAdmissionEdits(tx)).toEqual({ ok: false, reason: TLSN_DISABLED_REFUSAL })
+            expect(await verifyRpcEdits(tx)).toEqual({ ok: false, reason: TLSN_DISABLED_REFUSAL })
+        }
+        const [tx] = await tlsnTxs()
+        expect(await block.refused([tx])).toEqual([tx.hash])
+    })
+
+    it("admits, applies and issues a token again from the block at reenableAt", async () => {
+        await lifted(101)
+        const { verifyAdmissionEdits, verifyRpcEdits } = await validation()
+        for (const tx of await tlsnTxs()) {
+            expect((await verifyAdmissionEdits(tx)).reason).not.toBe(TLSN_DISABLED_REFUSAL)
+            expect((await verifyRpcEdits(tx)).reason).not.toBe(TLSN_DISABLED_REFUSAL)
+        }
+        const [tx] = await tlsnTxs()
+        expect(await block.refused([tx])).toEqual([])
+        issuedTokens.length = 0
         await handleGCR.applyTransaction(block.caches, await tlsnRequest(), false, true)
         expect(issuedTokens).toHaveLength(1)
     })

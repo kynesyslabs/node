@@ -291,6 +291,27 @@ describe("getNetworkInfo RPC handler", () => {
         expect(peerScheduleView(body)?.treasuryAddress).toBe(treasury)
     })
 
+    // Checks what docs/runbooks/tlsn-notary.md section 7 step 4 states:
+    // `activated` compares activationHeight with the tip only, so it stays
+    // true after reenableAt, and the status entry does not carry reenableAt.
+    // This file is not in scripts/test-consensus.sh, so CI does not run this
+    // case; if it fails, update that runbook sentence too.
+    it("keeps reporting tlsnDisabled as activated after reenableAt, while the gates accept TLSNotary again", async () => {
+        getSharedState.forkConfig.tlsnDisabled.activationHeight = 100
+        getSharedState.forkConfig.tlsnDisabled.reenableAt = 200
+        getSharedState.lastBlockNumber = 250
+        const body = (await getNetworkInfo({}, makeResponse(), "")).response as {
+            forks: Record<string, ForkStatusResponse & { reenableAt?: number }>
+        }
+        expect(body.forks.tlsnDisabled).toEqual({
+            activationHeight: 100,
+            activated: true,
+            currentHeight: 250,
+        })
+        const { tlsnDisabledAt } = await import("@/forks/tlsnDisabledGate")
+        expect(tlsnDisabledAt(250)).toBe(false)
+    })
+
     it("publishes a schedule digest that follows the whole schedule and the chain id", async () => {
         const digestOf = async () =>
             ((await getNetworkInfo({}, makeResponse())).response as { forkScheduleDigest: string }).forkScheduleDigest

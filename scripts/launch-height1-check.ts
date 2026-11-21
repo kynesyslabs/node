@@ -198,6 +198,17 @@ function listed(items: string[]): string {
         : `${items.slice(0, SHOWN).join("; ")}; and ${items.length - SHOWN} more`
 }
 
+/**
+ * How many blocks after block 0 are read before the state is left out. Run
+ * from outside the validators' network the check can start dozens of blocks
+ * after block 1, and a chain without transactions still
+ * holds block 0's state; the read stops at the first block that carries
+ * one, so the bound only costs time on a chain that stayed empty.
+ */
+export const DEFAULT_MAX_SCAN = 1000
+/** Per-request timeout: a validator's RPC seen across the internet can take seconds to answer. */
+export const DEFAULT_TIMEOUT_MS = 20_000
+
 /** Why the node's state can no longer be read as block 0's state, or null when it can. */
 function stateNotComparable(obs: NodeObservation, maxScan: number): string | null {
     const head = obs.head ?? 0
@@ -285,7 +296,7 @@ function compareBalances(
 export function decideHeight1(
     expected: LaunchExpectation,
     observations: NodeObservation[],
-    opts: { maxScan: number } = { maxScan: 20 },
+    opts: { maxScan: number } = { maxScan: DEFAULT_MAX_SCAN },
 ): Height1Decision {
     const checks: Check[] = []
     const add = (node: string, name: string, status: CheckStatus, detail: string) =>
@@ -462,22 +473,22 @@ function usage(): string {
         "  --rpc URL[,URL...]   nodes to check; default: block 0's validators at their connection_url",
         "  --balances N|all     snapshot accounts to check, largest balances first (default 100);",
         "                       every genesis.balances entry is always checked",
-        "  --max-scan N         compare state only while head <= N and blocks 1..head are empty (default 20)",
-        "  --timeout MS         per-request timeout (default 5000)",
+        `  --max-scan N         compare state only while head <= N and blocks 1..head are empty (default ${DEFAULT_MAX_SCAN})`,
+        `  --timeout MS         per-request timeout (default ${DEFAULT_TIMEOUT_MS})`,
         "  --json               machine-readable output",
     ].join("\n")
 }
 
-function parseArgs(argv: string[]): CliArgs {
+export function parseArgs(argv: string[]): CliArgs {
     const args: CliArgs = {
         genesis: null,
         snapshot: null,
         genesisHash: null,
         rpc: [],
         balances: 100,
-        maxScan: 20,
+        maxScan: DEFAULT_MAX_SCAN,
         json: false,
-        timeoutMs: 5000,
+        timeoutMs: DEFAULT_TIMEOUT_MS,
     }
     for (let i = 0; i < argv.length; i++) {
         const flag = argv[i]
@@ -538,9 +549,15 @@ async function nodeCall(base: string, message: string, data: unknown, timeoutMs:
     return res.response
 }
 
+/**
+ * Blocks from..to as the node serves them, up to the first one that is
+ * unreadable or carries transactions: from there on the state is not block
+ * 0's alone, so later blocks change nothing.
+ */
 async function readBlocks(base: string, from: number, to: number, timeoutMs: number): Promise<ObservedBlock[]> {
     const blocks: ObservedBlock[] = []
     for (let n = from; n <= to; n++) {
+        if (blocks.length > 0 && blocks[blocks.length - 1].txCount !== 0) break
         try {
             const block = await nodeCall(base, "getBlockByNumber", { blockNumber: n }, timeoutMs)
             const content = typeof block?.content === "string" ? JSON.parse(block.content) : block?.content
@@ -590,8 +607,9 @@ export async function observeNode(
         const firstHead = Number(await nodeCall(base, "getLastBlockNumber", {}, timeoutMs))
         obs.head = firstHead
         if (!(firstHead >= 1)) return obs
-        // Past the scan window only block 1 is needed, for its parent
-        obs.blocks = await readBlocks(base, 1, Math.min(firstHead, maxScan), timeoutMs)
+        // Past the scan window the state is out of the comparison anyway, so
+        // only block 1 is read, for its parent and agreement checks
+        obs.blocks = await readBlocks(base, 1, firstHead > maxScan ? 1 : firstHead, timeoutMs)
         if (stateNotComparable(obs, maxScan) !== null) return obs
 
         try {

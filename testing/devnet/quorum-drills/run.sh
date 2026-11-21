@@ -16,12 +16,23 @@
 #   halt-n30s10     30 validators, shardSize 10: stop 24 at once (6 live < q), hold, restart
 #   ride-n30s10     30 validators, shardSize 10: stop 3 at once, the chain must keep forging
 #   restart-n30s10  30 validators, shardSize 10: restart a committee member mid-round, 5 times
+#   <kind>-n<N>s<S> any of halt, ride, restart, third, load, hostloss with N validators
+#                   (4..400) and shardSize S (<= N), e.g. third-n30s10:
+#     third         stop a third of the validators at once: no fork, whatever
+#                   the chain does meanwhile, then all rejoin (README.md)
+#     load          native transfers at LOAD_TPS for LOAD_DURATION_S: main TPS,
+#                   block times, time to inclusion (README.md)
+#     hostloss      (--hosts) stop every validator of the last host at once:
+#                   the chain must keep forging, as in ride
 #   listed-stall    10 staked, 7 running: stop 1 listed, start the 3 others
 #   fallback        10 validators: the last block lists 6 (< 7) of them
 #   partition       6 validators, shardSize 4: split 3 + 3, then heal
 #
-# --hosts FILE spreads the nodes over the hosts in FILE (`user@ip [max_nodes]`
+# --hosts FILE spreads the nodes over the hosts in FILE (`user@ip[:port] [max_nodes]`
 # per line, HOSTS.md); --netem SPEC adds `tc netem SPEC` there for the drill.
+# --carryover (launch fork set only) builds the identityCarryover snapshot from
+# the image's own data/snapshot and binds it into the genesis, so the drill runs
+# every fork the launch genesis activates at block 0.
 # Everything lives in a per-run dir under runs/ (gitignored: it holds the
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
 # Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
@@ -64,7 +75,9 @@ RECOVERY_TIMEOUT="${RECOVERY_TIMEOUT:-300}"
 RIDE_BLOCKS="${RIDE_BLOCKS:-5}"
 RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
 # restart-* drills (README.md "restart-n30s10")
-RESTARTS="${RESTARTS:-5}"
+# Default 5, fewer below 6 validators (node-1 is never restarted): set after
+# the scenario gives N
+RESTARTS="${RESTARTS:-}"
 REJOIN_BOOT_S="${REJOIN_BOOT_S:-180}"
 REJOIN_SYNC_S="${REJOIN_SYNC_S:-60}"
 REJOIN_ROUND_S="${REJOIN_ROUND_S:-$((3 * CONSENSUS_TIME))}"
@@ -72,16 +85,35 @@ REJOIN_TIMEOUT="${REJOIN_TIMEOUT:-300}"
 # Two rounds plus the secretary's green-light (60 s) and validator-phase (30 s)
 # timeouts: the longest a round may take when one member is missing
 MAX_GAP_S="${MAX_GAP_S:-$((2 * CONSENSUS_TIME + 90))}"
+# third-* drills: rounds sampled while a third is down (HALT_ROUNDS by default)
+SAFE_ROUNDS="${SAFE_ROUNDS:-${HALT_ROUNDS}}"
+# load-* drills (README.md "load")
+LOAD_TPS="${LOAD_TPS:-4}"
+LOAD_DURATION_S="${LOAD_DURATION_S:-300}"
+LOAD_DRAIN_S="${LOAD_DRAIN_S:-180}"
+# One wallet keeps at most 18 transactions in flight (the node's 20-ahead nonce
+# window), so at 10 s blocks one wallet carries about 1.8 TPS
+# Each wallet sends through one node: default 8, or one per validator above
+# that, so every node takes client submissions (set after the scenario gives N)
+LOAD_WALLETS="${LOAD_WALLETS:-}"
+LOAD_MIN_INCLUDED="${LOAD_MIN_INCLUDED:-0.95}"
+# Container stats every RESOURCE_SAMPLE_S seconds into logs/resources.tsv; 0 is off
+RESOURCE_SAMPLE_S="${RESOURCE_SAMPLE_S:-15}"
+# Publish the node ports on the host's address only (multi-host), not 0.0.0.0
+BIND_HOST_IP="${BIND_HOST_IP:-0}"
+CARRYOVER="${CARRYOVER:-0}"
 HOSTS_FILE=""
 NETEM=""
 
 usage() {
-    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
     echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
     echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
     echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
     echo "             RESTARTS REJOIN_BOOT_S REJOIN_SYNC_S REJOIN_ROUND_S REJOIN_TIMEOUT MAX_GAP_S (restart-* drills)"
+    echo "             SAFE_ROUNDS (third-* drills); LOAD_TPS LOAD_DURATION_S LOAD_DRAIN_S LOAD_WALLETS LOAD_MIN_INCLUDED (load-* drills)"
+    echo "             RESOURCE_SAMPLE_S BIND_HOST_IP CARRYOVER; REGISTRY_TOKEN REGISTRY_USER QDRILL_SSH_* (HOSTS.md)"
 }
 
 while [ $# -gt 0 ]; do
@@ -91,6 +123,7 @@ while [ $# -gt 0 ]; do
         --binding) BINDING="$2"; shift 2 ;;
         --hosts) HOSTS_FILE="$2"; shift 2 ;;
         --netem) NETEM="$2"; shift 2 ;;
+        --carryover) CARRYOVER=1; shift ;;
         -h|--help) usage; exit 0 ;;
         --*) echo "unknown option $1" >&2; usage >&2; exit 2 ;;
         *) break ;;
@@ -118,8 +151,28 @@ case "${SCENARIO}" in
     listed-stall) N=10; SHARD=10; START=7 ;;
     fallback) N=10; SHARD=10; START=10 ;;
     partition) N=6; SHARD=4; START=6 ;;
+    halt-n*s* | ride-n*s* | restart-n*s* | third-n*s* | load-n*s* | hostloss-n*s*)
+        [[ "${SCENARIO}" =~ ^[a-z]+-n([1-9][0-9]*)s([1-9][0-9]*)$ ]] || { usage >&2; exit 2; }
+        N="${BASH_REMATCH[1]}"; SHARD="${BASH_REMATCH[2]}"; START="${N}"
+        { [ "${N}" -ge 4 ] && [ "${N}" -le 400 ] && [ "${SHARD}" -le "${N}" ]; } ||
+            { echo "${SCENARIO}: needs 4 <= N <= 400 and shardSize <= N" >&2; exit 2; }
+        q=$(( SHARD * 2 / 3 + 1 ))
+        case "${SCENARIO%%-*}" in
+            # Fewer than q live whatever the draw: the survivors can never sign a block
+            halt) STOPS=$(( N - q + 1 )) ;;
+            # What the committee code guarantees the chain tolerates (guaranteedTolerance)
+            ride) STOPS=$(( SHARD - q )) ;;
+            third) STOPS=$(( N / 3 ))
+                   [ $(( N - STOPS )) -ge "${q}" ] || { echo "${SCENARIO}: $(( N - STOPS )) survivors < q=${q}" >&2; exit 2; } ;;
+        esac
+        if [ "${SCENARIO%%-*}" = ride ] && [ "${STOPS}" -lt 1 ]; then
+            echo "${SCENARIO}: shardSize ${SHARD} tolerates no stopped validator" >&2; exit 2
+        fi
+        ;;
     *) usage >&2; exit 2 ;;
 esac
+[ -n "${RESTARTS}" ] || RESTARTS=$(( N - 1 < 5 ? N - 1 : 5 ))
+[ -n "${LOAD_WALLETS}" ] || LOAD_WALLETS=$(( N > 8 ? N : 8 ))
 # The halt and ride drills always run with gossip on, whatever the environment
 # says. With it off a restarted node never learns that the network is ahead:
 # a height claim above its own chain is refused unless it comes as a gossip
@@ -127,16 +180,22 @@ esac
 # src/libs/consensus/v2/routines/networkAheadVeto.ts), so the recovery result
 # would measure that and not the halt. The other scenarios keep the harness
 # default (off; GOSSIP_ENABLED=true in the environment turns it on).
-case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10|*-n30s10) export GOSSIP_ENABLED=true ;; esac
+case "${SCENARIO}" in halt-*|ride-*|restart-*|third-*|load-*|hostloss-*|*-n30s10) export GOSSIP_ENABLED=true ;; esac
 # The mainnet-shape drills run the fork set docs/mainnet/genesis.template.json
 # launches with (every fork it sets to 0, the rest off), read at run time. The
-# other scenarios keep the forks of genesis.devnet.json. Forks the drills cannot
-# run (identityCarryover: it needs a genesis snapshot and the drills mount an
-# empty one) are left off by name, drill_inputs.py LAUNCH_EXCLUDED_FORKS;
+# other scenarios keep the forks of genesis.devnet.json. identityCarryover needs
+# a genesis snapshot: without --carryover the drills mount an empty one and
+# leave that fork off by name (drill_inputs.py excluded_forks); with it the
+# snapshot is built from the image's data/snapshot and the fork runs at 0.
 # EXCLUDED_FORKS is that list, name -> reason, read from the generated inputs.
 FORK_SET=devnet
 EXCLUDED_FORKS='{}'
-case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10|*-n30s10) FORK_SET=launch ;; esac
+case "${SCENARIO}" in halt-*|ride-*|restart-*|third-*|load-*|hostloss-*|*-n30s10) FORK_SET=launch ;; esac
+case "${CARRYOVER}" in 0|1) ;; *) echo "CARRYOVER must be 0 or 1" >&2; exit 2 ;; esac
+case "${BIND_HOST_IP}" in 0|1) ;; *) echo "BIND_HOST_IP must be 0 or 1" >&2; exit 2 ;; esac
+if [ "${CARRYOVER}" = 1 ] && [ "${FORK_SET}" != launch ]; then
+    echo "--carryover applies to the launch fork set only (halt-*, ride-*, restart-*, third-*, load-*, hostloss-*, *-n30s10)" >&2; exit 2
+fi
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
 if [ "${FORK_SET}" = launch ] && [ "${BINDING}" != on ]; then
     echo "${SCENARIO} runs the launch fork set, which activates committeeBinding: --binding off does not apply" >&2; exit 2
@@ -163,7 +222,10 @@ if [ -n "${HOSTS_FILE}" ]; then
     # Every host must run the same bytes: pulled by digest, never by tag
     [[ "${IMAGE}" =~ ^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$ ]] ||
         { echo "--hosts needs --image REF@sha256:<digest> (a registry reference by digest), got ${IMAGE}" >&2; exit 2; }
+elif [ "${SCENARIO%%-*}" = hostloss ]; then
+    echo "${SCENARIO} needs --hosts: it stops every validator of one host" >&2; exit 2
 fi
+[ "${BIND_HOST_IP}" = 0 ] || [ -n "${HOSTS_FILE}" ] || { echo "BIND_HOST_IP=1 needs --hosts" >&2; exit 2; }
 if [ -n "${NETEM}" ]; then
     [ -n "${HOSTS_FILE}" ] || { echo "--netem needs --hosts" >&2; exit 2; }
     [[ "${NETEM}" =~ ^[A-Za-z0-9\ .%_-]+$ ]] || { echo "--netem: unexpected characters in '${NETEM}'" >&2; exit 2; }
@@ -192,6 +254,15 @@ LOG_DIR="${RUN_DIR}/logs"
 PROJECT="qdrill-$(echo "${RUN_ID}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')"
 mkdir -p "${LOG_DIR}" "${RUN_DIR}/inputs/empty-snapshot"
 [ -n "${HOSTS_FILE}" ] && mh_init
+if [ "${SCENARIO%%-*}" = hostloss ]; then
+    # The last host: node-1, the peerlist's seed, is always on the first
+    LOST_HOST="${MH_KS[${#MH_KS[@]} - 1]}"
+    [ "${LOST_HOST}" != "${MH_HOST_OF[1]}" ] || { echo "${SCENARIO} needs at least two hosts" >&2; exit 2; }
+    read -ra LOST_NODES <<< "${MH_NODES[${LOST_HOST}]//,/ }"
+    STOPS="${#LOST_NODES[@]}"
+    [ "${STOPS}" -le $(( (SHARD < N ? SHARD : N) - Q )) ] ||
+        { echo "${SCENARIO}: host ${LOST_HOST} runs ${STOPS} validators, more than the $(( (SHARD < N ? SHARD : N) - Q )) a committee of ${SHARD} tolerates (q=${Q}): put fewer on one host" >&2; exit 2; }
+fi
 EVENTS="${LOG_DIR}/events.log"
 PHASES="${RUN_DIR}/phases.tsv"
 printf 'phase\tdown\tlive\tfrom\tto\tblocks\tmean_s\tmax_s\toutcome\n' > "${PHASES}"
@@ -203,11 +274,103 @@ event() { echo "$(date -u +%H:%M:%S) $*" >> "${EVENTS}"; }
 
 dc() { docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" "$@"; }
 
+# The docker hosts of the run: the --hosts keys, or "local"
+host_keys() { if [ -n "${HOSTS_FILE}" ]; then printf '%s\n' "${MH_KS[@]}"; else echo local; fi; }
+on_host() { # $1 host key, then a command whose docker calls go to that host
+    local k="$1"; shift
+    if [ "${k}" = local ]; then "$@"; else ( export QDRILL_MH_HOST="${k}"; "$@" ); fi
+}
+
+# Container stats every RESOURCE_SAMPLE_S into logs/resources.tsv, one line per
+# container: epoch, name (h<k>: in front on a multi-host run), CPU, memory,
+# network and block I/O as `docker stats` gives them (drill_inputs.py resources)
+SAMPLER_PID=""
+sample_resources() {
+    local k ids t
+    while :; do
+        t=$(date -u +%s)
+        for k in $(host_keys); do
+            ids=$(on_host "${k}" bdc ps -q 2>/dev/null) || continue
+            [ -n "${ids}" ] || continue
+            # shellcheck disable=SC2086 # one id per word
+            on_host "${k}" bdocker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}' ${ids} 2>/dev/null |
+                sed "s/^/${t}\t$([ "${k}" = local ] || echo "h${k}:")/"
+        done >> "${LOG_DIR}/resources.tsv"
+        sleep "${RESOURCE_SAMPLE_S}"
+    done
+}
+stop_sampler() {
+    [ -n "${SAMPLER_PID}" ] || return 0
+    kill "${SAMPLER_PID}" 2>/dev/null; wait "${SAMPLER_PID}" 2>/dev/null
+    SAMPLER_PID=""
+}
+
+# What the run left on disk per node: database size and the image volumes
+# (/app/data, /app/logs, /app/state), for the sizing in PROVIDER-SPEC.md; and
+# the summary of the sampled stats. Once the scenario is over, not at teardown:
+# an aborted run has no steady state worth sizing from.
+record_footprint() {
+    local i b k vols
+    stop_sampler
+    if [ -s "${LOG_DIR}/resources.tsv" ]; then
+        python3 -I "${HERE}/drill_inputs.py" resources --file "${LOG_DIR}/resources.tsv" > "${RUN_DIR}/resources-summary.json" 2>> "${STEP_LOG}" ||
+            say "WARN: could not summarize ${LOG_DIR}/resources.tsv"
+    fi
+    for i in $(seq 1 "${N}"); do
+        [ "${STARTED[i]:-0}" = 1 ] || continue
+        b=$(psql_node "${i}" "SELECT pg_database_size(current_database())" 2>/dev/null | head -1)
+        [[ "${b}" =~ ^[0-9]+$ ]] && printf 'node-%s\t%s\n' "${i}" "${b}"
+    done > "${LOG_DIR}/pg-sizes.tsv"
+    # Only this run's volumes: on a shared host the rest are not ours to list
+    vols=$(run_volumes 2>/dev/null)
+    for k in $(host_keys); do
+        echo "== host ${k}"
+        on_host "${k}" bdocker system df -v 2>/dev/null | awk -v want="$(awk -v k="${k}" '$1 == k {print $2}' <<< "${vols}" | paste -sd' ')" \
+            'BEGIN { n = split(want, w, " "); for (i = 1; i <= n; i++) keep[w[i]] = 1 } /^VOLUME NAME/ || ($1 in keep)'
+    done > "${LOG_DIR}/disk.txt"
+}
+
+# The volumes the run's containers mount, "host volume" per line, read before
+# `down -v`; teardown_check then proves they are gone with the containers and
+# networks of the compose project
+run_volumes() {
+    local k ids
+    for k in $(host_keys); do
+        ids=$(on_host "${k}" bdc ps -aq 2>/dev/null) || continue
+        [ -n "${ids}" ] || continue
+        # shellcheck disable=SC2086 # one id per word
+        on_host "${k}" bdocker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' ${ids} 2>/dev/null |
+            sed "/^\$/d; s/^/${k} /"
+    done
+}
+teardown_check() { # $1 the run_volumes file
+    local k v c left=""
+    for k in $(host_keys); do
+        c=$(on_host "${k}" bdocker ps -aq --filter "label=com.docker.compose.project=${PROJECT}" 2>&1) || left+=" host ${k}: docker ps failed;"
+        [ -n "${c}" ] && left+=" host ${k}: containers $(echo ${c});"
+        c=$(on_host "${k}" bdocker network ls -q --filter "label=com.docker.compose.project=${PROJECT}" 2>&1) || left+=" host ${k}: docker network ls failed;"
+        [ -n "${c}" ] && left+=" host ${k}: networks $(echo ${c});"
+        c=$(on_host "${k}" bdocker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}" 2>&1) || left+=" host ${k}: docker volume ls failed;"
+        [ -n "${c}" ] && left+=" host ${k}: volumes $(echo ${c});"
+        for v in $(awk -v k="${k}" '$1 == k { print $2 }' "$1"); do
+            on_host "${k}" bdocker volume inspect "${v}" > /dev/null 2>&1 && left+=" host ${k}: volume ${v};"
+        done
+    done
+    if [ -z "${left}" ]; then
+        echo "clean: no container, network or volume of ${PROJECT} left on $(host_keys | wc -l) host(s); $(wc -l < "$1") volume(s) removed" > "${RUN_DIR}/teardown-check.txt"
+    else
+        echo "LEFT BEHIND:${left}" > "${RUN_DIR}/teardown-check.txt"
+        say "WARN: teardown left${left} (teardown-check.txt)"
+        return 1
+    fi
+}
+
 STARTED_STACK=0
 SIDECARS=()
 teardown() {
     local rc=$?
     trap - EXIT INT TERM
+    stop_sampler
     if [ "${STARTED_STACK}" = 1 ]; then
         say "collecting container logs"
         local i why unread="" f hit="" reason=""
@@ -243,7 +406,15 @@ teardown() {
         say "tearing down ${PROJECT}"
         for s in "${SIDECARS[@]}"; do docker rm -f "${s}" >/dev/null 2>&1 || true; done
         [ -n "${HOSTS_FILE:-}" ] && mh_netem_clear
+        run_volumes > "${RUN_DIR}/run-volumes.txt" 2>> "${LOG_DIR}/teardown.log"
         dc down -v --remove-orphans >>"${LOG_DIR}/teardown.log" 2>&1 || true
+        # A host left dirty is a run that could not be carried out cleanly:
+        # exit 2 whatever the verdict, which stays as the judge gave it
+        if ! teardown_check "${RUN_DIR}/run-volumes.txt" && [ "${rc}" -le 1 ]; then
+            say "exit ${rc} replaced by 2: the teardown left resources on a host"
+            rc=2
+        fi
+        say "teardown: $(cat "${RUN_DIR}/teardown-check.txt")"
     fi
     # Every host's run dir, whether or not the stack got started
     [ -n "${HOSTS_FILE:-}" ] && mh_cleanup_dirs
@@ -355,25 +526,88 @@ CODE="image"
 [ -n "${SRC_TREE}" ] && CODE="src:$(basename "${SRC_TREE}")@$(git -C "${SRC_TREE}" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "${SRC_TREE}" diff --quiet HEAD -- src 2>/dev/null || echo '+dirty')"
 say "scenario=${SCENARIO} N=${N} shardSize=${SHARD} q=${Q} binding=${BINDING} image=${IMAGE} (${IMAGE_ID:7:12}) code=${CODE} start=${START_PATH} gossip=${GOSSIP_ENABLED:-false}"
 
+# The identityCarryover snapshot, as the launch builds it: the image's own
+# data/snapshot (the source network's export it ships) run through
+# scripts/state-snapshot/carryover.ts with this run's validators, then bound
+# into every genesis by its manifest sha256 (drill_inputs.py bind-carryover).
+# The source comes out of the image on the docker host the drill uses (the
+# first host with --hosts), so the controller does not need the image.
+build_carryover() {
+    local src="${RUN_DIR}/carryover-src" cid sha out
+    mkdir -p "${src}" || return 1
+    cid=$(docker create --network none "${IMAGE}") || { echo "docker create ${IMAGE} failed"; return 1; }
+    docker cp "${cid}:/app/data/snapshot" - | tar -x -C "${src}"
+    local rc=$?
+    docker rm -v "${cid}" > /dev/null || echo "WARN: could not remove the snapshot container ${cid}"
+    [ "${rc}" = 0 ] && [ -s "${src}/snapshot/manifest.json" ] || { echo "no data/snapshot/manifest.json in ${IMAGE}"; return 1; }
+    out=$(cd "${REPO_ROOT}" && bun scripts/state-snapshot/carryover.ts --in "${src}/snapshot" \
+        --validators "${RUN_DIR}/inputs/genesis.json" --out "${RUN_DIR}/inputs/snapshot") || { echo "${out}"; return 1; }
+    echo "${out}"
+    sha=$(sed -n 's/^carryover manifest sha256 \([0-9a-f]\{64\}\)$/\1/p' <<< "${out}" | tail -1)
+    [ -n "${sha}" ] || { echo "carryover.ts printed no manifest sha256"; return 1; }
+    python3 -I "${HERE}/drill_inputs.py" bind-carryover --run-dir "${RUN_DIR}" --manifest-sha "${sha}" || return 1
+    rm -rf "${src}"
+}
+
 # ── 2. inputs ───────────────────────────────────────────────────────────
 step 02-inputs
 GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
-{
+GEN_FLAGS=()
+[ "${CARRYOVER}" = 1 ] && GEN_FLAGS+=(--carryover)
+[ "${BIND_HOST_IP}" = 1 ] && GEN_FLAGS+=(--bind-host-ip)
+# A subshell: an `exit 1` inside ends the step, not the run, so it is reported below
+(
+    new_identity() { # $1 identity file, $2 public key file
+        local out
+        out=$(cd "${REPO_ROOT}" && bun testing/devnet/scripts/generate-identity-helper.ts) || return 1
+        echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "$1"
+        echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "$2"
+    }
     for i in $(seq 1 "${N}"); do
-        out=$(cd "${REPO_ROOT}" && bun testing/devnet/scripts/generate-identity-helper.ts) || exit 1
-        echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/node${i}.identity"
-        echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
+        new_identity "${RUN_DIR}/inputs/node${i}.identity" "${RUN_DIR}/inputs/pub${i}" || exit 1
     done
+    # Funded in the genesis like a validator (gen-inputs.py), never staked
+    if [ "${SCENARIO%%-*}" = load ]; then
+        mkdir -p "${RUN_DIR}/inputs/load" && cp "${HERE}/load-client.ts" "${RUN_DIR}/inputs/load/" || exit 1
+        for j in $(seq 1 "${LOAD_WALLETS}"); do
+            new_identity "${RUN_DIR}/inputs/load/wallet${j}.identity" "${RUN_DIR}/inputs/load/wallet${j}.pub" || exit 1
+        done
+    fi
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
         --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --fork-set "${FORK_SET}" --genesis-ts "${GENESIS_TS}" \
         --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" \
-        --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}" --hosts-file "${HOSTS_FILE}"
+        --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}" --hosts-file "${HOSTS_FILE}" \
+        "${GEN_FLAGS[@]}" || exit 1
+    if [ "${CARRYOVER}" = 1 ]; then
+        build_carryover || exit 1
+    fi
     # Once, after everything is written, so the modes do not depend on the umask.
     # 644 files in a 755 inputs/ under the 0700 ${RUN_DIR}: the node runs as the
     # image's user (uid 1000), not the host user, and these are throwaway devnet
     # keys; other host users still cannot traverse to them.
     python3 -I "${HERE}/drill_inputs.py" readable --dir "${RUN_DIR}/inputs"
-} >> "${STEP_LOG}" 2>&1 || { say "ABORT: generating inputs failed (see 02-inputs.log)"; exit 2; }
+    if [ -d "${RUN_DIR}/hosts" ]; then
+        for d in "${RUN_DIR}"/hosts/*/inputs; do python3 -I "${HERE}/drill_inputs.py" readable --dir "${d}" || exit 1; done
+    fi
+) >> "${STEP_LOG}" 2>&1 || { say "ABORT: generating inputs failed (see 02-inputs.log)"; exit 2; }
+if [ "${CARRYOVER}" = 1 ]; then
+    CARRYOVER_SHA=$(sed -n 's/^carryover manifest sha256 \([0-9a-f]\{64\}\)$/\1/p' "${STEP_LOG}" | tail -1)
+    say "identityCarryover snapshot built from the image's data/snapshot: manifest sha256 ${CARRYOVER_SHA}"
+fi
+# Every fork the image knows must be declared in a launch-shape genesis: one it
+# does not declare would run at its code default, which is not what the
+# launch genesis does. Read from the image's own DEFAULT_FORK_CONFIG.
+if [ "${FORK_SET}" = launch ]; then
+    known=$(docker run --rm --network none --memory 512m --entrypoint bun "${IMAGE}" -e \
+        'const m = await import("/app/src/forks/forkConfig.ts"); console.log(JSON.stringify(Object.keys(m.DEFAULT_FORK_CONFIG)))' 2>/dev/null | tail -1)
+    jq -e 'type == "array" and length > 0' <<< "${known}" > /dev/null 2>&1 ||
+        abort_pre "could not read the forks ${IMAGE} knows (DEFAULT_FORK_CONFIG in /app/src/forks/forkConfig.ts)"
+    fork_gap=$(jq -rn --argjson known "${known}" --slurpfile g "${RUN_DIR}/inputs/genesis.json" '
+        ($g[0].forks | keys) as $declared
+        | [($known - $declared | map("not declared: \(.)")[]), ($declared - $known | map("unknown to the image: \(.)")[])] | join(", ")')
+    [ -z "${fork_gap}" ] || abort_pre "the generated genesis and ${IMAGE} disagree on the fork list: ${fork_gap}"
+    say "fork list: the genesis declares all $(jq length <<< "${known}") forks the image knows (${IMAGE##*@})"
+fi
 if [ -n "${HOSTS_FILE}" ]; then
     mh_push_inputs >> "${STEP_LOG}" 2>&1 || abort_pre "copying the inputs to the hosts failed (see 02-inputs.log)"
     say "inputs copied to ${#MH_KS[@]} hosts; node RPC at $(mh_url 1) ... $(mh_url "${N}")"
@@ -1173,6 +1407,12 @@ else
     echo "docker compose ps -q $([ "${ps_rc}" = 0 ] && echo "found no container" || bounded_why "${ps_rc}"): no stats" >> "${STEP_LOG}"
 fi
 
+if [ "${RESOURCE_SAMPLE_S}" -gt 0 ] 2>/dev/null; then
+    sample_resources > /dev/null 2>&1 &
+    SAMPLER_PID=$!
+    say "sampling container stats every ${RESOURCE_SAMPLE_S}s into logs/resources.tsv"
+fi
+
 # ── 4. scenario ─────────────────────────────────────────────────────────
 step 04-scenario
 [ -n "${NETEM}" ] && mh_netem_apply
@@ -1546,7 +1786,9 @@ drill_stop() {
     LOCKSTEP_FAIL_ON_DIVERGENCE=1
     VICTIMS=(); SURVIVORS=(); VICTIM_SERVICES=()
     for i in $(seq 1 "${N}"); do
-        if [ "${i}" -gt $((N - STOPS)) ]; then VICTIMS+=("${i}"); VICTIM_SERVICES+=("node-${i}"); else SURVIVORS+=("${i}"); fi
+        if [ "${SCENARIO%%-*}" = hostloss ]; then
+            case " ${LOST_NODES[*]} " in *" ${i} "*) VICTIMS+=("${i}"); VICTIM_SERVICES+=("node-${i}") ;; *) SURVIVORS+=("${i}") ;; esac
+        elif [ "${i}" -gt $((N - STOPS)) ]; then VICTIMS+=("${i}"); VICTIM_SERVICES+=("node-${i}"); else SURVIVORS+=("${i}"); fi
     done
     T_BASELINE=""; T_STOP=""; T_HALT=""; T_HOLD_END=""; T_RESTART=""; T_FIRST=""; T_CONV=""
     SETTLE_JSON=null; HOLD_JSON=null; RECOVERY_JSON=null; RIDE_JSON=null
@@ -1573,7 +1815,7 @@ drill_stop() {
     [[ "${PRE_PEERLIST}" =~ ^[0-9]+$ ]] || { say "ABORT: cannot read the peerlist of block ${PRE_HEIGHT}"; exit 2; }
     COUNTS_BEFORE=$(restart_counts "${SURVIVORS[@]}") || { say "ABORT: cannot read the survivors' restart counts"; exit 2; }
     # The ride bound holds only for a pool as large as the committee
-    if [ "${SCENARIO%%-*}" = ride ] && [ "${PRE_PEERLIST}" -lt $((N < SHARD ? N : SHARD)) ]; then
+    if { [ "${SCENARIO%%-*}" = ride ] || [ "${SCENARIO%%-*}" = hostloss ]; } && [ "${PRE_PEERLIST}" -lt $((N < SHARD ? N : SHARD)) ]; then
         say "ABORT: block ${PRE_HEIGHT} lists ${PRE_PEERLIST} validators, fewer than the committee of $((N < SHARD ? N : SHARD)): the ride bound does not apply"
         exit 2
     fi
@@ -1584,20 +1826,21 @@ drill_stop() {
     say "stopped ${VICTIM_SERVICES[*]} at once after block ${PRE_HEIGHT} (it lists ${PRE_PEERLIST} validators)"
 }
 
-# P3: survivor heads sampled every round for HALT_ROUNDS rounds. $1 halt height.
+# P3: survivor heads sampled every round. $1 halt height, $2 rounds (HALT_ROUNDS),
+# $3 phase name (halt-hold)
 drill_hold() {
-    local k hs samples="" t0
+    local k hs samples="" t0 rounds="${2:-${HALT_ROUNDS}}"
     t0=$(now_ms)
-    for k in $(seq 1 "${HALT_ROUNDS}"); do
+    for k in $(seq 1 "${rounds}"); do
         sleep "${CONSENSUS_TIME}"
         hs=$(heads_read "${SURVIVORS[@]}")
         samples+=$(jq -nc --argjson at "$(($(now_ms) - t0))" --argjson h "${hs}" '{atMs: $at, heights: $h}')$'\n'
-        [ $((k % 3)) = 0 ] && say "hold ${k}/${HALT_ROUNDS}: $(jq -c . <<< "${hs}")"
+        [ $((k % 3)) = 0 ] && say "hold ${k}/${rounds}: $(jq -c . <<< "${hs}")"
     done
     T_HOLD_END=$(now_ms)
     HOLD_JSON=$(printf '%s' "${samples}" | jq -cs '{samples: .}')
     local top; top=$(printf '%s' "${samples}" | jq -s '[.[].heights[]] | max')
-    phase_row halt-hold "${STOPS}" "${#SURVIVORS[@]}" "$1" "${top}" "$([ "${top}" -gt "$1" ] && echo progress || echo stall)"
+    phase_row "${3:-halt-hold}" "${STOPS}" "${#SURVIVORS[@]}" "$1" "${top}" "$([ "${top}" -gt "$1" ] && echo progress || echo stall)"
 }
 
 # P5: start the victims together and wait for all N to reach halt + RECOVERY_BLOCKS.
@@ -1631,9 +1874,10 @@ drill_recover() {
 }
 
 # Writes drill-input.json, runs the judge on it and sets RESULT and DETAIL
-drill_judge() { # $1 mode: halt or ride
+drill_judge() { # $1 mode: halt, ride or safe
     local input="${RUN_DIR}/drill-input.json" rc hold_rounds=0
     [ "$1" = halt ] && hold_rounds="${HALT_ROUNDS}"
+    [ "$1" = safe ] && hold_rounds="${SAFE_ROUNDS}"
     # Every fork of the genesis the nodes ran, null where off
     local forks; forks=$(jq -c '.forks | with_entries(.value |= .activationHeight)' "${RUN_DIR}/inputs/genesis.json")
     local marks; marks=$(jq -nc \
@@ -1730,6 +1974,97 @@ scenario_ride() {
     printf 'ride\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${STOPS}" "${#SURVIVORS[@]}" "${PRE_HEIGHT}" "${mx}" \
         $((mx - PRE_HEIGHT)) ${times} "$([ "${converged}" = 1 ] && echo progress || echo stall)" >> "${PHASES}"
     drill_judge ride
+}
+
+# Stop a third of the validators at once. Under a bound committee drawn from
+# all N, a round whose draw holds more than shardSize - q stopped members cannot
+# sign, so the chain may pause until the stopped leave the pool; what must hold
+# whatever it does: the survivors keep answering, no head goes back, every block
+# above the stop carries >= q signatures with one hash on every survivor, and
+# all N converge once the stopped rejoin. Judged by judgeHaltDrill.ts (safe).
+scenario_safe() {
+    drill_stop
+    # The hold starts at the stop: there is no halt to confirm first
+    T_HALT=$(now_ms)
+    drill_hold "${PRE_HEIGHT}" "${SAFE_ROUNDS}" third-hold
+    # The survivors' common height: whatever they forged during the hold, read
+    # where every survivor holds it with one hash (a fork fails here)
+    wait_lockstep "${PRE_HEIGHT}" "$(lockstep_window)" || lockstep_fail $? "the survivors never reached one head after the hold"
+    local H="${LOCK_HEIGHT}" settle_heads settle_rows
+    settle_heads=$(heads_read "${SURVIVORS[@]}")
+    settle_rows=$(block_rows "${PRE_HEIGHT}" "${H}" "${SURVIVORS[@]}") || { say "ABORT: could not read the blocks forged while a third was down"; exit 2; }
+    SETTLE_JSON=$(jq -nc --argjson heads "${settle_heads}" --argjson rows "${settle_rows}" --argjson h "${H}" '{heads: $heads, rows: $rows, height: $h}')
+    say "survivors agree at ${H}: $((H - PRE_HEIGHT)) block(s) forged with ${STOPS} of ${N} down"
+    phase_row third-agree "${STOPS}" "${#SURVIVORS[@]}" "${PRE_HEIGHT}" "${H}" "$([ "${H}" -gt "${PRE_HEIGHT}" ] && echo progress || echo stall)"
+    drill_recover "${H}"
+    drill_judge safe
+}
+
+# ── load-* drill ────────────────────────────────────────────────────────
+# Native transfers from LOAD_WALLETS funded wallets at LOAD_TPS for
+# LOAD_DURATION_S, through every node's RPC in turn, by load-client.ts in a
+# container of the image under test (its SDK) next to node-1. The client
+# reports what it sent and when each transfer was seen included; the run adds
+# the chain's blocks and every node's hashes, and judgeLoadDrill.ts gives the
+# verdict and the team's load metrics (main TPS, block times, time to inclusion).
+scenario_load() {
+    local start_h end_h before after rows times heads urls out input rc top load_json
+    LOCKSTEP_FAIL_ON_DIVERGENCE=1
+    lockstep_or_abort "${BASELINE_HEIGHT}"
+    start_h="${LOCK_HEIGHT}"
+    before=$(restart_counts $(seq 1 "${N}")) || { say "ABORT: cannot read the restart counts"; exit 2; }
+    urls=$(jq -r '[.services | to_entries[] | select(.key | test("^node-[0-9]+$")) | .value.environment.EXPOSED_URL] | join(",")' "${RUN_DIR}/compose.yml")
+    say "${SCENARIO}: ${LOAD_TPS} TPS for ${LOAD_DURATION_S}s from ${LOAD_WALLETS} wallets over ${N} RPCs, from ${start_h}"
+    T_LOAD_START=$(now_ms)
+    out="${LOG_DIR}/load-client.out"
+    (
+        [ -n "${HOSTS_FILE}" ] && export QDRILL_MH_HOST="${MH_HOST_OF[1]}"
+        timeout -k 10 $((LOAD_DURATION_S + LOAD_DRAIN_S + 300)) \
+            docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" run --rm --no-deps -T \
+            -e "LOAD_URLS=${urls}" -e "LOAD_TPS=${LOAD_TPS}" -e "LOAD_DURATION_S=${LOAD_DURATION_S}" -e "LOAD_DRAIN_S=${LOAD_DRAIN_S}" \
+            load
+    ) > "${out}" 2> "${LOG_DIR}/load-client.log"
+    rc=$?
+    load_json=$(sed -n 's/^LOAD_RESULT //p' "${out}" | tail -1)
+    jq -e 'type == "object"' <<< "${load_json}" > /dev/null 2>&1 ||
+        { say "ABORT: the load client gave no result (exit ${rc}; see logs/load-client.log)"; tail -5 "${LOG_DIR}/load-client.log" | while IFS= read -r l; do say "  ${l}"; done; exit 2; }
+    printf '%s\n' "${load_json}" > "${RUN_DIR}/load-result.json"
+    say "load: $(jq -c '{sent, accepted, included, rejected, throttled}' <<< "${load_json}")"
+    # Every node on one chain at or past the last block a transfer landed in
+    top=$(jq '[.txs[] | .blockNumber // empty] | max // 0' <<< "${load_json}")
+    [ "${top}" -gt "${start_h}" ] || top=$((start_h + 1))
+    wait_lockstep "${top}" "$(lockstep_window)" || lockstep_fail $? "the nodes never reached one head after the load"
+    end_h="${LOCK_HEIGHT}"
+    T_END=$(now_ms)
+    heads=$(heads_read $(running))
+    after=$(restart_counts $(seq 1 "${N}")) || { say "ABORT: cannot read the restart counts"; exit 2; }
+    rows=$(block_rows "${start_h}" "${end_h}" $(running)) || { say "ABORT: could not read the drill's blocks"; exit 2; }
+    times=$(psql_node 1 "SELECT number, content->>'timestamp' FROM blocks WHERE number BETWEEN ${start_h} AND ${end_h} ORDER BY number" |
+        jq -Rn '[inputs | split("|") | {number: (.[0] | tonumber), timestamp: (.[1] | tonumber)}]') ||
+        { say "ABORT: could not read the block timestamps from node1_db"; exit 2; }
+    phase_row load 0 "${N}" "${start_h}" "${end_h}" "$([ "${end_h}" -gt "${start_h}" ] && echo progress || echo stall)"
+    input="${RUN_DIR}/load-input.json"
+    jq -n --arg scenario "${SCENARIO}" --argjson validators "${N}" --argjson shardSize "${SHARD}" \
+        --argjson consensusTimeS "${CONSENSUS_TIME}" \
+        --argjson limits "$(jq -nc --argjson r "${LOAD_MIN_INCLUDED}" --argjson g "${MAX_GAP_S}" '{minIncludedRatio: $r, maxGapS: $g}')" \
+        --slurpfile load "${RUN_DIR}/load-result.json" --argjson startHeight "${start_h}" --argjson endHeight "${end_h}" \
+        --argjson tStart "${T_LOAD_START}" --argjson tEnd "${T_END}" \
+        --argjson blockTimes "${times}" --argjson heads "${heads}" --argjson rows "${rows}" \
+        --argjson before "${before}" --argjson after "${after}" \
+        '{scenario: $scenario, validators: $validators, shardSize: $shardSize, consensusTimeS: $consensusTimeS,
+          limits: $limits, load: $load[0], startHeight: $startHeight, endHeight: $endHeight, tStartMs: $tStart, tEndMs: $tEnd,
+          blockTimes: $blockTimes, heads: $heads, rows: $rows, restartCounts: {before: $before, after: $after}}' > "${input}" ||
+        { say "ABORT: could not write ${input}"; exit 2; }
+    ( cd "${REPO_ROOT}" && bun testing/forks/rehearsal/lib/judgeLoadDrill.ts "${input}" --out "${RUN_DIR}/drill-verdict.json" ) \
+        > "${LOG_DIR}/judge.out" 2>&1
+    rc=$?
+    tee -a "${LOG_DIR}/run.log" < "${LOG_DIR}/judge.out"
+    case "${rc}" in
+        0) RESULT=PASS ;;
+        1) RESULT=FAIL ;;
+        *) RESULT=ERROR; DETAIL="the judge could not read ${input} (exit ${rc})"; write_verdict; exit 2 ;;
+    esac
+    DETAIL=$(jq -r .summary "${RUN_DIR}/drill-verdict.json")
 }
 
 # ── restart-* drill ─────────────────────────────────────────────────────
@@ -1885,13 +2220,16 @@ case "${SCENARIO}" in
     floor) scenario_floor ;;
     drop-*) scenario_drop ;;
     halt-*) scenario_halt ;;
-    ride-*) scenario_ride ;;
+    ride-* | hostloss-*) scenario_ride ;;
     restart-*) scenario_restart ;;
+    third-*) scenario_safe ;;
+    load-*) scenario_load ;;
     listed-stall) scenario_listed_stall ;;
     fallback) scenario_fallback ;;
     partition) scenario_partition ;;
 esac
 
+record_footprint
 pg_limit_gate
 write_verdict
 [ "${RESULT}" = PASS ] && exit 0

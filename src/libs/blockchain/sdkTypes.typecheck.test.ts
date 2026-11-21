@@ -6,21 +6,33 @@ import ts from "typescript"
 
 const ROOT = path.resolve(import.meta.dir, "../../..")
 
-// Files that hand the SDK's transaction and byte types to the node's own
-// (kynesyslabs/node#627). bun build does not type-check, so only this keeps
-// them clean.
+// Files that hand the SDK's transaction, block and byte types to the node's
+// own, and the other files kynesyslabs/node#627's non-test errors were in.
+// bun build does not type-check, so only this keeps them clean.
 const FILES = [
     "src/libs/abstraction/web2/boundedFetch.ts",
+    "src/libs/atomic-work/atomicApply.test.ts",
+    "src/libs/atomic-work/atomicApply.ts",
     "src/libs/blockchain/chainBlocks.ts",
     "src/libs/blockchain/chainTransactions.ts",
     "src/libs/blockchain/gcr/gcr_routines/identityManager.ts",
+    "src/libs/blockchain/gcr/handleGCR.ts",
+    "src/libs/blockchain/genesis/genesisBlockContent.ts",
     "src/libs/blockchain/mempool.ts",
+    "src/libs/blockchain/routines/findGenesisBlock.ts",
     "src/libs/blockchain/routines/Sync.ts",
+    "src/libs/blockchain/routines/syncVerification.ts",
     "src/libs/blockchain/transaction.ts",
+    "src/libs/consensus/genesisShardSize.ts",
     "src/libs/consensus/v2/PoRBFT.ts",
+    "src/libs/consensus/v2/routines/blockTransactions.ts",
     "src/libs/consensus/v2/routines/orderTransactions.ts",
     "src/libs/network/endpointValidation.ts",
+    "src/libs/network/handlers/blockHandlers.ts",
+    "src/libs/network/routines/nodecalls/getChainIdentity.ts",
     "src/libs/network/routines/nodecalls/getTxsByHashes.ts",
+    "src/libs/network/server_rpc.ts",
+    "src/libs/peer/routines/peerBootstrap.ts",
     "src/libs/utils/demostdlib/deriveMempoolOperation.ts",
 ]
 
@@ -81,6 +93,6 @@ test("the check reports type errors but not declaration-emit errors, as tsc --no
     }
 }, 30_000)
 
-test("files using the SDK's transaction types have no TypeScript diagnostics", () => {
+test("files using the SDK's transaction and block types have no TypeScript diagnostics", () => {
     expect(typeErrors(ROOT, FILES)).toEqual([])
 }, 120_000)

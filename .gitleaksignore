@@ -7,3 +7,6 @@ d69f07c3a5d086b25237ee543458796395b5ca96:src/libs/l2ps/settlement/__fixtures__/s
 d69f07c3a5d086b25237ee543458796395b5ca96:src/libs/l2ps/settlement/prover.ts:generic-api-key:36
 291dd709ec15991d9d34beef0fc799b67ce43e11:src/libs/l2ps/settlement/prover.ts:generic-api-key:30
 291dd709ec15991d9d34beef0fc799b67ce43e11:src/libs/l2ps/settlement/__fixtures__/settlementProof.json:generic-api-key:3
+# L2PS settlement circuit v1.2: the same public verification-key digest, regenerated with the new circuit.
+d5bc235f134a2981dff90f53ef6c72286140e684:src/libs/l2ps/settlement/__fixtures__/settlementProof.json:generic-api-key:3
+d5bc235f134a2981dff90f53ef6c72286140e684:src/libs/l2ps/settlement/prover.ts:generic-api-key:49

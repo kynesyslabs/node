@@ -7,7 +7,7 @@
  *   { nativeOperation: "send", args: [to, "<OS decimal>"], l2ps_uid,
  *     settlement: { fee: "<OS decimal>", salt: "0x" + 64 hex,
  *                   commitment: "0x" + 64 hex, signature: "0x" + 128 hex } }
- * and whose `content.nonce` is the settlement nonce.
+ * and whose `content.nonce` is the sender's L2PS nonce in that subnet.
  */
 import {
     AMOUNT_LIMIT,
@@ -154,8 +154,9 @@ export function transferSignatureRefusal(
 
 /**
  * Member admission of a settlement transfer: the opening, the signature, a
- * fee of at least the native transfer fee and a nonce the account has not
- * spent. The planner judges balances and nonce order at batch time.
+ * fee of at least the native transfer fee and an L2PS nonce the account has
+ * not spent in this subnet. The planner judges balances and nonce order at
+ * batch time.
  */
 export function transferAdmissionRefusal(
     transfer: DecryptedTransfer,
@@ -163,6 +164,7 @@ export function transferAdmissionRefusal(
         chainId: number | null
         l2psUid: string
         minimumFee: bigint
+        /** The sender's L2PS nonce in `l2psUid`. */
         accountNonce: bigint
     },
 ): string | null {
@@ -172,14 +174,14 @@ export function transferAdmissionRefusal(
         return `settlement fee ${transfer.fee} is below the native transfer fee ${context.minimumFee}`
     }
     if (transfer.nonce < context.accountNonce + 1n) {
-        return `settlement nonce ${transfer.nonce} is already spent (account nonce ${context.accountNonce})`
+        return `settlement nonce ${transfer.nonce} is already spent (L2PS nonce ${context.accountNonce} in this subnet)`
     }
     return null
 }
 
 /**
- * How far past its account nonce a sender may queue transfers: two full
- * batches. A constant, so every member admits the same transfers.
+ * How far past its L2PS nonce in a subnet a sender may queue transfers there:
+ * two full batches. A constant, so every member admits the same transfers.
  */
 export const MAX_NONCE_AHEAD = 2n * BigInt(SETTLEMENT_TRANSFERS)
 
@@ -209,6 +211,7 @@ export function envelopeSizeRefusal(envelope: unknown): string | null {
 
 /** A transfer this member already queued for the sender and has not settled. */
 export interface QueuedTransfer {
+    l2psUid: string
     nonce: bigint
     amount: bigint
     fee: bigint
@@ -216,25 +219,28 @@ export interface QueuedTransfer {
 
 /**
  * Admission against what the sender already has queued here: a nonce within
- * MAX_NONCE_AHEAD of the account nonce and not queued yet, and a balance
- * that covers every queued transfer still to settle plus this one. Without
- * these one sender could fill the subnet's queue with transfers that can
- * never be placed in a batch.
+ * MAX_NONCE_AHEAD of its L2PS nonce in this subnet and not queued in this
+ * subnet yet, and a balance that covers every queued transfer still to
+ * settle, in any subnet, plus this one: the subnets have their own nonces
+ * but draw on one L1 balance. Without these one sender could fill the
+ * subnet's queue with transfers that can never be placed in a batch.
  */
 export function queueAdmissionRefusal(
     transfer: DecryptedTransfer,
-    sender: { balance: bigint; nonce: bigint },
+    l2psUid: string,
+    sender: { balance: bigint; nonceIn: (l2psUid: string) => bigint },
     queued: QueuedTransfer[],
 ): string | null {
-    const limit = sender.nonce + MAX_NONCE_AHEAD
+    const nonce = sender.nonceIn(l2psUid)
+    const limit = nonce + MAX_NONCE_AHEAD
     if (transfer.nonce > limit) {
-        return `settlement nonce ${transfer.nonce} is more than ${MAX_NONCE_AHEAD} past the account nonce ${sender.nonce}`
+        return `settlement nonce ${transfer.nonce} is more than ${MAX_NONCE_AHEAD} past the L2PS nonce ${nonce} in this subnet`
     }
     let committed = 0n
     for (const q of queued) {
-        if (q.nonce <= sender.nonce) continue
-        if (q.nonce === transfer.nonce) {
-            return `a transfer with settlement nonce ${transfer.nonce} is already queued for this sender`
+        if (q.nonce <= sender.nonceIn(q.l2psUid)) continue
+        if (q.l2psUid === l2psUid && q.nonce === transfer.nonce) {
+            return `a transfer with settlement nonce ${transfer.nonce} is already queued for this sender in this subnet`
         }
         committed += q.amount + q.fee
     }

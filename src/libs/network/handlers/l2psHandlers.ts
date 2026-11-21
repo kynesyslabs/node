@@ -9,6 +9,7 @@ import { resolveHistoryEntry, subnetDecryptor } from "@/libs/l2ps/historyPayload
 import { historyAuthMessageV2, readPageValue, type HistoryPageParams } from "@/libs/l2ps/historyAuth"
 import { isRefusal, parseHistoryRequest } from "@/libs/l2ps/historyRequest"
 import { L2PS_GATE_REFUSAL, l2psOff } from "@/forks/l2psGate"
+import { L2PS_UID_MAX_LENGTH } from "@/libs/l2ps/settlement/encoding"
 
 const historyAuthHint = (data: any) => ({
     messageV2:
@@ -128,7 +129,48 @@ function historyRow(
     }
 }
 
+/** A settlement cannot name a longer uid, so no L2PS nonce is stored under one. */
+const MAX_L2PS_UID_LENGTH = L2PS_UID_MAX_LENGTH
+const ACCOUNT_HEX = /^(0x)?[0-9a-fA-F]{64}$/
+
 const handlers: Record<string, NodeCallHandler> = {
+    /**
+     * The account's L2PS nonce in a subnet: the last settled private transfer
+     * nonce there, so the next transfer signs this + 1. Consensus state, the
+     * same on every node, so a client need not ask a member of the subnet.
+     */
+    getL2PSNonce: async (data, response) => {
+        const l2psUid = data?.l2psUid
+        const address = data?.address
+        if (
+            typeof l2psUid !== "string" ||
+            l2psUid.length === 0 ||
+            l2psUid.length > MAX_L2PS_UID_LENGTH ||
+            l2psUid.includes(":")
+        ) {
+            response.result = 400
+            response.response = "No valid L2PS UID specified"
+            return response
+        }
+        if (typeof address !== "string" || !ACCOUNT_HEX.test(address)) {
+            response.result = 400
+            response.response = "No valid address specified: expected 64 hex characters"
+            return response
+        }
+        const account = `0x${address.replace(/^0x/, "").toLowerCase()}`
+        try {
+            // Loaded here: the database model is not needed by the other handlers.
+            const { readL2PSNonce } = await import("@/libs/l2ps/settlement/tipState")
+            response.result = 200
+            response.response = await readL2PSNonce(account, l2psUid)
+        } catch (error) {
+            log.error("[L2PS] Failed to read an L2PS nonce:", error)
+            response.result = 500
+            response.response = "Failed to read the L2PS nonce"
+        }
+        return response
+    },
+
     getL2PSParticipationById: async (data, response) => {
         log.debug("[L2PS] Received L2PS participation query")
         if (!data.l2psUid || typeof data.l2psUid !== "string") {

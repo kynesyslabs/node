@@ -20,6 +20,7 @@ import {
   waitForTxReady,
   withDemosWallet,
 } from "./token_shared"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 type Mode = "pre_pause" | "transition_to_pause" | "paused" | "transition_to_unpause" | "post_unpause"
 
@@ -109,7 +110,10 @@ async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
     })
-    const json = await res.json().catch(() => null)
+    const json = await res.json().catch(error => {
+      logNonCriticalErrorOnce(`token_pause_under_load.rpcPost:${url}`, "token_pause_under_load.rpcPost", error, { rpcUrl: url, status: res.status })
+      return null
+    })
     return { ok: res.ok, status: res.status, json }
   } catch (error: any) {
     const reason =
@@ -466,8 +470,9 @@ async function worker(params: {
     try {
       const current = await demos.getAddressNonce(senderHex)
       nextNonce = Number(current) + 1
-    } catch {
+    } catch (error) {
       // keep old nextNonce and continue; will show up in errorSamples if broken
+      logNonCriticalErrorOnce("token_pause_under_load.resyncNonce", "token_pause_under_load.resyncNonce", error, { senderHex })
       nextNonce++
     }
   }

@@ -15,10 +15,21 @@ holding only their databases, every path relative to that directory) and an
 inputs/ dir with only what its nodes mount; run.sh copies hosts/<k>/ to the
 host. compose.yml in the run dir then lists every node service for reference
 (run.sh reads node-1's entrypoint from it) and is never started.
+
+With --carryover (launch fork set only) identityCarryover stays at 0 and every
+node mounts inputs/snapshot over /app/data/snapshot in place of the empty
+directory; run.sh builds that snapshot once the genesis exists and binds it
+(drill_inputs.py bind-carryover).
+
+The load drills put their funded wallets in inputs/load/ (wallet<j>.pub,
+wallet<j>.identity, the client script) before this runs: the wallets are
+funded in the genesis, and in multi-host mode the directory goes to host 1,
+which runs the load client.
 """
 import argparse
 import json
 import os
+import re
 import shutil
 
 from drill_inputs import (
@@ -35,7 +46,9 @@ from drill_inputs import (
     pg_max_connections,
     pg_mem_limit,
     seed_peerlist,
+    test_chain_problem,
     with_genesis_timestamp,
+    with_exempt_nft_seats,
     with_launch_forks,
     write_json,
 )
@@ -68,8 +81,13 @@ ap.add_argument("--consensus-time", required=True)
 ap.add_argument("--start", choices=["run-devnet", "image"], default="run-devnet")
 ap.add_argument("--image-entrypoint", default="[]")
 ap.add_argument("--image-cmd", default="[]")
-# Multi-host mode (run.sh --hosts): one `user@ip [max_nodes]` per line
+# Multi-host mode (run.sh --hosts): one `user@ip[:port] [max_nodes]` per line
 ap.add_argument("--hosts-file", default="")
+# Multi-host mode: publish the node ports on the host's own address only, not
+# on every interface (the address must be on one of the host's interfaces;
+# behind a provider's 1:1 NAT it is not, and docker refuses to bind it)
+ap.add_argument("--bind-host-ip", action="store_true")
+ap.add_argument("--carryover", action="store_true")
 a = ap.parse_args()
 image_entrypoint = json.loads(a.image_entrypoint) or []
 image_cmd = json.loads(a.image_cmd) or []
@@ -77,6 +95,10 @@ if a.start == "image" and not (image_entrypoint or image_cmd):
     ap.error("--start image needs the image's entrypoint or cmd")
 if a.fork_set == "launch" and a.binding != "on":
     ap.error("--fork-set launch activates committeeBinding (and commitLock needs it): --binding must be on")
+if a.carryover and a.fork_set != "launch":
+    ap.error("--carryover binds the launch set's identityCarryover: it needs --fork-set launch")
+if a.bind_host_ip and not a.hosts_file:
+    ap.error("--bind-host-ip applies to --hosts-file only")
 try:
     node_tmpfs = node_tmpfs_specs(a.uid, a.gid)
 except ValueError as e:
@@ -107,15 +129,18 @@ def exposed_url(i):
 pubs = [open(f"{inputs}/pub{i}").read().strip() for i in range(1, n + 1)]
 
 g = json.load(open(f"{a.repo}/testing/devnet/genesis.devnet.json"))
+problem = test_chain_problem(g)
+if problem:
+    ap.error(f"testing/devnet/genesis.devnet.json: {problem}")
 g = with_genesis_timestamp(g, a.genesis_ts)
 g["properties"]["shardSize"] = a.shard_size
 excluded = None
 if a.fork_set == "launch":
     with open(f"{a.repo}/docs/mainnet/genesis.template.json") as f:
         template = json.load(f)
-    g = with_launch_forks(g, template)
+    g = with_launch_forks(g, template, a.carryover)
     # run.sh logs these and records them in the verdict
-    excluded = launch_excluded(template)
+    excluded = launch_excluded(template, a.carryover)
     write_json(f"{inputs}/launch-excluded.json", excluded)
 else:
     forks = g.setdefault("forks", {})
@@ -139,8 +164,15 @@ g["validators"] = [
     }
     for i, pk in enumerate(pubs)
 ]
-others = [b for b in g.get("balances", []) if b[0] not in set(pubs)]
-g["balances"] = [[pk, stake] for pk in pubs] + others
+g = with_exempt_nft_seats(g)
+load_dir = os.path.join(inputs, "load")
+load_pubs = []
+if os.path.isdir(load_dir):
+    names = sorted((f for f in os.listdir(load_dir) if re.fullmatch(r"wallet[0-9]+\.pub", f)), key=lambda f: int(f[6:-4]))
+    load_pubs = [open(os.path.join(load_dir, f)).read().strip().lower() for f in names]
+funded = set(pubs) | set(load_pubs)
+others = [b for b in g.get("balances", []) if b[0] not in funded]
+g["balances"] = [[pk, stake] for pk in pubs] + [[pk, stake] for pk in load_pubs] + others
 write_json(f"{inputs}/genesis.json", g)
 
 # Seeds node-1 only (see drill_inputs.seed_peerlist), at the URL the others reach it by
@@ -236,13 +268,18 @@ peerlist_mount = "/app/demos_peerlist.json" if a.start == "run-devnet" else "/ap
 copy_identity = "mkdir -p /app/state && cp /app/keys/node.identity /app/state/node.identity"
 
 
-def node_service(i, in_dir, l2ps_dir):
+# The carry-over snapshot the genesis binds, or the empty directory that keeps
+# the image's own testnet snapshot out of the legacy genesis path
+snapshot_dir = "snapshot" if a.carryover else EMPTY_SNAPSHOT
+
+
+def node_service(i, in_dir, l2ps_dir, host_ip=None):
     """Compose service of node i; its mounts come from `in_dir` (and l2ps_dir)."""
     volumes = [
         f"{in_dir}/node{i}.identity:/app/keys/node.identity:ro",
         f"{in_dir}/peerlist.json:{peerlist_mount}:ro",
         f"{in_dir}/genesis.json:/app/data/genesis.json:ro",
-        f"{in_dir}/{EMPTY_SNAPSHOT}:/app/data/snapshot:ro",
+        f"{in_dir}/{snapshot_dir}:/app/data/snapshot:ro",
         f"{l2ps_dir}:/app/data/l2ps:ro",
     ]
     if a.src:
@@ -312,8 +349,24 @@ def node_service(i, in_dir, l2ps_dir):
         # host with GOSSIP_PORT, and nodes sharing a host cannot share one.
         gp = gossip_port(i)
         svc["environment"]["GOSSIP_PORT"] = str(gp)
-        svc["ports"] = [f"{p}:{p}" for p in (port(i), port(i) + 1, gp)]
+        bind = f"{host_ip}:" if host_ip else ""
+        svc["ports"] = [f"{bind}{p}:{p}" for p in (port(i), port(i) + 1, gp)]
     return svc
+
+
+def load_service(in_dir):
+    """The load client (load-client.ts in inputs/load), run once by run.sh with
+    `docker compose run`. It is mounted inside /app so its SDK import resolves
+    to the image's node_modules; the profile keeps `up` from starting it."""
+    return {
+        "image": a.image,
+        "profiles": ["load"],
+        "entrypoint": ["bun", "/app/qdrill-load-client.ts"],
+        "environment": {"LOAD_WALLET_DIR": "/load"},
+        "volumes": [f"{in_dir}/load:/load:ro", f"{in_dir}/load/load-client.ts:/app/qdrill-load-client.ts:ro"],
+        "mem_limit": "768m",
+        "networks": ["drillnet"],
+    }
 
 
 def compose_of(services):
@@ -321,10 +374,15 @@ def compose_of(services):
 
 
 l2ps_src = f"{devnet}/l2ps"
+if a.carryover:
+    # Filled by carryover.ts (single host) or by bind-carryover (each host)
+    os.makedirs(os.path.join(inputs, "snapshot"), exist_ok=True)
 if not plan:
     services = {"postgres": postgres_service(n, pg_init)}
     for i in range(1, n + 1):
         services[f"node-{i}"] = node_service(i, inputs, l2ps_src)
+    if load_pubs:
+        services["load"] = load_service(inputs)
     json.dump(compose_of(services), open(f"{a.run_dir}/compose.yml", "w"), indent=2)
 else:
     # One directory per host, copied there as is by run.sh; paths relative to it
@@ -340,12 +398,18 @@ else:
         for i in h["nodes"]:
             shutil.copy(os.path.join(inputs, f"node{i}.identity"), hin)
         make_empty_snapshot(hin)
+        if a.carryover:
+            os.makedirs(os.path.join(hin, "snapshot"))
+        if h["index"] == 1 and os.path.isdir(load_dir):
+            shutil.copytree(load_dir, os.path.join(hin, "load"))
         shutil.copytree(l2ps_src, os.path.join(hin, "l2ps"))
         write_pg_init(hin, h["nodes"])
         services = {"postgres": postgres_service(len(h["nodes"]), "./inputs/pg-init")}
         for i in h["nodes"]:
-            services[f"node-{i}"] = node_service(i, "./inputs", "./inputs/l2ps")
+            services[f"node-{i}"] = node_service(i, "./inputs", "./inputs/l2ps", h["ip"] if a.bind_host_ip else None)
             every[f"node-{i}"] = services[f"node-{i}"]
+        if load_pubs and h["index"] == 1:
+            services["load"] = load_service("./inputs")
         json.dump(compose_of(services), open(os.path.join(hdir, "compose.yml"), "w"), indent=2)
         make_readable(hdir)
     # Reference only: every node service, so run.sh can read node-1's
@@ -362,3 +426,5 @@ if plan:
         print(f"host {h['index']} {h['ssh']}: {len(h['nodes'])} nodes {','.join(map(str, h['nodes']))}")
 if a.fork_set == "launch":
     print(f"launch fork set (docs/mainnet/genesis.template.json): {fork_set_text(g['forks'], excluded)}")
+if load_pubs:
+    print(f"load wallets funded: {len(load_pubs)}")

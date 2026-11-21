@@ -47,7 +47,6 @@ mock.module("./manageConsensusRoutines", () => ({ __esModule: true, default: jes
 mock.module("./manageGCRRoutines", () => ({ __esModule: true, default: jest.fn() }))
 mock.module("./manageExecution", () => ({ manageExecution: jest.fn() }))
 mock.module("./manageHelloPeer", () => ({ manageHelloPeer: jest.fn() }))
-mock.module("./manageLogin", () => ({ handleLoginRequest: jest.fn(), handleLoginResponse: jest.fn() }))
 mock.module("./manageNodeCall", () => ({ manageNodeCall: jest.fn() }))
 mock.module("./routines/transactions/handleWeb2ProxyRequest", () => ({ handleWeb2ProxyRequest: jest.fn() }))
 mock.module("../utils/web2RequestUtils", () => ({ parseWeb2ProxyRequest: jest.fn() }))
@@ -81,5 +80,15 @@ describe("the mempool merge log", () => {
         expect(quiet).toContain(pooled[0].hash)
         expect(quiet).toContain(pooled[1].hash)
         expect(quiet).not.toContain(SECRET)
+    })
+})
+
+describe("the login methods", () => {
+    it.each(["login_request", "login_response"])("%s is not served", async method => {
+        const res = await processPayload(
+            { method, params: [{ data: { publicKey: "k", signature: { length: 300000000 } } }] } as any,
+            "0x" + "11".repeat(32),
+        )
+        expect(res.result).toBe(501)
     })
 })

@@ -21,6 +21,8 @@ import {
     type QueuedTransfer,
 } from "@/libs/l2ps/settlement/transfer"
 import type { DecryptedTransfer } from "@/libs/l2ps/settlement/types"
+import type { TipAccount } from "@/libs/l2ps/settlement/tipState"
+import { l2psNonceOf } from "@/libs/l2ps/settlement/l2psNonce"
 import { L2PS_GATE_REFUSAL, l2psOff } from "@/forks/l2psGate"
 
 /**
@@ -88,8 +90,8 @@ async function decryptAndValidate(
 
 
 /**
- * Admission of a settlement transfer at the tip: signature, fee and nonce
- * (transferAdmissionRefusal), and a balance that covers amount + fee now.
+ * Admission of a settlement transfer at the tip: signature, fee and L2PS
+ * nonce in its subnet (transferAdmissionRefusal), and a balance that covers amount + fee now.
  * Reads only: the planner judges running balances and nonce order when it
  * builds a batch, and block apply is the authority.
  */
@@ -100,7 +102,7 @@ export async function settlementAdmissionRefusal(
 ): Promise<string | null> {
     let minimumFee: bigint
     let chainId: number | null
-    let sender: { balance: bigint; nonce: bigint }
+    let sender: TipAccount
     try {
         // Loaded here: these pull in the block-apply, prover and database
         // modules, which the RPC path needs only once a settlement transfer
@@ -109,7 +111,7 @@ export async function settlementAdmissionRefusal(
         const { readTipAccounts } = await import("@/libs/l2ps/settlement/tipState")
         minimumFee = await nativeTransferFeeOs()
         chainId = settlementChainId()
-        sender = (await readTipAccounts([transfer.from])).get(transfer.from)
+        sender = (await readTipAccounts([transfer.from], l2psUid)).get(transfer.from)
     } catch (error) {
         return `Settlement admission could not read the tip: ${error instanceof Error ? error.message : "Unknown error"}`
     }
@@ -120,13 +122,14 @@ export async function settlementAdmissionRefusal(
         accountNonce: sender.nonce,
     })
     if (refusal) return refusal
+    const nonceIn = (uid: string) => BigInt(l2psNonceOf(sender, uid))
     let queued: QueuedTransfer[]
     try {
-        queued = await queuedTransfersOf(l2psInstance, l2psUid, transfer, sender.nonce)
+        queued = await queuedTransfersOf(l2psInstance, l2psUid, transfer, nonceIn)
     } catch (error) {
         return `Settlement admission could not read the sender's queued transfers: ${error instanceof Error ? error.message : "Unknown error"}`
     }
-    return queueAdmissionRefusal(transfer, sender, queued)
+    return queueAdmissionRefusal(transfer, l2psUid, { balance: sender.balance, nonceIn }, queued)
 }
 
 /**
@@ -139,24 +142,35 @@ async function queuedTransfersOf(
     l2psInstance: L2PS,
     l2psUid: string,
     transfer: DecryptedTransfer,
-    accountNonce: bigint,
+    nonceIn: (l2psUid: string) => bigint,
 ): Promise<QueuedTransfer[]> {
-    // Every subnet's: they all settle against the sender's one L1 nonce
-    // and balance. Nonces past the account nonce are unique per sender, so
-    // at most MAX_NONCE_AHEAD rows can be unsettled; one more shows a breach.
-    // Only a transfer whose queue row can still settle holds a nonce: a
-    // history row left pending by a refusal whose cleanup failed would
-    // otherwise hold one for good. Paged until that many live rows are
-    // read, so such rows never push live ones out of the window.
+    // Every subnet's: each has its own L2PS nonce, but all draw on the
+    // sender's one L1 balance. Nonces past a subnet's L2PS nonce are unique
+    // per sender there, so at most MAX_NONCE_AHEAD of its rows can be
+    // unsettled; one more shows a breach. Only a transfer whose queue row
+    // can still settle holds a nonce: a history row left pending by a
+    // refusal whose cleanup failed would otherwise hold one for good. Paged
+    // until that many live rows are read, so such rows never push live ones
+    // out of the window.
     const window = Number(MAX_NONCE_AHEAD) + 1
     const rows: Awaited<ReturnType<typeof L2PSTransactionExecutor.getUnsettledBySender>> = []
-    for (let offset = 0; rows.length < window; offset += window) {
-        const page = await L2PSTransactionExecutor.getUnsettledBySender(transfer.from, accountNonce, window, offset)
-        const settleable = await L2PSMempool.getSettleableHashes(
-            page.map(row => row.encrypted_hash).filter((hash): hash is string => !!hash),
-        )
-        rows.push(...page.filter(row => !!row.encrypted_hash && settleable.has(row.encrypted_hash)))
-        if (page.length < window) break
+    for (const uid of await L2PSTransactionExecutor.getUnsettledSubnetsOf(transfer.from)) {
+        const live: typeof rows = []
+        for (let offset = 0; live.length < window; offset += window) {
+            const page = await L2PSTransactionExecutor.getUnsettledBySender(
+                transfer.from,
+                uid,
+                nonceIn(uid),
+                window,
+                offset,
+            )
+            const settleable = await L2PSMempool.getSettleableHashes(
+                page.map(row => row.encrypted_hash).filter((hash): hash is string => !!hash),
+            )
+            live.push(...page.filter(row => !!row.encrypted_hash && settleable.has(row.encrypted_hash)))
+            if (page.length < window) break
+        }
+        rows.push(...live)
     }
     const instances = new Map<string, L2PS | null>([[l2psUid, l2psInstance]])
     const queued: QueuedTransfer[] = []
@@ -171,7 +185,7 @@ async function queuedTransfersOf(
         const opened = openSettlementTransfer(inner as never, row.encrypted_hash ?? "")
         if (opened.ok === false) throw new Error(`a queued transfer does not open: ${opened.reason}`)
         const { nonce, amount, fee } = opened.transfer
-        queued.push({ nonce, amount, fee })
+        queued.push({ l2psUid: row.l2ps_uid, nonce, amount, fee })
     }
     return queued
 }

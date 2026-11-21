@@ -21,6 +21,7 @@ import { SETTLEMENT_TRANSFERS, fieldToHex } from "./encoding"
 import { SettlementAggregator, type HistoryStatus, type SettlementDeps } from "./aggregator"
 import { openSettlementTransfer } from "./transfer"
 import type { DecryptedTransfer, SettlementPlan } from "./types"
+import type { TipAccount } from "./tipState"
 import type { SettlementRecord } from "./validation"
 import { UID, innerTx, key, netChanges, signedTransfer } from "./__fixtures__/settlementKit"
 
@@ -82,7 +83,7 @@ function plan(transfers: DecryptedTransfer[], balances: Map<string, bigint>, non
         next.set(t.from, nonce + 1n)
         taken.push(t)
     }
-    return { transfers: taken, deferred, changes: netChanges(taken), balancesBefore: new Map(balances) }
+    return { transfers: taken, deferred, changes: netChanges(taken) }
 }
 
 function deps(): SettlementDeps {
@@ -91,9 +92,9 @@ function deps(): SettlementDeps {
         rows: async (uid, status, limit, offset = 0) =>
             [...rows.values()].filter(r => r.l2ps_uid === uid && r.status === status).slice(offset, offset + limit) as any,
         open: async (_uid, row: any) => openSettlementTransfer(row.encrypted_tx, row.hash),
-        tip: async accounts => {
-            const out = new Map<string, { balance: bigint; nonce: bigint }>()
-            for (const a of accounts) out.set(a, tip.get(a) ?? { balance: 0n, nonce: 0n })
+        tip: async (_uid, accounts) => {
+            const out = new Map<string, TipAccount>()
+            for (const a of accounts) out.set(a, { l2psNonces: {}, ...(tip.get(a) ?? { balance: 0n, nonce: 0n }) })
             return out
         },
         minimumFee: async () => minimumFee,
@@ -226,7 +227,7 @@ describe("SettlementAggregator", () => {
         expect(history.filter(h => h.status === "batched").map(h => h.l1)).toEqual(["l1_1", "l1_1"])
     })
 
-    it("drops a transfer whose nonce L1 already spent, and an old-format one, with a history status", async () => {
+    it("drops a transfer whose L2PS nonce is already spent, and an old-format one, with a history status", async () => {
         const spent = pay(ALICE, BOB.account, 10n, 4n)
         const old = pay(BOB, CAROL.account, 1n, 1n)
         const inner = innerTx(old) as any
@@ -240,7 +241,7 @@ describe("SettlementAggregator", () => {
         expect(statusOf(spent)).toBe(L2PS_STATUS.FAILED)
         expect(statusOf(old)).toBe(L2PS_STATUS.FAILED)
         expect(history.find(h => h.hash === spent.txHash)).toMatchObject({ status: "failed" })
-        expect(history.find(h => h.hash === spent.txHash)!.message).toContain("already spent on L1")
+        expect(history.find(h => h.hash === spent.txHash)!.message).toContain("already spent in this subnet")
         expect(history.find(h => h.hash === old.txHash)!.message).toContain("old-format")
     })
 
@@ -1003,22 +1004,76 @@ describe("planning per cycle", () => {
         expect(submitted.map(s => s.rows)).toEqual([full.map(t => t.txHash), [other.txHash]])
     })
 
-    it("does not count an L1 failure against the transfers when the tip moved under the batch", async () => {
+    it("does not count an L1 failure against the transfers when a signer's L2PS nonce moved under the batch", async () => {
         const ts = [pay(ALICE, sink("a2"), 1n, 5n), pay(BOB, sink("a3"), 1n, 1n)]
         for (const t of ts) queue(t)
         const agg = new SettlementAggregator(deps(), LIMITS)
-        for (let i = 0; i < 3; i++) {
-            await agg.cycle()
-            statuses.set(submitted[submitted.length - 1].l1, { state: "failed", blockNumber: head + 1, code: "TX_EXECUTE_FAILED" })
-            // Another L1 transaction paid Alice in the same block.
-            const alice = tip.get(ALICE.account)!
-            tip.set(ALICE.account, { ...alice, balance: alice.balance + 1n })
-            head += 1
-        }
+        await agg.cycle()
+        statuses.set(submitted[0].l1, { state: "failed", blockNumber: head + 1, code: "TX_EXECUTE_FAILED" })
+        // Another member's batch spent Bob's L2PS nonce 1 in the same block.
+        tip.set(BOB.account, { ...tip.get(BOB.account)!, nonce: 1n })
+        head += 1
         await agg.cycle()
 
-        expect(submitted.map(s => s.rows.length)).toEqual([2, 2, 2, 2])
         expect(ts.map(t => agg.failuresOf(t.txHash))).toEqual([undefined, undefined])
+        // Bob's transfer can never settle now; Alice's goes out again alone.
+        expect(statusOf(ts[1])).toBe(L2PS_STATUS.FAILED)
+        expect(submitted.map(s => s.rows)).toEqual([ts.map(t => t.txHash), [ts[0].txHash]])
+    })
+
+    it("counts an L1 failure against the transfers when balances moved but still cover the batch", async () => {
+        // The proof binds no balance, so an L1 payment to or from a touched
+        // account that leaves it covering its net change explains nothing.
+        const ts = [pay(ALICE, sink("a2"), 1n, 5n), pay(BOB, sink("a3"), 1n, 1n)]
+        for (const t of ts) queue(t)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        await agg.cycle()
+        statuses.set(submitted[0].l1, { state: "failed", blockNumber: head + 1, code: "TX_EXECUTE_FAILED" })
+        const alice = tip.get(ALICE.account)!
+        tip.set(ALICE.account, { ...alice, balance: alice.balance - 10n })
+        head += 1
+        await agg.cycle()
+
+        expect(ts.map(t => agg.failuresOf(t.txHash))).toEqual([
+            { group: 1, alone: 0 },
+            { group: 1, alone: 0 },
+        ])
+    })
+
+    it("drops the transfers of a signer that drained its balance while the batch proved, and settles the rest", async () => {
+        const drained = [pay(ALICE, sink("a2"), 10n, 5n), pay(ALICE, sink("a3"), 10n, 6n)]
+        const other = pay(BOB, sink("a4"), 1n, 1n)
+        for (const t of [...drained, other]) queue(t)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        await agg.cycle()
+        expect(submitted[0].rows).toEqual([...drained, other].map(t => t.txHash))
+        statuses.set(submitted[0].l1, { state: "failed", blockNumber: head + 1, code: "TX_EXECUTE_FAILED" })
+        // Alice spent all but 5 on L1: her net debit of 2 * (10 + FEE) is no longer covered.
+        tip.set(ALICE.account, { ...tip.get(ALICE.account)!, balance: 5n })
+        head += 1
+        await agg.cycle()
+
+        for (const t of drained) {
+            expect(statusOf(t)).toBe(L2PS_STATUS.FAILED)
+            expect(history.filter(h => h.hash === t.txHash).at(-1)!.message).toContain("no longer covers")
+        }
+        expect([...drained, other].map(t => agg.failuresOf(t.txHash))).toEqual([undefined, undefined, undefined])
+        expect(submitted.map(s => s.rows)).toEqual([[...drained, other].map(t => t.txHash), [other.txHash]])
+    })
+
+    it("keeps the transfers a drained signer can still pay", async () => {
+        const kept = pay(ALICE, sink("a2"), 1n, 5n)
+        const lost = pay(ALICE, sink("a3"), 50n, 6n)
+        for (const t of [kept, lost]) queue(t)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        await agg.cycle()
+        statuses.set(submitted[0].l1, { state: "failed", blockNumber: head + 1, code: "TX_EXECUTE_FAILED" })
+        tip.set(ALICE.account, { ...tip.get(ALICE.account)!, balance: 1n + FEE })
+        head += 1
+        await agg.cycle()
+
+        expect(statusOf(lost)).toBe(L2PS_STATUS.FAILED)
+        expect(submitted.map(s => s.rows)).toEqual([[kept, lost].map(t => t.txHash), [kept.txHash]])
     })
 
     it("moves the first subnet each cycle, so a shared account is not always claimed by the same subnet", async () => {

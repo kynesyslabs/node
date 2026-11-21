@@ -46,7 +46,7 @@ export const BASE_FIELD_ORDER = 218882428718392752222464057452572750886963111572
  * whose file differs refuses to verify instead of forking off quietly.
  * Changing the circuit means changing this digest in the same commit.
  */
-export const SETTLEMENT_VKEY_DIGEST = "bf3d72794436aa2a78a0c0fc6df4059561de55103a913656a0ffbcb24cddddeb"
+export const SETTLEMENT_VKEY_DIGEST = "ac5dd4d2a719fd3d44f91e8940f4006bdee30e1e8a268ddbc36550bee23e581e"
 
 const sortedDeep = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(sortedDeep)

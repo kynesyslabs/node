@@ -73,6 +73,12 @@
     "tokenStakingGate": {
       "activationHeight": 0
     },
+    "tokenStaking": {
+      "activationHeight": 0
+    },
+    "nftValidatorGating": {
+      "activationHeight": 0
+    },
     "l2psSettlement": {
       "activationHeight": 0
     },
@@ -120,6 +126,9 @@
     "referenceBlockRoom10": {
       "activationHeight": 0
     },
+    "keylessWeb2Identity": {
+      "activationHeight": 0
+    },
     "atomicWork": {
       "activationHeight": null
     },
@@ -127,9 +136,6 @@
       "activationHeight": null
     },
     "networkGovernance": {
-      "activationHeight": null
-    },
-    "tokenStaking": {
       "activationHeight": null
     }
   },
@@ -139,5 +145,5 @@
   "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, whole starting balances in OS (1 DEM = 10^9 OS; see genesis.md)",
   "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
   "status": "confirmed",
-  "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\", \"first_seen\": 0, \"valid_at\": 0}"
+  "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\": \"0\", \"first_seen\": 0, \"valid_at\": 0, \"nft_mint\", \"nft_owner\", \"nft_proof_tx\"}, the NFT fields from scripts/genesis-seeds.ts; no nft_exempt"
 }

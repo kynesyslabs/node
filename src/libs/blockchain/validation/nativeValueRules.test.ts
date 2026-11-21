@@ -26,6 +26,7 @@ import { verifyAdmissionEdits, verifyRpcEdits } from "./editBinding"
 import { nativeSendRefusal, nonCanonicalAddressRefusal } from "./nativeValueRules"
 import { chargedFeeMismatch, feeBindingRefusal } from "./feeBinding"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
+import GCR from "@/libs/blockchain/gcr/gcr"
 
 const PEER_UPPER = "0x" + PEER.slice(2).toUpperCase()
 const saved = {
@@ -183,6 +184,18 @@ describe("nonCanonicalAddressRefusal", () => {
 })
 
 describe("feeBindingRefusal", () => {
+    it("compares the sender's OS balance with the fee in OS", async () => {
+        forks({ gasFee: true }, true)
+        const originalBalance = GCR.getAccountBalance
+        GCR.getAccountBalance = async () => 1n
+        try {
+            const result = await applyGasFeeSeparation(await honest())
+            expect(result.ok).toBe(false)
+            expect((result as { message: string }).message).toContain("sender balance 1 < total fee 1000000000")
+        } finally {
+            GCR.getAccountBalance = originalBalance
+        }
+    })
     it("passes the network fee, as an OS string after osDenomination or a DEM number before", async () => {
         forks({ gasFee: true }, true)
         expect(await feeBindingRefusal(await honest(), true)).toBeNull()

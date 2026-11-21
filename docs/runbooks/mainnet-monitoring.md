@@ -45,6 +45,16 @@ itself binds `METRICS_HOST`, which defaults to `127.0.0.1`. Set
 `METRICS_HOST` to the private interface's address in its `.env` so the
 monitoring host can scrape it; until then `NodeDown` fires for that node.
 
+Without a private network between the hosts, keep `METRICS_BIND` on loopback and
+put a TLS reverse proxy on the validator host instead: it serves only the metrics
+path, accepts only the monitoring host's address and requires basic auth (or
+forwards `METRICS_BEARER_TOKEN`). Prometheus then scrapes it with `scheme: https`
+and `basic_auth.password_file`; the commented example at the end of
+`monitoring/prometheus/prometheus.yml` shows the job, including
+`__metrics_path__` per target when one proxy fronts several validators on one
+host. Test from another address that the proxy answers 403, and from the
+monitoring host without credentials that it answers 401.
+
 ## Setup on the monitoring host
 
 Run every command in this runbook from the repository root (the directory that
@@ -66,6 +76,19 @@ do not depend on the working directory.
    (gitignored; see `monitoring/secrets/README.md`). `chmod 644` them so the
    container user can read them. Compose mounts them at `/run/secrets/` and
    Alertmanager reads them through `api_url_file` / `url_file`.
+   Before Slack and paging exist, a Telegram receiver can stand in: the
+   commented `telegram` receiver at the end of
+   `monitoring/alertmanager/alertmanager.yml` reads the bot token from a file
+   (`bot_token_file`). Put the bot token alone in
+   `monitoring/secrets/telegram_bot_token` (gitignored, `chmod 644` like the
+   webhooks), declare it in `monitoring/docker-compose.yml` as a top-level
+   secret (`telegram_bot_token: {file: ./secrets/telegram_bot_token}`) and add
+   `telegram_bot_token` to the `alertmanager` service's `secrets:` list, so it is
+   mounted at `/run/secrets/telegram_bot_token`. Render the chat id into a
+   deployment copy of `alertmanager.yml`, point the routes at `telegram`, recreate
+   Alertmanager (step 5) and send the same `amtool` test alerts (step 4).
+   Check delivery with `alertmanager_notifications_total{integration="telegram"}`
+   and `alertmanager_notifications_failed_total` on Alertmanager's `/metrics`.
 3. Set a strong `GRAFANA_ADMIN_PASSWORD` in `monitoring/.env` (for example
    `echo "GRAFANA_ADMIN_PASSWORD=<a strong password>" >> monitoring/.env`) or in
    the environment of the shell that runs `up`. It is required: without it
@@ -116,7 +139,7 @@ The node-specific alerts fire per validator (`instance` label). `DeadMansSwitch`
 | BlockHashMismatch | 4 or more peer disagreements on the candidate block hash within 10 min, held 5 min (3 does not fire: `increase()` extrapolates, so 3 events read slightly above 3 and the threshold is 3.5). The count is per disagreeing peer, not per round: one round where 4 peers refuse this node's candidate counts 4. Not latched: it resolves once the 10 min window has passed | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. |
 | ConflictingBlock | a peer holds a different block with a verified quorum at a height where this node has one, **latched 7 days** | critical | A fork. The node does not switch chains on its own. Search the log for `[FORK]` for the height and both hashes, decide which chain to keep. See "Clearing a latched alert". |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, **latched 7 days** | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
-| SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
+| SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block that committed but whose follow-up failed, or whose commit could not be confirmed; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting. The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting. For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. |
 | PrecommitEquivocation | a committee member precommitted two different blocks at one height and round, **latched 7 days** | critical | That member's key runs twice or its signing state was rolled back. The log line `[commitLock] Equivocation` names it. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
 | MissedSignatures | 3 or more blocks in 15 min where the node was drawn into the shard and did not sign | info, no notification | A trend signal, not an alarm. On the 4-node soak it was higher when healthy than during real faults, so it is visible in Prometheus and Grafana only and notifies nobody. No mainnet data yet: revisit after launch week. Read it next to `NodeDown` and `HeightStalled`, never alone. |
 | ForkScheduleMismatch | at least one validator reports a different fork schedule, held 5 min | critical | Genesis fork schedules differ; see `fork-schedule-policy.md`. |

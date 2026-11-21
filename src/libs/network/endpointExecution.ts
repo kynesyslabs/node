@@ -13,7 +13,8 @@ import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-import HandleGCR from "../blockchain/gcr/handleGCR"
+import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
+import { tlsnAdmissionCopy } from "../blockchain/gcr/tlsnTransitions"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import { web2CallerForAddress } from "@/features/web2/web2FetchLimiter"
@@ -28,6 +29,7 @@ import {
     type OutboundFeature,
 } from "./outboundSwitches"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
+import { identityReplyExtra } from "./routines/transactions/identityReply"
 import {
     ucrypto,
     uint8ArrayToHex,
@@ -265,7 +267,7 @@ export async function handleExecuteTransaction(
         result.success = true
     }
 
-    switch (tx.content.type) {
+    switch (tx.content.type as string) {
         case "crosschainOperation": {
             if (refusedAsDisabled(result, "xm")) break
             payload = tx.content.data
@@ -411,15 +413,8 @@ export async function handleExecuteTransaction(
         case "identity":
             try {
                 const identityResult = await handleIdentityRequest(tx, sender)
-                const status = identityResult.success
-                    ? "applied"
-                    : "not applied"
-
                 result.success = identityResult.success
-                result.extra = {
-                    message:
-                        identityResult.message + `. Transaction ${status}.`,
-                }
+                result.extra = identityReplyExtra(identityResult)
             } catch (e) {
                 log.error("[handleverifyPayload] Error in identity: " + e)
                 result.success = false
@@ -465,6 +460,7 @@ export async function handleExecuteTransaction(
         case "validatorStake":
         case "validatorUnstake":
         case "validatorExit":
+        case "validatorChallenge":
         case "networkUpgrade":
         case "networkUpgradeVote": {
             // No-op — dispatcher already ran in confirmTransaction.
@@ -474,10 +470,22 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const entities = await HandleGCR.prepareEntities([queriedTx])
+        // Under tlsnVerified a TLSNotary tx is simulated with the edit the
+        // block will derive for it, so a store the block would refuse or
+        // fail is refused here, before it pays. The copy is the block's:
+        // the derived fee edits first, the TLSNotary edit last.
+        const tlsn = tlsnAdmissionCopy(queriedTx, withDerivedFeeEdits(queriedTx))
+        if (tlsn.ok === false) {
+            log.error(`[handleExecuteTransaction] TLSNotary tx refused: ${tlsn.reason}`)
+            result.success = false
+            result.response = false
+            result.extra = { error: tlsn.reason }
+            return result
+        }
+        const entities = await HandleGCR.prepareEntities([tlsn.tx])
         const simulateResult = await HandleGCR.applyTransaction(
             entities,
-            queriedTx,
+            tlsn.tx,
             false,
             true,
         )

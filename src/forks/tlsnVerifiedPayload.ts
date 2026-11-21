@@ -30,7 +30,8 @@ const ENTRY_FIELDS: ReadonlySet<string> = new Set([
     "description",
     ...TLSN_VERIFIED_PAYLOAD_FIELDS,
 ])
-const KEY_FIELDS: ReadonlySet<string> = new Set(["id", "alg", "hex"])
+const KEY_RANGE_FIELDS = ["validFrom", "validUntil"] as const
+const KEY_FIELDS: ReadonlySet<string> = new Set(["id", "alg", "hex", ...KEY_RANGE_FIELDS])
 
 /** At most this many notary keys: a primary, a standby and room for a rotation overlap. */
 export const TLSN_MAX_NOTARY_KEYS = 8
@@ -79,7 +80,21 @@ function isIntIn(value: unknown, [min, max]: readonly [number, number]): value i
 
 const show = (value: unknown) => JSON.stringify(value)?.slice(0, 120) ?? String(value)
 
-function notaryKeyProblems(raw: unknown, at: string): string[] {
+/**
+ * Why a key's optional block range is refused: each end an integer at or
+ * above the fork's activation height, and `validFrom` <= `validUntil`.
+ */
+function keyRangeProblems(key: Record<string, unknown>, at: string, activationHeight: number): string[] {
+    const problems = KEY_RANGE_FIELDS.filter(
+        f => Object.hasOwn(key, f) && !(Number.isSafeInteger(key[f]) && (key[f] as number) >= activationHeight),
+    ).map(f => `${at}.${f} must be an integer block height at or above activationHeight ${activationHeight}, got ${show(key[f])}`)
+    if (problems.length === 0 && (key.validFrom as number) > (key.validUntil as number)) {
+        problems.push(`${at}.validFrom ${show(key.validFrom)} is above validUntil ${show(key.validUntil)}`)
+    }
+    return problems
+}
+
+export function notaryKeyProblems(raw: unknown, at: string, activationHeight = 0): string[] {
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
         return [`${at} must be an object {id, alg, hex}, got ${show(raw)}`]
     }
@@ -102,7 +117,7 @@ function notaryKeyProblems(raw: unknown, at: string): string[] {
     } else if (!isSecp256k1CompressedPoint(key.hex)) {
         problems.push(`${at}.hex ${key.hex} is not a point on secp256k1`)
     }
-    return problems
+    return [...problems, ...keyRangeProblems(key, at, activationHeight)]
 }
 
 /**
@@ -126,7 +141,8 @@ export function tlsnVerifiedProblems(entry: Record<string, unknown>, scheduled: 
             `${at}.notaryKeys must be a list of 1 to ${TLSN_MAX_NOTARY_KEYS} keys, got ${show(keys)}`,
         )
     } else {
-        keys.forEach((key, i) => problems.push(...notaryKeyProblems(key, `${at}.notaryKeys[${i}]`)))
+        const activation = typeof entry.activationHeight === "number" ? entry.activationHeight : 0
+        keys.forEach((key, i) => problems.push(...notaryKeyProblems(key, `${at}.notaryKeys[${i}]`, activation)))
         const ids = keys.map(k => (k as { id?: unknown })?.id).filter(v => typeof v === "string")
         const hexes = keys.map(k => (k as { hex?: unknown })?.hex).filter(v => typeof v === "string")
         for (const [field, values] of [["id", ids], ["hex", hexes]] as const) {
@@ -159,8 +175,16 @@ export function tlsnVerifiedProblems(entry: Record<string, unknown>, scheduled: 
  * holds the key list.
  */
 export function tlsnVerifiedParamsOf(entry: Record<string, unknown>): TlsnVerifiedParams {
+    // A range end is copied only when given, so a key without one keeps the
+    // shape (and the fork schedule digest) it has always had.
     const keys = (entry.notaryKeys as TlsnNotaryKey[]).map(k =>
-        Object.freeze({ id: k.id, alg: k.alg, hex: k.hex }),
+        Object.freeze({
+            id: k.id,
+            alg: k.alg,
+            hex: k.hex,
+            ...(k.validFrom !== undefined ? { validFrom: k.validFrom } : {}),
+            ...(k.validUntil !== undefined ? { validUntil: k.validUntil } : {}),
+        }),
     )
     return Object.freeze({
         notaryKeys: Object.freeze(keys),

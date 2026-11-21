@@ -26,6 +26,7 @@ import type {
     CanonicalSignersConfig,
     TokenStakingGateConfig,
     TokenStakingConfig,
+    NftValidatorGatingConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
     L2psSettlementConfig,
@@ -34,6 +35,7 @@ import type {
     TlsnVerifiedConfig,
     StorageFeeSettlementConfig,
     ReferenceBlockRoom10Config,
+    KeylessWeb2IdentityConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -431,6 +433,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "tokenStaking":
             getSharedState.forkConfig.tokenStaking = config as TokenStakingConfig
             return
+        case "nftValidatorGating":
+            getSharedState.forkConfig.nftValidatorGating =
+                config as NftValidatorGatingConfig
+            return
         case "unpinnedCommittee":
             getSharedState.forkConfig.unpinnedCommittee =
                 config as UnpinnedCommitteeConfig
@@ -463,6 +469,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             return
         case "tlsnVerified":
             getSharedState.forkConfig.tlsnVerified = config as TlsnVerifiedConfig
+            return
+        case "keylessWeb2Identity":
+            getSharedState.forkConfig.keylessWeb2Identity =
+                config as KeylessWeb2IdentityConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -623,6 +633,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as TokenStakingGateConfig
         case "tokenStaking":
             return base as TokenStakingConfig
+        case "nftValidatorGating":
+            return base as NftValidatorGatingConfig
         case "unpinnedCommittee":
             return base as UnpinnedCommitteeConfig
         case "telegramSenderBinding":
@@ -634,13 +646,15 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
         case "l2psGate":
             return base as L2psGateConfig
         case "tlsnDisabled":
-            return base as TlsnDisabledConfig
+            return validateTlsnDisabledEntry(base, entry)
         case "storageFeeSettlement":
             return base as StorageFeeSettlementConfig
         case "referenceBlockRoom10":
             return base as ReferenceBlockRoom10Config
         case "tlsnVerified":
             return validateTlsnVerifiedEntry(base, entry)
+        case "keylessWeb2Identity":
+            return base as KeylessWeb2IdentityConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
@@ -718,4 +732,32 @@ function validateTlsnVerifiedEntry(
         description: base.description,
         ...(hasPayload ? tlsnVerifiedParamsOf(entry) : {}),
     }
+}
+
+/**
+ * Validate the optional `reenableAt` of tlsnDisabled: the block height from
+ * which TLSNotary is accepted again. It needs a scheduled kill switch and must
+ * be at least its activation height + 2: the switch at H first refuses block
+ * H + 1, so a lower value would refuse no block. Absent or null, the switch
+ * stays on, as before; the field is kept only when set, so the schedule digest
+ * of an entry without it is unchanged.
+ */
+function validateTlsnDisabledEntry(
+    base: BaseForkConfig,
+    entry: Record<string, unknown>,
+): TlsnDisabledConfig {
+    const reenableAt = entry.reenableAt
+    if (reenableAt === undefined || reenableAt === null) return base
+    if (
+        base.activationHeight === null ||
+        !Number.isSafeInteger(reenableAt) ||
+        (reenableAt as number) <= base.activationHeight + 1
+    ) {
+        throw new ForkConfigValidationError(
+            "[FORKS] Genesis fork \"tlsnDisabled\".reenableAt must be an integer block height of at least a scheduled " +
+                `activationHeight (${JSON.stringify(base.activationHeight)}) + 2, as a lower one would refuse no block, ` +
+                `got: ${JSON.stringify(reenableAt)}`,
+        )
+    }
+    return { ...base, reenableAt: reenableAt as number }
 }

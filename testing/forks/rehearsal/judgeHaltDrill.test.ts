@@ -13,6 +13,7 @@ import {
     main,
     parseDrillInput,
     ridePreconditionError,
+    safePreconditionError,
     timingsLine,
 } from "./lib/judgeHaltDrill"
 
@@ -276,6 +277,14 @@ describe("halt drill verdict", () => {
         expect(failedPhases(input)).toEqual(["P5"])
         expect(reasonsOf(input, "P5")[0]).toContain("height 11: hash divergence")
     })
+    it("fails recovery when the halt block was rewritten after the settle read", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        const halt = Math.max(...raw.settle.rows.map((r: any) => r.number))
+        for (const r of raw.recovery.rows) if (r.number === halt) r.hash = "0xrewritten"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5").some(r => r.startsWith(`height ${halt}: node-`))).toBe(true)
+    })
     it("fails recovery when a restarted validator never reaches the target", () => {
         const raw = loadRaw("halt-n13s10.pass")
         raw.recovery.heads["13"] = 10
@@ -450,6 +459,78 @@ describe("ride drill verdict", () => {
         expect(ridePreconditionError(10, 13, 3, 13)).toBeNull()
         expect(ridePreconditionError(10, 13, 3, 10)).toBeNull()
         expect(ridePreconditionError(10, 13, 4, 13)).not.toBeNull()
+    })
+})
+
+describe("safe drill verdict (a third stopped)", () => {
+    it("passes when the survivors stay live, forge quorum blocks on one chain and all rejoin", () => {
+        const verdict = judgeDrill(load("third-n12s10.pass"))
+        expect(verdict.pass).toBe(true)
+        expect(verdict.phases.map(p => p.id)).toEqual(["P1", "S2", "S3", "P5", "P6"])
+        expect(verdict.haltHeight).toBe(10)
+        expect(verdict.settleBlocks).toBe(2)
+        expect(verdict.targetHeight).toBe(13)
+        expect(verdict.summary).toContain("common=10")
+    })
+    it("passes a chain that paused while a third was down", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const s of raw.hold.samples) for (const k of Object.keys(s.heights)) s.heights[k] = 8
+        raw.settle.height = 8
+        for (const k of Object.keys(raw.settle.heads)) raw.settle.heads[k] = 8
+        raw.settle.rows = raw.settle.rows.filter((r: any) => r.number === 8)
+        raw.recovery.blocks = 5
+        const verdict = judgeDrill(parseDrillInput(raw))
+        expect(verdict.pass).toBe(true)
+        expect(verdict.settleBlocks).toBe(0)
+    })
+    it("fails a fork among the survivors", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.settle.rows.find((r: any) => r.node === 3 && r.number === 9).hash = "0xfork"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["S3"])
+        expect(reasonsOf(input, "S3")[0]).toContain("settle block 9: hash divergence")
+    })
+    it("fails a block forged without quorum signatures", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const r of raw.settle.rows) if (r.number === 10) r.signatures = 6
+        expect(failedPhases(parseDrillInput(raw))).toEqual(["S3"])
+    })
+    it("fails a survivor that stopped answering or whose head went back", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.hold.samples[1].heights["2"] = -1
+        raw.hold.samples[3].heights["5"] = 8
+        const reasons = reasonsOf(parseDrillInput(raw), "S2")
+        expect(reasons).toContain("sample 2: survivor node-2 did not answer")
+        expect(reasons).toContain("sample 4: node-5 head went back 9 -> 8")
+    })
+    it("fails a rejoin that forks or misses the target", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.recovery.rows.find((r: any) => r.node === 12 && r.number === 12).hash = "0xfork"
+        raw.recovery.heads["11"] = 11
+        const reasons = reasonsOf(parseDrillInput(raw), "P5")
+        expect(reasons).toContain("node-11 head 11 < target 13")
+        expect(reasons.some(r => r.includes("height 12: hash divergence"))).toBe(true)
+    })
+    it("fails a block rewritten after the settle read, even when every node agrees on the new hash", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        for (const r of raw.recovery.rows) if (r.number === 10) r.hash = "0xrewritten"
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5").some(r => r.startsWith("height 10: node-") && r.includes("0xrewritten"))).toBe(true)
+    })
+    it("refuses more than a third stopped, or survivors below the quorum", () => {
+        const raw = loadRaw("third-n12s10.pass")
+        raw.stopped = [8, 9, 10, 11, 12]
+        expect(judgeDrill(parseDrillInput(raw)).phases.map(p => p.id)).toEqual(["P0"])
+        expect(safePreconditionError(30, 10, 10)).toBeNull()
+        expect(safePreconditionError(30, 10, 11)).toContain("more than a third")
+        expect(safePreconditionError(9, 10, 3)).toContain("fewer than the quorum")
+    })
+    it("reports the hold, not a halt", () => {
+        const input = load("third-n12s10.pass")
+        const lines = formatReport(input, judgeDrill(input))
+        expect(lines.some(l => l.startsWith("timing: hold with a third down 40.0"))).toBe(true)
+        expect(lines.some(l => l.includes("halt confirmed"))).toBe(false)
     })
 })
 

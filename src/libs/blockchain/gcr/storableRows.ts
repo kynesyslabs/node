@@ -173,7 +173,7 @@ export const EDIT_KEY_MAX_BYTES = {
     resourceKey: 256,
 } as const
 
-const ACCOUNT_EDITS = new Set(["balance", "nonce", "identity"])
+const ACCOUNT_EDITS = new Set(["balance", "nonce", "identity", "l2psNonce"])
 const TARGET_EDITS = new Set(["storageProgram", "storage-program-put"])
 const WORK_EDITS = new Set(["work-attempt", "work-receipt"])
 

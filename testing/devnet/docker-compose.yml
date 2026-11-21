@@ -75,6 +75,8 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      # Proxy sessions are reached over the compose network, not loopback.
+      - WSTCP_BIND_HOST=0.0.0.0
     volumes:
       - ./identities/node1.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -115,6 +117,8 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      # Proxy sessions are reached over the compose network, not loopback.
+      - WSTCP_BIND_HOST=0.0.0.0
     volumes:
       - ./identities/node2.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -155,6 +159,8 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      # Proxy sessions are reached over the compose network, not loopback.
+      - WSTCP_BIND_HOST=0.0.0.0
     volumes:
       - ./identities/node3.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -195,6 +201,8 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      # Proxy sessions are reached over the compose network, not loopback.
+      - WSTCP_BIND_HOST=0.0.0.0
     volumes:
       - ./identities/node4.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -246,6 +254,8 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      # Proxy sessions are reached over the compose network, not loopback.
+      - WSTCP_BIND_HOST=0.0.0.0
       # Rehearsal-only: per-node toggle for pre-fork-binary simulation.
       # Default unset; set to "true" via override to disable fork machinery.
       - DEMOS_DISABLE_FORK_MACHINERY=${NODE5_DISABLE_FORK_MACHINERY:-}

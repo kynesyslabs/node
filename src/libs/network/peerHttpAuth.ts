@@ -41,6 +41,16 @@ export const BODY_BOUND_METHODS: ReadonlySet<string> = new Set([
     ...SUDO_METHODS,
 ])
 
+/**
+ * nodeCall messages that hand the signer something only they may hold, such
+ * as a TLSNotary proxy session URL. They need the body-bound form naming this
+ * node: with the older form, captured headers could open sessions for the
+ * signer and read back the URL.
+ */
+export const BODY_BOUND_NODE_CALLS: ReadonlySet<string> = new Set([
+    "requestTLSNproxy",
+])
+
 let lastAuthTimestamp = 0
 
 /**

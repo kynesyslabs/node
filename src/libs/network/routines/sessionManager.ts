@@ -10,6 +10,9 @@ import Cryptography from "src/libs/crypto/cryptography"
 import { normalizeWebBuffers } from "./normalizeWebBuffers"
 
 const sessionTimeout = 1000 * 60 * 5 // 5 minutes
+// Most sessions held at once, and the longest address a session is keyed by.
+export const maxSessions = 1024
+export const maxAddressLength = 8192
 
 function randomMessage() {
     let result = ""
@@ -74,6 +77,16 @@ export default class Sessions {
 
     // INFO Generating a new session
     public newSession(address: string): InterfaceSession {
+        if (typeof address !== "string" || address.length > maxAddressLength) {
+            return null
+        }
+        const now = Date.now()
+        for (const [key, held] of this.registry) {
+            if (held.end_timestamp < now) this.registry.delete(key)
+        }
+        if (!this.registry.has(address) && this.registry.size >= maxSessions) {
+            return null
+        }
         // Generate a new session
         const session: InterfaceSession = {
             start_timestamp: Date.now(),

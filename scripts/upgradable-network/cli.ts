@@ -26,19 +26,32 @@ function exitWith(msg: string, code = 1): never {
     process.exit(code)
 }
 
-function loadMnemonic(file = MNEMONIC_FILE): string {
+function loadMnemonic(file = MNEMONIC_FILE, requireCanonical = false): string {
     if (!existsSync(file)) {
         exitWith(
             `Mnemonic file ${file} not found. Run \`new-wallet\` first or set MNEMONIC_FILE to a valid path.`,
         )
     }
-    return readFileSync(file, "utf8").trim()
+    const mnemonic = readFileSync(file, "utf8").trim()
+    // The node refuses a phrase that is not in canonical form, so do not stake
+    // under a key it will never run as.
+    if (requireCanonical && mnemonic.normalize("NFKD") !== mnemonic) {
+        exitWith(
+            "Invalid mnemonic: the phrase is not in canonical form (full-width letters, ideographic or no-break spaces). " +
+                "Retype it in plain lowercase ASCII letters with ASCII spaces between the words",
+        )
+    }
+    return mnemonic
 }
 
-async function connect(mnemonicFile?: string): Promise<Demos> {
+async function connect(
+    mnemonicFile?: string,
+    requireCanonical = false,
+): Promise<Demos> {
+    const mnemonic = loadMnemonic(mnemonicFile, requireCanonical)
     const demos = new Demos()
     await demos.connect(RPC_URL)
-    await demos.connectWallet(loadMnemonic(mnemonicFile))
+    await demos.connectWallet(mnemonic)
     return demos
 }
 
@@ -75,7 +88,7 @@ async function cmdNewWallet(file?: string) {
 }
 
 async function cmdStake(amount?: string, url?: string) {
-    const demos = await connect()
+    const demos = await connect(undefined, true)
     if (amount !== undefined) {
         try {
             if (BigInt(amount) <= 0n) {

@@ -1,4 +1,8 @@
-import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
+import {
+    ValidationPhase,
+    emptyValidationPhase,
+    isKnownPhase,
+} from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
@@ -787,6 +791,13 @@ export default class SecretaryManager {
             // INFO: This happens when a node enters an ongoing consensus
             log.debug(
                 "New member trying to enter an ongoing consensus. Doing nothing ...",
+            )
+            return res
+        }
+
+        if (!isKnownPhase(theirPhase)) {
+            log.warning(
+                `[receiveValidatorPhase] Ignoring unknown phase from ${memberKey}`,
             )
             return res
         }

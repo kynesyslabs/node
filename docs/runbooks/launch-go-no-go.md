@@ -65,6 +65,14 @@ chain still makes blocks; a 4th stops it until one comes back.
 5. Mainnet validators run with `DEMOS_REQUIRE_VALIDATORS=true`. Under
    docker compose it goes in `.env`; the shipped `docker-compose.yml`
    passes it to the node container.
+   Keep `PROD=true` and `DEBUG_ASSERTIONS_ENABLED=false` in the effective
+   environment: the shared config loader refuses to start a production node
+   with debug assertions enabled (`true` or `1`), since an assertion can exit
+   the process during consensus. This applies to fresh installs and upgrades,
+   through Docker, bare metal and `bun run start:bun`. Before upgrading a
+   running validator, remove any shell override and set the flag to `false`
+   in `.env`; recreate the Docker node container to apply the changed
+   environment, or restart the bare-metal/Bun process.
 
 6. Before T-0 no operator or provider holds more than a third of the first
    committee's votes (one validator, one vote), and every launch validator's
@@ -99,23 +107,37 @@ since each node would then stamp block 0 with its own clock.
 ## Plan check (before any validator is up)
 
 The genesis rules and the validator table can be checked as soon as the
-genesis file, the snapshot and the table exist, with no node running:
+genesis file, the snapshot and the table exist, with no node running. The
+check needs Solana: under `nftValidatorGating` it verifies the NFT proof of
+every block 0 seat there, the one time those proofs are read before the
+genesis is sealed.
 
 ```bash
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json --snapshot mainnet/snapshot \
+  --bots mainnet/bots.json \
   --operators mainnet/launch-validators.json \
-  --expected-treasury <agreed treasury address> [--json]
+  --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony> [--json]
 ```
 
-One `PASS`/`FAIL` line per check: genesis forks, treasury, chain id, shard size,
-genesis values (no template `FILL` left), genesis file (a node would load it), block 0 validator set, launch
+One `PASS`/`FAIL` line per check: genesis forks, treasury, notary keys, chain id, shard size,
+genesis values (no template `FILL` left), genesis file (a node would load it), bot allowlist, block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
 provider and region for each), operator and provider cap, voting power per
 operator and provider, pinned identities. Exit 0 when all pass, 1
-otherwise, 2 when any of the three inputs is missing. Filling the genesis
-is in `docs/mainnet/genesis.md`, the table in
+otherwise, 2 when any of the genesis, snapshot and operators inputs is
+missing. Filling the genesis is in `docs/mainnet/genesis.md`, the table in
 `docs/mainnet/launch-validators.md`.
+
+The genesis owners also supply `--bots` as a reviewed JSON array of bot
+addresses (or `[]` for no bots). It must exactly match the addresses with
+raw genesis allocations at least `1_000_000_000_000`; see the
+[authorization rule and operator paths](../mainnet/genesis.md#bot-authorization-launch-decision-and-gate).
+An omitted inventory is NO-GO (exit 1); a missing file or invalid JSON is
+bad input (exit 2). The inventory is required in both plan and live mode.
+A genesis file stored as a JSON-encoded string fails the bot allowlist
+check: the node's bot loader parses the file once and fails at boot on it.
 
 ## Go/no-go check
 
@@ -143,18 +165,21 @@ a false NO-GO. Collect each validator's `EXPOSED_URL` with its T-24h post.
 bun scripts/launch-go-no-go.ts \
   --genesis data/genesis.json \
   --snapshot data/snapshot \
+  --bots mainnet/bots.json \
   --operators launch-operators.json \
   --genesis-hash <agreed genesis block hash> \
   --commit <release commit SHA> \
   --expected-treasury <agreed treasury address> \
+  --expected-notary-keys <id:hex,id:hex from the notary key ceremony> \
   [--peerlist demos_peerlist.json] [--rpc https://v1.example:53550,...] \
   [--json]
 ```
 
-`--genesis-hash`, `--commit` and `--snapshot` are required for GO; without
+`--genesis-hash`, `--commit`, `--snapshot` and `--bots` are required for GO; without
 any of them the result is NO-GO and says which one is missing. On the
 mainnet chain id (any `properties.id` other than testnet `1` and devnet
-`1337`) `--expected-treasury` is required as well, for GO and for `--plan`.
+`1337`) `--expected-treasury` and `--expected-notary-keys` are required as
+well, for GO and for `--plan`.
 
 - `--expected-treasury` is the agreed `gasFeeSeparation` treasury address,
   taken from the owners' sign-off, not from the genesis file being checked.
@@ -165,6 +190,23 @@ mainnet chain id (any `properties.id` other than testnet `1` and devnet
   `DEMOS_EXPECTED_TREASURY`. It is exit 2 when the value is not `0x` and 64
   hex characters. On the testnet and devnet chain ids it is optional and
   checked only when given.
+
+- `--expected-notary-keys` is the list of notary public keys the notary key
+  ceremony produced (`docs/runbooks/tlsn-notary.md`, section 3), as
+  comma-separated `id:hex` entries, for example
+  `demos-notary-1:<hex>,demos-notary-standby:<hex>`, taken from the
+  holders' sign-off, not from the genesis file being checked. The genesis
+  `forks.tlsnVerified.notaryKeys` must hold exactly these id and key pairs
+  (order, hex case and surrounding spaces are ignored), or the result is
+  NO-GO: the node only checks that a key is a well-formed secp256k1 point,
+  so any key whose private half someone else holds would otherwise attest
+  identity links from block 0. Without the flag the tool reads
+  `DEMOS_EXPECTED_NOTARY_KEYS`. It is exit 2 when an entry is not `id:hex`,
+  an id or key the node would refuse in a genesis, or a repeated id or key.
+  On the testnet and devnet chain ids it is optional and checked only when
+  given. On every chain id, with or without the flag, the result is NO-GO
+  when a genesis notary key carries `validFrom` or `validUntil`: launch
+  notary keys are trusted from block 0 with no end.
 
 - `--genesis-hash` is the agreed genesis block hash (above). The tool also
   builds block 0 from `--genesis` and is NO-GO when the two differ, so the
@@ -193,24 +235,38 @@ and its commit (`/info` `commitHash`; the image digest itself is not
 exposed by the node, so it comes from the T-24h posts). Then:
 
 - `GO` (exit 0): `--genesis-hash` and `--commit` were given and the genesis
-  file builds that block 0; at least `q` members of the first committee
+  file builds that block 0; the addresses with raw genesis `balances` of at
+  least `1_000_000_000_000` are exactly the `--bots` inventory; at least `q`
+  members of the first committee
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
-  third of the first committee's votes; the genesis schedules
+  third of the first committee's votes; on the mainnet chain id every entry
+  names its beneficial `owner`, and no owner runs more than that same cap; no
+  region hosts a third or more of the launch validators, and no owner,
+  operator, provider or region holds a third or more of block 0's stake
+  (`docs/mainnet/validator-concentration.md`); the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement` and `tlsnVerified` at
-  `activationHeight` 0, leaves `atomicWork`, `networkGovernance`, `tokenStaking` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `tokenStaking`, `nftValidatorGating`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement`, `tlsnVerified` and `keylessWeb2Identity` at
+  `activationHeight` 0, leaves `atomicWork`, `networkGovernance` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
-  (`--expected-treasury`), gives `tlsnVerified` the notary keys from the
-  notary key ceremony (NO-GO on the template's placeholder keys, on no keys,
+  (`--expected-treasury`), gives `tlsnVerified` exactly the notary keys from
+  the notary key ceremony (`--expected-notary-keys`; NO-GO on the template's placeholder keys, on no keys,
   on a payload the node would refuse and on a devnet, spike or test-vector
   key, `KNOWN_TEST_NOTARY_KEYS`),
   uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`
   (mainnet is `8587492`), and sets
   `shardSize` 10; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
-  a seat on any network whose pool holds them; and a node would accept
+  a seat on any network whose pool holds them; every block 0 seat (from
+  `genesis.validators`, or the snapshot's `validators.jsonl` when it has
+  one) names an allowlisted `nft_mint`, its `nft_owner` and an
+  `nft_proof_tx` whose proof checks out on Solana, no mint backs two seats
+  and no seat is `nft_exempt` (this is the only Solana read of the launch
+  proofs: the genesis is sealed by its hash after it, and a node building
+  block 0 checks the NFT fields offline and never reads Solana); the build
+  pins its NFT allowlist digest and
+  the shipped allowlist matches it; and a node would accept
   the genesis file at its first boot (fixed timestamp, snapshot bound by
   `snapshot.manifestSha256`). Without `--genesis` the forks cannot be
   checked and the result is always NO-GO.
@@ -221,8 +277,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   block, other genesis data (`getGenesisDataHash`), another fork schedule
   digest, one of the mainnet forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
-- Exit 2: bad input, including a malformed `--genesis-hash`, `--commit` or
-  `--expected-treasury`, and a `--shard-size` that differs from the genesis.
+- Exit 2: bad input, including a malformed `--genesis-hash`, `--commit`,
+  `--expected-treasury` or `--expected-notary-keys`, and a `--shard-size` that differs from the genesis.
 
 **Identity proof.** `/info` is a claim anyone can make, so an endpoint
 (for example a `--rpc` URL) could otherwise answer for an offline
@@ -330,7 +386,7 @@ check: without it a partial set passes. Exit 0 ok, 1 not ok, 2 bad input.
 From T-0 on, restart or upgrade launch validators one at a time, and wait
 until each is back in the committee (signing blocks) before the next. A
 just-restarted validator that logs `Timeout waiting for green light` for the
-same block twice is restarted once more. From `v1.0.0-rc.12` the validator
+same block twice is restarted once more. From `v1.0.0-rc.13` the validator
 leaves a round the secretary abandoned and joins the newer one on its own,
 so this is a fallback there. The rule, the signing check and the recovery
 tiers are in [chain-halt-recovery.md](chain-halt-recovery.md).

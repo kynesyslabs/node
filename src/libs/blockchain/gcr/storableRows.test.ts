@@ -209,9 +209,9 @@ describe("indexed text columns", () => {
         expect(indexed).toEqual({
             accounts: ["pubkey"],
             storagePrograms: ["encoding", "owner", "programName", "storageAddress", "storageLocation"],
-            tlsNotaries: ["domain", "owner", "tokenId", "txhash"],
+            tlsNotaries: ["attestationId", "domain", "owner", "tokenId", "txhash"],
             atomicWorks: ["txHash", "workId"],
-            validators: ["address", "unstake_available_at", "unstake_requested_at"],
+            validators: ["address", "nft_mint", "unstake_available_at", "unstake_requested_at"],
             networkUpgrades: ["effectiveAtBlock", "id", "proposalId", "status"],
             networkUpgradeVotes: ["id", "proposalId", "voterAddress"],
         })

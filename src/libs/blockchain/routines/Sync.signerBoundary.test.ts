@@ -157,6 +157,8 @@ beforeEach(() => {
             ? { number: n, hash: PARENT_HASH, content: { peerlist: [], timestamp: now - 100 } }
             : null) as any)
     spyOn(chain, "getLastBlockNumber").mockResolvedValue(HEIGHT - 1)
+    // The drift check reads the stored tip and refuses the apply if it cannot
+    spyOn(chain, "getLastStoredBlockNumber").mockResolvedValue(HEIGHT - 1)
     spyOn(chain, "getExistingTransactionHashes").mockResolvedValue(new Set())
     spyOn(datasource, "getInstance").mockResolvedValue(fakeDatasource as any)
 

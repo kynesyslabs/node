@@ -141,6 +141,9 @@ export type ValidatorSeed = {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint: string | null
+    nft_owner: string | null
+    nft_proof_tx: string | null
 }
 
 // ----------------------------------------------------------------------------
@@ -395,6 +398,9 @@ function parseValidatorRow(line: string, lineNo: number): ValidatorSeed {
         valid_at: optionalInt(obj, "valid_at"),
         unstake_requested_at: optionalInt(obj, "unstake_requested_at"),
         unstake_available_at: optionalInt(obj, "unstake_available_at"),
+        nft_mint: optionalString(obj, "nft_mint"),
+        nft_owner: optionalString(obj, "nft_owner"),
+        nft_proof_tx: optionalString(obj, "nft_proof_tx"),
     }
 }
 

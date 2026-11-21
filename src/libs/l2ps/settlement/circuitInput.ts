@@ -32,7 +32,6 @@ export const PUBLIC_INPUT_LAYOUT: ReadonlyArray<readonly [string, number]> = [
     ["accountActive", SETTLEMENT_ACCOUNTS],
     ["accountHi", SETTLEMENT_ACCOUNTS],
     ["accountLo", SETTLEMENT_ACCOUNTS],
-    ["balanceBefore", SETTLEMENT_ACCOUNTS],
     ["deltaNegative", SETTLEMENT_ACCOUNTS],
     ["deltaMagnitude", SETTLEMENT_ACCOUNTS],
 ]
@@ -41,7 +40,7 @@ export type SettlementCircuitInput = Record<string, string | string[]>
 
 export interface BuiltSettlementInput {
     input: SettlementCircuitInput
-    /** The Interface v1 signals (1 + 5N + 6M) the proof must verify against. */
+    /** The Interface v1 signals (1 + 5N + 5M) the proof must verify against. */
     publicSignals: bigint[]
     /** settlementPublicHash of publicSignals: the circuit's one public input. */
     publicHash: bigint
@@ -54,11 +53,11 @@ const dec = (xs: bigint[]): string[] => xs.map(x => x.toString())
 
 /**
  * Throws SettlementEncodingError when the plan is not one the circuit can
- * prove: the plan is replayed here (debit, then credit, in batch order) so a
- * plan that would only fail inside witness generation fails with a reason.
+ * prove: each change is recomputed from the transfers so a plan that would
+ * only fail inside witness generation fails with a reason.
  */
 export function buildSettlementCircuitInput(plan: SettlementPlan): BuiltSettlementInput {
-    const { transfers, changes, balancesBefore } = plan
+    const { transfers, changes } = plan
     if (transfers.length === 0 || transfers.length > SETTLEMENT_TRANSFERS) {
         throw new SettlementEncodingError(`plan has ${transfers.length} transfers, 1..${SETTLEMENT_TRANSFERS} allowed`)
     }
@@ -70,12 +69,7 @@ export function buildSettlementCircuitInput(plan: SettlementPlan): BuiltSettleme
     }
     const index = new Map(accounts.map((a, i) => [a, i]))
 
-    const running = new Map<string, bigint>()
-    for (const a of accounts) {
-        const b = balancesBefore.get(a)
-        if (b === undefined) throw new SettlementEncodingError(`no balance before for ${a}`)
-        running.set(a, b)
-    }
+    const net = new Map<string, bigint>(accounts.map(a => [a, 0n]))
     const touched = new Set<string>()
     for (const t of transfers) {
         if (!index.has(t.from) || !index.has(t.to)) {
@@ -84,29 +78,22 @@ export function buildSettlementCircuitInput(plan: SettlementPlan): BuiltSettleme
         if (settlementCommitment(t) !== t.commitment) {
             throw new SettlementEncodingError("a commitment does not open to its transfer")
         }
-        const debited = (running.get(t.from) as bigint) - t.amount - t.fee
-        if (debited < 0n) throw new SettlementEncodingError("a transfer overdraws its sender")
-        running.set(t.from, debited)
-        running.set(t.to, (running.get(t.to) as bigint) + t.amount)
+        net.set(t.from, (net.get(t.from) as bigint) - t.amount - t.fee)
+        net.set(t.to, (net.get(t.to) as bigint) + t.amount)
         touched.add(t.from).add(t.to)
     }
     for (const c of changes) {
         if (!touched.has(c.account)) {
             throw new SettlementEncodingError(`account ${c.account} is not touched by any transfer`)
         }
-        const before = balancesBefore.get(c.account) as bigint
-        if ((running.get(c.account) as bigint) - before !== c.delta) {
+        if (net.get(c.account) !== c.delta) {
             throw new SettlementEncodingError(`delta of ${c.account} is not the result of the transfers`)
         }
     }
 
     const publicSignals = settlementPublicSignals(
         transfers.map(t => ({ commitment: t.commitment, signer: t.from, nonce: t.nonce, fee: t.fee })),
-        changes.map(c => ({
-            account: c.account,
-            balanceBefore: balancesBefore.get(c.account) as bigint,
-            delta: c.delta,
-        })),
+        changes.map(c => ({ account: c.account, delta: c.delta })),
     )
     if (publicSignals.length !== SETTLEMENT_PUBLIC_SIGNALS) {
         throw new SettlementEncodingError("public signal count does not match the circuit")

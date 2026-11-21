@@ -10,6 +10,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadForkConfigFromGenesis } from "src/forks"
+import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
+import { genesisScheduleProblems, isMainnetChainId } from "src/libs/blockchain/genesis/genesisPin"
 import { generateGenesisBlock } from "src/libs/blockchain/chainGenesis"
 import { SHARD_SIZE_MAX, SHARD_SIZE_MIN } from "src/libs/consensus/genesisShardSize"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
@@ -183,6 +185,51 @@ describe("genesis-hash tool", () => {
             expect(run.exitCode).toBe(1)
             expect(run.stdout.toString()).toContain("problem: a node would refuse the snapshot at boot")
         }, 60_000)
+    })
+
+    describe("the fork schedule check a node runs at boot", () => {
+        /** The launch fixture on a mainnet chain id, declaring every fork this build knows but `leave`. */
+        const onMainnetId = (leave: string[] = []) => {
+            const g = launchGenesis()
+            g.properties = { ...g.properties, id: 4242 }
+            g.forks = Object.fromEntries(
+                Object.keys(DEFAULT_FORK_CONFIG)
+                    .filter(name => !leave.includes(name))
+                    .map(name => [name, g.forks?.[name] ?? { activationHeight: null }]),
+            )
+            return g
+        }
+
+        it("reports a genesis the node refuses for an undeclared fork, in the node's words", () => {
+            const g = onMainnetId(["l2psSettlement", "tlsnVerified"])
+            const values = genesisValues(g)
+            const refused = genesisScheduleProblems({
+                fileGenesisData: g,
+                pin: values.genesisDataHash,
+                blockPin: values.genesisBlockHash ?? "",
+            })
+            expect(refused).toHaveLength(1)
+            expect(refused[0]).toStartWith("the genesis does not declare l2psSettlement, tlsnVerified")
+            expect(values.problems).toContain(refused[0])
+            expect(genesisValues(onMainnetId()).problems.filter(p => p.includes("does not declare"))).toEqual([])
+        })
+
+        it("exits 1 from the command line on it", () => {
+            const file = writeGenesis(onMainnetId(["tlsnVerified"]))
+            const args = ["bun", "scripts/genesis-hash.ts", "--allow-unforgeable", "--genesis"]
+            // The fixture's 4 validators are below the quorum; that is not the finding here
+            const accepted = Bun.spawnSync([...args, writeGenesis(onMainnetId())], { stdout: "pipe", stderr: "pipe" })
+            expect(accepted.exitCode).toBe(0)
+            const run = Bun.spawnSync([...args, file], { stdout: "pipe", stderr: "pipe" })
+            expect(run.exitCode).toBe(1)
+            expect(run.stdout.toString()).toContain("problem: the genesis does not declare tlsnVerified")
+        }, 60_000)
+
+        it("accepts a test network genesis that declares a fork schedule", () => {
+            const g = launchGenesis()
+            expect(isMainnetChainId(g.properties.id)).toBe(false)
+            expect(genesisValues(g).problems.filter(p => p.includes("does not declare"))).toEqual([])
+        })
     })
 
     describe("network checks a pinned hash does not make", () => {

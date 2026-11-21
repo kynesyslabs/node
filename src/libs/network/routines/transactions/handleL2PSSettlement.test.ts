@@ -3,7 +3,8 @@
  * must carry its settlement opening (the old format is refused with a clear
  * error), its commitment must open, the sender must have signed it for this
  * chain and subnet, the fee must reach the native transfer fee and the nonce
- * must be unspent. An admitted transfer is queued without running the
+ * must be unspent in the sender's L2PS nonce of that subnet, which is apart
+ * from its L1 nonce and from its nonces in other subnets. An admitted transfer is queued without running the
  * executor, whose edits fed the local proof path the fork turns off.
  */
 
@@ -26,7 +27,7 @@ const updateTransactionStatus = jest.fn(async (..._args: unknown[]): Promise<voi
 /** History rows of the sender's queued transfers; each envelope decrypts to `__inner`. */
 /** Queue rows no longer settleable (refused, or never marked executed). */
 let stranded = new Set<string>()
-let unsettled: { l2ps_uid: string; encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
+let unsettled: { l2ps_uid: string; nonce: bigint; encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
 
 mock.module("src/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
 mock.module("src/libs/blockchain/transaction", () => ({ __esModule: true, default: { confirmTx } }))
@@ -55,22 +56,24 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
         execute,
         recordTransaction,
         updateTransactionStatus,
-        // As the query reads them: one page, filtered by subnet only when
-        // given one (l2psUid, from, ...).
-        getUnsettledBySender: async (...args: unknown[]) => {
-            const byUid = typeof args[1] === "string"
-            const [limit, offset = 0] = (byUid ? args.slice(3) : args.slice(2)) as number[]
-            return unsettled.filter(row => !byUid || row.l2ps_uid === args[0]).slice(offset, offset + limit)
-        },
+        // As the queries read them: the subnets with unsettled rows, and one
+        // subnet's page of rows past the given L2PS nonce.
+        getUnsettledSubnetsOf: async () => [...new Set(unsettled.map(row => row.l2ps_uid))].sort(),
+        getUnsettledBySender: async (_from: string, uid: string, nonce: bigint, limit: number, offset = 0) =>
+            unsettled.filter(row => row.l2ps_uid === uid && row.nonce > nonce).slice(offset, offset + limit),
     },
 }))
 const checkInnerTxBalance = jest.fn(async (..._args: unknown[]): Promise<string | null> => null)
 mock.module("@/libs/l2ps/balanceCheck", () => ({ checkInnerTxBalance }))
-let tipAccounts = new Map<string, { balance: bigint; nonce: bigint }>()
+/** Balance and L2PS nonces per account; the L1 nonce is never read. */
+let tipAccounts = new Map<string, { balance: bigint; l2psNonces: Record<string, number> }>()
 mock.module("@/libs/l2ps/settlement/tipState", () => ({
-    readTipAccounts: async (accounts: Iterable<string>) => {
-        const out = new Map<string, { balance: bigint; nonce: bigint }>()
-        for (const a of accounts) out.set(a, tipAccounts.get(a) ?? { balance: 0n, nonce: 0n })
+    readTipAccounts: async (accounts: Iterable<string>, l2psUid: string) => {
+        const out = new Map<string, { balance: bigint; nonce: bigint; l2psNonces: Record<string, number> }>()
+        for (const a of accounts) {
+            const state = tipAccounts.get(a) ?? { balance: 0n, l2psNonces: {} }
+            out.set(a, { ...state, nonce: BigInt(state.l2psNonces[l2psUid] ?? 0) })
+        }
         return out
     },
 }))
@@ -126,7 +129,7 @@ function decrypted(t: ReturnType<typeof signedTransfer>, mutate?: (inner: any) =
 
 /** Records `t` as already queued here for its sender, as the history holds it. */
 function queued(t: ReturnType<typeof signedTransfer>, uid = UID) {
-    unsettled.push({ l2ps_uid: uid, encrypted_hash: t.txHash, encrypted_payload: { __inner: innerTx(t, uid) } })
+    unsettled.push({ l2ps_uid: uid, nonce: t.nonce, encrypted_hash: t.txHash, encrypted_payload: { __inner: innerTx(t, uid) } })
 }
 
 const transfer = (over: Partial<Parameters<typeof signedTransfer>[0]> = {}) =>
@@ -140,7 +143,7 @@ beforeEach(() => {
     getSharedState.networkFee = 1
     getSharedState.rpcFee = 1
     getSharedState.additionalFee = 1
-    tipAccounts = new Map([[ALICE.account, { balance: 100n * OS, nonce: 4n }]])
+    tipAccounts = new Map([[ALICE.account, { balance: 100n * OS, l2psNonces: { [UID]: 4 } }]])
     unsettled = []
     stranded = new Set()
     check.mockResolvedValue({ admitted: true, count: 1, cap: 50_000, retryAfterMs: 10_000 })
@@ -234,15 +237,21 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(JSON.stringify(response)).toContain("below the native transfer fee")
     })
 
-    it("refuses a nonce the account already spent on L1", async () => {
+    it("refuses a nonce the account already spent in this subnet", async () => {
         decrypted(transfer({ nonce: 4n }))
         const response = await handleL2PS(tx)
         expect(response.result).toBe(400)
         expect(JSON.stringify(response)).toContain("already spent")
     })
 
+    it("judges the nonce by this subnet's L2PS nonce alone, never another subnet's", async () => {
+        tipAccounts.set(ALICE.account, { balance: 100n * OS, l2psNonces: { other_subnet: 40 } })
+        decrypted(transfer({ nonce: 1n }))
+        expect((await handleL2PS(tx)).result).toBe(200)
+    })
+
     it("refuses a sender that cannot pay amount and fee at the tip", async () => {
-        tipAccounts.set(ALICE.account, { balance: 5n * OS + FEE - 1n, nonce: 4n })
+        tipAccounts.set(ALICE.account, { balance: 5n * OS + FEE - 1n, l2psNonces: { [UID]: 4 } })
         decrypted(transfer())
         const response = await handleL2PS(tx)
         expect(response.result).toBe(400)
@@ -261,11 +270,11 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(response.result).toBe(200)
     })
 
-    it("refuses a nonce more than two batches past the account nonce", async () => {
+    it("refuses a nonce more than two batches past the L2PS nonce", async () => {
         decrypted(transfer({ nonce: 4n + MAX_NONCE_AHEAD + 1n }))
         const response = await handleL2PS(tx)
         expect(response.result).toBe(400)
-        expect(JSON.stringify(response)).toContain(`more than ${MAX_NONCE_AHEAD} past the account nonce`)
+        expect(JSON.stringify(response)).toContain(`more than ${MAX_NONCE_AHEAD} past the L2PS nonce`)
         expect(addTransaction).not.toHaveBeenCalled()
 
         decrypted(transfer({ nonce: 4n + MAX_NONCE_AHEAD }))
@@ -280,13 +289,21 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(JSON.stringify(response)).toContain("already queued")
     })
 
-    it("counts the sender's transfers queued in its other subnets, which spend the same L1 nonce and balance", async () => {
+    it("admits a nonce the sender has queued in another subnet, which has a nonce of its own", async () => {
         const OTHER = "other_subnet"
         queued(transfer({ nonce: 5n, amount: 1n, l2psUid: OTHER }), OTHER)
         decrypted(transfer({ nonce: 5n }))
         const response = await handleL2PS(tx)
+        expect(response.result).toBe(200)
+    })
+
+    it("counts the sender's transfers queued in its other subnets against the one L1 balance", async () => {
+        const OTHER = "other_subnet"
+        queued(transfer({ nonce: 1n, amount: 90n * OS, l2psUid: OTHER }), OTHER)
+        decrypted(transfer({ nonce: 5n }))
+        const response = await handleL2PS(tx)
         expect(response.result).toBe(400)
-        expect(JSON.stringify(response)).toContain("already queued")
+        expect(JSON.stringify(response)).toContain("Insufficient balance")
         expect(getL2PS.mock.calls.map(call => call[0])).toContain(OTHER)
     })
 
@@ -337,7 +354,7 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(addTransaction).not.toHaveBeenCalled()
     })
 
-    it("counts no queued transfer whose nonce L1 already spent", async () => {
+    it("counts no queued transfer whose L2PS nonce is already spent", async () => {
         queued(transfer({ nonce: 3n, amount: 90n * OS }))
         decrypted(transfer())
         expect((await handleL2PS(tx)).result).toBe(200)

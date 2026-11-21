@@ -2,6 +2,16 @@
 
 This document describes the current integrated flow for adding Web2 identities (`github`, `discord`, `telegram`) via TLSNotary.
 
+On a network where the `keylessWeb2Identity` fork is active (mainnet, from block 0), GitHub, Discord and Twitter accounts link only through TLSNotary: `web2_identity_assign` with context `github`, `discord` or `twitter` is refused, so validators hold no GitHub, Discord or RapidAPI credentials. Under `tlsnVerified` the node reads the account from the attested response of one endpoint per context, with the request bound to the sender by the `X-Demos-Bind: demos-tlsn:v1:<context>:<sender>:<tlsn_request hash>` header:
+
+| context | request | account read from the response |
+| --- | --- | --- |
+| `github` | `GET https://api.github.com/user` | `login`, numeric `id` |
+| `discord` | `GET https://discord.com/api/users/@me` | `username`, decimal-string `id` |
+| `twitter` (only under `keylessWeb2Identity`) | `GET https://api.x.com/2/users/me` (X OAuth 2.0 user token, done in the user's browser) | `data.username`, decimal-string `data.id` |
+
+Telegram keeps its bot-signed attestation path.
+
 It reflects the behavior implemented in:
 - `src/libs/tlsnotary/verifier.ts`
 - `src/libs/network/routines/transactions/handleIdentityRequest.ts`
@@ -125,6 +135,7 @@ To avoid common failures:
 3. Send `revealedRecv` in payload and ensure wallet-extension forwards it unchanged.
 4. Keep `username`/`userId` from the same revealed response that produced `recvHash`.
 5. Keep reveal ranges large enough to include required JSON fields (`id`, `login`/`username`).
+6. Submit the link right after attesting. On a `tlsnVerified` network the node refuses a presentation attested more than `freshnessWindowSec` (3600 s on mainnet) before the time of the block the transaction lands in, even though the `tlsn_request` token lives 500 blocks (about 83 min at 10 s blocks). The deadline is one hour from the attestation or the token's expiry, whichever comes first. The SDK exports the value as `TLSN_ATTESTATION_MAX_AGE_SECONDS`.
 
 ## 7. Security Notes
 
@@ -145,3 +156,5 @@ Common errors and meaning:
   - Disclosed bytes do not contain parseable fields for that context.
 - `Username mismatch` / `UserId mismatch`
   - Claimed values do not match extracted values from disclosed bytes.
+- `attestation is stale: attested at <t>, more than 3600s before the block time <T>`
+  - The link landed more than `freshnessWindowSec` after the attestation (checklist item 6). Attest again and submit at once.

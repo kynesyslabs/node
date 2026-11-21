@@ -41,6 +41,7 @@ import {
 } from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
+import { createShutdownExitStatus } from "./utilities/shutdownExitStatus"
 import { markSubsystem, subsystemError } from "./utilities/subsystemRegistry"
 import {
     fastSync,
@@ -54,6 +55,7 @@ import { checkClockAtBoot, startClockProbe } from "./libs/utils/clockProbe"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { ensureNftGatingReady } from "./features/staking/boot"
 import { ensureValidatorSetSnapshot } from "./libs/blockchain/finality/validatorSet"
 import { pruneStorageHistory } from "./libs/blockchain/finality/storageHistory"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
@@ -62,7 +64,10 @@ import {
     holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
 } from "./libs/identity/signingRecord"
-import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
+import {
+    armRestartSigningFloor,
+    waitForRestartSigningFloor,
+} from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -651,6 +656,7 @@ async function preMainLoop() {
             )
         }
         await ensureValidatorSeed(genesisData)
+        await ensureNftGatingReady()
         // Committee selection under finalityProofs reads the set from here
         await ensureValidatorSetSnapshot(await Chain.getLastBlockNumber())
         await pruneStorageHistory(await Chain.getLastBlockNumber())
@@ -695,6 +701,9 @@ async function preMainLoop() {
     if (!l2psOff()) {
         await loadL2PSNetworks()
     }
+
+    // Peers start a round as soon as they see this node.
+    await waitForRestartSigningFloor(getNetworkTimestamp)
 
     await startInboundServers()
 
@@ -1218,20 +1227,35 @@ async function main() {
                     log.warning(msg)
                 }
             } catch (error) {
-                log.error(
-                    "[TLSNotary] Failed to start TLSNotary service: " + error,
-                )
-                bootTracker.fail("tlsnotary", error)
-                subsystemError(getSharedState.subsystems, "tlsnotary", error)
-                const { isTLSNotaryFatal } =
-                    await import("./features/tlsnotary")
-                if (isTLSNotaryFatal()) {
-                    log.error(
-                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                const tlsnotary = await import("./features/tlsnotary")
+                if (error instanceof tlsnotary.NotaryUnreachableError) {
+                    // requestTLSNproxy needs only TLSNOTARY_ENABLED: a node
+                    // that relays for the network's notary hosts none itself
+                    log.warning(
+                        `[TLSNotary] Relay only: ${error.message}. This node serves requestTLSNproxy ` +
+                            "sessions; provers notarize at the network's notary. To host a notary on this " +
+                            "node, start it (docker compose profile tlsnotary); TLSNOTARY_FATAL=true " +
+                            "makes a missing notary stop the node.",
                     )
-                    process.exit(1)
+                    bootTracker.ready("tlsnotary")
+                    markSubsystem(getSharedState.subsystems, "tlsnotary", "ready", {
+                        enabled: true,
+                        extra: { mode: "relay-only", notary: error.message },
+                    })
+                } else {
+                    log.error(
+                        "[TLSNotary] Failed to start TLSNotary service: " + error,
+                    )
+                    bootTracker.fail("tlsnotary", error)
+                    subsystemError(getSharedState.subsystems, "tlsnotary", error)
+                    if (tlsnotary.isTLSNotaryFatal()) {
+                        log.error(
+                            "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                        )
+                        process.exit(1)
+                    }
+                    // Continue without TLSNotary (failsafe)
                 }
-                // Continue without TLSNotary (failsafe)
             }
         } else {
             log.info(
@@ -1495,8 +1519,11 @@ async function shutdownStep(
     }
 }
 
+const shutdownExitStatus = createShutdownExitStatus()
+
 // Graceful shutdown handler
 export async function gracefulShutdown(signal: string, exitCode = 0) {
+    shutdownExitStatus.request(exitCode)
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
     if (getSharedState.isShuttingDown) {
         return
@@ -1507,9 +1534,8 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
 
     log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
 
-    // A block apply writes GCR state and then inserts the block in separate
-    // commits; exiting between them leaves state ahead of the chain. Let the
-    // block in flight finish before anything else is torn down.
+    // An apply that has not reached its insert refuses it; one already
+    // inserting finishes, and the drain waits for it.
     const BLOCK_APPLY_DRAIN_MS = 30_000
     let drainTimer: ReturnType<typeof setTimeout> | null = null
     const drained = await Promise.race([
@@ -1525,10 +1551,10 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
         )
     }
 
-    // Force exit after 10 seconds if graceful shutdown hangs
+    // Force exit after 3 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
         log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
-        process.exit(exitCode)
+        process.exit(shutdownExitStatus.code)
     }, 3_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
@@ -1665,14 +1691,14 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
 
         log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
-        process.exit(exitCode)
+        process.exit(shutdownExitStatus.code)
     } catch (error) {
         handleError(error, "CORE", {
             source: ErrorSource.GRACEFUL_SHUTDOWN,
             fatal: true,
         })
         clearTimeout(forceExitTimeout)
-        process.exit(exitCode === 0 ? 1 : exitCode)
+        process.exit(shutdownExitStatus.code || 1)
     }
 }
 

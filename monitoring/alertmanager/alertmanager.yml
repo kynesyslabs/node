@@ -86,3 +86,18 @@ receivers:
     webhook_configs:
       - url_file: /run/secrets/deadman_webhook
         send_resolved: false
+  # Optional Telegram receiver (for example a test alert channel before Slack is set up). Point
+  # `receiver:` of the routes above at it. The bot token is read from a file like the webhooks;
+  # chat_id must be an integer in the file itself, so render it into a deployment copy of this
+  # file instead of committing it. parse_mode "" sends plain text, because annotations may hold
+  # characters that Telegram's HTML mode rejects.
+  # - name: telegram
+  #   telegram_configs:
+  #     - bot_token_file: /run/secrets/telegram_bot_token
+  #       chat_id: <TELEGRAM_CHAT_ID_PLACEHOLDER>
+  #       send_resolved: true
+  #       parse_mode: ""
+  #       message: |-
+  #         [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})
+  #         {{ range .Alerts }}{{ .Labels.instance }}: {{ .Annotations.summary }}
+  #         {{ end }}

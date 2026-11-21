@@ -1,5 +1,6 @@
 import Chain from "../../blockchain/chain"
 import { hashGenesisData } from "../../blockchain/genesis/normalizeGenesisForHash"
+import { asGenesisBlockContent } from "../../blockchain/genesis/genesisBlockContent"
 import getPreviousHashFromBlockNumber from "../routines/nodecalls/getPreviousHashFromBlockNumber"
 import getPreviousHashFromBlockHash from "../routines/nodecalls/getPreviousHashFromBlockHash"
 import getBlockHeaderByNumber from "../routines/nodecalls/getBlockHeaderByNumber"
@@ -27,7 +28,8 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
             let genesisData =
-                genesisBlock.content.extra?.genesisData || null
+                asGenesisBlockContent(genesisBlock.content).extra
+                    ?.genesisData || null
 
             if (typeof genesisData === "string") {
                 genesisData = JSON.parse(genesisData)

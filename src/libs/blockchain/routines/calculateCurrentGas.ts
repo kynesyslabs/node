@@ -1,5 +1,4 @@
 import { getSharedState } from "src/utilities/sharedState"
-import sizeOf from "src/utilities/sizeOf"
 
 import Chain from "../chain"
 import GCR from "../gcr/gcr"
@@ -68,12 +67,11 @@ async function dynamicSurgeMultiplier(): Promise<number> {
 export async function calculateFeeBreakdown(
     payload: unknown,
 ): Promise<FeeBreakdown> {
-    const payloadSize = sizeOf(payload)
-    void payloadSize
     const surge = await dynamicSurgeMultiplier()
 
-    // Today (flat-fee era): payloadSize does not multiply in. When surge
-    // pricing comes back, multiply each component by `payloadSize` here.
+    // Flat-fee era: the payload's size does not multiply in, so the payload
+    // is not walked; sizing an arbitrary client object costs time on every
+    // fee quote. When surge pricing comes back, size it here.
     const network_fee = getSharedState.networkFee * surge
     const rpc_fee = getSharedState.rpcFee * surge
     // DEM-665 (PR #817 Greptile P1): read additional_fee from shared
@@ -133,10 +131,7 @@ async function calculateComposedGas(): Promise<number> {
 export default async function calculateCurrentGas(
     payload: unknown,
 ): Promise<number> {
-    const payloadSize = sizeOf(payload)
-    void payloadSize
-    // Today: flat-fee-only — payload size does not affect cost. When
-    // surge pricing comes back, multiply by payloadSize here (or fold
-    // it into calculateComposedGas).
+    // Flat-fee era: the payload's size does not affect the cost, so the
+    // payload is not walked (see calculateFeeBreakdown).
     return calculateComposedGas()
 }
