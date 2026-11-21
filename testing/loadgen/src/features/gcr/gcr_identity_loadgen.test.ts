@@ -14,6 +14,8 @@ import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { ConfirmError, RateLimitError, normalizeLoadgenError } from "../../framework/errors"
 import {
   IDENTITY_CONFIRMS_PER_BLOCK,
+  countStepFailure,
+  errorRateOf,
   resolveWorkerCount,
   retryOnRateLimit,
   submitPqcTx,
@@ -167,6 +169,23 @@ async function until(check: () => boolean, timeoutMs = 5000) {
 }
 
 const OWNER = "0x" + "11".repeat(32)
+
+function freshCounters(): LoadgenCounters {
+  return {
+    startedAtMs: 0,
+    endedAtMs: 0,
+    total: 0,
+    ok: 0,
+    confirmError: 0,
+    broadcastError: 0,
+    validationError: 0,
+    networkError: 0,
+    rateLimited: 0,
+    rateLimitedAtDeadline: 0,
+    rateLimitRetries: 0,
+    cleanupError: 0,
+  }
+}
 const identity = (i: number) => "0x" + i.toString(16).padStart(64, "0")
 
 describe("identity confirm 429", () => {
@@ -304,6 +323,46 @@ describe("identity confirm 429", () => {
     expect(counters.rateLimitRetries).toBe(1)
     expect(fake.rejected).toEqual([1, 1])
     expect(fake.accepted).toEqual([1, 1, 1, 1])
+  })
+
+  it("a 429 that ends a worker's step after the run deadline is counted apart and is not an error", async () => {
+    node = startFakeNode()
+    const fake = node
+    const demos = await demosWithSdkTransport(fake.url)
+    const counters = freshCounters()
+    for (let i = 0; i < IDENTITY_CONFIRMS_PER_BLOCK; i++) {
+      counters.total++
+      await addStep(demos, i)()
+      counters.ok++
+    }
+
+    // A fifth step in the same block is refused. The run ends while it waits
+    // for a block that never comes, so its 429 reaches the worker after the deadline.
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
+    const stopAtMs = Date.now() + 300
+    const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop: { value: false }, stopAtMs })
+    counters.total++
+    const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(RateLimitError)
+    expect(Date.now()).toBeGreaterThanOrEqual(stopAtMs)
+
+    expect(countStepFailure(counters, error, stopAtMs)).toBe("rateLimitedAtDeadline")
+    expect(counters.rateLimitedAtDeadline).toBe(1)
+    expect(counters.rateLimited).toBe(0)
+    // The unfinished step stays in total but does not raise the error rate.
+    expect(counters.total).toBe(5)
+    expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 0 })
+  })
+
+  it("a 429 that ends a step before the run deadline is still an error", () => {
+    const counters = freshCounters()
+    counters.total = 2
+    counters.ok = 1
+    const error = new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)")
+    expect(countStepFailure(counters, error, Date.now() + 60_000)).toBe("rateLimited")
+    expect(counters.rateLimited).toBe(1)
+    expect(counters.rateLimitedAtDeadline).toBe(0)
+    expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
   })
 
   it("waitForNextBlock returns once the block moves, and false when it does not", async () => {

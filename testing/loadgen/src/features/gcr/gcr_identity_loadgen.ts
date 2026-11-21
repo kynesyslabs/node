@@ -46,6 +46,11 @@ export type LoadgenCounters = {
   validationError: number
   networkError: number
   rateLimited: number
+  /**
+   * Steps a 429 left unfinished at the run deadline (the retry stops waiting
+   * for the next block there). Counted in total, but not errors.
+   */
+  rateLimitedAtDeadline: number
   /** HTTP 429 answers that were waited out (next block) and retried; not errors. */
   rateLimitRetries: number
   cleanupError: number
@@ -130,8 +135,12 @@ export const IDENTITY_CONFIRMS_PER_BLOCK = 4
 /**
  * How many workers to start. Each worker sends at most one identity confirm per
  * block (every add and remove waits for the next block to show it), and workers
- * are spread round-robin over the targets, so up to 4 workers per target stays
- * within the node's cap. The default is that cap, and no more than one worker
+ * are spread round-robin over the targets, so up to 4 workers per target
+ * normally stays within the node's cap. A 429 can still occur when the node's
+ * limiter has not yet seen the new block: the limiter counts per shared-state
+ * lastBlockNumber, while a worker moves on once the stored chain shows the block
+ * (its identity change, or getLastBlockNumber after a 429). That 429 is retried
+ * (retryOnRateLimit). The default is that cap, and no more than one worker
  * per wallet (workers sharing a wallet race on its nonce). An explicit
  * CONCURRENCY wins (see workerCountWarnings).
  */
@@ -227,6 +236,32 @@ function classifyFailure(error: unknown): keyof Pick<LoadgenCounters, "confirmEr
     default:
       return "networkError"
   }
+}
+
+/**
+ * Counts a worker step that failed. A 429 that ends the step once the run
+ * deadline has passed goes to rateLimitedAtDeadline, not rateLimited: the
+ * worker's retry stops waiting for the next block at the deadline, so the node
+ * did not refuse the step for good, the run just ended before the retry. The
+ * step stays in total as unfinished, and errorRateOf leaves it out.
+ */
+export function countStepFailure(counters: LoadgenCounters, error: unknown, stopAtMs: number) {
+  const classified = classifyFailure(error)
+  const bucket = classified === "rateLimited" && nowMs() >= stopAtMs ? "rateLimitedAtDeadline" : classified
+  counters[bucket]++
+  return bucket
+}
+
+/** Errors over all steps, checked against MAX_ERROR_RATE. rateLimitedAtDeadline is not an error. */
+export function errorRateOf(counters: LoadgenCounters): { errorCount: number; errorRate: number } {
+  const errorCount =
+    counters.confirmError +
+    counters.broadcastError +
+    counters.validationError +
+    counters.networkError +
+    counters.rateLimited +
+    counters.cleanupError
+  return { errorCount, errorRate: counters.total > 0 ? errorCount / counters.total : 1 }
 }
 
 function parseMaybeJson(value: any): any {
@@ -619,9 +654,11 @@ async function worker(params: {
       const elapsed = performance.now() - started
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
-      const bucket = classifyFailure(error)
-      params.counters[bucket]++
-      pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
+      const bucket = countStepFailure(params.counters, error, params.stopAtMs)
+      if (bucket !== "rateLimitedAtDeadline") {
+        pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
+      }
+      // A 429 before the deadline still ends the run here when STOP_ON_RATE_LIMIT is set.
       if (bucket === "rateLimited" && params.cfg.stopOnRateLimit) {
         params.sharedStop.value = true
       }
@@ -695,6 +732,7 @@ export async function runGcrIdentityLoadgen() {
     validationError: 0,
     networkError: 0,
     rateLimited: 0,
+    rateLimitedAtDeadline: 0,
     rateLimitRetries: 0,
     cleanupError: 0,
   }
@@ -871,14 +909,7 @@ export async function runGcrIdentityLoadgen() {
   }
 
   const elapsedSec = Math.max(0.001, (counters.endedAtMs - counters.startedAtMs) / 1000)
-  const errorCount =
-    counters.confirmError +
-    counters.broadcastError +
-    counters.validationError +
-    counters.networkError +
-    counters.rateLimited +
-    counters.cleanupError
-  const errorRate = counters.total > 0 ? errorCount / counters.total : 1
+  const { errorCount, errorRate } = errorRateOf(counters)
   const leakedIdentities = finalChecks.flatMap(check => check.stillPresent)
   const sampleCodeCounts = errorSamples.reduce<Record<string, number>>((acc, sample) => {
     const key = sample.code ?? "UNKNOWN"
