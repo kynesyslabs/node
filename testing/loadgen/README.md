@@ -87,12 +87,14 @@ Current registry includes families such as:
 
 A node allows **4 identity confirms per block from one source address** (`RATE_LIMIT_TX_PER_BLOCK` in `src/utilities/constants.ts`, enforced in `src/libs/network/rpcRateLimit.ts`). It answers any further confirm in that block with HTTP 429. Every worker in one loadgen process shares one source address, so the cap applies to the process as a whole on each target node.
 
-`gcr_identity_loadgen` normally stays within this cap by default. A 429 can still occur when the node's limiter has not yet seen the new block (it counts per the node's shared-state block number, which can lag the stored chain head the loadgen waits on); that 429 is retried as described below.
+`gcr_identity_loadgen` normally stays within this cap:
 
 - it starts 4 workers per distinct node in `TARGETS` (a URL listed twice counts once, but two different URLs for the same node, for example `localhost` and `127.0.0.1`, count as two; and no more workers than there are wallets); an explicit `CONCURRENCY` still wins, with a warning when it is above that number;
-- a 429 is treated as back-pressure: the worker waits for the next block on that target and retries the same step, up to `RATE_LIMIT_MAX_RETRIES` blocks (default 10). Retries are counted as `counters.rateLimitRetries` in the summary and are not errors. A step that a 429 leaves unfinished when the run ends (retries stop at the deadline) is counted as `counters.rateLimitedAtDeadline`, next to `counters.rateLimited`; it stays in `counters.total` but is not an error and does not count towards `MAX_ERROR_RATE`. It is listed as `rate_limit` in `operatorSummary.primaryIssues`, and a run with no successful step fails even when its error rate is 0 (for example when every step ends in a 429 at the deadline);
-- only an HTTP 429 is retried this way. Other rate-limit errors, including an "IP blocked" message without an HTTP 429, end the step at once and count in `counters.rateLimited`;
-- `STOP_ON_RATE_LIMIT=true` brings back the old behaviour, where the first 429 ends the run (the default is now `false`).
+- it treats a 429 as back-pressure: the worker waits for the next block on that target and retries the same step, up to `RATE_LIMIT_MAX_RETRIES` blocks (default 10). Retries are counted as `counters.rateLimitRetries` in the summary and are not errors. A step that a 429 leaves unfinished when the run ends (retries stop at the deadline) is counted as `counters.rateLimitedAtDeadline`, next to `counters.rateLimited`; it stays in `counters.total` but is not an error and does not count towards `MAX_ERROR_RATE`. It is listed as `rate_limit` in `operatorSummary.primaryIssues`, and a run with no successful step fails even when its error rate is 0 (for example when every step ends in a 429 at the deadline);
+- it retries only an HTTP 429 this way. Other rate-limit errors, including an "IP blocked" message without an HTTP 429, end the step at once and count in `counters.rateLimited`;
+- it ends the run at the first 429 only with `STOP_ON_RATE_LIMIT=true`, the old behaviour (the default is now `false`).
+
+A 429 can still occur when the node's limiter has not yet seen the new block (it counts per the node's shared-state block number, which can lag the stored chain head the loadgen waits on); that 429 is retried as described above.
 
 To push more identity load than 4 confirms per block, use:
 
