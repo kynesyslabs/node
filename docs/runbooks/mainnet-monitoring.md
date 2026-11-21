@@ -352,8 +352,9 @@ blocks stop (the node's own queries succeed between restarts).
 
 When `DbDown` fires, on the validator:
 
-1. Read the error in the `[DB] Postgres probe failed` log line. `ECONNREFUSED`
-   or `ENOTFOUND`: Postgres is not running, or `PG_HOST` / `PG_PORT` are wrong.
+1. Read the error in the `[DB] Postgres probe failed` log line. `ECONNREFUSED`,
+   `ENOTFOUND` or `EAI_AGAIN`: Postgres is not running, or `PG_HOST` /
+   `PG_PORT` are wrong.
    `no answer within 5000 ms`: Postgres, or the network path to it, hangs, or
    the node's own connection pool is fully in use. Check the node's connections
    in `pg_stat_activity` before you restart Postgres.
