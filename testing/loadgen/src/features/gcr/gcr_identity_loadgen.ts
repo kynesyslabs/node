@@ -15,6 +15,8 @@ import {
 
 export type LoadgenConfig = {
   rpcUrls: string[]
+  /** rpcUrls without repeats (first occurrence kept): workers are spread over it and the cap counts it. */
+  targetUrls: string[]
   wallets: string[]
   durationSec: number
   concurrency: number
@@ -158,7 +160,7 @@ export const IDENTITY_CONFIRMS_PER_BLOCK = 4
 /**
  * How many workers to start. Each worker sends at most one identity confirm per
  * block (every add and remove waits for the next block to show it), and workers
- * are spread round-robin over the targets, so up to 4 workers per target
+ * are spread round-robin over the distinct targets, so up to 4 workers per target
  * normally stays within the node's cap. A 429 can still occur when the node's
  * limiter has not yet seen the new block: the limiter counts per shared-state
  * lastBlockNumber, while a worker moves on once the stored chain shows the block
@@ -178,9 +180,17 @@ export function resolveWorkerCount(params: {
   return { workers: Math.max(1, parsed), cap }
 }
 
-/** Distinct nodes in TARGETS: a repeated URL is the same node with the same cap. */
-function distinctTargetCount(rpcUrls: string[]): number {
-  return new Set(rpcUrls.map(normalizeRpcUrl)).size
+/**
+ * Distinct nodes in TARGETS, in order with the first occurrence kept: a
+ * repeated URL is the same node with the same cap.
+ */
+function distinctTargets(rpcUrls: string[]): string[] {
+  return [...new Set(rpcUrls.map(normalizeRpcUrl))]
+}
+
+/** The node worker `idx` sends to: round-robin over the distinct targets. */
+export function workerRpcUrl(cfg: Pick<LoadgenConfig, "targetUrls">, idx: number): string {
+  return cfg.targetUrls[idx % cfg.targetUrls.length]!
 }
 
 /**
@@ -191,7 +201,7 @@ export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "wo
   const warnings: string[] = []
   if (cfg.concurrency > cfg.workerCap) {
     warnings.push(
-      `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, distinctTargetCount(cfg.rpcUrls))} target(s) from one source address). ` +
+      `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, distinctTargets(cfg.rpcUrls).length)} target(s) from one source address). ` +
         "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry.",
     )
   }
@@ -204,15 +214,17 @@ export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "wo
 }
 
 export function getConfig(wallets: string[]): LoadgenConfig {
-  // rpcUrls stays as given: workers are spread round-robin over it.
+  // rpcUrls stays as given; workers are spread over targetUrls (see workerRpcUrl).
   const rpcUrls = getTokenTargets().map(normalizeRpcUrl)
+  const targetUrls = distinctTargets(rpcUrls)
   const workerCount = resolveWorkerCount({
     requested: process.env.CONCURRENCY,
-    targetCount: distinctTargetCount(rpcUrls),
+    targetCount: targetUrls.length,
     walletCount: wallets.length,
   })
   const config: LoadgenConfig = {
     rpcUrls,
+    targetUrls,
     wallets,
     durationSec: envInt("DURATION_SEC", 30),
     concurrency: workerCount.workers,
@@ -986,7 +998,7 @@ export async function runGcrIdentityLoadgen() {
   const workers = Array.from({ length: workerCount }, (_, idx) =>
     worker({
       workerId: idx,
-      rpcUrl: cfg.rpcUrls[idx % cfg.rpcUrls.length]!,
+      rpcUrl: workerRpcUrl(cfg, idx),
       walletMnemonic: cfg.wallets[idx % cfg.wallets.length]!,
       stopAtMs,
       algorithm: cfg.algorithm,

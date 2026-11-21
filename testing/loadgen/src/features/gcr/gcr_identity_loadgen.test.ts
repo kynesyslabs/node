@@ -31,6 +31,7 @@ import {
   waitForNextBlock,
   workerCountWarnings,
   workerRateLimitRetry,
+  workerRpcUrl,
   type LoadgenConfig,
   type LoadgenCounters,
   type RateLimitRetry,
@@ -121,8 +122,34 @@ describe("getConfig", () => {
     expect(single.workerCap).toBe(4)
     expect(twice.workerCap).toBe(single.workerCap)
     expect(twice.concurrency).toBe(single.concurrency)
-    // rpcUrls stays as given: workers are spread round-robin over it.
+    // rpcUrls stays as given; workers are spread over the distinct targets.
     expect(twice.rpcUrls).toEqual(["http://node0:53550/", "http://node0:53550/"])
+    expect(twice.targetUrls).toEqual(["http://node0:53550/"])
+  })
+
+  const workersPerNode = (cfg: LoadgenConfig) => {
+    const counts: Record<string, number> = {}
+    for (let idx = 0; idx < cfg.concurrency; idx++) {
+      const url = workerRpcUrl(cfg, idx)
+      counts[url] = (counts[url] ?? 0) + 1
+    }
+    return counts
+  }
+
+  it("spreads the default workers evenly over the distinct targets", () => {
+    const wallets = Array.from({ length: 20 }, (_, i) => `wallet ${i}`)
+    delete process.env.CONCURRENCY
+    process.env.TARGETS = "http://a:1,http://a:1,http://b:1"
+    const cfg = getConfig(wallets)
+
+    expect(cfg.workerCap).toBe(8)
+    expect(cfg.concurrency).toBe(8)
+    expect(cfg.targetUrls).toEqual(["http://a:1/", "http://b:1/"])
+    // Round-robin over rpcUrls as given would put 6 workers on a and 2 on b.
+    expect(workersPerNode(cfg)).toEqual({ "http://a:1/": 4, "http://b:1/": 4 })
+
+    process.env.TARGETS = "http://a:1,http://b:1"
+    expect(workersPerNode(getConfig(wallets))).toEqual({ "http://a:1/": 4, "http://b:1/": 4 })
   })
 })
 
