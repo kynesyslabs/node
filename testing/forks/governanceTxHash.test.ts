@@ -2,15 +2,17 @@
  * kynesyslabs/node#941: a governance propose signed by the SDK was refused at
  * confirm with "Transaction hash mismatch". The node now derives the hash of
  * post-osDenomination content with the SDK's own serializer
- * (src/libs/crypto/txContentSerializer.ts), so the two cannot disagree on a
- * governance transaction.
+ * (src/libs/crypto/txContentSerializer.ts), so at the same SDK version and the
+ * same osDenomination state the two cannot disagree on a governance
+ * transaction's hash.
  *
- * This pins that end to end on the node side: a propose and a vote are built
- * and signed by the real SDK builders (proposeNetworkUpgrade, voteOnUpgrade),
- * with the payload reported in the issue, and must pass the RPC coherence
- * check (Transaction.checkCoherence) and the mempool admission check
+ * This pins that on the node side: a propose and a vote are built and signed
+ * by the real SDK builders (proposeNetworkUpgrade, voteOnUpgrade), with the
+ * payload reported in the issue, and must pass the RPC hash check
+ * (Transaction.checkCoherence) and the mempool hash and signature check
  * (validateTx) with osDenomination on and off. A propose edited after signing
- * must be refused. Only the SDK's network lookups are stubbed.
+ * must be refused. Only the SDK's network lookups are stubbed. These six cases
+ * do not run the edit checks or the governance gate.
  */
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
 
@@ -74,7 +76,8 @@ async function sdkSigner(osDenomination: boolean): Promise<Demos> {
     return demos
 }
 
-function admit(tx: Transaction, osDenomination: boolean) {
+/** The RPC hash check, and the mempool hash and signature check. */
+function hashChecks(tx: Transaction, osDenomination: boolean) {
     const height = osDenomination ? OS_DENOMINATION_HEIGHT : PRE_FORK_HEIGHT
     return {
         rpc: TransactionClass.checkCoherence(tx, height),
@@ -85,7 +88,7 @@ function admit(tx: Transaction, osDenomination: boolean) {
     }
 }
 
-describe("#941: SDK-signed governance transactions pass node admission", () => {
+describe("#941: SDK-signed governance transactions hash and verify on the node", () => {
     let snapshot: ForkConfigByName
     beforeEach(() => {
         snapshot = getSharedState.forkConfig
@@ -100,7 +103,7 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
     for (const osDenomination of [true, false]) {
         const label = `osDenomination ${osDenomination ? "on" : "off"}`
 
-        it(`${label}: a propose with the issue's payload is coherent and admitted`, async () => {
+        it(`${label}: a propose with the issue's payload passes the RPC hash check and the mempool hash and signature check`, async () => {
             const demos = await sdkSigner(osDenomination)
             const tx = (await DemosTransactions.proposeNetworkUpgrade(
                 ISSUE_PROPOSAL,
@@ -115,12 +118,12 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
                 osDenomination ? "1000000000" : 1,
             )
 
-            const { rpc, mempool } = admit(tx, osDenomination)
+            const { rpc, mempool } = hashChecks(tx, osDenomination)
             expect(rpc).toEqual({ coherent: true })
             expect(await mempool).toEqual({ hash: tx.hash, valid: true })
         })
 
-        it(`${label}: a vote is coherent and admitted`, async () => {
+        it(`${label}: a vote passes the RPC hash check and the mempool hash and signature check`, async () => {
             const demos = await sdkSigner(osDenomination)
             const tx = (await DemosTransactions.voteOnUpgrade(
                 ISSUE_PROPOSAL.proposalId,
@@ -130,7 +133,7 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
             )) as Transaction
 
             expect(tx.content.type).toBe("networkUpgradeVote")
-            const { rpc, mempool } = admit(tx, osDenomination)
+            const { rpc, mempool } = hashChecks(tx, osDenomination)
             expect(rpc).toEqual({ coherent: true })
             expect(await mempool).toEqual({ hash: tx.hash, valid: true })
         })
@@ -145,7 +148,7 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
             const payload = (tx.content.data as [string, { effectiveAtBlock: number }])[1]
             payload.effectiveAtBlock += 1
 
-            const { rpc, mempool } = admit(tx, osDenomination)
+            const { rpc, mempool } = hashChecks(tx, osDenomination)
             expect(rpc).toEqual({
                 coherent: false,
                 reason: "Transaction hash mismatch",
@@ -159,7 +162,7 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
                 tx,
                 osDenomination ? OS_DENOMINATION_HEIGHT : PRE_FORK_HEIGHT,
             )
-            const rehashed = admit(tx, osDenomination)
+            const rehashed = hashChecks(tx, osDenomination)
             expect(rehashed.rpc).toEqual({ coherent: true })
             expect((await rehashed.mempool).reason).toBe(
                 "Transaction signature verification failed",
@@ -201,7 +204,7 @@ describe("#941: SDK-signed governance transactions pass node admission", () => {
         // A number here is OS at apply, so this is not the same value.
         fee.amount = 1
 
-        const { rpc, mempool } = admit(tx, true)
+        const { rpc, mempool } = hashChecks(tx, true)
         expect(rpc).toEqual({ coherent: true })
         expect(await mempool).toEqual({ hash: tx.hash, valid: true })
 
