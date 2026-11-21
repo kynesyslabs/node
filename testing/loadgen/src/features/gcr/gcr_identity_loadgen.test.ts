@@ -19,9 +19,11 @@ import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { ConfirmError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import {
   IDENTITY_CONFIRMS_PER_BLOCK,
+  cleanupWorkerIdentities,
   countStepFailure,
   errorRateOf,
   getConfig,
+  http429LimiterOf,
   resolveWorkerCount,
   retryOnRateLimit,
   runVerdict,
@@ -136,8 +138,18 @@ type FakeNode = {
   stop: () => void
 }
 
-/** One node, one client address. Blocks advance only when the test says so. */
-function startFakeNode(): FakeNode {
+/**
+ * The general limiter's 429 for a blocked address (rateLimiter.ts
+ * blockedResponse): a Retry-After header and a numeric body retryAfter. Each
+ * can be left out to check that either one marks it.
+ */
+type IpBlockReply = { retryAfterHeader: string | null; retryAfter: number | null }
+
+/**
+ * One node, one client address. Blocks advance only when the test says so.
+ * With ipBlock, every identity confirm gets the general limiter's 429 instead.
+ */
+function startFakeNode(ipBlock?: IpBlockReply): FakeNode {
   let block = 1
   let countedBlock = -1
   let countInBlock = 0
@@ -154,6 +166,12 @@ function startFakeNode(): FakeNode {
       const body: any = await req.json()
       const param = body?.params?.[0]
       if (body?.method === "execute" && param?.extra === "confirmTx" && param?.data?.content?.data?.[0] === "identity") {
+        if (ipBlock) {
+          node.rejected.push(block)
+          const headers: Record<string, string> = { "Content-Type": "application/json" }
+          if (ipBlock.retryAfterHeader !== null) headers["Retry-After"] = ipBlock.retryAfterHeader
+          return new Response(JSON.stringify({ error: "Rate limit exceeded", retryAfter: ipBlock.retryAfter }), { status: 429, headers })
+        }
         // Same rule as handleIdentityTxRateLimit: count, then refuse past the cap.
         if (countedBlock === block) countInBlock++
         else {
@@ -162,7 +180,8 @@ function startFakeNode(): FakeNode {
         }
         if (countInBlock > IDENTITY_CONFIRMS_PER_BLOCK) {
           node.rejected.push(block)
-          return Response.json({ error: "Rate limit exceeded", retryAfter: null }, { status: 429 })
+          // The cap's reply as rpcRateLimit.ts sends it: no Retry-After header, no content type.
+          return new Response(JSON.stringify({ error: "Rate limit exceeded", retryAfter: null }), { status: 429 })
         }
         node.accepted.push(block)
         return Response.json({ result: 200, response: { data: { valid: true } }, require_reply: false, extra: null })
@@ -227,7 +246,12 @@ function freshCounters(): LoadgenCounters {
 const identity = (i: number) => "0x" + i.toString(16).padStart(64, "0")
 /** The error submitPqcTx throws for the per-block cap's HTTP 429. */
 const http429 = () =>
-  new RateLimitError("confirm (add): node answered HTTP 429 (Rate limit exceeded)", { operation: "add", status: 429, httpStatus: 429 })
+  new RateLimitError("confirm (add): node answered HTTP 429 (rate limit)", {
+    operation: "add",
+    status: 429,
+    httpStatus: 429,
+    limiter: "identity_cap",
+  })
 /** A rate-limit error from the node's text, with no HTTP 429 (loadgenErrorFromMessage). */
 const ipBlocked = () => loadgenErrorFromMessage("confirm failed (add): IP blocked due to rate limiting", { operation: "add" })
 
@@ -424,7 +448,7 @@ describe("identity confirm 429", () => {
     expect(error).toBeInstanceOf(RateLimitError)
     expect(Date.now()).toBeGreaterThanOrEqual(stopAtMs)
 
-    expect(countStepFailure(counters, error, stopAtMs)).toBe("rateLimitedAtDeadline")
+    expect(countStepFailure(counters, error, stopAtMs, cfg.stopOnRateLimit)).toBe("rateLimitedAtDeadline")
     expect(counters.rateLimitedAtDeadline).toBe(1)
     expect(counters.rateLimited).toBe(0)
     // The unfinished step stays in total but does not raise the error rate.
@@ -436,7 +460,18 @@ describe("identity confirm 429", () => {
     const counters = freshCounters()
     counters.total = 2
     counters.ok = 1
-    expect(countStepFailure(counters, http429(), Date.now() + 60_000)).toBe("rateLimited")
+    expect(countStepFailure(counters, http429(), Date.now() + 60_000, false)).toBe("rateLimited")
+    expect(counters.rateLimited).toBe(1)
+    expect(counters.rateLimitedAtDeadline).toBe(0)
+    expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
+  })
+
+  it("with stopOnRateLimit, a 429 at the run deadline is still an error", () => {
+    // No retries then, so the 429 refused the step, it did not just outlast the run.
+    const counters = freshCounters()
+    counters.total = 2
+    counters.ok = 1
+    expect(countStepFailure(counters, http429(), Date.now() - 1, true)).toBe("rateLimited")
     expect(counters.rateLimited).toBe(1)
     expect(counters.rateLimitedAtDeadline).toBe(0)
     expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
@@ -469,11 +504,80 @@ describe("identity confirm 429", () => {
     expect(waits).toBe(0)
   })
 
+  it.each([
+    { label: "a Retry-After header and body retryAfter", ipBlock: { retryAfterHeader: "30", retryAfter: 30 } },
+    { label: "a Retry-After header", ipBlock: { retryAfterHeader: "30", retryAfter: null } },
+    { label: "body retryAfter", ipBlock: { retryAfterHeader: null, retryAfter: 30 } },
+  ])("does not retry the general limiter's HTTP 429 with $label", async ({ ipBlock }) => {
+    node = startFakeNode(ipBlock)
+    const fake = node
+    const demos = await demosWithSdkTransport(fake.url)
+    let attempts = 0
+    let waits = 0
+    const error = await retryOnRateLimit(() => {
+      attempts++
+      return addStep(demos, 0)()
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => false,
+      waitForNextBlock: async () => {
+        waits++
+        fake.nextBlock()
+      },
+      onRetry: () => {},
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(RateLimitError)
+    expect(normalizeLoadgenError(error).context).toMatchObject({ httpStatus: 429, limiter: "ip_block" })
+    expect(attempts).toBe(1)
+    expect(waits).toBe(0)
+    expect(fake.rejected).toEqual([1])
+    // Not retried, so it is an error even at the run deadline.
+    const counters = freshCounters()
+    expect(countStepFailure(counters, error, Date.now() - 1, false)).toBe("rateLimited")
+  })
+
+  it("retries the identity confirm cap's HTTP 429 (no Retry-After, body retryAfter null)", async () => {
+    node = startFakeNode()
+    const fake = node
+    const demos = await demosWithSdkTransport(fake.url)
+    for (let i = 0; i < IDENTITY_CONFIRMS_PER_BLOCK; i++) await addStep(demos, i)()
+
+    const refused = await addStep(demos, 98)().catch((caught: unknown) => caught)
+    expect(normalizeLoadgenError(refused).context).toMatchObject({ httpStatus: 429, limiter: "identity_cap" })
+
+    let attempts = 0
+    await retryOnRateLimit(() => {
+      attempts++
+      return addStep(demos, 99)()
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => false,
+      waitForNextBlock: async () => {
+        fake.nextBlock()
+      },
+      onRetry: () => {},
+    })
+    expect(attempts).toBe(2)
+    expect(fake.rejected).toEqual([1, 1])
+    expect(fake.accepted).toEqual([1, 1, 1, 1, 2])
+  })
+
+  it("counts a 429 with only a status (no headers or body) as the identity confirm cap", () => {
+    expect(http429LimiterOf({ result: 500, response: { cause: { status: 429 } } })).toBe("identity_cap")
+    expect(http429LimiterOf({ result: 500, response: { cause: { response: { status: 429 } } } })).toBe("identity_cap")
+    expect(
+      http429LimiterOf({ result: 500, response: { cause: { response: { status: 429, headers: { "retry-after": "5" } } } } }),
+    ).toBe("ip_block")
+  })
+
   it("an 'IP blocked' error after the run deadline is still counted as rateLimited", () => {
     const counters = freshCounters()
     counters.total = 2
     counters.ok = 1
-    expect(countStepFailure(counters, ipBlocked(), Date.now() - 1)).toBe("rateLimited")
+    expect(countStepFailure(counters, ipBlocked(), Date.now() - 1, false)).toBe("rateLimited")
     expect(counters.rateLimited).toBe(1)
     expect(counters.rateLimitedAtDeadline).toBe(0)
     expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
@@ -485,6 +589,73 @@ describe("identity confirm 429", () => {
     expect(await waitForNextBlock(fake.url, 100, 10, fake.readBlock)).toBe(false)
     setTimeout(() => fake.nextBlock(), 30)
     expect(await waitForNextBlock(fake.url, 2000, 10, fake.readBlock)).toBe(true)
+  })
+})
+
+describe("cleanupWorkerIdentities", () => {
+  const leftover = identity(7)
+  const report = { workerId: 0, rpcUrl: "http://node0:53550", ownerAddress: OWNER, outstanding: [leftover] }
+  const cfg = { algorithm: "falcon", settleTimeoutSec: 1, settlePollMs: 10 }
+
+  it("waits for a cleanup remove to show before the leak check", async () => {
+    const counters = freshCounters()
+    const removed: string[] = []
+    let reads = 0
+    const result = await cleanupWorkerIdentities({
+      report,
+      cfg,
+      counters,
+      errorSamples: [],
+      removeIdentity: async address => {
+        removed.push(address)
+      },
+      // The remove shows only from the second read on.
+      readIdentities: async () => (++reads === 1 ? new Set([leftover]) : new Set()),
+    })
+
+    expect(removed).toEqual([leftover])
+    expect(result).toEqual({ ownerAddress: OWNER, stillPresent: [] })
+    expect(counters.cleanupError).toBe(0)
+    expect(reads).toBe(3)
+  })
+
+  it("reports an identity still present after the settle timeout as leaked", async () => {
+    const counters = freshCounters()
+    const result = await cleanupWorkerIdentities({
+      report,
+      cfg,
+      counters,
+      errorSamples: [],
+      removeIdentity: async () => {},
+      readIdentities: async () => new Set([leftover]),
+    })
+
+    expect(result).toEqual({ ownerAddress: OWNER, stillPresent: [leftover] })
+    expect(counters.cleanupError).toBe(0)
+  })
+
+  it("counts a failed cleanup remove as a cleanup error and does not wait for it", async () => {
+    const counters = freshCounters()
+    const errorSamples: Parameters<typeof cleanupWorkerIdentities>[0]["errorSamples"] = []
+    let reads = 0
+    const result = await cleanupWorkerIdentities({
+      report,
+      cfg,
+      counters,
+      errorSamples,
+      removeIdentity: async () => {
+        throw http429()
+      },
+      readIdentities: async () => {
+        reads++
+        return new Set([leftover])
+      },
+    })
+
+    expect(result.stillPresent).toEqual([leftover])
+    expect(counters.cleanupError).toBe(1)
+    expect(errorSamples).toHaveLength(1)
+    expect(reads).toBe(1)
   })
 })
 

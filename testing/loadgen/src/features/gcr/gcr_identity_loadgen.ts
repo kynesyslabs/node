@@ -84,6 +84,7 @@ type TimeseriesPoint = {
   validationError: number
   networkError: number
   rateLimited: number
+  rateLimitedAtDeadline: number
   tps: number
   okTps: number
   latencyMs: ReturnType<typeof summarizeLatency>
@@ -118,16 +119,31 @@ export function httpStatusOf(response: any): number | null {
   return typeof status === "number" ? status : null
 }
 
+/**
+ * Which node limiter sent an HTTP 429. Both answer 429 with "Rate limit
+ * exceeded". The identity confirm cap (src/libs/network/rpcRateLimit.ts) sends
+ * no Retry-After header and body retryAfter null; the next block frees it. The
+ * general limiter (src/libs/network/middleware/rateLimiter.ts) blocks the
+ * address for some seconds and sends a Retry-After header and a numeric
+ * retryAfter. A 429 with neither header nor body (only a status) counts as the cap.
+ */
+export function http429LimiterOf(response: any): "identity_cap" | "ip_block" {
+  const reply = response?.response?.cause?.response
+  const blocked = reply?.headers?.["retry-after"] != null || typeof reply?.data?.retryAfter === "number"
+  return blocked ? "ip_block" : "identity_cap"
+}
+
 function throwIfRateLimited(label: string, operation: "add" | "remove", response: any, context: Record<string, unknown>) {
   const httpStatus = httpStatusOf(response)
   if (response?.result !== 429 && httpStatus !== 429) return
-  throw new RateLimitError(`${label} (${operation}): node answered HTTP 429 (rate limit)`, { ...context, status: 429, httpStatus })
+  const limiter = httpStatus === 429 ? http429LimiterOf(response) : null
+  throw new RateLimitError(`${label} (${operation}): node answered HTTP 429 (rate limit)`, { ...context, status: 429, httpStatus, limiter })
 }
 
-/** Only an HTTP 429, verified by httpStatusOf, qualifies for block-based retries. */
-function isHttpRateLimit(error: unknown): boolean {
+/** Only the identity confirm cap's HTTP 429 (httpStatusOf, http429LimiterOf) qualifies for block-based retries. */
+function isIdentityCapRateLimit(error: unknown): boolean {
   const info = normalizeLoadgenError(error)
-  return info.code === "RATE_LIMIT" && info.context?.httpStatus === 429
+  return info.code === "RATE_LIMIT" && info.context?.httpStatus === 429 && info.context?.limiter === "identity_cap"
 }
 
 /**
@@ -252,18 +268,19 @@ function classifyFailure(error: unknown): keyof Pick<LoadgenCounters, "confirmEr
 }
 
 /**
- * Counts a worker step that failed. An HTTP 429 that
+ * Counts a worker step that failed. An identity confirm cap HTTP 429 that
  * ends the step once the run deadline has passed goes to rateLimitedAtDeadline,
  * not rateLimited: the worker's retry stops waiting for the next block at the
  * deadline, so the node did not refuse the step for good, the run just ended
  * before the retry. The step stays in total as unfinished, and errorRateOf
  * leaves it out. It is not an error, but a run with no successful step still
  * fails (runVerdict). Other rate-limit errors, which are not retried, stay in
- * rateLimited.
+ * rateLimited, and so does every 429 when stopOnRateLimit is set (no retries).
  */
-export function countStepFailure(counters: LoadgenCounters, error: unknown, stopAtMs: number) {
+export function countStepFailure(counters: LoadgenCounters, error: unknown, stopAtMs: number, stopOnRateLimit: boolean) {
   const classified = classifyFailure(error)
-  const bucket = isHttpRateLimit(error) && nowMs() >= stopAtMs ? "rateLimitedAtDeadline" : classified
+  const cutOff = !stopOnRateLimit && isIdentityCapRateLimit(error) && nowMs() >= stopAtMs
+  const bucket = cutOff ? "rateLimitedAtDeadline" : classified
   counters[bucket]++
   return bucket
 }
@@ -458,6 +475,9 @@ async function getPqcIdentitySet(rpcUrl: string, ownerAddress: string, algorithm
   return new Set(list.map((item: any) => normalizeHexAddress(item?.address ?? "")).filter(Boolean))
 }
 
+/** Reads an owner's PQC identities of one algorithm (getPqcIdentitySet). */
+export type ReadIdentities = (rpcUrl: string, ownerAddress: string, algorithm: string) => Promise<Set<string>>
+
 async function waitForIdentityPresence(params: {
   rpcUrl: string
   ownerAddress: string
@@ -466,11 +486,13 @@ async function waitForIdentityPresence(params: {
   expectPresent: boolean
   timeoutSec: number
   pollMs: number
+  readIdentities?: ReadIdentities
 }) {
   const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
   const target = normalizeHexAddress(params.identityAddress)
+  const readIdentities = params.readIdentities ?? getPqcIdentitySet
   while (nowMs() < deadlineMs) {
-    const set = await getPqcIdentitySet(params.rpcUrl, params.ownerAddress, params.algorithm)
+    const set = await readIdentities(params.rpcUrl, params.ownerAddress, params.algorithm)
     const present = set.has(target)
     if (present === params.expectPresent) return
     await sleep(params.pollMs)
@@ -530,10 +552,11 @@ export type RateLimitRetry = {
 }
 
 /**
- * Runs one step (a confirm + broadcast). An HTTP 429 is back-pressure from the
- * node's per-block identity confirm cap, so the step is retried after the next
- * block, up to maxRetries times. Rate-limit messages without an HTTP 429,
- * other errors, and every 429 when stopOnRateLimit is set, are thrown to the caller.
+ * Runs one step (a confirm + broadcast). An HTTP 429 from the node's per-block
+ * identity confirm cap is back-pressure, so the step is retried after the next
+ * block, up to maxRetries times. The general limiter's 429 (http429LimiterOf),
+ * rate-limit messages without an HTTP 429, other errors, and every 429 when
+ * stopOnRateLimit is set, are thrown to the caller.
  */
 export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -541,7 +564,7 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
       return await step()
     } catch (error) {
       const retry =
-        isHttpRateLimit(error) &&
+        isIdentityCapRateLimit(error) &&
         !opts.stopOnRateLimit &&
         attempt < opts.maxRetries &&
         !opts.shouldStop()
@@ -716,11 +739,11 @@ async function worker(params: {
       const elapsed = performance.now() - started
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
-      const bucket = countStepFailure(params.counters, error, params.stopAtMs)
+      const bucket = countStepFailure(params.counters, error, params.stopAtMs, params.cfg.stopOnRateLimit)
       if (bucket !== "rateLimitedAtDeadline") {
         pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
       }
-      // A 429 before the deadline still ends the run here when STOP_ON_RATE_LIMIT is set.
+      // A rate-limit error still ends the run here when STOP_ON_RATE_LIMIT is set.
       if (bucket === "rateLimited" && params.cfg.stopOnRateLimit) {
         params.sharedStop.value = true
       }
@@ -765,6 +788,54 @@ async function probeWalletIdentities(params: {
     })
   }
   return probes
+}
+
+/**
+ * End-of-run cleanup of one worker: removes each identity it left behind,
+ * waits for each remove to show (as the worker's remove step does), then
+ * reads which identities are still present. Those are reported as leaked.
+ */
+export async function cleanupWorkerIdentities(params: {
+  report: Pick<WorkerReport, "workerId" | "rpcUrl" | "ownerAddress" | "outstanding">
+  cfg: Pick<LoadgenConfig, "algorithm" | "settleTimeoutSec" | "settlePollMs">
+  counters: Pick<LoadgenCounters, "cleanupError">
+  errorSamples: ErrorSample[]
+  removeIdentity: (identityAddress: string) => Promise<void>
+  readIdentities?: ReadIdentities
+}): Promise<{ ownerAddress: string; stillPresent: string[] }> {
+  const { report, cfg } = params
+  const readIdentities = params.readIdentities ?? getPqcIdentitySet
+  for (const address of report.outstanding) {
+    const logContext = {
+      workerId: report.workerId,
+      rpcUrl: report.rpcUrl,
+      ownerAddress: report.ownerAddress,
+      identityAddress: address,
+    }
+    try {
+      await params.removeIdentity(address)
+    } catch (error) {
+      params.counters.cleanupError++
+      pushErrorSample(params.errorSamples, "cleanup", error)
+      logNonCriticalError("gcr_identity_loadgen.cleanup", error, logContext)
+      continue
+    }
+    // An identity still present after settleTimeoutSec is reported below as leaked.
+    await waitForIdentityPresence({
+      rpcUrl: report.rpcUrl,
+      ownerAddress: report.ownerAddress,
+      algorithm: cfg.algorithm,
+      identityAddress: address,
+      expectPresent: false,
+      timeoutSec: cfg.settleTimeoutSec,
+      pollMs: cfg.settlePollMs,
+      readIdentities,
+    }).catch(error => logNonCriticalError("gcr_identity_loadgen.cleanup.settle", error, logContext))
+  }
+
+  const existing = await readIdentities(report.rpcUrl, report.ownerAddress, cfg.algorithm)
+  const stillPresent = report.outstanding.filter(address => existing.has(normalizeHexAddress(address)))
+  return { ownerAddress: report.ownerAddress, stillPresent }
 }
 
 export async function runGcrIdentityLoadgen() {
@@ -864,6 +935,7 @@ export async function runGcrIdentityLoadgen() {
   let lastValidation = 0
   let lastNetwork = 0
   let lastRateLimited = 0
+  let lastRateLimitedAtDeadline = 0
 
   async function timeseriesLoop() {
     if (!cfg.emitTimeseries) return
@@ -880,6 +952,7 @@ export async function runGcrIdentityLoadgen() {
       const validationDelta = counters.validationError - lastValidation
       const networkDelta = counters.networkError - lastNetwork
       const rateLimitedDelta = counters.rateLimited - lastRateLimited
+      const rateLimitedAtDeadlineDelta = counters.rateLimitedAtDeadline - lastRateLimitedAtDeadline
 
       lastOk = counters.ok
       lastTotal = counters.total
@@ -888,6 +961,7 @@ export async function runGcrIdentityLoadgen() {
       lastValidation = counters.validationError
       lastNetwork = counters.networkError
       lastRateLimited = counters.rateLimited
+      lastRateLimitedAtDeadline = counters.rateLimitedAtDeadline
 
       const point: TimeseriesPoint = {
         tSec: (now - counters.startedAtMs) / 1000,
@@ -898,6 +972,7 @@ export async function runGcrIdentityLoadgen() {
         validationError: validationDelta,
         networkError: networkDelta,
         rateLimited: rateLimitedDelta,
+        rateLimitedAtDeadline: rateLimitedAtDeadlineDelta,
         tps: totalDelta / elapsedSinceLast,
         okTps: okDelta / elapsedSinceLast,
         latencyMs: summarizeLatency(timeseriesSampler.snapshotSorted()),
@@ -931,43 +1006,29 @@ export async function runGcrIdentityLoadgen() {
 
   const finalChecks: Array<{ ownerAddress: string; stillPresent: string[] }> = []
   for (const report of workerReports) {
-    for (const address of report.outstanding) {
-      try {
-        const demos = new Demos()
-        await withTimeout(`cleanup.connect(worker:${report.workerId})`, cfg.opTimeoutMs, demos.connect(report.rpcUrl))
-        await withTimeout(
-          `cleanup.connectWallet(worker:${report.workerId})`,
-          cfg.opTimeoutMs,
-          demos.connectWallet(cfg.wallets[report.workerId % cfg.wallets.length]!, { algorithm: "ed25519" }),
-        )
-        // Cleanup always waits out a 429: leaving the identity behind fails the run.
-        await retryOnRateLimit(
-          () =>
-            submitPqcTx({
-              demos,
-              ownerAddress: report.ownerAddress,
-              algorithm: cfg.algorithm,
-              identityAddress: address,
-              operation: "remove",
-              opTimeoutMs: cfg.opTimeoutMs,
-            }),
-          rateLimitRetryFor({ rpcUrl: report.rpcUrl, cfg, counters, shouldStop: () => false, stopOnRateLimit: false }),
-        )
-      } catch (error) {
-        counters.cleanupError++
-        pushErrorSample(errorSamples, "cleanup", error)
-        logNonCriticalError("gcr_identity_loadgen.cleanup", error, {
-          workerId: report.workerId,
-          rpcUrl: report.rpcUrl,
-          ownerAddress: report.ownerAddress,
-          identityAddress: address,
-        })
-      }
+    const removeIdentity = async (address: string) => {
+      const demos = new Demos()
+      await withTimeout(`cleanup.connect(worker:${report.workerId})`, cfg.opTimeoutMs, demos.connect(report.rpcUrl))
+      await withTimeout(
+        `cleanup.connectWallet(worker:${report.workerId})`,
+        cfg.opTimeoutMs,
+        demos.connectWallet(cfg.wallets[report.workerId % cfg.wallets.length]!, { algorithm: "ed25519" }),
+      )
+      // Cleanup always waits out a 429: leaving the identity behind fails the run.
+      await retryOnRateLimit(
+        () =>
+          submitPqcTx({
+            demos,
+            ownerAddress: report.ownerAddress,
+            algorithm: cfg.algorithm,
+            identityAddress: address,
+            operation: "remove",
+            opTimeoutMs: cfg.opTimeoutMs,
+          }),
+        rateLimitRetryFor({ rpcUrl: report.rpcUrl, cfg, counters, shouldStop: () => false, stopOnRateLimit: false }),
+      )
     }
-
-    const existing = await getPqcIdentitySet(report.rpcUrl, report.ownerAddress, cfg.algorithm)
-    const stillPresent = report.outstanding.filter(address => existing.has(normalizeHexAddress(address)))
-    finalChecks.push({ ownerAddress: report.ownerAddress, stillPresent })
+    finalChecks.push(await cleanupWorkerIdentities({ report, cfg, counters, errorSamples, removeIdentity }))
   }
 
   const elapsedSec = Math.max(0.001, (counters.endedAtMs - counters.startedAtMs) / 1000)
