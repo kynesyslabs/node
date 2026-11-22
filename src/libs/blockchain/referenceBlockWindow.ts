@@ -20,6 +20,20 @@ export function referenceBlockRoomAt(head: number): number {
         : LEGACY_REFERENCE_BLOCK_ROOM
 }
 
+/**
+ * The reference block the sender signed in the transaction content, or null
+ * when the content carries none that fits the pool's integer column.
+ */
+export function signedReferenceBlock(tx: { content?: unknown }): number | null {
+    const value = (tx?.content as { reference_block?: unknown } | null | undefined)
+        ?.reference_block
+    return Number.isInteger(value) &&
+        (value as number) >= 0 &&
+        (value as number) <= 2147483647
+        ? (value as number)
+        : null
+}
+
 export function isReferenceBlockAllowed(
     referenceBlock: number,
     lastBlock: number,

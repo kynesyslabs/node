@@ -7,6 +7,7 @@ import {
     deepWindowCutoff,
     isReferenceBlockAllowed,
     referenceBlockRoomAt,
+    signedReferenceBlock,
 } from "@/libs/blockchain/referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { ErrorCode } from "@/errors"
@@ -47,19 +48,26 @@ export function filterMempoolByRefBlock(
     const lastBlockNumber = getSharedState.lastBlockNumber
 
     for (const tx of mempool) {
-        if (!isReferenceBlockAllowed(tx.reference_block, lastBlockNumber)) {
+        // Judged on the reference block the sender signed, never on the pool
+        // row's own column: a tx without one is left out, not included.
+        const reference = signedReferenceBlock(tx)
+        if (
+            reference === null ||
+            !isReferenceBlockAllowed(reference, lastBlockNumber)
+        ) {
             const code = ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE
-            const message = `Reference block expired. Expected: ${lastBlockNumber - referenceBlockRoomAt(lastBlockNumber)} - ${lastBlockNumber} got ${tx.reference_block}`
+            const message = `Reference block expired. Expected: ${lastBlockNumber - referenceBlockRoomAt(lastBlockNumber)} - ${lastBlockNumber} got ${reference}`
             if (
                 includeExpiredAsFailed &&
-                tx.reference_block <= lastBlockNumber &&
-                tx.reference_block >= deepWindowCutoff(lastBlockNumber)
+                reference !== null &&
+                reference <= lastBlockNumber &&
+                reference >= deepWindowCutoff(lastBlockNumber)
             ) {
                 tx.status = TRANSACTION_STATUS.FAILED
                 tx.attrs = {
                     code,
                     message,
-                    reference_block: tx.reference_block,
+                    reference_block: reference,
                 }
                 validTxs.push(tx)
                 log.debug(
@@ -144,7 +152,7 @@ export async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
                 tx.attrs = {
                     code: ErrorCode.TX_NONCE_INVALID_LOW,
                     message: `Invalid nonce edit. Expected ${expected}, got ${tx.content.nonce}`,
-                    reference_block: tx.reference_block,
+                    reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                 }
                 validTxs.push(tx)
 

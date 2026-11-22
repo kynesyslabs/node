@@ -937,6 +937,8 @@ export default class GCR {
         // The chain head is the correct reference; this tx is created at
         // runtime, not bound to a specific block.
         const referenceHeight = await Chain.getLastBlockNumber()
+        // Signed with the rest of the content, as for a client's transaction.
+        Object.assign(tx.content, { reference_block: referenceHeight })
         tx.hash = Hashing.sha256(
             serializeTransactionContent(tx.content, referenceHeight),
         )
@@ -1162,10 +1164,10 @@ export default class GCR {
             }
         }
 
-        const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
-            ...tx,
-            reference_block: await Chain.getLastBlockNumber(),
-        })
+        // The pool takes the reference block from the signed content.
+        const { confirmationBlock, error } = await Mempool.addTransactionWithLock(
+            tx as typeof tx & { reference_block: number },
+        )
 
         if (error) {
             log.error("Failed to add transaction to mempool")

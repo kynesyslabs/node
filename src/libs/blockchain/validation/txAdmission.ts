@@ -1,7 +1,10 @@
 import type { Transaction as SdkTransaction } from "@kynesyslabs/demosdk/types"
 import Transaction from "src/libs/blockchain/transaction"
 import Chain from "src/libs/blockchain/chain"
-import { isWithinDeepWindow } from "src/libs/blockchain/referenceBlockWindow"
+import {
+    isWithinDeepWindow,
+    signedReferenceBlock,
+} from "src/libs/blockchain/referenceBlockWindow"
 
 export type TxAdmissionCode =
     | "structure"
@@ -21,7 +24,7 @@ export interface TxAdmissionVerdict {
 export interface TxAdmissionOptions {
     /** Chain head the reference-block window is measured against. */
     head: number
-    /** Enforce the deep reference-block window. Off for RPC intake, which sets the reference block itself. */
+    /** Enforce the deep reference-block window. Off for RPC intake, which holds the signed value to the inclusion window itself. */
     checkWindow?: boolean
     /** Reject a tx that is already pending locally. */
     checkMempool?: boolean
@@ -44,7 +47,7 @@ export interface TxAdmissionOptions {
  * not this composition.
  */
 export async function checkTxAdmissible(
-    tx: SdkTransaction & { reference_block?: number },
+    tx: SdkTransaction,
     options: TxAdmissionOptions,
 ): Promise<TxAdmissionVerdict> {
     // The static helpers are typed on the node's Transaction class; the
@@ -56,15 +59,15 @@ export async function checkTxAdmissible(
     }
 
     if (options.checkWindow) {
-        const referenceBlock = tx.reference_block
+        const referenceBlock = signedReferenceBlock(tx)
         if (
-            typeof referenceBlock !== "number" ||
+            referenceBlock === null ||
             !isWithinDeepWindow(referenceBlock, options.head)
         ) {
             return {
                 ok: false,
                 code: "window",
-                reason: `reference block ${referenceBlock} outside the allowed window at block ${options.head}`,
+                reason: `reference block ${String((tx.content as { reference_block?: unknown })?.reference_block)} outside the allowed window at block ${options.head}`,
             }
         }
     }
