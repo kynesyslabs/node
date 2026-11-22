@@ -188,6 +188,7 @@ SUITE_FILES=(
     src/libs/network/sudoReplayFloor.test.ts
     src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
+    testing/loadgen/src/features/gcr/gcr_identity_loadgen.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
     # Loadgen error logging (#708), including the guard against silent catches
     testing/loadgen/src/features/omni/close_log.test.ts

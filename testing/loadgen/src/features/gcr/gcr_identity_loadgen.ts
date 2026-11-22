@@ -649,7 +649,7 @@ export type RateLimitRetry = {
   stopOnRateLimit: boolean
   maxRetries: number
   shouldStop: () => boolean
-  /** The target's current block number, or null when the read fails. */
+  /** The target's current block number, or null when the read fails or does not answer in time. */
   readHeight: () => Promise<number | null>
   /** Resolves true once a block past start shows up, false if none did in time. */
   waitForNextBlock: (start: number | null) => Promise<boolean>
@@ -697,14 +697,18 @@ function rateLimitRetryFor(params: {
   shouldStop: () => boolean
   stopOnRateLimit: boolean
   readBlockNumber?: ReadBlockNumber
+  clock?: WaitClock
 }): RateLimitRetry {
+  const readBlockNumber = params.readBlockNumber ?? readLastBlockNumber
+  const clock = params.clock ?? realClock
   return {
     stopOnRateLimit: params.stopOnRateLimit,
     maxRetries: params.cfg.rateLimitMaxRetries,
     shouldStop: params.shouldStop,
-    readHeight: () => (params.readBlockNumber ?? readLastBlockNumber)(params.rpcUrl),
+    // A read still pending after opTimeoutMs gives null, so the step goes out.
+    readHeight: () => readWithin(clock, params.cfg.opTimeoutMs, () => readBlockNumber(params.rpcUrl)),
     waitForNextBlock: start =>
-      waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs, params.readBlockNumber, start),
+      waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs, readBlockNumber, start, clock),
     onRetry: () => {
       params.counters.rateLimitRetries++
     },
@@ -719,6 +723,7 @@ export function workerRateLimitRetry(params: {
   sharedStop: { value: boolean }
   stopAtMs: number
   readBlockNumber?: ReadBlockNumber
+  clock?: WaitClock
 }): RateLimitRetry {
   return rateLimitRetryFor({
     rpcUrl: params.rpcUrl,
@@ -727,6 +732,7 @@ export function workerRateLimitRetry(params: {
     shouldStop: () => params.sharedStop.value || nowMs() >= params.stopAtMs,
     stopOnRateLimit: params.cfg.stopOnRateLimit,
     readBlockNumber: params.readBlockNumber,
+    clock: params.clock,
   })
 }
 

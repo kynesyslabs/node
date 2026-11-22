@@ -15,6 +15,8 @@
  */
 
 import { afterEach, describe, expect, it, spyOn } from "bun:test"
+import { execFileSync } from "node:child_process"
+import { join } from "node:path"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { ConfirmError, ConvergenceError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import { ReservoirSampler } from "../../framework/metrics"
@@ -648,7 +650,7 @@ describe("identity confirm 429", () => {
     for (let i = 0; i < IDENTITY_CONFIRMS_PER_BLOCK; i++) await addStep(demos, i)()
 
     const counters = { rateLimitRetries: 0 } as LoadgenCounters
-    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10, opTimeoutMs: 15000 } as LoadgenConfig
     const sharedStop = { value: false }
     // The run ends while the step waits for a block that never comes (the
     // wait gives up after settleTimeoutSec, past the deadline).
@@ -690,7 +692,7 @@ describe("identity confirm 429", () => {
     // A fifth step in the same block is refused. The next block shows up
     // only after the run has ended, so the step is not sent again and its 429
     // is rethrown to the worker after the deadline.
-    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10, opTimeoutMs: 15000 } as LoadgenConfig
     const stopAtMs = Date.now() + 300
     const retry = workerRateLimitRetry({
       rpcUrl: fake.url,
@@ -994,7 +996,7 @@ describe("identity confirm 429", () => {
     let refused = false
     const reads: (number | null)[] = []
     const counters = freshCounters()
-    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: params.settleTimeoutSec, settlePollMs: params.settlePollMs } as LoadgenConfig
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: params.settleTimeoutSec, settlePollMs: params.settlePollMs, opTimeoutMs: 15000 } as LoadgenConfig
     const retry = workerRateLimitRetry({
       rpcUrl: "http://unused:1",
       cfg,
@@ -1070,6 +1072,56 @@ describe("identity confirm 429", () => {
     }, retry).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(RateLimitError)
     expect(reads).toBe(0)
+  })
+
+  it("sends the confirm once a height read before it does not answer within opTimeoutMs, and a later 429 still waits for a new block", async () => {
+    const clock = fakeWaitClock()
+    const counters = freshCounters()
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 5, settlePollMs: 100, opTimeoutMs: 1000 } as LoadgenConfig
+    // Before the 429 the height read never answers. After it, the reads give
+    // 101, 101, then 102 from then on.
+    let refused = false
+    const after = [101, 101]
+    const readsAfter: number[] = []
+    const retry = workerRateLimitRetry({
+      rpcUrl: "http://unused:1",
+      cfg,
+      counters,
+      sharedStop: { value: false },
+      stopAtMs: Date.now() + 600_000,
+      clock,
+      readBlockNumber: () => {
+        if (!refused) return new Promise<number | null>(() => {})
+        const height = after.shift() ?? 102
+        readsAfter.push(height)
+        return Promise.resolve(height)
+      },
+    })
+    const sentAt: number[] = []
+    const run = retryOnRateLimit(async () => {
+      sentAt.push(clock.now())
+      if (sentAt.length > 1) return "added"
+      refused = true
+      throw http429()
+    }, retry)
+
+    // Without the bound, the step is never sent and the run hangs.
+    expect(await Promise.race([run, Bun.sleep(2000).then(() => "the confirm was never sent")])).toBe("added")
+    // The first confirm went out when the hung read timed out, at 1 s.
+    expect(sentAt[0]).toBe(1000)
+    // Its 429 took the first good read after it (101) as the baseline and was
+    // retried only once 102 showed up, two 100 ms polls later.
+    expect(sentAt[1]).toBe(1200)
+    expect(readsAfter).toEqual([101, 101, 102, 102])
+    expect(counters.rateLimitRetries).toBe(1)
+  })
+})
+
+describe("CI", () => {
+  it("lists this file in test:consensus, so CI runs it", () => {
+    const script = join(import.meta.dir, "../../../../../scripts/test-consensus.sh")
+    const files = execFileSync("bash", [script, "--list"], { encoding: "utf8" }).trim().split("\n")
+    expect(files).toContain("testing/loadgen/src/features/gcr/gcr_identity_loadgen.test.ts")
   })
 })
 
