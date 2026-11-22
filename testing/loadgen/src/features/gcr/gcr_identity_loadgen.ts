@@ -78,7 +78,7 @@ type WorkerReport = {
   fatalError?: string
 }
 
-type TimeseriesPoint = {
+export type TimeseriesPoint = {
   tSec: number
   ok: number
   total: number
@@ -893,6 +893,103 @@ export async function cleanupWorkerIdentities(params: {
   return { ownerAddress: report.ownerAddress, stillPresent }
 }
 
+/**
+ * Runs the timeseries next to the workers: one point a second until stopAtMs,
+ * each carrying the counter deltas since the previous point. A worker still
+ * waiting for a block at the deadline can count after the loop's last point,
+ * so once all workers have settled one final point carries whatever changed
+ * since. Summed over the timeseries, each counter equals the summary's total.
+ */
+export async function runWithTimeseries<T>(params: {
+  counters: LoadgenCounters
+  cfg: Pick<LoadgenConfig, "emitTimeseries">
+  stopAtMs: number
+  timeseriesSampler: ReservoirSampler
+  workers: Promise<T>
+  writePoint: (point: TimeseriesPoint) => void
+  now?: () => number
+  sleep?: (ms: number) => Promise<void>
+}): Promise<T> {
+  const { counters, cfg, stopAtMs, timeseriesSampler } = params
+  const now = params.now ?? nowMs
+  const wait = params.sleep ?? sleep
+
+  let lastPointAtMs = counters.startedAtMs
+  let lastOk = 0
+  let lastTotal = 0
+  let lastConfirm = 0
+  let lastBroadcast = 0
+  let lastValidation = 0
+  let lastNetwork = 0
+  let lastRateLimited = 0
+  let lastRateLimitedAtDeadline = 0
+
+  const changedSinceLastPoint = () =>
+    counters.ok !== lastOk ||
+    counters.total !== lastTotal ||
+    counters.confirmError !== lastConfirm ||
+    counters.broadcastError !== lastBroadcast ||
+    counters.validationError !== lastValidation ||
+    counters.networkError !== lastNetwork ||
+    counters.rateLimited !== lastRateLimited ||
+    counters.rateLimitedAtDeadline !== lastRateLimitedAtDeadline
+
+  function writePoint() {
+    const pointAtMs = now()
+    const elapsedSinceLast = Math.max(0.001, (pointAtMs - lastPointAtMs) / 1000)
+    lastPointAtMs = pointAtMs
+
+    const okDelta = counters.ok - lastOk
+    const totalDelta = counters.total - lastTotal
+    const confirmDelta = counters.confirmError - lastConfirm
+    const broadcastDelta = counters.broadcastError - lastBroadcast
+    const validationDelta = counters.validationError - lastValidation
+    const networkDelta = counters.networkError - lastNetwork
+    const rateLimitedDelta = counters.rateLimited - lastRateLimited
+    const rateLimitedAtDeadlineDelta = counters.rateLimitedAtDeadline - lastRateLimitedAtDeadline
+
+    lastOk = counters.ok
+    lastTotal = counters.total
+    lastConfirm = counters.confirmError
+    lastBroadcast = counters.broadcastError
+    lastValidation = counters.validationError
+    lastNetwork = counters.networkError
+    lastRateLimited = counters.rateLimited
+    lastRateLimitedAtDeadline = counters.rateLimitedAtDeadline
+
+    params.writePoint({
+      tSec: (pointAtMs - counters.startedAtMs) / 1000,
+      ok: okDelta,
+      total: totalDelta,
+      confirmError: confirmDelta,
+      broadcastError: broadcastDelta,
+      validationError: validationDelta,
+      networkError: networkDelta,
+      rateLimited: rateLimitedDelta,
+      rateLimitedAtDeadline: rateLimitedAtDeadlineDelta,
+      tps: totalDelta / elapsedSinceLast,
+      okTps: okDelta / elapsedSinceLast,
+      latencyMs: summarizeLatency(timeseriesSampler.snapshotSorted()),
+      timestamp: new Date().toISOString(),
+    })
+  }
+
+  async function timeseriesLoop() {
+    if (!cfg.emitTimeseries) return
+    while (now() < stopAtMs) {
+      await wait(1000)
+      writePoint()
+    }
+  }
+
+  const timeseriesPromise = timeseriesLoop()
+  const result = await params.workers
+  await timeseriesPromise
+  // Counts made after the loop's last point (e.g. a 429 cut off at the deadline).
+  if (cfg.emitTimeseries && changedSinceLastPoint()) writePoint()
+  return result
+}
+
 export async function runGcrIdentityLoadgen() {
   maybeSilenceConsole()
 
@@ -982,61 +1079,6 @@ export async function runGcrIdentityLoadgen() {
     throw new Error("gcr_identity_loadgen failed: concurrent wallet preflight detected shared SDK identity state")
   }
 
-  let lastPointAtMs = counters.startedAtMs
-  let lastOk = 0
-  let lastTotal = 0
-  let lastConfirm = 0
-  let lastBroadcast = 0
-  let lastValidation = 0
-  let lastNetwork = 0
-  let lastRateLimited = 0
-  let lastRateLimitedAtDeadline = 0
-
-  async function timeseriesLoop() {
-    if (!cfg.emitTimeseries) return
-    while (nowMs() < stopAtMs) {
-      await sleep(1000)
-      const now = nowMs()
-      const elapsedSinceLast = Math.max(0.001, (now - lastPointAtMs) / 1000)
-      lastPointAtMs = now
-
-      const okDelta = counters.ok - lastOk
-      const totalDelta = counters.total - lastTotal
-      const confirmDelta = counters.confirmError - lastConfirm
-      const broadcastDelta = counters.broadcastError - lastBroadcast
-      const validationDelta = counters.validationError - lastValidation
-      const networkDelta = counters.networkError - lastNetwork
-      const rateLimitedDelta = counters.rateLimited - lastRateLimited
-      const rateLimitedAtDeadlineDelta = counters.rateLimitedAtDeadline - lastRateLimitedAtDeadline
-
-      lastOk = counters.ok
-      lastTotal = counters.total
-      lastConfirm = counters.confirmError
-      lastBroadcast = counters.broadcastError
-      lastValidation = counters.validationError
-      lastNetwork = counters.networkError
-      lastRateLimited = counters.rateLimited
-      lastRateLimitedAtDeadline = counters.rateLimitedAtDeadline
-
-      const point: TimeseriesPoint = {
-        tSec: (now - counters.startedAtMs) / 1000,
-        ok: okDelta,
-        total: totalDelta,
-        confirmError: confirmDelta,
-        broadcastError: broadcastDelta,
-        validationError: validationDelta,
-        networkError: networkDelta,
-        rateLimited: rateLimitedDelta,
-        rateLimitedAtDeadline: rateLimitedAtDeadlineDelta,
-        tps: totalDelta / elapsedSinceLast,
-        okTps: okDelta / elapsedSinceLast,
-        latencyMs: summarizeLatency(timeseriesSampler.snapshotSorted()),
-        timestamp: new Date().toISOString(),
-      }
-      appendJsonl(artifacts.timeseriesPath, point)
-    }
-  }
-
   const sharedStop = { value: false }
   const workers = Array.from({ length: workerCount }, (_, idx) =>
     worker({
@@ -1054,9 +1096,14 @@ export async function runGcrIdentityLoadgen() {
     }),
   )
 
-  const timeseriesPromise = timeseriesLoop()
-  const workerReports = await Promise.all(workers)
-  await timeseriesPromise
+  const workerReports = await runWithTimeseries({
+    counters,
+    cfg,
+    stopAtMs,
+    timeseriesSampler,
+    workers: Promise.all(workers),
+    writePoint: point => appendJsonl(artifacts.timeseriesPath, point),
+  })
   counters.endedAtMs = nowMs()
 
   const finalChecks: Array<{ ownerAddress: string; stillPresent: string[] }> = []

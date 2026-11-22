@@ -17,6 +17,7 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { ConfirmError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
+import { ReservoirSampler } from "../../framework/metrics"
 import {
   IDENTITY_CONFIRMS_PER_BLOCK,
   cleanupWorkerIdentities,
@@ -28,6 +29,7 @@ import {
   resolveWorkerCount,
   retryOnRateLimit,
   runVerdict,
+  runWithTimeseries,
   submitPqcTx,
   waitForNextBlock,
   workerCountWarnings,
@@ -37,6 +39,7 @@ import {
   type LoadgenCounters,
   type RateLimitRetry,
   type ReadBlockNumber,
+  type TimeseriesPoint,
 } from "./gcr_identity_loadgen"
 
 describe("resolveWorkerCount", () => {
@@ -964,6 +967,126 @@ describe("cleanupWorkerIdentities", () => {
     expect(counters.cleanupError).toBe(1)
     expect(errorSamples).toHaveLength(1)
     expect(reads).toBe(1)
+  })
+})
+
+describe("runWithTimeseries", () => {
+  const pointCounters = [
+    "ok",
+    "total",
+    "confirmError",
+    "broadcastError",
+    "validationError",
+    "networkError",
+    "rateLimited",
+    "rateLimitedAtDeadline",
+  ] as const
+  /** Each counter summed over the timeseries points. */
+  const sumOverPoints = (points: TimeseriesPoint[]) =>
+    Object.fromEntries(pointCounters.map(key => [key, points.reduce((sum, point) => sum + point[key], 0)]))
+  /** The same counters as the summary reports them. */
+  const summaryTotals = (counters: LoadgenCounters) => Object.fromEntries(pointCounters.map(key => [key, counters[key]]))
+
+  /**
+   * A run on a fake clock (no real waits): the timeseries loop's one-second
+   * sleep moves the clock on. loopDone resolves once the loop has written its
+   * point at the deadline, which is its last.
+   */
+  const timeseriesRun = (stopAtMs: number) => {
+    const clock = { ms: 0 }
+    const points: TimeseriesPoint[] = []
+    let markLoopDone!: () => void
+    const loopDone = new Promise<void>(resolve => {
+      markLoopDone = resolve
+    })
+    const run = <T>(counters: LoadgenCounters, workers: Promise<T>, emitTimeseries = true) =>
+      runWithTimeseries({
+        counters,
+        cfg: { emitTimeseries },
+        stopAtMs,
+        timeseriesSampler: new ReservoirSampler(10),
+        workers,
+        writePoint: point => {
+          points.push(point)
+          if (clock.ms >= stopAtMs) markLoopDone()
+        },
+        now: () => clock.ms,
+        sleep: async ms => {
+          clock.ms += ms
+        },
+      })
+    return { clock, points, loopDone, run }
+  }
+
+  it("writes a final point carrying a 429 the deadline cut off after the loop's last point", async () => {
+    const stopAtMs = 3000
+    const { clock, points, loopDone, run } = timeseriesRun(stopAtMs)
+    const counters = freshCounters()
+    // One worker: a step that succeeds during the run, then one refused with
+    // the cap's 429. Its block wait outlasts the loop: the next block shows up
+    // only after the loop has written its last point, so the run has ended,
+    // the step is not sent again, and the 429 counts in rateLimitedAtDeadline.
+    const workers = (async () => {
+      counters.total++
+      counters.ok++
+      counters.total++
+      const error = await retryOnRateLimit(
+        async () => {
+          throw http429()
+        },
+        {
+          stopOnRateLimit: false,
+          maxRetries: 10,
+          shouldStop: () => clock.ms >= stopAtMs,
+          waitForNextBlock: async () => {
+            await loopDone
+            clock.ms += 500
+            return true
+          },
+          onRetry: () => {
+            counters.rateLimitRetries++
+          },
+        },
+      ).catch((caught: unknown) => caught)
+      return countStepFailure(counters, error)
+    })()
+
+    expect(await run(counters, workers)).toBe("rateLimitedAtDeadline")
+    expect(counters).toMatchObject({ total: 2, ok: 1, rateLimited: 0, rateLimitedAtDeadline: 1, rateLimitRetries: 0 })
+    // The loop's points (one a second up to the deadline) miss the 429; a
+    // final point after the workers have settled carries it.
+    expect(points.map(point => point.tSec)).toEqual([1, 2, 3, 3.5])
+    expect(points.slice(0, 3).map(point => point.rateLimitedAtDeadline)).toEqual([0, 0, 0])
+    expect(points[3]).toMatchObject({ ok: 0, total: 0, rateLimited: 0, rateLimitedAtDeadline: 1 })
+    expect(sumOverPoints(points)).toEqual(summaryTotals(counters))
+  })
+
+  it("writes no final point when nothing was counted after the loop's last point", async () => {
+    const { points, loopDone, run } = timeseriesRun(3000)
+    const counters = freshCounters()
+    const workers = (async () => {
+      counters.total += 3
+      counters.ok += 2
+      counters.rateLimited++
+      // The worker ends with the run, counting nothing more.
+      await loopDone
+    })()
+
+    await run(counters, workers)
+    expect(points.map(point => point.tSec)).toEqual([1, 2, 3])
+    expect(sumOverPoints(points)).toEqual(summaryTotals(counters))
+  })
+
+  it("writes no points, not even a final one, when EMIT_TIMESERIES is off", async () => {
+    const { points, run } = timeseriesRun(3000)
+    const counters = freshCounters()
+    const workers = (async () => {
+      counters.total++
+      counters.rateLimitedAtDeadline++
+    })()
+
+    await run(counters, workers, false)
+    expect(points).toEqual([])
   })
 })
 
