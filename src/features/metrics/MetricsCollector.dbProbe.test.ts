@@ -19,7 +19,9 @@ const timerOf = (probe: DbProbe) =>
 describe("MetricsCollector.start() with the DbProbe", () => {
     it("a second start() after a first one that threw leaves exactly one probe timer running", async () => {
         // No query: the probe's ticks do nothing, so the DataSource is never loaded.
-        const tick = spyOn(DbProbe.prototype, "tick").mockResolvedValue(undefined)
+        const tick = spyOn(DbProbe.prototype, "tick").mockResolvedValue(
+            undefined,
+        )
         const started: DbProbe[] = []
         const originalStart = DbProbe.prototype.start
         DbProbe.prototype.start = function (this: DbProbe) {
@@ -29,14 +31,17 @@ describe("MetricsCollector.start() with the DbProbe", () => {
 
         const collector = MetricsCollector.getInstance()
         let collections = 0
-        ;(collector as unknown as { collectAll: () => Promise<void> }).collectAll =
-            async () => {
-                collections++
-                if (collections === 1) throw new Error("first collection failed")
-            }
+        ;(
+            collector as unknown as { collectAll: () => Promise<void> }
+        ).collectAll = async () => {
+            collections++
+            if (collections === 1) throw new Error("first collection failed")
+        }
 
         try {
-            await expect(collector.start()).rejects.toThrow("first collection failed")
+            await expect(collector.start()).rejects.toThrow(
+                "first collection failed",
+            )
             expect(started).toHaveLength(1)
             expect(timerOf(started[0])).not.toBeNull()
 
@@ -62,7 +67,10 @@ describe("MetricsCollector.start() with the DbProbe", () => {
  */
 function fakePostgres() {
     const state = { hang: true, connections: 0, queries: 0 }
-    const waiters = { query: [] as Array<() => void>, close: [] as Array<() => void> }
+    const waiters = {
+        query: [] as Array<() => void>,
+        close: [] as Array<() => void>,
+    }
     const sockets = new Set<net.Socket>()
     const message = (type: string, body: Buffer) => {
         const head = Buffer.alloc(5)
@@ -100,7 +108,8 @@ function fakePostgres() {
                 } else if (type === "Q") {
                     state.queries++
                     waiters.query.splice(0).forEach(wake => wake())
-                    if (!state.hang) socket.write(Buffer.concat([selectDone, ready]))
+                    if (!state.hang)
+                        socket.write(Buffer.concat([selectDone, ready]))
                 } else if (type === "X") {
                     socket.end()
                 }

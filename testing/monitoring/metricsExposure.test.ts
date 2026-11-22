@@ -85,17 +85,23 @@ describe("block-stall alerting is loaded", () => {
         expect(read("monitoring/prometheus/alerts/node-health.yml")).toMatch(
             /alert: DbDown\s+expr: demos_db_up == 0/,
         )
-        expect(read("src/features/metrics/MetricsCollector.ts")).toContain("\"db_up\"")
+        expect(read("src/features/metrics/MetricsCollector.ts")).toMatch(
+            /"db_up"/,
+        )
     })
 
     it("says the probe duration gauge includes getting a pool connection and is stale while demos_db_up is 0", () => {
-        expect(read("src/features/metrics/MetricsCollector.ts")).toContain(
-            "\"Seconds the last successful Postgres probe took, including getting a pool connection and SELECT 1; stale while demos_db_up is 0\"",
+        expect(read("src/features/metrics/MetricsCollector.ts")).toMatch(
+            /"Seconds the last successful Postgres probe took, including getting a pool connection and SELECT 1; stale while demos_db_up is 0"/,
         )
-        expect(read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " ")).toContain(
+        expect(
+            read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " "),
+        ).toContain(
             "`demos_db_probe_duration_seconds`: how long the last successful probe took, including getting a pool connection, so a busy node pool also raises it.",
         )
-        expect(read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " ")).toContain(
+        expect(
+            read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " "),
+        ).toContain(
             "It is not updated by failed probes, so it is stale while `demos_db_up` is 0.",
         )
     })
@@ -123,6 +129,14 @@ describe("block-stall alerting is loaded", () => {
         expect(runbook).toContain(
             "An outage with at least one good probe each minute, for example Postgres crash-looping and restarting, does not fire it; it is seen only through `HeightStalled`, if blocks stop",
         )
+    })
+
+    it("says DbDown clears once the node's pool has a free connection, and to restart a node it keeps firing on", () => {
+        const runbook = flat(read("docs/runbooks/mainnet-monitoring.md"))
+        expect(runbook).toContain(
+            "so the alert clears with the next probe once the node's pool has a free connection; if it keeps firing while Postgres answers (`psql` works), or the height still does not advance a few minutes later, restart the node.",
+        )
+        expect(runbook).not.toContain("without a node restart")
     })
 })
 

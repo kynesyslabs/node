@@ -370,7 +370,8 @@ When `DbDown` fires, on the validator:
    `DiskSpaceCritical` see that disk only when it is the filesystem of
    `DISK_SPACE_PATH`.
 4. The pool opens new connections once Postgres answers, so the alert clears
-   with the next probe without a node restart. If the height still does not
+   with the next probe once the node's pool has a free connection; if it keeps
+   firing while Postgres answers (`psql` works), or the height still does not
    advance a few minutes later, restart the node. If it stopped meanwhile
    (`NodeDown`), start it once Postgres is healthy.
 
