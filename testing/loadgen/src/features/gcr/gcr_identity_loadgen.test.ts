@@ -181,8 +181,13 @@ describe("workerCountWarnings", () => {
     expect(over).toHaveLength(1)
     expect(over[0]).toContain("CONCURRENCY=6 is above 4 (4 identity confirms per block per node x 1 target(s)")
     // The retry is the default; under STOP_ON_RATE_LIMIT=true the first 429 ends the run.
+    // Only nodes that apply the cap answer 429: the cap exempts whitelisted
+    // addresses and requests signed with the target node's key.
     expect(over[0]).toEndWith(
-      "workers wait for the next block and retry (with STOP_ON_RATE_LIMIT=true the first 429 stops the run instead).",
+      "Nodes that apply the cap will answer the extra confirms with HTTP 429; " +
+        "workers wait for the next block and retry (with STOP_ON_RATE_LIMIT=true the first 429 stops the run instead) " +
+        "(whitelisted addresses such as loopback, and requests signed with the target node's key, are exempt from the cap; " +
+        "set GCR_IDENTITY_OVER_CAP=true for those targets).",
     )
     expect(workerCountWarnings(config(9, 8, 9, 2))[0]).toContain("CONCURRENCY=9 is above 8")
     // The printed cap is the configured one, not recomputed from the targets.
@@ -243,7 +248,9 @@ describe("getConfig", () => {
     expect(clamped.cfg.workerCap).toBe(16)
     expect(clamped.cfg.concurrency).toBe(16)
     expect(clamped.warnings).toEqual([
-      "[gcr_identity_loadgen] CONCURRENCY=50 is above the identity confirm cap of 16; using 16, set GCR_IDENTITY_OVER_CAP=true to keep 50.",
+      "[gcr_identity_loadgen] CONCURRENCY=50 is above the identity confirm cap of 16; using 16, set GCR_IDENTITY_OVER_CAP=true to keep 50 " +
+        "(whitelisted addresses such as loopback, and requests signed with the target node's key, are exempt from the cap; " +
+        "set GCR_IDENTITY_OVER_CAP=true for those targets).",
     ])
 
     process.env.GCR_IDENTITY_OVER_CAP = "true"
@@ -279,7 +286,9 @@ describe("getConfig", () => {
     const capped = configWithWarnings(twentyWallets)
     expect(capped.cfg.concurrency).toBe(16)
     expect(capped.warnings).toEqual([
-      "[gcr_identity_loadgen] CONCURRENCY=50 is above the identity confirm cap of 16; using 16, set GCR_IDENTITY_OVER_CAP=true to keep 50.",
+      "[gcr_identity_loadgen] CONCURRENCY=50 is above the identity confirm cap of 16; using 16, set GCR_IDENTITY_OVER_CAP=true to keep 50 " +
+        "(whitelisted addresses such as loopback, and requests signed with the target node's key, are exempt from the cap; " +
+        "set GCR_IDENTITY_OVER_CAP=true for those targets).",
     ])
 
     process.env.GCR_IDENTITY_OVER_CAP = "true"
@@ -1576,5 +1585,15 @@ describe("runVerdict", () => {
       ok: false,
       primaryIssues: ["leaked_identities"],
     })
+  })
+
+  it("names all three failure conditions in the message of a failed run", () => {
+    // runGcrIdentityLoadgen throws it when runVerdict gives ok false; reaching
+    // that throw needs live nodes, so the check reads the source.
+    const source = readFileSync(join(import.meta.dir, "gcr_identity_loadgen.ts"), "utf8")
+    expect(source).toContain(
+      "\"gcr_identity_loadgen failed: no successful step, error rate above MAX_ERROR_RATE, or leaked identities detected\"",
+    )
+    expect(source).not.toContain("error rate exceeded threshold")
   })
 })

@@ -212,6 +212,11 @@ export function workerRpcUrl(cfg: Pick<LoadgenConfig, "targetUrls">, idx: number
   return cfg.targetUrls[idx % cfg.targetUrls.length]
 }
 
+/** Who the node's identity confirm cap exempts (isTrustedInternalRequest, src/libs/network/middleware/rateLimiter.ts). */
+const CAP_EXEMPTIONS =
+  "(whitelisted addresses such as loopback, and requests signed with the target node's key, are exempt from the cap; " +
+  "set GCR_IDENTITY_OVER_CAP=true for those targets)"
+
 /**
  * Warnings for the configured worker count: above the identity confirm cap
  * (config.workerCap), and more workers than wallets. resolveWorkerCount
@@ -223,8 +228,8 @@ export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "wo
   if (cfg.concurrency > cfg.workerCap) {
     warnings.push(
       `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, distinctTargets(cfg.rpcUrls).length)} target(s) from one source address). ` +
-        "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry " +
-        "(with STOP_ON_RATE_LIMIT=true the first 429 stops the run instead).",
+        "Nodes that apply the cap will answer the extra confirms with HTTP 429; workers wait for the next block and retry " +
+        `(with STOP_ON_RATE_LIMIT=true the first 429 stops the run instead) ${CAP_EXEMPTIONS}.`,
     )
   }
   if (cfg.concurrency > cfg.wallets.length) {
@@ -253,7 +258,8 @@ export function getConfig(wallets: string[]): LoadgenConfig {
             (workerCount.clampedBy === "wallets"
               ? `the wallet count of ${wallets.length} (workers sharing a wallet race on its nonce); `
               : `the identity confirm cap of ${workerCount.cap}; `) +
-            `using ${workerCount.workers}, set GCR_IDENTITY_OVER_CAP=true to keep ${workerCount.clampedFrom}.`,
+            `using ${workerCount.workers}, set GCR_IDENTITY_OVER_CAP=true to keep ${workerCount.clampedFrom}` +
+            (workerCount.clampedBy === "wallets" ? "." : ` ${CAP_EXEMPTIONS}.`),
         ]
   const config: LoadgenConfig = {
     rpcUrls,
@@ -1284,7 +1290,9 @@ export async function runGcrIdentityLoadgen() {
   console.log(JSON.stringify({ gcr_identity_loadgen_summary: summary }, null, 2))
 
   if (!ok) {
-    throw new Error("gcr_identity_loadgen failed: error rate exceeded threshold or leaked identities detected")
+    throw new Error(
+      "gcr_identity_loadgen failed: no successful step, error rate above MAX_ERROR_RATE, or leaked identities detected",
+    )
   }
 }
 
