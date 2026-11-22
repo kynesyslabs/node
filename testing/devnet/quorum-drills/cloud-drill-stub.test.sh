@@ -96,8 +96,8 @@ export PATH="${WORK}/bin:${PATH}" RUN_SH="${WORK}/run.sh" CAMPAIGNS_DIR="${WORK}
 # The stub hosts have no clock offset, so what cloud-drill.sh measures is the
 # ssh round trip: a runner stall there adds about half its length, and over the
 # 500 ms default the campaign aborts before any scenario or leftovers.txt
-# (#1275). Every case runs with a bound no stall reaches; the clock case sets
-# the default back.
+# (#1275). Every case runs with a bound no stall reaches; the clock case clears
+# it, so the script's own default applies there.
 export CLOCK_MAX_MS=600000
 
 inv() { printf '%s\n' "$@" > "${WORK}/inv"; }
@@ -181,9 +181,11 @@ check "a PASS run whose own teardown left a volume: exit 2" [ "${rc}" = 2 ]
 check "that run counts as exit 2 in results.tsv" grep -q $'^restart-n6s6\t2\tPASS\t' "${C}/results.tsv"
 
 echo "clock"
-CLOCK_MAX_MS=500 STUB_SKEW_MS=4000 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 skew; rc=$?
-check "a host 4 s off: exit 2" [ "${rc}" = 2 ]
-check "a host 4 s off: says so, no scenario run" bash -c "grep -q 'clock offset above 500ms' '${WORK}/out' && ! grep -q skew '${WORK}/run-calls'"
+# No CLOCK_MAX_MS: the 500 ms default is under test. A stall after the clock
+# read lowers the measured offset by half its length, so 60 s off leaves margin
+CLOCK_MAX_MS= STUB_SKEW_MS=60000 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 skew; rc=$?
+check "a host 60 s off: exit 2" [ "${rc}" = 2 ]
+check "a host 60 s off: says so, no scenario run" bash -c "grep -q 'clock offset above 500ms' '${WORK}/out' && ! grep -q skew '${WORK}/run-calls'"
 
 echo "prepare"
 inv "10.0.0.1 drill 22 3" "10.0.0.2 drill 2222 3"
