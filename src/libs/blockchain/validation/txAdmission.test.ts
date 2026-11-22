@@ -18,12 +18,14 @@ jest.mock("src/libs/blockchain/mempool", () => ({ __esModule: true, default: mem
 
 jest.mock("src/libs/blockchain/referenceBlockWindow", () => ({
     isWithinDeepWindow: (ref: number, head: number) => ref >= head - 5 && ref <= head,
+    signedReferenceBlock: (tx: any) =>
+        Number.isInteger(tx?.content?.reference_block) ? tx.content.reference_block : null,
 }))
 
 import { checkTxAdmissible } from "./txAdmission"
 
 const tx = (referenceBlock?: number) =>
-    ({ hash: "h1", content: {}, reference_block: referenceBlock }) as any
+    ({ hash: "h1", content: { reference_block: referenceBlock } }) as any
 
 describe("checkTxAdmissible", () => {
     beforeEach(() => {

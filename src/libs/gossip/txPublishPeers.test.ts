@@ -68,7 +68,7 @@ function fakeManager(txSubscribers: number) {
 function envelope(hash: string): ValidityData {
     return {
         data: {
-            transaction: { hash, content: { type: "native" } },
+            transaction: { hash, content: { type: "native", reference_block: 100 } },
             reference_block: 100,
         },
     } as unknown as ValidityData

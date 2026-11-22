@@ -60,7 +60,7 @@ function validityData(referenceBlock: number): any {
             valid: true,
             reference_block: referenceBlock,
             message: "",
-            transaction: { hash: HASH, blockNumber: HEAD + 1, content: { type: "native", data: ["native", {}] } },
+            transaction: { hash: HASH, blockNumber: HEAD + 1, content: { type: "native", data: ["native", {}], reference_block: referenceBlock } },
         },
         signature: { type: "ed25519", data: "bb".repeat(64) },
         rpc_public_key: { type: "ed25519", data: OUR_KEY },

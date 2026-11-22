@@ -111,6 +111,7 @@ function identityTx(hash: string, method: string, payload: unknown) {
             from_ed25519_address: SENDER,
             gcr_edits: [],
             data: ["identity", { method, payload }],
+            reference_block: 100,
         },
     } as any
 }

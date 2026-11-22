@@ -60,6 +60,7 @@ const PEER = "0x" + "cd".repeat(32)
 
 function offline(demos: any): void {
     demos.getAddressNonce = async () => 7
+    demos.getLastBlockNumber = async () => 100
     demos._isPostForkCached = async () => true
     demos._assertAmountAcceptableOnTargetNode = async () => {}
     demos._getNetworkParametersCached = async () => ({ networkFee: 1, rpcFee: 0 })

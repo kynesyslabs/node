@@ -144,6 +144,7 @@ await other.connectWalletFromPrivateKey("0x" + "22".repeat(32), {
     algorithm: "ed25519",
 })
 other.getAddressNonce = async () => 7
+other.getLastBlockNumber = async () => 100
 other._isPostForkCached = async () => true
 other._assertAmountAcceptableOnTargetNode = async () => {}
 other._getNetworkParametersCached = async () => ({ networkFee: 1, rpcFee: 0 })

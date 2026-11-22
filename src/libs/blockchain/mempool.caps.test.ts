@@ -230,6 +230,7 @@ function makeTx(over: {
                 additional_fee: 0,
             },
             pad: "x".repeat(over.pad ?? 0),
+            reference_block: 100,
         },
     } as any
 }

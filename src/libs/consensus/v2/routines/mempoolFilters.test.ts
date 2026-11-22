@@ -56,6 +56,7 @@ const tx = (
         content: {
             nonce: overrides.nonce ?? 0,
             gcr_edits: overrides.gcr_edits ?? [],
+            reference_block: referenceBlock,
         },
     }) as unknown as MempoolTransaction
 
@@ -67,6 +68,23 @@ describe("filterMempoolByRefBlock", () => {
         expect(res.validTxs).toEqual([a, b])
         expect(res.failedTxs).toEqual([])
         expect(a.status).toBe(TRANSACTION_STATUS.PENDING)
+    })
+
+    it("judges the signed reference block, not the pool row's", () => {
+        const expired = tx("0xexp", LAST_BLOCK - 3)
+        expired.reference_block = LAST_BLOCK
+        const res = filterMempoolByRefBlock([expired], true)
+        expect(expired.status).toBe(TRANSACTION_STATUS.FAILED)
+        expect(expired.attrs.reference_block).toBe(LAST_BLOCK - 3)
+        expect(res.validTxs).toEqual([expired])
+    })
+
+    it("leaves out a tx whose content carries no reference block", () => {
+        const bare = tx("0xbare", LAST_BLOCK)
+        delete (bare.content as { reference_block?: number }).reference_block
+        const res = filterMempoolByRefBlock([bare], true)
+        expect(res.validTxs).toEqual([])
+        expect(res.failedTxs.map(f => f.txhash)).toEqual(["0xbare"])
     })
 
     it("includes expired-in-deep-window txs as failed with attrs", () => {
