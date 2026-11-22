@@ -54,7 +54,7 @@ export type LoadgenCounters = {
    * total, but not errors.
    */
   rateLimitedAtDeadline: number
-  /** HTTP 429 answers that were waited out (next block) and retried; not errors. */
+  /** Cap 429 retries: one per retry started after the new block showed up; not errors. */
   rateLimitRetries: number
   cleanupError: number
 }
@@ -656,7 +656,7 @@ export type RateLimitRetry = {
   readHeight: () => Promise<number | null>
   /** Resolves true once a block past start shows up, false if none did in time. */
   waitForNextBlock: (start: number | null) => Promise<boolean>
-  /** Called once per extra attempt, just before it is sent. */
+  /** Called once per retry started after the new block showed up, just before the step runs again. */
   onRetry: () => void
 }
 
@@ -665,8 +665,8 @@ export type RateLimitRetry = {
  * identity confirm cap is back-pressure, so the step is retried after the next
  * block, up to maxRetries times. That block is one past the height read just
  * before the refused attempt, so a block that lands during the refusal counts;
- * the height is read only when a retry is possible at all. If no new block
- * shows up in time, the 429 is thrown. If the run has ended (shouldStop)
+ * the height is read before each attempt that could still be retried. If no
+ * new block shows up in time, the 429 is thrown. If the run has ended (shouldStop)
  * before the wait, once the new block shows up, or during the height read
  * before the retry, the 429 is thrown marked as cut off by the deadline
  * (isCutOffAtDeadline), since another attempt was still allowed. The general
@@ -679,7 +679,7 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
   const canRetry = !opts.stopOnRateLimit && opts.maxRetries > 0
   let refused: unknown
   for (let attempt = 0; ; attempt++) {
-    const start = canRetry ? await opts.readHeight() : null
+    const start = canRetry && attempt < opts.maxRetries ? await opts.readHeight() : null
     if (attempt > 0) {
       // The run ended during the height read: do not send the retry.
       if (opts.shouldStop()) throw markCutOffAtDeadline(refused)

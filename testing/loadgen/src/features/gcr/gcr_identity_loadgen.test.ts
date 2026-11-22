@@ -674,6 +674,43 @@ describe("identity confirm 429", () => {
     expect(isCutOffAtDeadline(limited)).toBe(true)
   })
 
+  it("reads no height before the last allowed attempt", async () => {
+    // maxRetries 1: the second attempt cannot be retried, so nothing would use
+    // a height read before it.
+    let attempts = 0
+    let reads = 0
+    let waits = 0
+    let retries = 0
+    let last: unknown
+    const limited = await retryOnRateLimit(async () => {
+      attempts++
+      last = http429()
+      throw last
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 1,
+      shouldStop: () => false,
+      readHeight: async () => {
+        reads++
+        return 100
+      },
+      waitForNextBlock: async () => {
+        waits++
+        return true
+      },
+      onRetry: () => {
+        retries++
+      },
+    }).catch((caught: unknown) => caught)
+    expect(limited).toBe(last)
+    expect(limited).toBeInstanceOf(RateLimitError)
+    expect(isCutOffAtDeadline(limited)).toBe(false)
+    expect(attempts).toBe(2)
+    expect(reads).toBe(1)
+    expect(waits).toBe(1)
+    expect(retries).toBe(1)
+  })
+
   it("a worker's step waiting out 429s stops retrying once the run deadline passes", async () => {
     node = startFakeNode()
     const fake = node
