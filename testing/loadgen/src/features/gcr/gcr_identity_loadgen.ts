@@ -5,6 +5,7 @@ import { ReservoirSampler, summarizeLatency } from "../../framework/metrics"
 import { envBool, envFloat, envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeHexAddress, normalizeRpcUrl, nowMs, sleep } from "../../framework/common"
 import { BroadcastError, ConfirmError, ConvergenceError, RateLimitError, RpcTimeoutError, SetupError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
+import { RATE_LIMIT_TX_PER_BLOCK } from "../../../../../src/utilities/constants"
 import {
   getTokenTargets,
   maybeSilenceConsole,
@@ -156,12 +157,13 @@ function isIdentityCapRateLimit(error: unknown): boolean {
 
 /**
  * Identity confirms (`execute` / `confirmTx` with identity data) one source
- * address may send to one node per block. Mirrors the node's
- * RATE_LIMIT_TX_PER_BLOCK (src/utilities/constants.ts, enforced in
- * src/libs/network/rpcRateLimit.ts); any further confirm in that block gets
- * HTTP 429. Every worker in this process shares one source address.
+ * address may send to one node per block. This is the node's own
+ * RATE_LIMIT_TX_PER_BLOCK, imported from src/utilities/constants.ts (enforced
+ * in src/libs/network/rpcRateLimit.ts), so the worker count follows any change
+ * to it. Any further confirm in that block gets HTTP 429. Every worker in this
+ * process shares one source address.
  */
-export const IDENTITY_CONFIRMS_PER_BLOCK = 4
+export const IDENTITY_CONFIRMS_PER_BLOCK = RATE_LIMIT_TX_PER_BLOCK
 
 /**
  * How many workers to start. Each worker sends at most one identity confirm per

@@ -16,8 +16,10 @@
 
 import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { join } from "node:path"
+import { readFileSync } from "node:fs"
+import { join, resolve as resolvePath } from "node:path"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
+import { RATE_LIMIT_TX_PER_BLOCK } from "../../../../../src/utilities/constants"
 import { ConfirmError, ConvergenceError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import { ReservoirSampler } from "../../framework/metrics"
 import {
@@ -90,6 +92,17 @@ function fakeWaitClock(): WaitClock & { sleeps: number[] } {
 }
 
 describe("resolveWorkerCount", () => {
+  it("takes the cap from the node's RATE_LIMIT_TX_PER_BLOCK, not a copy of its value", () => {
+    expect(IDENTITY_CONFIRMS_PER_BLOCK).toBe(RATE_LIMIT_TX_PER_BLOCK)
+    // Both are 4 today, so the value alone cannot tell an import from a copy:
+    // check that the loadgen imports the node's constant and exports it as is.
+    const source = readFileSync(join(import.meta.dir, "gcr_identity_loadgen.ts"), "utf8")
+    const importPath = source.match(/^import \{[^}]*\bRATE_LIMIT_TX_PER_BLOCK\b[^}]*\} from "([^"]+)"$/m)?.[1]
+    expect(importPath).toBeDefined()
+    expect(resolvePath(import.meta.dir, `${importPath}.ts`)).toBe(resolvePath(import.meta.dir, "../../../../../src/utilities/constants.ts"))
+    expect(source).toMatch(/^export const IDENTITY_CONFIRMS_PER_BLOCK = RATE_LIMIT_TX_PER_BLOCK$/m)
+  })
+
   it("defaults to 4 workers per target", () => {
     expect(IDENTITY_CONFIRMS_PER_BLOCK).toBe(4)
     expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4 })
