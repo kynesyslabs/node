@@ -652,20 +652,32 @@ describe("identity confirm 429", () => {
     const counters = { rateLimitRetries: 0 } as LoadgenCounters
     const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10, opTimeoutMs: 15000 } as LoadgenConfig
     const sharedStop = { value: false }
-    // The run ends while the step waits for a block that never comes (the
-    // wait gives up after settleTimeoutSec, past the deadline).
+    // The run ends while the step waits for a block that never comes. The test
+    // ends it, not the wall clock: the first height read after the 429 (the
+    // block wait's) moves the run deadline into the past, so however long the
+    // step takes, the run is still on when its 429 arrives. The wait gives up
+    // after settleTimeoutSec on a fake clock, after the deadline.
+    let stopAtMs = Number.POSITIVE_INFINITY
     const retry = workerRateLimitRetry({
       rpcUrl: fake.url,
       cfg,
       counters,
       sharedStop,
-      stopAtMs: Date.now() + 300,
-      readBlockNumber: fake.readBlock,
+      get stopAtMs() {
+        return stopAtMs
+      },
+      readBlockNumber: rpcUrl => {
+        if (fake.rejected.length > 0) stopAtMs = Number.NEGATIVE_INFINITY
+        return fake.readBlock(rpcUrl)
+      },
+      clock: fakeWaitClock(),
     })
     const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(RateLimitError)
     expect(sharedStop.value).toBe(false)
+    // The run had ended by the time the wait gave up.
+    expect(retry.shouldStop()).toBe(true)
     // One wait, started before the deadline. The run has ended when it gives
     // up, so the step is not sent again, its first 429 ends it, and no retry
     // is counted.
