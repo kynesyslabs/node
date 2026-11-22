@@ -10,6 +10,9 @@
 #   int-handled:N Ctrl-C: the launcher and the node both get SIGINT, as from a
 #                 terminal; the node handles it and exits N
 #   int-killed    Ctrl-C, and the node is killed by the SIGINT (status 130)
+# STUB_SETUP=int sends the launcher a Ctrl-C during setup instead: the sleep
+# stub signals it at its first sleep (the pause after "Starting your Demos
+# Network node"), on a second start where postgres_<port>/ already exists.
 #
 # Checks:
 #   - the node exits 1 -> scripts/run exits 1, after the clean-up
@@ -17,6 +20,8 @@
 #   - the node exits 0 -> scripts/run exits 0
 #   - Ctrl-C (node exits 1, or is killed by the SIGINT) -> "stopped successfully",
 #     exit 0, as before
+#   - Ctrl-C during setup, then the node exits 1 -> a crash, exit 1 (the
+#     setup Ctrl-C does not turn a later crash into a stop)
 #   - ./run (the wrapper) -> the node's status too
 #
 # Usage:
@@ -73,7 +78,16 @@ EOF
     printf '#!/usr/bin/env bash\nexit 1\n' >"$bin/lsof"
     printf '#!/usr/bin/env bash\nexit 1\n' >"$bin/ping"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$bin/nc"
-    printf '#!/usr/bin/env bash\nexit 0\n' >"$bin/sleep"
+    # sleep returns at once; with STUB_SETUP=int its first call sends the
+    # launcher (its parent) a SIGINT, which the launcher's INT trap handles
+    cat >"$bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${STUB_SETUP:-}" == int && ! -e "$STUB_ST/setup-int" ]]; then
+    : >"$STUB_ST/setup-int"
+    kill -INT "$PPID" && echo "SETUP INT (sleep $*)" >>"$STUB_ST/node.log"
+fi
+exit 0
+EOF
     printf '#!/usr/bin/env bash\necho 8\n' >"$bin/nproc"
     chmod +x "$bin"/*
 }
@@ -91,18 +105,27 @@ new_world() {
     make_stubs "$W/bin"
 }
 
-# check NAME STUB_NODE WANT_RC WANT_LINE [LAUNCHER]
+# check NAME STUB_NODE WANT_RC WANT_LINE [LAUNCHER] [STUB_SETUP]
 # LAUNCHER is scripts/run (default) or run, relative to the world. timeout also
 # gives the launcher a default SIGINT even where this shell ignores it.
+# STUB_SETUP=int: Ctrl-C during setup, on a second start (postgres_5332/ exists,
+# as the launcher's INT trap cds into it).
 check() {
     local name="$1" node="$2" want_rc="$3" want_line="$4" launcher="${5:-scripts/run}"
+    local setup="${6:-}"
     local out rc why=""
     new_world
+    if [[ "$setup" == int ]]; then
+        cp -r "$W/postgres" "$W/postgres_5332"
+    fi
     out="$(cd "$W" && env -u PG_PORT -u PG_HOST PATH="$W/bin:$PATH" STUB_ST="$ST" \
-        STUB_NODE="$node" GOSSIP_ENABLED=false timeout 60 "$W/$launcher" -t -m 2>&1)"
+        STUB_NODE="$node" STUB_SETUP="$setup" GOSSIP_ENABLED=false \
+        timeout 60 "$W/$launcher" -t -m 2>&1)"
     rc=$?
     if ! grep -q 'NODE started' "$ST/node.log" 2>/dev/null; then
         why="the node never started"
+    elif [[ "$setup" == int ]] && ! head -1 "$ST/node.log" | grep -q '^SETUP INT'; then
+        why="no Ctrl-C reached the launcher before the node started"
     elif [[ "$rc" != "$want_rc" ]]; then
         why="exit $rc (want $want_rc)"
     elif ! grep -qF -- "$want_line" <<<"$out"; then
@@ -127,6 +150,7 @@ check "node exits 3 -> launcher exits 3" exit:3 3 "$CRASH"
 check "node exits 0 -> launcher exits 0" exit:0 0 'node exited successfully'
 check "Ctrl-C, node exits 1 -> stopped, exit 0 (unchanged)" int-handled:1 0 'node stopped successfully'
 check "Ctrl-C, node killed by SIGINT -> stopped, exit 0 (unchanged)" int-killed 0 'node stopped successfully'
+check "Ctrl-C during setup, then node exits 1 -> crash, exit 1" exit:1 1 "$CRASH" scripts/run int
 echo "# ./run (execs scripts/run)"
 check "./run, node exits 1 -> exits 1" exit:1 1 "$CRASH" run
 check "./run, node exits 0 -> exits 0" exit:0 0 'node exited successfully' run

@@ -845,6 +845,8 @@ this restart is a fallback there.
     alerts on a non-zero exit (systemd `Restart=on-failure`, a shell loop, a
     health check) acts on it; a refusal repeats on each restart until its
     cause is fixed. Ctrl-C still exits 0. `./run --docker` is unchanged.
+    The block watchdog's exit code 42 now reaches the supervisor too; exempt
+    it (systemd `RestartPreventExitStatus=42`), as `.env.example` says.
 
 ## Known limits
 

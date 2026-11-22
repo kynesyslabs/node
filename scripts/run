@@ -1066,6 +1066,8 @@ log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT:
 log_verbose "Command: ${FINAL_COMMAND}"
 # The node's status, read before anything else runs. The launcher exits with it
 # after the clean-up below, so a supervisor sees a crash or a refusal (exit 1).
+# Only a Ctrl-C while the node runs counts as a stop, not one during setup.
+HAS_BEEN_INTERRUPTED=false
 RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND
 exit_code=$?
 if [[ "$exit_code" -ne 0 ]]; then
