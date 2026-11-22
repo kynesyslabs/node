@@ -49,8 +49,9 @@ export type LoadgenCounters = {
   networkError: number
   rateLimited: number
   /**
-   * Steps a 429 left unfinished at the run deadline (the retry stops waiting
-   * for the next block there). Counted in total, but not errors.
+   * Steps an identity confirm cap 429 left unfinished because the run deadline
+   * cut off a retry that was still allowed (isCutOffAtDeadline). Counted in
+   * total, but not errors.
    */
   rateLimitedAtDeadline: number
   /** HTTP 429 answers that were waited out (next block) and retried; not errors. */
@@ -165,24 +166,29 @@ export const IDENTITY_CONFIRMS_PER_BLOCK = 4
  * limiter has not yet seen the new block: the limiter counts per shared-state
  * lastBlockNumber, while a worker moves on once the stored chain shows the block
  * (its identity change, or getLastBlockNumber after a 429). That 429 is retried
- * (retryOnRateLimit). The default is that cap, and no more than one worker
- * per wallet (workers sharing a wallet race on its nonce). An explicit
- * CONCURRENCY at or below the cap is used as given. One above the cap (the
- * Docker perf compose passes 50) is clamped to the cap (clampedFrom is the
- * requested number), unless overCap (GCR_IDENTITY_OVER_CAP=true) is set; then
- * it is used as given (see workerCountWarnings).
+ * (retryOnRateLimit). The default is the smaller of that cap and the wallet
+ * count: no more than one worker per wallet, since workers sharing a wallet
+ * race on its nonce. An explicit CONCURRENCY at or below that default is used
+ * as given. One above it (the Docker perf compose passes 50) is clamped to it
+ * (clampedFrom is the requested number, clampedBy the limit that applied: the
+ * cap, or the wallet count when that is smaller), unless overCap
+ * (GCR_IDENTITY_OVER_CAP=true) is set; then it is used as given (see
+ * workerCountWarnings).
  */
 export function resolveWorkerCount(params: {
   requested: string | undefined
   targetCount: number
   walletCount: number
   overCap?: boolean
-}): { workers: number; cap: number; clampedFrom?: number } {
+}): { workers: number; cap: number; clampedFrom?: number; clampedBy?: "cap" | "wallets" } {
   const cap = IDENTITY_CONFIRMS_PER_BLOCK * Math.max(1, params.targetCount)
+  const limit = Math.max(1, Math.min(cap, params.walletCount))
   const parsed = params.requested ? Number.parseInt(params.requested, 10) : Number.NaN
-  if (!Number.isFinite(parsed)) return { workers: Math.max(1, Math.min(cap, params.walletCount)), cap }
+  if (!Number.isFinite(parsed)) return { workers: limit, cap }
   const requested = Math.max(1, parsed)
-  if (requested > cap && !params.overCap) return { workers: cap, cap, clampedFrom: requested }
+  if (requested > limit && !params.overCap) {
+    return { workers: limit, cap, clampedFrom: requested, clampedBy: params.walletCount < cap ? "wallets" : "cap" }
+  }
   return { workers: requested, cap }
 }
 
@@ -201,8 +207,9 @@ export function workerRpcUrl(cfg: Pick<LoadgenConfig, "targetUrls">, idx: number
 
 /**
  * Warnings for the configured worker count: above the identity confirm cap
- * (config.workerCap, only with GCR_IDENTITY_OVER_CAP=true), and more workers
- * than wallets.
+ * (config.workerCap), and more workers than wallets. resolveWorkerCount
+ * clamps to both unless GCR_IDENTITY_OVER_CAP=true, so without the flag only a
+ * run with no wallet gets the second one.
  */
 export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "workerCap" | "rpcUrls" | "wallets">): string[] {
   const warnings: string[] = []
@@ -234,8 +241,11 @@ export function getConfig(wallets: string[]): LoadgenConfig {
     workerCount.clampedFrom === undefined
       ? []
       : [
-          `[gcr_identity_loadgen] CONCURRENCY=${workerCount.clampedFrom} is above the identity confirm cap of ${workerCount.cap}; ` +
-            `using ${workerCount.cap}, set GCR_IDENTITY_OVER_CAP=true to keep ${workerCount.clampedFrom}.`,
+          `[gcr_identity_loadgen] CONCURRENCY=${workerCount.clampedFrom} is above ` +
+            (workerCount.clampedBy === "wallets"
+              ? `the wallet count of ${wallets.length} (workers sharing a wallet race on its nonce); `
+              : `the identity confirm cap of ${workerCount.cap}; `) +
+            `using ${workerCount.workers}, set GCR_IDENTITY_OVER_CAP=true to keep ${workerCount.clampedFrom}.`,
         ]
   const config: LoadgenConfig = {
     rpcUrls,
@@ -294,20 +304,34 @@ function classifyFailure(error: unknown): keyof Pick<LoadgenCounters, "confirmEr
   }
 }
 
+/** Set by retryOnRateLimit on a 429 whose retry the run deadline cut off (isCutOffAtDeadline). */
+type CutOffMark = { cutOffAtDeadline?: true }
+
+function markCutOffAtDeadline(error: unknown): unknown {
+  if (error instanceof Error) (error as Error & CutOffMark).cutOffAtDeadline = true
+  return error
+}
+
+/** Whether retryOnRateLimit gave up on this identity confirm cap 429 only because the run ended. */
+export function isCutOffAtDeadline(error: unknown): boolean {
+  return error instanceof Error && (error as Error & CutOffMark).cutOffAtDeadline === true
+}
+
 /**
- * Counts a worker step that failed. An identity confirm cap HTTP 429 that
- * ends the step once the run deadline has passed goes to rateLimitedAtDeadline,
- * not rateLimited: the worker's retry stops waiting for the next block at the
- * deadline, so the node did not refuse the step for good, the run just ended
- * before the retry. The step stays in total as unfinished, and errorRateOf
- * leaves it out. It is not an error, but a run with no successful step still
- * fails (runVerdict). Other rate-limit errors, which are not retried, stay in
- * rateLimited, and so does every 429 when stopOnRateLimit is set (no retries).
+ * Counts a worker step that failed. Only an identity confirm cap HTTP 429
+ * whose retry the run deadline cut off (isCutOffAtDeadline: retryOnRateLimit
+ * would have waited for the next block and sent the step again, but the run
+ * had ended) goes to rateLimitedAtDeadline: the node did not refuse the step
+ * for good, the run just ended before the retry. The step stays in total as
+ * unfinished, and errorRateOf leaves it out. It is not an error, but a run
+ * with no successful step still fails (runVerdict). Every other 429 counts in
+ * rateLimited as an error, whenever it arrives: one with no retry left
+ * (RATE_LIMIT_MAX_RETRIES used up, or 0), one whose block wait timed out,
+ * every 429 when stopOnRateLimit is set, and the other rate-limit errors,
+ * which are not retried.
  */
-export function countStepFailure(counters: LoadgenCounters, error: unknown, stopAtMs: number, stopOnRateLimit: boolean) {
-  const classified = classifyFailure(error)
-  const cutOff = !stopOnRateLimit && isIdentityCapRateLimit(error) && nowMs() >= stopAtMs
-  const bucket = cutOff ? "rateLimitedAtDeadline" : classified
+export function countStepFailure(counters: LoadgenCounters, error: unknown) {
+  const bucket = isCutOffAtDeadline(error) ? "rateLimitedAtDeadline" : classifyFailure(error)
   counters[bucket]++
   return bucket
 }
@@ -583,25 +607,26 @@ export type RateLimitRetry = {
 /**
  * Runs one step (a confirm + broadcast). An HTTP 429 from the node's per-block
  * identity confirm cap is back-pressure, so the step is retried after the next
- * block, up to maxRetries times. If no new block shows up in time, or the run
- * ends during the wait, the 429 is thrown. The general limiter's 429 (http429LimiterOf),
- * rate-limit messages without an HTTP 429, other errors, and every 429 when
- * stopOnRateLimit is set, are thrown to the caller.
+ * block, up to maxRetries times. If no new block shows up in time, the 429 is
+ * thrown. If the run has ended (shouldStop) before the wait or once the new
+ * block shows up, the 429 is thrown marked as cut off by the deadline
+ * (isCutOffAtDeadline), since another attempt was still allowed. The general
+ * limiter's 429 (http429LimiterOf), rate-limit messages without an HTTP 429,
+ * other errors, every 429 when stopOnRateLimit is set, and a 429 with no retry
+ * left, are thrown to the caller unmarked.
  */
 export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await step()
     } catch (error) {
-      const retry =
-        isIdentityCapRateLimit(error) &&
-        !opts.stopOnRateLimit &&
-        attempt < opts.maxRetries &&
-        !opts.shouldStop()
-      if (!retry) throw error
-      // No new block in time (the cap is still spent), or the run ended
-      // during the wait: do not start another step.
-      if (!(await opts.waitForNextBlock()) || opts.shouldStop()) throw error
+      const retryAllowed = isIdentityCapRateLimit(error) && !opts.stopOnRateLimit && attempt < opts.maxRetries
+      if (!retryAllowed) throw error
+      if (opts.shouldStop()) throw markCutOffAtDeadline(error)
+      // No new block in time: the cap is still spent, so do not start another step.
+      if (!(await opts.waitForNextBlock())) throw error
+      // The run ended during the wait: do not start another step.
+      if (opts.shouldStop()) throw markCutOffAtDeadline(error)
       opts.onRetry()
     }
   }
@@ -769,7 +794,7 @@ async function worker(params: {
       const elapsed = performance.now() - started
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
-      const bucket = countStepFailure(params.counters, error, params.stopAtMs, params.cfg.stopOnRateLimit)
+      const bucket = countStepFailure(params.counters, error)
       if (bucket !== "rateLimitedAtDeadline") {
         pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
       }

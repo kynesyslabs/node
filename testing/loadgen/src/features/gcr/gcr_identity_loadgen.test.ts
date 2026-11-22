@@ -24,6 +24,7 @@ import {
   errorRateOf,
   getConfig,
   http429LimiterOf,
+  isCutOffAtDeadline,
   resolveWorkerCount,
   retryOnRateLimit,
   runVerdict,
@@ -52,18 +53,51 @@ describe("resolveWorkerCount", () => {
     expect(resolveWorkerCount({ requested: undefined, targetCount: 1, walletCount: 0 }).workers).toBe(1)
   })
 
-  it("uses an explicit CONCURRENCY at or below the cap as given", () => {
-    expect(resolveWorkerCount({ requested: "8", targetCount: 2, walletCount: 4 })).toEqual({ workers: 8, cap: 8 })
+  it("uses an explicit CONCURRENCY at or below the cap and the wallet count as given", () => {
+    expect(resolveWorkerCount({ requested: "8", targetCount: 2, walletCount: 8 })).toEqual({ workers: 8, cap: 8 })
     expect(resolveWorkerCount({ requested: "3", targetCount: 1, walletCount: 4 })).toEqual({ workers: 3, cap: 4 })
     expect(resolveWorkerCount({ requested: "1", targetCount: 1, walletCount: 4 })).toEqual({ workers: 1, cap: 4 })
     expect(resolveWorkerCount({ requested: "0", targetCount: 1, walletCount: 4 }).workers).toBe(1)
   })
 
   it("clamps an explicit CONCURRENCY above the cap, unless overCap is set", () => {
-    expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4 })).toEqual({ workers: 4, cap: 4, clampedFrom: 6 })
-    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 50 })).toEqual({ workers: 16, cap: 16, clampedFrom: 50 })
+    expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4 })).toEqual({
+      workers: 4,
+      cap: 4,
+      clampedFrom: 6,
+      clampedBy: "cap",
+    })
+    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 50 })).toEqual({
+      workers: 16,
+      cap: 16,
+      clampedFrom: 50,
+      clampedBy: "cap",
+    })
     expect(resolveWorkerCount({ requested: "6", targetCount: 1, walletCount: 4, overCap: true })).toEqual({ workers: 6, cap: 4 })
     expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 50, overCap: true })).toEqual({ workers: 50, cap: 16 })
+  })
+
+  it("clamps an explicit CONCURRENCY above the wallet count to one worker per wallet, unless overCap is set", () => {
+    // The Docker perf defaults: 4 targets, 4 wallets, CONCURRENCY=50.
+    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 4 })).toEqual({
+      workers: 4,
+      cap: 16,
+      clampedFrom: 50,
+      clampedBy: "wallets",
+    })
+    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 20 })).toEqual({
+      workers: 16,
+      cap: 16,
+      clampedFrom: 50,
+      clampedBy: "cap",
+    })
+    expect(resolveWorkerCount({ requested: "8", targetCount: 2, walletCount: 4 })).toEqual({
+      workers: 4,
+      cap: 8,
+      clampedFrom: 8,
+      clampedBy: "wallets",
+    })
+    expect(resolveWorkerCount({ requested: "50", targetCount: 4, walletCount: 4, overCap: true })).toEqual({ workers: 50, cap: 16 })
   })
 
   it("ignores a CONCURRENCY that is not a number", () => {
@@ -157,6 +191,37 @@ describe("getConfig", () => {
     const below = configWithWarnings(wallets)
     expect(below.cfg.concurrency).toBe(3)
     expect(below.warnings).toEqual([])
+  })
+
+  it("gives the Docker perf defaults (CONCURRENCY=50, 4 targets, 4 wallets) one worker per wallet", () => {
+    process.env.TARGETS = "http://a:1,http://b:1,http://c:1,http://d:1"
+    process.env.CONCURRENCY = "50"
+    delete process.env.GCR_IDENTITY_OVER_CAP
+    const fourWallets = Array.from({ length: 4 }, (_, i) => `wallet ${i}`)
+    const perWallet = configWithWarnings(fourWallets)
+    expect(perWallet.cfg.workerCap).toBe(16)
+    expect(perWallet.cfg.concurrency).toBe(4)
+    // One worker on each node, each with its own wallet.
+    expect(workersPerNode(perWallet.cfg)).toEqual({ "http://a:1/": 1, "http://b:1/": 1, "http://c:1/": 1, "http://d:1/": 1 })
+    expect(perWallet.warnings).toEqual([
+      "[gcr_identity_loadgen] CONCURRENCY=50 is above the wallet count of 4 (workers sharing a wallet race on its nonce); " +
+        "using 4, set GCR_IDENTITY_OVER_CAP=true to keep 50.",
+    ])
+
+    const twentyWallets = Array.from({ length: 20 }, (_, i) => `wallet ${i}`)
+    const capped = configWithWarnings(twentyWallets)
+    expect(capped.cfg.concurrency).toBe(16)
+    expect(capped.warnings).toEqual([
+      "[gcr_identity_loadgen] CONCURRENCY=50 is above the identity confirm cap of 16; using 16, set GCR_IDENTITY_OVER_CAP=true to keep 50.",
+    ])
+
+    process.env.GCR_IDENTITY_OVER_CAP = "true"
+    const over = configWithWarnings(fourWallets)
+    expect(over.cfg.concurrency).toBe(50)
+    // No clamp line: the over-cap and shared-wallet warnings instead.
+    expect(over.warnings).toHaveLength(2)
+    expect(over.warnings[0]).toContain("CONCURRENCY=50 is above 16")
+    expect(over.warnings[1]).toContain("50 workers but 4 wallet(s)")
   })
 
   it("gives TARGETS=a,a the same worker cap as TARGETS=a", () => {
@@ -549,9 +614,13 @@ describe("identity confirm 429", () => {
     expect(counters.rateLimitRetries).toBe(0)
     expect(fake.rejected).toEqual([1])
     expect(fake.accepted).toEqual([1, 1, 1, 1])
+    // No new block came, so the cap was still spent and the deadline cut off
+    // no retry: the 429 is an error, though it ends the step after the deadline.
+    expect(isCutOffAtDeadline(error)).toBe(false)
+    expect(countStepFailure(freshCounters(), error)).toBe("rateLimited")
   })
 
-  it("a 429 that ends a worker's step after the run deadline is counted apart and is not an error", async () => {
+  it("a 429 whose retry the run deadline cut off is counted apart and is not an error", async () => {
     node = startFakeNode()
     const fake = node
     const demos = await demosWithSdkTransport(fake.url)
@@ -562,8 +631,9 @@ describe("identity confirm 429", () => {
       counters.ok++
     }
 
-    // A fifth step in the same block is refused. The run ends while it waits
-    // for a block that never comes, so its 429 is rethrown to the worker after the deadline.
+    // A fifth step in the same block is refused. The next block shows up
+    // only after the run has ended, so the step is not sent again and its 429
+    // is rethrown to the worker after the deadline.
     const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
     const stopAtMs = Date.now() + 300
     const retry = workerRateLimitRetry({
@@ -574,12 +644,18 @@ describe("identity confirm 429", () => {
       stopAtMs,
       readBlockNumber: fake.readBlock,
     })
+    setTimeout(() => fake.nextBlock(), 400)
     counters.total++
     const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(RateLimitError)
     expect(Date.now()).toBeGreaterThanOrEqual(stopAtMs)
+    expect(fake.rejected).toEqual([1])
+    expect(counters.rateLimitRetries).toBe(0)
+    expect(isCutOffAtDeadline(error)).toBe(true)
+    // The mark keeps the error's code and limiter.
+    expect(normalizeLoadgenError(error).context).toMatchObject({ httpStatus: 429, limiter: "identity_cap" })
 
-    expect(countStepFailure(counters, error, stopAtMs, cfg.stopOnRateLimit)).toBe("rateLimitedAtDeadline")
+    expect(countStepFailure(counters, error)).toBe("rateLimitedAtDeadline")
     expect(counters.rateLimitedAtDeadline).toBe(1)
     expect(counters.rateLimited).toBe(0)
     // The unfinished step stays in total but does not raise the error rate.
@@ -587,22 +663,112 @@ describe("identity confirm 429", () => {
     expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 0 })
   })
 
+  /** A retry whose run has ended (shouldStop) and whose block wait always succeeds; counts the waits. */
+  const retryAfterDeadline = (overrides: Partial<RateLimitRetry> = {}) => {
+    const seen = { waits: 0 }
+    const retry: RateLimitRetry = {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => true,
+      waitForNextBlock: async () => {
+        seen.waits++
+        return true
+      },
+      onRetry: () => {},
+      ...overrides,
+    }
+    return { retry, seen }
+  }
+
+  it("a cap 429 after the run deadline with a retry still allowed is cut off by the deadline", async () => {
+    const { retry, seen } = retryAfterDeadline()
+    let attempts = 0
+    const error = await retryOnRateLimit(async () => {
+      attempts++
+      throw http429()
+    }, retry).catch((caught: unknown) => caught)
+    expect(attempts).toBe(1)
+    expect(seen.waits).toBe(0)
+    expect(isCutOffAtDeadline(error)).toBe(true)
+    const counters = freshCounters()
+    counters.total = 2
+    counters.ok = 1
+    expect(countStepFailure(counters, error)).toBe("rateLimitedAtDeadline")
+    expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 0 })
+  })
+
+  it("with RATE_LIMIT_MAX_RETRIES=0, a cap 429 after the run deadline is an error", async () => {
+    const counters = freshCounters()
+    counters.total = 2
+    counters.ok = 1
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 0, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
+    const retry = workerRateLimitRetry({
+      rpcUrl: "http://unused:1",
+      cfg,
+      counters,
+      sharedStop: { value: false },
+      stopAtMs: Date.now() - 1,
+      readBlockNumber: async () => {
+        throw new Error("no retry is allowed, so no block is read")
+      },
+    })
+    const error = await retryOnRateLimit(async () => {
+      throw http429()
+    }, retry).catch((caught: unknown) => caught)
+    expect(isCutOffAtDeadline(error)).toBe(false)
+    expect(countStepFailure(counters, error)).toBe("rateLimited")
+    expect(counters.rateLimitedAtDeadline).toBe(0)
+    expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
+  })
+
+  it("with the retry budget used up, a cap 429 after the run deadline is an error", async () => {
+    // The run ends while the last allowed retry is in flight; its 429 has no retry left.
+    let attempts = 0
+    let retries = 0
+    const { retry, seen } = retryAfterDeadline({
+      maxRetries: 1,
+      shouldStop: () => attempts > 1,
+      onRetry: () => {
+        retries++
+      },
+    })
+    const error = await retryOnRateLimit(async () => {
+      attempts++
+      throw http429()
+    }, retry).catch((caught: unknown) => caught)
+    expect(attempts).toBe(2)
+    expect(seen.waits).toBe(1)
+    expect(retries).toBe(1)
+    expect(isCutOffAtDeadline(error)).toBe(false)
+    const counters = freshCounters()
+    counters.total = 2
+    counters.ok = 1
+    expect(countStepFailure(counters, error)).toBe("rateLimited")
+    expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
+  })
+
   it("a 429 that ends a step before the run deadline is still an error", () => {
     const counters = freshCounters()
     counters.total = 2
     counters.ok = 1
-    expect(countStepFailure(counters, http429(), Date.now() + 60_000, false)).toBe("rateLimited")
+    expect(countStepFailure(counters, http429())).toBe("rateLimited")
     expect(counters.rateLimited).toBe(1)
     expect(counters.rateLimitedAtDeadline).toBe(0)
     expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
   })
 
-  it("with stopOnRateLimit, a 429 at the run deadline is still an error", () => {
+  it("with stopOnRateLimit, a 429 at the run deadline is still an error", async () => {
     // No retries then, so the 429 refused the step, it did not just outlast the run.
+    const { retry, seen } = retryAfterDeadline({ stopOnRateLimit: true })
+    const error = await retryOnRateLimit(async () => {
+      throw http429()
+    }, retry).catch((caught: unknown) => caught)
+    expect(seen.waits).toBe(0)
+    expect(isCutOffAtDeadline(error)).toBe(false)
     const counters = freshCounters()
     counters.total = 2
     counters.ok = 1
-    expect(countStepFailure(counters, http429(), Date.now() - 1, true)).toBe("rateLimited")
+    expect(countStepFailure(counters, error)).toBe("rateLimited")
     expect(counters.rateLimited).toBe(1)
     expect(counters.rateLimitedAtDeadline).toBe(0)
     expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
@@ -667,8 +833,11 @@ describe("identity confirm 429", () => {
     expect(waits).toBe(0)
     expect(fake.rejected).toEqual([1])
     // Not retried, so it is an error even at the run deadline.
-    const counters = freshCounters()
-    expect(countStepFailure(counters, error, Date.now() - 1, false)).toBe("rateLimited")
+    const { retry: afterDeadline } = retryAfterDeadline()
+    const late = await retryOnRateLimit(() => addStep(demos, 1)(), afterDeadline).catch((caught: unknown) => caught)
+    expect(normalizeLoadgenError(late).context).toMatchObject({ httpStatus: 429, limiter: "ip_block" })
+    expect(isCutOffAtDeadline(late)).toBe(false)
+    expect(countStepFailure(freshCounters(), late)).toBe("rateLimited")
   })
 
   it("retries the identity confirm cap's HTTP 429 (no Retry-After, body retryAfter null)", async () => {
@@ -707,11 +876,16 @@ describe("identity confirm 429", () => {
     ).toBe("ip_block")
   })
 
-  it("an 'IP blocked' error after the run deadline is still counted as rateLimited", () => {
+  it("an 'IP blocked' error after the run deadline is still counted as rateLimited", async () => {
+    const { retry } = retryAfterDeadline()
+    const error = await retryOnRateLimit(async () => {
+      throw ipBlocked()
+    }, retry).catch((caught: unknown) => caught)
+    expect(isCutOffAtDeadline(error)).toBe(false)
     const counters = freshCounters()
     counters.total = 2
     counters.ok = 1
-    expect(countStepFailure(counters, ipBlocked(), Date.now() - 1, false)).toBe("rateLimited")
+    expect(countStepFailure(counters, error)).toBe("rateLimited")
     expect(counters.rateLimited).toBe(1)
     expect(counters.rateLimitedAtDeadline).toBe(0)
     expect(errorRateOf(counters)).toEqual({ errorCount: 1, errorRate: 0.5 })
