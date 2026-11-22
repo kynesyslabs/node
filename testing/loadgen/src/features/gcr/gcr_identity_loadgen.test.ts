@@ -28,6 +28,7 @@ import {
   getConfig,
   http429LimiterOf,
   isCutOffAtDeadline,
+  recordStepFailure,
   resolveWorkerCount,
   retryOnRateLimit,
   runVerdict,
@@ -850,6 +851,28 @@ describe("identity confirm 429", () => {
     counters.ok = 1
     expect(countStepFailure(counters, error)).toBe("rateLimitedAtDeadline")
     expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 0 })
+  })
+
+  it("a step cut off at the run deadline adds no latency sample; a step that fails otherwise still adds one", async () => {
+    const { retry } = retryAfterDeadline()
+    const cutOff = await retryOnRateLimit(async () => {
+      throw http429()
+    }, retry).catch((caught: unknown) => caught)
+    const errorSamples: Parameters<typeof recordStepFailure>[0]["errorSamples"] = []
+    const step = { counters: freshCounters(), sampler: new ReservoirSampler(10), timeseriesSampler: new ReservoirSampler(10), errorSamples }
+
+    expect(recordStepFailure(step, cutOff, 1200)).toBe("rateLimitedAtDeadline")
+    expect(step.sampler.size()).toBe(0)
+    expect(step.timeseriesSampler.size()).toBe(0)
+    expect(errorSamples).toEqual([])
+
+    // A cap 429 with no retry left and a confirm error still add their samples.
+    expect(recordStepFailure(step, http429(), 800)).toBe("rateLimited")
+    expect(recordStepFailure(step, new ConfirmError("confirm failed (add): invalid"), 300)).toBe("confirmError")
+    expect(step.sampler.snapshotSorted()).toEqual([300, 800])
+    expect(step.timeseriesSampler.snapshotSorted()).toEqual([300, 800])
+    expect(errorSamples).toHaveLength(2)
+    expect(step.counters).toMatchObject({ rateLimited: 1, confirmError: 1, rateLimitedAtDeadline: 1 })
   })
 
   it("with RATE_LIMIT_MAX_RETRIES=0, a cap 429 after the run deadline is an error", async () => {

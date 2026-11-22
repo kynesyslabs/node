@@ -759,6 +759,25 @@ function pushErrorSample(samples: ErrorSample[], stage: ErrorSample["stage"], er
   })
 }
 
+/**
+ * Counts a failed worker step. A step cut off at the deadline did not finish:
+ * it adds no latency sample and no error sample. Every other failed step adds
+ * its latency sample (a retried step's includes its block waits).
+ */
+export function recordStepFailure(
+  params: { counters: LoadgenCounters; sampler: ReservoirSampler; timeseriesSampler: ReservoirSampler; errorSamples: ErrorSample[] },
+  error: unknown,
+  elapsed: number,
+) {
+  const bucket = countStepFailure(params.counters, error)
+  if (bucket !== "rateLimitedAtDeadline") {
+    params.sampler.add(elapsed)
+    params.timeseriesSampler.add(elapsed)
+    pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
+  }
+  return bucket
+}
+
 async function worker(params: {
   workerId: number
   rpcUrl: string
@@ -866,13 +885,7 @@ async function worker(params: {
       params.timeseriesSampler.add(elapsed)
       iterations++
     } catch (error) {
-      const elapsed = performance.now() - started
-      params.sampler.add(elapsed)
-      params.timeseriesSampler.add(elapsed)
-      const bucket = countStepFailure(params.counters, error)
-      if (bucket !== "rateLimitedAtDeadline") {
-        pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
-      }
+      const bucket = recordStepFailure(params, error, performance.now() - started)
       // A rate-limit error still ends the run here when STOP_ON_RATE_LIMIT is set.
       if (bucket === "rateLimited" && params.cfg.stopOnRateLimit) {
         params.sharedStop.value = true
