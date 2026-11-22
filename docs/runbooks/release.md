@@ -838,6 +838,13 @@ this restart is a fallback there.
     them. The OmniProtocol framer waits for the rest of a partial auth block
     instead of refusing the frame, and the secretary ignores a validator
     phase it does not know.
+  - The bare-metal launcher (`./run` without `--docker`) exits with the
+    node's status, after its usual clean-up. Before, it exited 0 whatever
+    the node did. A crash, or one of the node's deliberate refusals to boot
+    (exit 1), now ends `./run` non-zero, so a supervisor that restarts or
+    alerts on a non-zero exit (systemd `Restart=on-failure`, a shell loop, a
+    health check) acts on it; a refusal repeats on each restart until its
+    cause is fixed. Ctrl-C still exits 0. `./run --docker` is unchanged.
 
 ## Known limits
 
