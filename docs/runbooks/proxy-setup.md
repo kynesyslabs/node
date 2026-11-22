@@ -184,9 +184,10 @@ support is required, run Prometheus on a dedicated subdomain
 Default `MCP_BASIC_AUTH_HASH` is a sentinel that rejects all callers
 (Caddyfile comment explains). With `docker-compose.proxy.yml`, the node
 refuses to start while `METRICS_BASIC_AUTH_HASH` is empty or the placeholder;
-`PROXY_ALLOW_PLACEHOLDER_AUTH=true` keeps the route closed on purpose. The
-`MCP_BASIC_AUTH_HASH` check applies only if `MCP_ENABLED` is also passed to the
-node container (the shipped compose files do not pass it). Generate a real hash:
+`PROXY_ALLOW_PLACEHOLDER_AUTH=true` keeps the route closed on purpose. With
+`MCP_ENABLED=true` in `.env` it refuses the same way while `MCP_BASIC_AUTH_HASH`
+is empty or the placeholder; with MCP off (the default) that hash is not
+checked. Generate a real hash:
 
 ```bash
 docker run --rm caddy:2 caddy hash-password --plaintext 'mcp-password-here'
