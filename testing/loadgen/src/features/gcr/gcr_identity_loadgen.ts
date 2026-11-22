@@ -1184,7 +1184,7 @@ export async function runGcrIdentityLoadgen() {
         cfg.opTimeoutMs,
         demos.connectWallet(cfg.wallets[report.workerId % cfg.wallets.length]!, { algorithm: "ed25519" }),
       )
-      // Cleanup always waits out a 429: leaving the identity behind fails the run.
+      // Cleanup waits out a 429, up to RATE_LIMIT_MAX_RETRIES blocks: leaving the identity behind fails the run.
       await retryOnRateLimit(
         () =>
           submitPqcTx({
