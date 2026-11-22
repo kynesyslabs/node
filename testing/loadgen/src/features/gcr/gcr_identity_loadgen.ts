@@ -149,6 +149,12 @@ function isIdentityCapRateLimit(error: unknown): boolean {
   return info.code === "RATE_LIMIT" && info.context?.httpStatus === 429 && info.context?.limiter === "identity_cap"
 }
 
+/** The general limiter's HTTP 429 (http429LimiterOf "ip_block"): the node has blocked this source address. */
+function isGeneralLimiterBlock(error: unknown): boolean {
+  const info = normalizeLoadgenError(error)
+  return info.code === "RATE_LIMIT" && info.context?.httpStatus === 429 && info.context?.limiter === "ip_block"
+}
+
 /**
  * Identity confirms (`execute` / `confirmTx` with identity data) one source
  * address may send to one node per block. Mirrors the node's
@@ -715,7 +721,11 @@ function rateLimitRetryFor(params: {
   }
 }
 
-/** A worker's retry: it also ends at the run deadline, so a step waiting out 429s does not outlive the run. */
+/**
+ * A worker's retry: it also ends at the run deadline or once the run is
+ * stopped (sharedStop, set by recordStepFailure), so a step waiting out 429s
+ * does not outlive the run. Its shouldStop also ends the worker's loop.
+ */
 export function workerRateLimitRetry(params: {
   rpcUrl: string
   cfg: LoadgenConfig
@@ -747,6 +757,30 @@ function pushErrorSample(samples: ErrorSample[], stage: ErrorSample["stage"], er
     retryable: info.retryable,
     context: info.context ?? null,
   })
+}
+
+/**
+ * Records a worker step that failed (countStepFailure, plus an error sample
+ * unless the run's end cut off its retry) and stops the run for every worker
+ * when the failure calls for it. The general limiter's HTTP 429 (limiter
+ * "ip_block", http429LimiterOf) always stops it, whatever stopOnRateLimit is:
+ * the node has blocked this source address and refuses every later request
+ * from it, and that 429 is never retried. With stopOnRateLimit set, every
+ * other rate-limit error stops it too. Once stopped, workers start no new
+ * step, and one waiting out a cap 429 does not send it again (workerRateLimitRetry).
+ */
+export function recordStepFailure(
+  params: { counters: LoadgenCounters; errorSamples: ErrorSample[]; sharedStop: { value: boolean }; cfg: Pick<LoadgenConfig, "stopOnRateLimit"> },
+  error: unknown,
+) {
+  const bucket = countStepFailure(params.counters, error)
+  if (bucket !== "rateLimitedAtDeadline") {
+    pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
+  }
+  if (bucket === "rateLimited" && (params.cfg.stopOnRateLimit || isGeneralLimiterBlock(error))) {
+    params.sharedStop.value = true
+  }
+  return bucket
 }
 
 async function worker(params: {
@@ -821,7 +855,8 @@ async function worker(params: {
       rateLimitRetry,
     )
 
-  while (nowMs() < params.stopAtMs && !params.sharedStop.value) {
+  // The run deadline, or a stop set by recordStepFailure (sharedStop): workerRateLimitRetry's shouldStop.
+  while (!rateLimitRetry.shouldStop()) {
     const identityAddress = buildIdentityAddress(params.workerId, sequence++)
     const started = performance.now()
     params.counters.total++
@@ -859,14 +894,7 @@ async function worker(params: {
       const elapsed = performance.now() - started
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
-      const bucket = countStepFailure(params.counters, error)
-      if (bucket !== "rateLimitedAtDeadline") {
-        pushErrorSample(params.errorSamples, bucket === "broadcastError" ? "broadcast" : "confirm", error)
-      }
-      // A rate-limit error still ends the run here when STOP_ON_RATE_LIMIT is set.
-      if (bucket === "rateLimited" && params.cfg.stopOnRateLimit) {
-        params.sharedStop.value = true
-      }
+      recordStepFailure(params, error)
       await sleep(Math.max(25, params.cfg.minLoopDelayMs))
     }
     if (params.cfg.minLoopDelayMs > 0) await sleep(params.cfg.minLoopDelayMs)
