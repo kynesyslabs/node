@@ -61,6 +61,23 @@ describe("DbProbe", () => {
         expect(h.changes).toEqual([[0, "the DataSource is not initialized"]])
     })
 
+    it("names a failure that is not an Error without printing an object", async () => {
+        // Before the fix, String() on the code or the rejection itself gave
+        // "[object Object]" for the first two (SonarCloud S6551).
+        const cases: Array<[unknown, string]> = [
+            [{ code: { a: 1 } }, "unknown error"],
+            [{}, "unknown error"],
+            [{ code: "ECONNREFUSED" }, "ECONNREFUSED"],
+            ["x", "x"],
+        ]
+        for (const [rejection, reason] of cases) {
+            const h = harness(() => Promise.reject(rejection))
+            await h.db.tick()
+            expect(h.reports).toEqual([[0, null]])
+            expect(h.changes).toEqual([[0, reason]])
+        }
+    })
+
     it("reports 0 after the timeout for a query that never returns, and the next tick does not wait for it", async () => {
         const stuck: { answer?: () => void } = {}
         let hang = true

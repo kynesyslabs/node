@@ -47,7 +47,23 @@ export interface DbProbeOptions {
 function reasonOf(error: unknown): string {
     if (error instanceof Error && error.message) return error.message
     const code = (error as { code?: unknown } | null)?.code
-    return code ? String(code) : String(error)
+    if ((typeof code === "string" || typeof code === "number") && code) {
+        return String(code)
+    }
+    switch (typeof error) {
+        case "string":
+            return error
+        case "number":
+        case "bigint":
+        case "boolean":
+        case "symbol":
+        case "undefined":
+            return String(error)
+        default:
+            // An object or a function: String() would give "[object Object]",
+            // and JSON.stringify can throw or print query text.
+            return error === null ? "null" : "unknown error"
+    }
 }
 
 export class DbProbe {
@@ -85,7 +101,7 @@ export class DbProbe {
     /** One probe. Never rejects, and resolves within the timeout. */
     public async tick(): Promise<void> {
         if (this.stopped) return
-        if (this.inFlight) {
+        if (this.inFlight !== null) {
             // Still the timed-out probe: same reason, so no new log line.
             this.record(0, null, this.noAnswer)
             return
