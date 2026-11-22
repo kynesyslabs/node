@@ -202,7 +202,7 @@ function distinctTargets(rpcUrls: string[]): string[] {
 
 /** The node worker `idx` sends to: round-robin over the distinct targets. */
 export function workerRpcUrl(cfg: Pick<LoadgenConfig, "targetUrls">, idx: number): string {
-  return cfg.targetUrls[idx % cfg.targetUrls.length]!
+  return cfg.targetUrls[idx % cfg.targetUrls.length]
 }
 
 /**
@@ -270,6 +270,8 @@ export function getConfig(wallets: string[]): LoadgenConfig {
     settlePollMs: Math.max(50, envInt("SETTLE_POLL_MS", 200)),
     opTimeoutMs: Math.max(1000, envInt("GCR_OP_TIMEOUT_MS", 15000)),
   }
+  // The clamp notice and warnings are meant for the operator running the loadgen.
+  // eslint-disable-next-line no-console
   for (const warning of [...clampNotice, ...workerCountWarnings(config)]) console.warn(warning)
   return config
 }
@@ -577,6 +579,8 @@ export type ReadBlockNumber = (rpcUrl: string) => Promise<number | null>
  * height read before the refused attempt, so a block that landed since counts
  * and the first read is checked at once. With start null, the first good read
  * is the baseline. Returns false if no new block shows up within timeoutMs.
+ * The wait ends by timeoutMs whatever pollMs is: no sleep runs past the
+ * deadline, and a read still pending at the deadline counts as a failed read.
  */
 export async function waitForNextBlock(
   rpcUrl: string,
@@ -584,14 +588,25 @@ export async function waitForNextBlock(
   pollMs: number,
   readBlockNumber: ReadBlockNumber = readLastBlockNumber,
   start: number | null = null,
+  clock: { now: () => number; sleep: (ms: number) => Promise<void> } = { now: nowMs, sleep },
 ): Promise<boolean> {
-  const deadlineMs = nowMs() + timeoutMs
-  let baseline = start ?? (await readBlockNumber(rpcUrl))
+  const deadlineMs = clock.now() + timeoutMs
+  const leftMs = () => deadlineMs - clock.now()
+  const read = async () => {
+    try {
+      return await withTimeout("getLastBlockNumber", Math.max(0, leftMs()), readBlockNumber(rpcUrl))
+    } catch (error) {
+      if (error instanceof RpcTimeoutError) return null
+      throw error
+    }
+  }
+  let baseline = start ?? (await read())
   let pause = start === null
-  while (nowMs() < deadlineMs) {
-    if (pause) await sleep(pollMs)
+  while (leftMs() > 0) {
+    if (pause) await clock.sleep(Math.min(pollMs, leftMs()))
     pause = true
-    const current = await readBlockNumber(rpcUrl)
+    if (leftMs() <= 0) break
+    const current = await read()
     if (current === null) continue
     if (baseline === null) baseline = current
     else if (current > baseline) return true

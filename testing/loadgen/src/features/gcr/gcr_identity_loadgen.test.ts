@@ -915,6 +915,32 @@ describe("identity confirm 429", () => {
     expect(await waitForNextBlock(fake.url, 2000, 10, fake.readBlock)).toBe(true)
   })
 
+  it.each([
+    { label: "a start height", start: 100 },
+    { label: "no start height", start: null },
+  ])("waitForNextBlock ends by its timeout when the poll interval is longer, with $label", async ({ start }) => {
+    // A fake clock that only sleep moves on, so the test makes no real waits.
+    let clockMs = 0
+    let sleptMs = 0
+    const clock = {
+      now: () => clockMs,
+      sleep: async (ms: number) => {
+        sleptMs += ms
+        clockMs += ms
+      },
+    }
+    expect(await waitForNextBlock("http://unused:1", 30, 120, async () => 100, start, clock)).toBe(false)
+    expect(sleptMs).toBeGreaterThan(0)
+    expect(sleptMs).toBeLessThanOrEqual(30)
+  })
+
+  it("waitForNextBlock ends at its timeout while a height read is still pending", async () => {
+    // The read shows a new block only after one second, like an RPC read that
+    // its 8 s abort has not ended yet. The wait must end at its 30 ms timeout.
+    const lateRead = () => new Promise<number>(resolve => setTimeout(() => resolve(101), 1000))
+    expect(await waitForNextBlock("http://unused:1", 30, 120, lateRead, 100)).toBe(false)
+  })
+
   /**
    * A worker's retry for a step refused once with the cap's 429. The height
    * reader gets the heights it returns from before (until the step is refused)
