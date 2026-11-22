@@ -195,11 +195,23 @@ docker run --rm caddy:2 caddy hash-password --plaintext 'mcp-password-here'
 docker compose restart caddy
 ```
 
-Then call: `curl -u mcp:mcp-password-here https://${PROXY_DOMAIN}/mcp/sse`.
-
 Reminder: MCP itself has no built-in auth (see `mcp-security.md`). Caddy
 basic-auth is the only auth layer. Set `MCP_ENABLED=true` in `.env` too
 when re-enabling the server.
+
+**`/mcp/` through Caddy does not connect yet.** Under Docker Compose the
+node starts the MCP server with `host: "localhost"` (`src/index.ts`), so it
+listens only on the loopback interface inside the node container. Caddy
+forwards `/mcp/*` with `reverse_proxy node:3001`
+(`monitoring/caddy/Caddyfile`), which reaches the node container over the
+compose network, not on its loopback. Nothing answers there, so a request
+with the right credentials passes basic-auth and then fails at Caddy (502)
+instead of opening the SSE stream. Setting `MCP_ENABLED=true` in proxy mode
+still requires a real `MCP_BASIC_AUTH_HASH`, or the node refuses to boot
+(unless `PROXY_ALLOW_PLACEHOLDER_AUTH=true`, see above).
+
+Not working yet, for the reason above:
+`curl -u mcp:mcp-password-here https://${PROXY_DOMAIN}/mcp/sse`.
 
 ## Rolling back
 
