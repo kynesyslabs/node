@@ -17,7 +17,7 @@ check() {
     local what="$1"; shift
     if "$@"; then echo "  ok   ${what}"; return; fi
     echo "  FAIL ${what}"; fails=$((fails + 1))
-    [ "${shown}" = 0 ] && [ -f "${WORK}/out" ] || return 0
+    [[ "${shown}" = 0 && -f "${WORK}/out" ]] || return 0
     shown=1
     echo "  ---- cloud-drill stdout"; sed 's/^/  | /' "${WORK}/out"
     echo "  ---- cloud-drill stderr"; sed 's/^/  | /' "${WORK}/err"
