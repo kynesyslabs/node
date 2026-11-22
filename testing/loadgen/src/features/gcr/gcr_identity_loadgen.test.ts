@@ -340,10 +340,16 @@ type FakeNode = {
 type IpBlockReply = { retryAfterHeader: string | null; retryAfter: number | null }
 
 /**
- * One node, one client address. Blocks advance only when the test says so.
- * With ipBlock, every identity confirm gets the general limiter's 429 instead.
+ * A 429 from something other than the node's limiters, for example a reverse
+ * proxy in front of the node: the given body and content type, no Retry-After.
  */
-function startFakeNode(ipBlock?: IpBlockReply): FakeNode {
+type OtherReply = { body: string; contentType: string }
+
+/**
+ * One node, one client address. Blocks advance only when the test says so.
+ * With ipBlock, every identity confirm gets that 429 instead of the cap's.
+ */
+function startFakeNode(ipBlock?: IpBlockReply | OtherReply): FakeNode {
   let block = 1
   let countedBlock = -1
   let countInBlock = 0
@@ -362,6 +368,7 @@ function startFakeNode(ipBlock?: IpBlockReply): FakeNode {
       if (body?.method === "execute" && param?.extra === "confirmTx" && param?.data?.content?.data?.[0] === "identity") {
         if (ipBlock) {
           node.rejected.push(block)
+          if ("body" in ipBlock) return new Response(ipBlock.body, { status: 429, headers: { "Content-Type": ipBlock.contentType } })
           const headers: Record<string, string> = { "Content-Type": "application/json" }
           if (ipBlock.retryAfterHeader !== null) headers["Retry-After"] = ipBlock.retryAfterHeader
           return new Response(JSON.stringify({ error: "Rate limit exceeded", retryAfter: ipBlock.retryAfter }), { status: 429, headers })
@@ -985,11 +992,17 @@ describe("identity confirm 429", () => {
     expect(waits).toBe(0)
   })
 
-  it.each([
-    { label: "a Retry-After header and body retryAfter", ipBlock: { retryAfterHeader: "30", retryAfter: 30 } },
-    { label: "a Retry-After header", ipBlock: { retryAfterHeader: "30", retryAfter: null } },
-    { label: "body retryAfter", ipBlock: { retryAfterHeader: null, retryAfter: 30 } },
-  ])("does not retry the general limiter's HTTP 429 with $label", async ({ ipBlock }) => {
+  it.each<{ label: string; ipBlock: IpBlockReply | OtherReply }>([
+    { label: "the general limiter's, with a Retry-After header and body retryAfter", ipBlock: { retryAfterHeader: "30", retryAfter: 30 } },
+    { label: "the general limiter's, with a Retry-After header", ipBlock: { retryAfterHeader: "30", retryAfter: null } },
+    { label: "the general limiter's, with body retryAfter", ipBlock: { retryAfterHeader: null, retryAfter: 30 } },
+    // No Retry-After header and no numeric retryAfter, but not the cap's own reply either.
+    {
+      label: "a reverse proxy's HTML page",
+      ipBlock: { body: "<html><head><title>429 Too Many Requests</title></head><body><h1>429 Too Many Requests</h1></body></html>", contentType: "text/html" },
+    },
+    { label: "a JSON body with no retryAfter key", ipBlock: { body: JSON.stringify({ error: "Too Many Requests" }), contentType: "application/json" } },
+  ])("does not retry an HTTP 429 that is not the cap's own reply: $label", async ({ ipBlock }) => {
     node = startFakeNode(ipBlock)
     const fake = node
     const demos = await demosWithSdkTransport(fake.url)
@@ -1053,12 +1066,24 @@ describe("identity confirm 429", () => {
     expect(fake.accepted).toEqual([1, 1, 1, 1, 2])
   })
 
-  it("counts a 429 with only a status (no headers or body) as the identity confirm cap", () => {
+  it("counts only the cap's own reply, or a 429 with only a status (no headers or body), as the identity confirm cap", () => {
+    const http429With = (reply: Record<string, unknown>) => ({ result: 500, response: { cause: { response: { status: 429, ...reply } } } })
     expect(http429LimiterOf({ result: 500, response: { cause: { status: 429 } } })).toBe("identity_cap")
-    expect(http429LimiterOf({ result: 500, response: { cause: { response: { status: 429 } } } })).toBe("identity_cap")
+    expect(http429LimiterOf(http429With({}))).toBe("identity_cap")
+    expect(http429LimiterOf(http429With({ headers: { "retry-after": "5" } }))).toBe("ip_block")
+    // The cap's exact body (rpcRateLimit.ts), as axios parses it.
+    expect(http429LimiterOf(http429With({ data: { error: "Rate limit exceeded", retryAfter: null } }))).toBe("identity_cap")
+    // A reverse proxy's HTML page: axios keeps it a string, so it has no retryAfter.
     expect(
-      http429LimiterOf({ result: 500, response: { cause: { response: { status: 429, headers: { "retry-after": "5" } } } } }),
+      http429LimiterOf(
+        http429With({
+          headers: { "content-type": "text/html" },
+          data: "<html><head><title>429 Too Many Requests</title></head><body><h1>429 Too Many Requests</h1></body></html>",
+        }),
+      ),
     ).toBe("ip_block")
+    // A JSON body without the retryAfter key is not the cap's reply either.
+    expect(http429LimiterOf(http429With({ data: { error: "Too Many Requests" } }))).toBe("ip_block")
   })
 
   it("an 'IP blocked' error after the run deadline is still counted as rateLimited", async () => {
