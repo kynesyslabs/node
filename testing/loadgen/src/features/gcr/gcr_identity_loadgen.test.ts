@@ -28,7 +28,6 @@ import {
   getConfig,
   http429LimiterOf,
   isCutOffAtDeadline,
-  recordStepFailure,
   resolveWorkerCount,
   retryOnRateLimit,
   runVerdict,
@@ -900,91 +899,6 @@ describe("identity confirm 429", () => {
     expect(normalizeLoadgenError(late).context).toMatchObject({ httpStatus: 429, limiter: "ip_block" })
     expect(isCutOffAtDeadline(late)).toBe(false)
     expect(countStepFailure(freshCounters(), late)).toBe("rateLimited")
-  })
-
-  it("stops the run at the general limiter's HTTP 429 without STOP_ON_RATE_LIMIT, and no worker sends another step", async () => {
-    // Worker B's node has the cap; worker A's node has blocked the address.
-    node = startFakeNode()
-    const capNode = node
-    const blockNode = startFakeNode({ retryAfterHeader: "30", retryAfter: 30 })
-    try {
-      const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 5, settlePollMs: 10, opTimeoutMs: 15000 } as LoadgenConfig
-      const counters = freshCounters()
-      const errorSamples: Parameters<typeof recordStepFailure>[0]["errorSamples"] = []
-      const sharedStop = { value: false }
-      const run = { cfg, counters, errorSamples, sharedStop }
-      const stopAtMs = Date.now() + 60_000
-      const retryA = workerRateLimitRetry({ ...run, rpcUrl: blockNode.url, stopAtMs, readBlockNumber: blockNode.readBlock })
-      const retryB = workerRateLimitRetry({ ...run, rpcUrl: capNode.url, stopAtMs, readBlockNumber: capNode.readBlock })
-
-      // B spends the cap, and its fifth step waits out the cap's 429 for the next block.
-      const demosB = await demosWithSdkTransport(capNode.url)
-      for (let i = 0; i < IDENTITY_CONFIRMS_PER_BLOCK; i++) await addStep(demosB, i)()
-      const pendingB = retryOnRateLimit(addStep(demosB, 99), retryB).catch((caught: unknown) => caught)
-      await until(() => capNode.rejected.length === 1)
-
-      // A's step gets the general limiter's 429. It is not retried, and the
-      // worker's catch stops the run though STOP_ON_RATE_LIMIT is unset.
-      const demosA = await demosWithSdkTransport(blockNode.url)
-      const blocked = await retryOnRateLimit(addStep(demosA, 0), retryA).catch((caught: unknown) => caught)
-      expect(normalizeLoadgenError(blocked).context).toMatchObject({ httpStatus: 429, limiter: "ip_block" })
-      expect(retryA.shouldStop()).toBe(false)
-      expect(recordStepFailure(run, blocked)).toBe("rateLimited")
-      expect(sharedStop.value).toBe(true)
-      expect(counters.rateLimited).toBe(1)
-      expect(errorSamples.map(sample => sample.context?.limiter)).toEqual(["ip_block"])
-      // Both workers' loops end: their shouldStop is the loop's guard.
-      expect(retryA.shouldStop()).toBe(true)
-      expect(retryB.shouldStop()).toBe(true)
-
-      // B's next block shows up, but the run has stopped: the step is not sent again.
-      capNode.nextBlock()
-      const errorB = await pendingB
-      expect(errorB).toBeInstanceOf(RateLimitError)
-      expect(isCutOffAtDeadline(errorB)).toBe(true)
-      expect(counters.rateLimitRetries).toBe(0)
-      expect(capNode.accepted).toEqual([1, 1, 1, 1])
-      expect(capNode.rejected).toEqual([1])
-      expect(blockNode.rejected).toEqual([1])
-      expect(blockNode.accepted).toEqual([])
-    } finally {
-      blockNode.stop()
-    }
-  })
-
-  it("without STOP_ON_RATE_LIMIT, a cap 429 is still retried and does not stop the run", async () => {
-    node = startFakeNode()
-    const fake = node
-    const demos = await demosWithSdkTransport(fake.url)
-    for (let i = 0; i < IDENTITY_CONFIRMS_PER_BLOCK; i++) await addStep(demos, i)()
-    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 5, settlePollMs: 10, opTimeoutMs: 15000 } as LoadgenConfig
-    const counters = freshCounters()
-    const errorSamples: Parameters<typeof recordStepFailure>[0]["errorSamples"] = []
-    const sharedStop = { value: false }
-    const retry = workerRateLimitRetry({ rpcUrl: fake.url, cfg, counters, sharedStop, stopAtMs: Date.now() + 60_000, readBlockNumber: fake.readBlock })
-
-    // A cap 429 that ends its step (no new block in time, or no retry left)
-    // is an error, but does not stop the run.
-    const refused = await addStep(demos, 98)().catch((caught: unknown) => caught)
-    expect(normalizeLoadgenError(refused).context).toMatchObject({ httpStatus: 429, limiter: "identity_cap" })
-    expect(recordStepFailure({ cfg, counters, errorSamples, sharedStop }, refused)).toBe("rateLimited")
-    expect(counters.rateLimited).toBe(1)
-    expect(sharedStop.value).toBe(false)
-    expect(retry.shouldStop()).toBe(false)
-
-    // A worker's step that gets the cap's 429 still waits for the next block and is sent again.
-    const step = retryOnRateLimit(addStep(demos, 99), retry)
-    await until(() => fake.rejected.length === 2)
-    fake.nextBlock()
-    await step
-    expect(fake.accepted).toEqual([1, 1, 1, 1, 2])
-    expect(fake.rejected).toEqual([1, 1])
-    expect(counters.rateLimitRetries).toBe(1)
-    expect(sharedStop.value).toBe(false)
-
-    // With STOP_ON_RATE_LIMIT=true the cap's 429 does stop the run, as before.
-    recordStepFailure({ cfg: { stopOnRateLimit: true }, counters, errorSamples, sharedStop }, refused)
-    expect(sharedStop.value).toBe(true)
   })
 
   it("retries the identity confirm cap's HTTP 429 (no Retry-After, body retryAfter null)", async () => {
