@@ -16,7 +16,7 @@
 
 import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
-import { ConfirmError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
+import { ConfirmError, ConvergenceError, RateLimitError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import { ReservoirSampler } from "../../framework/metrics"
 import {
   IDENTITY_CONFIRMS_PER_BLOCK,
@@ -31,6 +31,7 @@ import {
   runVerdict,
   runWithTimeseries,
   submitPqcTx,
+  waitForIdentityPresence,
   waitForNextBlock,
   workerCountWarnings,
   workerRateLimitRetry,
@@ -40,7 +41,50 @@ import {
   type RateLimitRetry,
   type ReadBlockNumber,
   type TimeseriesPoint,
+  type WaitClock,
 } from "./gcr_identity_loadgen"
+
+/**
+ * A fake clock for the block and settle waits, so they make no real waits.
+ * Each sleep is a timer due at now + ms. Once nothing else can run, the
+ * earliest timer fires and moves the clock to its due time. A sleep cancelled
+ * by its signal never fires, so it does not move the clock. sleeps records
+ * each sleep asked for.
+ */
+function fakeWaitClock(): WaitClock & { sleeps: number[] } {
+  let nowMs = 0
+  const sleeps: number[] = []
+  const timers: { at: number; fire: () => void }[] = []
+  let scheduled = false
+  const schedule = () => {
+    if (scheduled || timers.length === 0) return
+    scheduled = true
+    setImmediate(() => {
+      scheduled = false
+      timers.sort((a, b) => a.at - b.at)
+      const next = timers.shift()
+      if (!next) return
+      nowMs = Math.max(nowMs, next.at)
+      next.fire()
+      schedule()
+    })
+  }
+  return {
+    sleeps,
+    now: () => nowMs,
+    sleep: (ms, signal) =>
+      new Promise<void>(resolve => {
+        sleeps.push(ms)
+        const timer = { at: nowMs + ms, fire: resolve }
+        timers.push(timer)
+        signal?.addEventListener("abort", () => {
+          const idx = timers.indexOf(timer)
+          if (idx >= 0) timers.splice(idx, 1)
+        })
+        schedule()
+      }),
+  }
+}
 
 describe("resolveWorkerCount", () => {
   it("defaults to 4 workers per target", () => {
@@ -919,19 +963,19 @@ describe("identity confirm 429", () => {
     { label: "a start height", start: 100 },
     { label: "no start height", start: null },
   ])("waitForNextBlock ends by its timeout when the poll interval is longer, with $label", async ({ start }) => {
-    // A fake clock that only sleep moves on, so the test makes no real waits.
-    let clockMs = 0
-    let sleptMs = 0
-    const clock = {
-      now: () => clockMs,
-      sleep: async (ms: number) => {
-        sleptMs += ms
-        clockMs += ms
-      },
-    }
+    const clock = fakeWaitClock()
     expect(await waitForNextBlock("http://unused:1", 30, 120, async () => 100, start, clock)).toBe(false)
-    expect(sleptMs).toBeGreaterThan(0)
-    expect(sleptMs).toBeLessThanOrEqual(30)
+    expect(clock.now()).toBeGreaterThan(0)
+    expect(clock.now()).toBeLessThanOrEqual(30)
+    expect(Math.max(...clock.sleeps)).toBeLessThanOrEqual(30)
+  })
+
+  it("waitForNextBlock ends by its timeout on the injected clock while a height read is still pending", async () => {
+    const clock = fakeWaitClock()
+    // The read shows a new block only after 1.5 s; the timeout is 1 s.
+    const lateRead = () => clock.sleep(1500).then(() => 101)
+    expect(await waitForNextBlock("http://unused:1", 1000, 120, lateRead, 100, clock)).toBe(false)
+    expect(clock.now()).toBe(1000)
   })
 
   it("waitForNextBlock ends at its timeout while a height read is still pending", async () => {
@@ -1026,6 +1070,58 @@ describe("identity confirm 429", () => {
     }, retry).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(RateLimitError)
     expect(reads).toBe(0)
+  })
+})
+
+describe("waitForIdentityPresence", () => {
+  const removed = identity(9)
+  const settle = (clock: WaitClock, readIdentities: () => Promise<Set<string>>, pollMs: number) => {
+    let endedAtMs = -1
+    const wait = waitForIdentityPresence({
+      rpcUrl: "http://unused:1",
+      ownerAddress: OWNER,
+      algorithm: "falcon",
+      identityAddress: removed,
+      expectPresent: false,
+      timeoutSec: 1,
+      pollMs,
+      readIdentities,
+      clock,
+    }).then(
+      () => {
+        endedAtMs = clock.now()
+      },
+      error => {
+        endedAtMs = clock.now()
+        throw error
+      },
+    )
+    return { wait, endedAtMs: () => endedAtMs }
+  }
+
+  it("ends by its timeout with ConvergenceError while a read is still pending", async () => {
+    const clock = fakeWaitClock()
+    // The read would show the remove, but only after 1.5 s; the timeout is 1 s.
+    const { wait, endedAtMs } = settle(clock, () => clock.sleep(1500).then(() => new Set<string>()), 200)
+    await expect(wait).rejects.toBeInstanceOf(ConvergenceError)
+    expect(endedAtMs()).toBe(1000)
+  })
+
+  it("sleeps at most the time left when the poll interval is far above the timeout", async () => {
+    const clock = fakeWaitClock()
+    const { wait, endedAtMs } = settle(clock, async () => new Set([removed]), 60_000)
+    await expect(wait).rejects.toBeInstanceOf(ConvergenceError)
+    expect(endedAtMs()).toBe(1000)
+    expect(Math.max(...clock.sleeps)).toBeLessThanOrEqual(1000)
+  })
+
+  it("returns once a read in time shows the expected state", async () => {
+    const clock = fakeWaitClock()
+    let reads = 0
+    const { wait, endedAtMs } = settle(clock, async () => (++reads === 1 ? new Set([removed]) : new Set<string>()), 200)
+    await wait
+    expect(endedAtMs()).toBe(200)
+    expect(reads).toBe(2)
   })
 })
 

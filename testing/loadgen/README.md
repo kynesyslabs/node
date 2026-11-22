@@ -96,7 +96,7 @@ A node allows **4 identity confirms per block from one source address** (`RATE_L
 
 For Docker runs, `GCR_IDENTITY_OVER_CAP`, `RATE_LIMIT_MAX_RETRIES` and `STOP_ON_RATE_LIMIT` pass through from the host environment for a direct `docker compose ... run loadgen` (see "Directly inside the devnet image") as well as through `run-scenario.sh --env KEY=VALUE`, like `CONCURRENCY`. When they are unset, the perf compose passes them empty and the scenario uses its defaults.
 
-End-of-run cleanup removes the identities a worker left behind, waiting out the cap's 429 the same way, and waits up to `SETTLE_TIMEOUT_SEC` for each remove to show before it checks for leaked identities.
+End-of-run cleanup removes the identities a worker left behind, waiting out the cap's 429 the same way, and waits up to `SETTLE_TIMEOUT_SEC` for each remove to show before it checks for leaked identities. An identities read still pending at that point counts as not settled, so the wait does not run past `SETTLE_TIMEOUT_SEC`.
 
 A 429 can still occur when the node's limiter has not yet seen the new block (it counts per the node's shared-state block number, which can lag the stored chain head the loadgen waits on); that 429 is retried as described above.
 

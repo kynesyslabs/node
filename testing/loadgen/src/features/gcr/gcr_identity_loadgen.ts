@@ -531,7 +531,42 @@ async function getPqcIdentitySet(rpcUrl: string, ownerAddress: string, algorithm
 /** Reads an owner's PQC identities of one algorithm (getPqcIdentitySet). */
 export type ReadIdentities = (rpcUrl: string, ownerAddress: string, algorithm: string) => Promise<Set<string>>
 
-async function waitForIdentityPresence(params: {
+/**
+ * Time source of the settle and block waits; tests pass a fake one, so they
+ * make no real waits. A sleep cancelled by its signal never resolves.
+ */
+export type WaitClock = { now: () => number; sleep: (ms: number, signal?: AbortSignal) => Promise<void> }
+
+const realClock: WaitClock = {
+  now: nowMs,
+  sleep: (ms, signal) =>
+    new Promise(resolve => {
+      const timer = setTimeout(resolve, ms)
+      signal?.addEventListener("abort", () => clearTimeout(timer), { once: true })
+    }),
+}
+
+/**
+ * Runs a wait's read against the time left before its deadline. A read still
+ * pending at the deadline counts as failed (null), so the wait ends by its
+ * timeout and does not hold on for the RPC's own abort.
+ */
+async function readWithin<T>(clock: WaitClock, leftMs: number, read: () => Promise<T>): Promise<T | null> {
+  const timer = new AbortController()
+  try {
+    return await Promise.race([read(), clock.sleep(Math.max(0, leftMs), timer.signal).then(() => null)])
+  } finally {
+    timer.abort()
+  }
+}
+
+/**
+ * Waits until the identity is present (or absent) as expected, and throws
+ * ConvergenceError if it is not within timeoutSec. The wait ends by timeoutSec
+ * whatever pollMs is: no sleep runs past the deadline, and a read still
+ * pending at the deadline counts as not settled.
+ */
+export async function waitForIdentityPresence(params: {
   rpcUrl: string
   ownerAddress: string
   algorithm: string
@@ -540,15 +575,18 @@ async function waitForIdentityPresence(params: {
   timeoutSec: number
   pollMs: number
   readIdentities?: ReadIdentities
+  clock?: WaitClock
 }) {
-  const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
+  const clock = params.clock ?? realClock
+  const deadlineMs = clock.now() + Math.max(1, params.timeoutSec) * 1000
+  const leftMs = () => deadlineMs - clock.now()
   const target = normalizeHexAddress(params.identityAddress)
   const readIdentities = params.readIdentities ?? getPqcIdentitySet
-  while (nowMs() < deadlineMs) {
-    const set = await readIdentities(params.rpcUrl, params.ownerAddress, params.algorithm)
-    const present = set.has(target)
-    if (present === params.expectPresent) return
-    await sleep(params.pollMs)
+  while (leftMs() > 0) {
+    const set = await readWithin(clock, leftMs(), () => readIdentities(params.rpcUrl, params.ownerAddress, params.algorithm))
+    if (set !== null && set.has(target) === params.expectPresent) return
+    if (leftMs() <= 0) break
+    await clock.sleep(Math.min(params.pollMs, leftMs()))
   }
   throw new ConvergenceError(
     `settle failed: identity ${params.expectPresent ? "not visible" : "still visible"} after ${params.timeoutSec}s`,
@@ -588,18 +626,11 @@ export async function waitForNextBlock(
   pollMs: number,
   readBlockNumber: ReadBlockNumber = readLastBlockNumber,
   start: number | null = null,
-  clock: { now: () => number; sleep: (ms: number) => Promise<void> } = { now: nowMs, sleep },
+  clock: WaitClock = realClock,
 ): Promise<boolean> {
   const deadlineMs = clock.now() + timeoutMs
   const leftMs = () => deadlineMs - clock.now()
-  const read = async () => {
-    try {
-      return await withTimeout("getLastBlockNumber", Math.max(0, leftMs()), readBlockNumber(rpcUrl))
-    } catch (error) {
-      if (error instanceof RpcTimeoutError) return null
-      throw error
-    }
-  }
+  const read = () => readWithin(clock, leftMs(), () => readBlockNumber(rpcUrl))
   let baseline = start ?? (await read())
   let pause = start === null
   while (leftMs() > 0) {
