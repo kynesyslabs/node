@@ -1002,6 +1002,8 @@ describe("identity confirm 429", () => {
       ipBlock: { body: "<html><head><title>429 Too Many Requests</title></head><body><h1>429 Too Many Requests</h1></body></html>", contentType: "text/html" },
     },
     { label: "a JSON body with no retryAfter key", ipBlock: { body: JSON.stringify({ error: "Too Many Requests" }), contentType: "application/json" } },
+    // The SDK transport gives an empty body as data "", which has no retryAfter.
+    { label: "an empty body", ipBlock: { body: "", contentType: "text/plain" } },
   ])("does not retry an HTTP 429 that is not the cap's own reply: $label", async ({ ipBlock }) => {
     node = startFakeNode(ipBlock)
     const fake = node
@@ -1066,10 +1068,13 @@ describe("identity confirm 429", () => {
     expect(fake.accepted).toEqual([1, 1, 1, 1, 2])
   })
 
-  it("counts only the cap's own reply, or a 429 with only a status (no headers or body), as the identity confirm cap", () => {
+  it("counts the cap's own reply, and a hand-built reply object with no data (not produced by the SDK), as the identity confirm cap", () => {
     const http429With = (reply: Record<string, unknown>) => ({ result: 500, response: { cause: { response: { status: 429, ...reply } } } })
+    // Hand-built objects with no data at all; the SDK transport never gives these (an empty body arrives as data "").
     expect(http429LimiterOf({ result: 500, response: { cause: { status: 429 } } })).toBe("identity_cap")
     expect(http429LimiterOf(http429With({}))).toBe("identity_cap")
+    // An empty body, as the SDK transport gives it.
+    expect(http429LimiterOf(http429With({ data: "" }))).toBe("ip_block")
     expect(http429LimiterOf(http429With({ headers: { "retry-after": "5" } }))).toBe("ip_block")
     // The cap's exact body (rpcRateLimit.ts), as axios parses it.
     expect(http429LimiterOf(http429With({ data: { error: "Rate limit exceeded", retryAfter: null } }))).toBe("identity_cap")

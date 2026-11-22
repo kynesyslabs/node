@@ -129,10 +129,11 @@ export function httpStatusOf(response: any): number | null {
  * general limiter (src/libs/network/middleware/rateLimiter.ts) blocks the
  * address for some seconds and sends a Retry-After header and a numeric
  * retryAfter. Only the cap's own reply is "identity_cap": no Retry-After
- * header, and either no body (a 429 with only a status) or a body whose
- * retryAfter is null. Every other 429 is "ip_block" and is not retried: the
- * general limiter's, and one from anything else, such as a reverse proxy's
- * HTML page or a JSON body without retryAfter.
+ * header and a body whose retryAfter is null. Every other 429 is "ip_block"
+ * and is not retried: the general limiter's, and one from anything else, such
+ * as a reverse proxy's HTML page, a JSON body without retryAfter, or an empty
+ * body (the SDK transport gives it as data ""). A reply object with no data
+ * at all also counts as the cap, but the SDK transport does not produce one.
  */
 export function http429LimiterOf(response: any): "identity_cap" | "ip_block" {
   const reply = response?.response?.cause?.response
