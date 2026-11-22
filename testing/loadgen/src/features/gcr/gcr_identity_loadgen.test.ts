@@ -167,6 +167,10 @@ describe("workerCountWarnings", () => {
     const over = workerCountWarnings(config(6, 4, 6))
     expect(over).toHaveLength(1)
     expect(over[0]).toContain("CONCURRENCY=6 is above 4 (4 identity confirms per block per node x 1 target(s)")
+    // The retry is the default; under STOP_ON_RATE_LIMIT=true the first 429 ends the run.
+    expect(over[0]).toEndWith(
+      "workers wait for the next block and retry (with STOP_ON_RATE_LIMIT=true the first 429 stops the run instead).",
+    )
     expect(workerCountWarnings(config(9, 8, 9, 2))[0]).toContain("CONCURRENCY=9 is above 8")
     // The printed cap is the configured one, not recomputed from the targets.
     expect(workerCountWarnings(config(6, 5, 6))[0]).toContain("CONCURRENCY=6 is above 5")

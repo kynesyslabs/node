@@ -216,7 +216,8 @@ export function workerCountWarnings(cfg: Pick<LoadgenConfig, "concurrency" | "wo
   if (cfg.concurrency > cfg.workerCap) {
     warnings.push(
       `[gcr_identity_loadgen] CONCURRENCY=${cfg.concurrency} is above ${cfg.workerCap} (${IDENTITY_CONFIRMS_PER_BLOCK} identity confirms per block per node x ${Math.max(1, distinctTargets(cfg.rpcUrls).length)} target(s) from one source address). ` +
-        "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry.",
+        "The nodes will answer the extra confirms with HTTP 429; workers wait for the next block and retry " +
+        "(with STOP_ON_RATE_LIMIT=true the first 429 stops the run instead).",
     )
   }
   if (cfg.concurrency > cfg.wallets.length) {
