@@ -11,7 +11,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
 fails=0
-check() { local what="$1"; shift; if "$@"; then echo "  ok   ${what}"; else echo "  FAIL ${what}"; fails=$((fails + 1)); fi; }
+shown=0
+# A failed check prints what the cloud-drill run before it said, once per run
+check() {
+    local what="$1"; shift
+    if "$@"; then echo "  ok   ${what}"; return; fi
+    echo "  FAIL ${what}"; fails=$((fails + 1))
+    [ "${shown}" = 0 ] && [ -f "${WORK}/out" ] || return 0
+    shown=1
+    echo "  ---- cloud-drill stdout"; sed 's/^/  | /' "${WORK}/out"
+    echo "  ---- cloud-drill stderr"; sed 's/^/  | /' "${WORK}/err"
+}
 IMAGE="ghcr.io/kynesyslabs/node:v1.0.0-rc.13@sha256:$(printf '%064d' 7)"
 export STUB_WORK="${WORK}"
 
@@ -83,9 +93,15 @@ exit "${rc}"
 EOF
 chmod +x "${WORK}"/bin/* "${WORK}"/remote/bin/* "${WORK}/run.sh"
 export PATH="${WORK}/bin:${PATH}" RUN_SH="${WORK}/run.sh" CAMPAIGNS_DIR="${WORK}/campaigns"
+# The stub hosts have no clock offset, so what cloud-drill.sh measures is the
+# ssh round trip: a runner stall there adds about half its length, and over the
+# 500 ms default the campaign aborts before any scenario or leftovers.txt
+# (#1275). Every case runs with a bound no stall reaches; the clock case sets
+# the default back.
+export CLOCK_MAX_MS=600000
 
 inv() { printf '%s\n' "$@" > "${WORK}/inv"; }
-cloud() { bash "${HERE}/cloud-drill.sh" "$@" > "${WORK}/out" 2> "${WORK}/err"; }
+cloud() { shown=0; bash "${HERE}/cloud-drill.sh" "$@" > "${WORK}/out" 2> "${WORK}/err"; }
 last_campaign() { ls -1dt "${CAMPAIGNS_DIR}"/*-"$1"* | head -1; }
 
 echo "plan"
@@ -132,8 +148,9 @@ C=$(last_campaign full)
 check "a failed scenario: exit 1" [ "${rc}" = 1 ]
 check "run.sh ran once per scenario, in order" diff <(cut -d' ' -f5 "${WORK}/run-calls") <(printf '%s\n' restart-n6s6 halt-n6s6 load-n6s6)
 check "run.sh got HEADROOM_MB=1536 and BIND_HOST_IP=0" bash -c "grep -qx HEADROOM_MB=1536 '${WORK}/run-env' && grep -qx BIND_HOST_IP=0 '${WORK}/run-env'"
-check "hosts.tsv: both hosts with their facts and a small offset" \
-    bash -c "awk -F'\t' 'NR > 1 && \$8 == \"27.3.1\" && \$9 == \"yes\" && (\$10 < 500 && \$10 > -500)' '${C}/hosts.tsv' | wc -l | grep -qx 2"
+# The offset's size is the clock case's: here a stall can make it any size
+check "hosts.tsv: both hosts with their facts and an offset in whole ms" \
+    bash -c "awk -F'\t' -v max=${CLOCK_MAX_MS} 'NR > 1 && \$8 == \"27.3.1\" && \$9 == \"yes\" && \$10 ~ /^-?[0-9]+\$/ && \$10 <= max && \$10 >= -max' '${C}/hosts.tsv' | wc -l | grep -qx 2"
 check "ping matrix: 2 x 2 at 12.500 ms" bash -c "grep -c $'\t12.500\t12.500$' '${C}/ping-matrix.tsv' | grep -qx 2"
 check "results.tsv: halt FAIL with exit 1, load PASS" \
     bash -c "grep -q $'^halt-n6s6\t1\tFAIL\t' '${C}/results.tsv' && grep -q $'^load-n6s6\t0\tPASS\t' '${C}/results.tsv'"
@@ -164,7 +181,7 @@ check "a PASS run whose own teardown left a volume: exit 2" [ "${rc}" = 2 ]
 check "that run counts as exit 2 in results.tsv" grep -q $'^restart-n6s6\t2\tPASS\t' "${C}/results.tsv"
 
 echo "clock"
-STUB_SKEW_MS=4000 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 skew; rc=$?
+CLOCK_MAX_MS=500 STUB_SKEW_MS=4000 cloud --inventory "${WORK}/inv" --image "${IMAGE}" --scenarios restart --shard 6 skew; rc=$?
 check "a host 4 s off: exit 2" [ "${rc}" = 2 ]
 check "a host 4 s off: says so, no scenario run" bash -c "grep -q 'clock offset above 500ms' '${WORK}/out' && ! grep -q skew '${WORK}/run-calls'"
 
