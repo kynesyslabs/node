@@ -397,6 +397,8 @@ const http429 = () =>
   })
 /** A rate-limit error from the node's text, with no HTTP 429 (loadgenErrorFromMessage). */
 const ipBlocked = () => loadgenErrorFromMessage("confirm failed (add): IP blocked due to rate limiting", { operation: "add" })
+/** A height reader for retries whose block wait is stubbed: the read fails. */
+const noHeight = async (): Promise<number | null> => null
 
 describe("identity confirm 429", () => {
   let node: FakeNode | null = null
@@ -419,9 +421,10 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
-      waitForNextBlock: () => {
+      readHeight: () => fake.readBlock(fake.url),
+      waitForNextBlock: start => {
         waits++
-        return waitForNextBlock(fake.url, 5000, 10, fake.readBlock)
+        return waitForNextBlock(fake.url, 5000, 10, fake.readBlock, start)
       },
       onRetry: () => {
         retries++
@@ -458,7 +461,8 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: true,
       maxRetries: 10,
       shouldStop: () => false,
-      waitForNextBlock: () => waitForNextBlock(fake.url, 5000, 10, fake.readBlock),
+      readHeight: () => fake.readBlock(fake.url),
+      waitForNextBlock: start => waitForNextBlock(fake.url, 5000, 10, fake.readBlock, start),
       onRetry: () => {
         retries++
       },
@@ -479,6 +483,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 2,
       shouldStop: () => false,
+      readHeight: noHeight,
       waitForNextBlock: async () => {
         waits++
         return true
@@ -513,6 +518,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => true,
+      readHeight: noHeight,
       waitForNextBlock: async () => true,
       onRetry: () => {},
     }).catch((caught: unknown) => caught)
@@ -532,6 +538,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
+      readHeight: noHeight,
       waitForNextBlock: async () => {
         waits++
         return false
@@ -557,6 +564,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
+      readHeight: noHeight,
       waitForNextBlock: async () => true,
       onRetry: () => {
         retries++
@@ -578,6 +586,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => stopping,
+      readHeight: noHeight,
       waitForNextBlock: async () => {
         stopping = true
         return true
@@ -673,6 +682,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => true,
+      readHeight: noHeight,
       waitForNextBlock: async () => {
         seen.waits++
         return true
@@ -789,6 +799,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
+      readHeight: noHeight,
       waitForNextBlock: async () => {
         waits++
         return true
@@ -822,6 +833,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
+      readHeight: () => fake.readBlock(fake.url),
       waitForNextBlock: async () => {
         waits++
         fake.nextBlock()
@@ -860,6 +872,7 @@ describe("identity confirm 429", () => {
       stopOnRateLimit: false,
       maxRetries: 10,
       shouldStop: () => false,
+      readHeight: () => fake.readBlock(fake.url),
       waitForNextBlock: async () => {
         fake.nextBlock()
         return true
@@ -900,6 +913,93 @@ describe("identity confirm 429", () => {
     expect(await waitForNextBlock(fake.url, 100, 10, fake.readBlock)).toBe(false)
     setTimeout(() => fake.nextBlock(), 30)
     expect(await waitForNextBlock(fake.url, 2000, 10, fake.readBlock)).toBe(true)
+  })
+
+  /**
+   * A worker's retry for a step refused once with the cap's 429. The height
+   * reader gets the heights it returns from before (until the step is refused)
+   * and after (from then on), and records each read.
+   */
+  function refusedOnce(params: { before: () => number | null; after: () => number | null; settlePollMs: number; settleTimeoutSec: number }) {
+    let refused = false
+    const reads: (number | null)[] = []
+    const counters = freshCounters()
+    const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: params.settleTimeoutSec, settlePollMs: params.settlePollMs } as LoadgenConfig
+    const retry = workerRateLimitRetry({
+      rpcUrl: "http://unused:1",
+      cfg,
+      counters,
+      sharedStop: { value: false },
+      stopAtMs: Date.now() + 600_000,
+      readBlockNumber: async () => {
+        const height = refused ? params.after() : params.before()
+        reads.push(height)
+        return height
+      },
+    })
+    let attempts = 0
+    const run = () =>
+      retryOnRateLimit(async () => {
+        attempts++
+        if (attempts > 1) return "added"
+        refused = true
+        throw http429()
+      }, retry)
+    return { run, reads, counters, attempts: () => attempts }
+  }
+
+  it("retries at once when a block lands while the confirm is refused", async () => {
+    // Height 100 before the attempt, 101 on every read after the 429. The poll
+    // interval is far past the test's timeout, so a wait that sleeps before
+    // its first read, or takes its baseline after the 429, fails the test.
+    const { run, reads, counters, attempts } = refusedOnce({ before: () => 100, after: () => 101, settlePollMs: 600_000, settleTimeoutSec: 600 })
+    expect(await run()).toBe("added")
+    expect(attempts()).toBe(2)
+    expect(counters.rateLimitRetries).toBe(1)
+    // Before the first attempt, the wait's one read, before the second attempt.
+    expect(reads).toEqual([100, 101, 101])
+  })
+
+  it("with a failed height read before the attempt, waits for a block past the first good read after the 429", async () => {
+    const after = [null, 101, 101, 102]
+    let next = 0
+    const { run, reads, counters, attempts } = refusedOnce({
+      before: () => null,
+      after: () => (next < after.length ? after[next++] : 102),
+      settlePollMs: 1,
+      settleTimeoutSec: 5,
+    })
+    expect(await run()).toBe("added")
+    expect(attempts()).toBe(2)
+    expect(counters.rateLimitRetries).toBe(1)
+    // The failed read before the attempt; the wait: a failed read, 101 as the
+    // baseline, 101 again, then 102; the read before the second attempt.
+    expect(reads).toEqual([null, null, 101, 101, 102, 102])
+  })
+
+  it.each([
+    { label: "RATE_LIMIT_MAX_RETRIES=0", stopOnRateLimit: false, rateLimitMaxRetries: 0 },
+    { label: "STOP_ON_RATE_LIMIT=true", stopOnRateLimit: true, rateLimitMaxRetries: 10 },
+  ])("reads no height before the attempt with $label", async ({ stopOnRateLimit, rateLimitMaxRetries }) => {
+    let reads = 0
+    const cfg = { stopOnRateLimit, rateLimitMaxRetries, settleTimeoutSec: 1, settlePollMs: 10 } as LoadgenConfig
+    const retry = workerRateLimitRetry({
+      rpcUrl: "http://unused:1",
+      cfg,
+      counters: freshCounters(),
+      sharedStop: { value: false },
+      stopAtMs: Date.now() + 600_000,
+      readBlockNumber: async () => {
+        reads++
+        return 1
+      },
+    })
+    expect(await retryOnRateLimit(async () => "added", retry)).toBe("added")
+    const error = await retryOnRateLimit(async () => {
+      throw http429()
+    }, retry).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(RateLimitError)
+    expect(reads).toBe(0)
   })
 })
 
@@ -1038,6 +1138,7 @@ describe("runWithTimeseries", () => {
           stopOnRateLimit: false,
           maxRetries: 10,
           shouldStop: () => clock.ms >= stopAtMs,
+          readHeight: noHeight,
           waitForNextBlock: async () => {
             await loopDone
             clock.ms += 500

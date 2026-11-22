@@ -572,24 +572,29 @@ async function readLastBlockNumber(rpcUrl: string): Promise<number | null> {
 export type ReadBlockNumber = (rpcUrl: string) => Promise<number | null>
 
 /**
- * Waits until the node's last block number moves past the one it reports now:
- * the identity confirm cap counts per block, so a new block frees the slots.
- * Returns false if no new block shows up within timeoutMs.
+ * Waits until the node's last block number moves past start: the identity
+ * confirm cap counts per block, so a new block frees the slots. start is the
+ * height read before the refused attempt, so a block that landed since counts
+ * and the first read is checked at once. With start null, the first good read
+ * is the baseline. Returns false if no new block shows up within timeoutMs.
  */
 export async function waitForNextBlock(
   rpcUrl: string,
   timeoutMs: number,
   pollMs: number,
   readBlockNumber: ReadBlockNumber = readLastBlockNumber,
+  start: number | null = null,
 ): Promise<boolean> {
   const deadlineMs = nowMs() + timeoutMs
-  let start = await readBlockNumber(rpcUrl)
+  let baseline = start ?? (await readBlockNumber(rpcUrl))
+  let pause = start === null
   while (nowMs() < deadlineMs) {
-    await sleep(pollMs)
+    if (pause) await sleep(pollMs)
+    pause = true
     const current = await readBlockNumber(rpcUrl)
     if (current === null) continue
-    if (start === null) start = current
-    else if (current > start) return true
+    if (baseline === null) baseline = current
+    else if (current > baseline) return true
   }
   return false
 }
@@ -598,8 +603,10 @@ export type RateLimitRetry = {
   stopOnRateLimit: boolean
   maxRetries: number
   shouldStop: () => boolean
-  /** Resolves true once a new block shows up, false if none did in time. */
-  waitForNextBlock: () => Promise<boolean>
+  /** The target's current block number, or null when the read fails. */
+  readHeight: () => Promise<number | null>
+  /** Resolves true once a block past start shows up, false if none did in time. */
+  waitForNextBlock: (start: number | null) => Promise<boolean>
   /** Called once per extra attempt, just before it is sent. */
   onRetry: () => void
 }
@@ -607,16 +614,21 @@ export type RateLimitRetry = {
 /**
  * Runs one step (a confirm + broadcast). An HTTP 429 from the node's per-block
  * identity confirm cap is back-pressure, so the step is retried after the next
- * block, up to maxRetries times. If no new block shows up in time, the 429 is
- * thrown. If the run has ended (shouldStop) before the wait or once the new
- * block shows up, the 429 is thrown marked as cut off by the deadline
- * (isCutOffAtDeadline), since another attempt was still allowed. The general
- * limiter's 429 (http429LimiterOf), rate-limit messages without an HTTP 429,
- * other errors, every 429 when stopOnRateLimit is set, and a 429 with no retry
- * left, are thrown to the caller unmarked.
+ * block, up to maxRetries times. That block is one past the height read just
+ * before the refused attempt, so a block that lands during the refusal counts;
+ * the height is read only when a retry is possible at all. If no new block
+ * shows up in time, the 429 is thrown. If the run has ended (shouldStop)
+ * before the wait or once the new block shows up, the 429 is thrown marked as
+ * cut off by the deadline (isCutOffAtDeadline), since another attempt was
+ * still allowed. The general limiter's 429 (http429LimiterOf), rate-limit
+ * messages without an HTTP 429, other errors, every 429 when stopOnRateLimit
+ * is set, and a 429 with no retry left, are thrown to the caller unmarked.
  */
 export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
+  // With retries off, no height is read.
+  const canRetry = !opts.stopOnRateLimit && opts.maxRetries > 0
   for (let attempt = 0; ; attempt++) {
+    const start = canRetry ? await opts.readHeight() : null
     try {
       return await step()
     } catch (error) {
@@ -624,7 +636,7 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
       if (!retryAllowed) throw error
       if (opts.shouldStop()) throw markCutOffAtDeadline(error)
       // No new block in time: the cap is still spent, so do not start another step.
-      if (!(await opts.waitForNextBlock())) throw error
+      if (!(await opts.waitForNextBlock(start))) throw error
       // The run ended during the wait: do not start another step.
       if (opts.shouldStop()) throw markCutOffAtDeadline(error)
       opts.onRetry()
@@ -644,8 +656,9 @@ function rateLimitRetryFor(params: {
     stopOnRateLimit: params.stopOnRateLimit,
     maxRetries: params.cfg.rateLimitMaxRetries,
     shouldStop: params.shouldStop,
-    waitForNextBlock: () =>
-      waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs, params.readBlockNumber),
+    readHeight: () => (params.readBlockNumber ?? readLastBlockNumber)(params.rpcUrl),
+    waitForNextBlock: start =>
+      waitForNextBlock(params.rpcUrl, params.cfg.settleTimeoutSec * 1000, params.cfg.settlePollMs, params.readBlockNumber, start),
     onRetry: () => {
       params.counters.rateLimitRetries++
     },
@@ -898,7 +911,10 @@ export async function cleanupWorkerIdentities(params: {
  * each carrying the counter deltas since the previous point. A worker still
  * waiting for a block at the deadline can count after the loop's last point,
  * so once all workers have settled one final point carries whatever changed
- * since. Summed over the timeseries, each counter equals the summary's total.
+ * since. Summed over the timeseries, each counter a point carries (ok, total,
+ * confirmError, broadcastError, validationError, networkError, rateLimited,
+ * rateLimitedAtDeadline) equals the summary's total; rateLimitRetries and
+ * cleanupError are not in a point.
  */
 export async function runWithTimeseries<T>(params: {
   counters: LoadgenCounters
