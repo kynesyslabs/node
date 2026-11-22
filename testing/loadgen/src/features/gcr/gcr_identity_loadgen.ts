@@ -715,7 +715,7 @@ function rateLimitRetryFor(params: {
   }
 }
 
-/** A worker's retry: it also ends at the run deadline, so a step waiting out 429s does not outlive the run. */
+/** A worker's retry: it also ends at the run deadline, so a step waiting out 429s sends no retry after the run deadline. */
 export function workerRateLimitRetry(params: {
   rpcUrl: string
   cfg: LoadgenConfig

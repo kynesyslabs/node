@@ -85,7 +85,7 @@ Current registry includes families such as:
 
 ## Rate limits
 
-A node allows **4 identity confirms per block from one source address** (`RATE_LIMIT_TX_PER_BLOCK` in `src/utilities/constants.ts`, enforced in `src/libs/network/rpcRateLimit.ts`). It answers any further confirm in that block with HTTP 429. Every worker in one loadgen process shares one source address, so the cap applies to the process as a whole on each target node.
+A node allows **4 identity confirms per block from one source address** (`RATE_LIMIT_TX_PER_BLOCK` in `src/utilities/constants.ts`, enforced in `src/libs/network/rpcRateLimit.ts`). It answers any further confirm in that block with HTTP 429. Every worker in one loadgen process shares one source address, so the cap applies to the process as a whole on each target node. Requests from loopback or a whitelisted address are exempt (`isTrustedInternalRequest` in `src/libs/network/middleware/rateLimiter.ts`), and so are requests signed by the target node's own key, a staked validator's key, or, on a network with no validator rows (unless the node sets `DEMOS_REQUIRE_VALIDATORS=true`), a known peer's key. The Docker perf compose's default wallets (`WALLET_FILES=node1.identity,node2.identity,node3.identity,node4.identity`) are the devnet nodes' own identities, so in that run the wallet count, not the cap, sets the worker count.
 
 `gcr_identity_loadgen` normally stays within this cap:
 
@@ -107,7 +107,7 @@ To push more identity load than 4 confirms per block, use:
 - more targets (`TARGETS`): the cap is per node;
 - more source addresses: run loadgen containers or hosts side by side, each with its own wallets (`WALLETS` or `WALLET_FILES`); two processes that share a wallet race on its nonce.
 
-Do not whitelist the loadgen to get around the cap. Loopback is exempt, but a Docker bridge address or gateway (e.g. `172.17.0.1`) counts as a remote client. Whitelisting it on a public node would exempt any traffic that reaches the node through that bridge, which can include internet traffic that Docker forwards to a published port through its proxy.
+Do not whitelist the loadgen to get around the cap. Loopback is exempt, and so are requests signed by the target node's own key, a staked validator's key, or (on a network with no validator rows) a known peer's key, but a Docker bridge address or gateway (e.g. `172.17.0.1`) counts as a remote client. Whitelisting it on a public node would exempt any traffic that reaches the node through that bridge, which can include internet traffic that Docker forwards to a published port through its proxy.
 
 ## Artifacts
 
