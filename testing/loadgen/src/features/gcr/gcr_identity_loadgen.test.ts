@@ -643,6 +643,37 @@ describe("identity confirm 429", () => {
     expect(attempts).toBe(1)
   })
 
+  it("does not send the retry when the run ends during the height read before it", async () => {
+    let attempts = 0
+    let reads = 0
+    let retries = 0
+    let stopping = false
+    const refused = http429()
+    const limited = await retryOnRateLimit(async () => {
+      attempts++
+      throw refused
+    }, {
+      stopOnRateLimit: false,
+      maxRetries: 10,
+      shouldStop: () => stopping,
+      // The second read, after the new block, is slow: the run ends during it.
+      readHeight: async () => {
+        reads++
+        if (reads === 2) stopping = true
+        return 100 + reads
+      },
+      waitForNextBlock: async () => true,
+      onRetry: () => {
+        retries++
+      },
+    }).catch((caught: unknown) => caught)
+    expect(limited).toBe(refused)
+    expect(attempts).toBe(1)
+    expect(reads).toBe(2)
+    expect(retries).toBe(0)
+    expect(isCutOffAtDeadline(limited)).toBe(true)
+  })
+
   it("a worker's step waiting out 429s stops retrying once the run deadline passes", async () => {
     node = startFakeNode()
     const fake = node
@@ -703,22 +734,38 @@ describe("identity confirm 429", () => {
 
     // A fifth step in the same block is refused. The next block shows up
     // only after the run has ended, so the step is not sent again and its 429
-    // is rethrown to the worker after the deadline.
+    // is rethrown to the worker after the deadline. The test drives both, not
+    // the wall clock: the block wait's first read after the 429 moves the run
+    // deadline into the past and still shows block 1; its next read, one poll
+    // later on a fake clock, shows block 2.
     const cfg = { stopOnRateLimit: false, rateLimitMaxRetries: 3, settleTimeoutSec: 1, settlePollMs: 10, opTimeoutMs: 15000 } as LoadgenConfig
-    const stopAtMs = Date.now() + 300
+    let stopAtMs = Number.POSITIVE_INFINITY
+    let readsAfter429 = 0
     const retry = workerRateLimitRetry({
       rpcUrl: fake.url,
       cfg,
       counters,
       sharedStop: { value: false },
-      stopAtMs,
-      readBlockNumber: fake.readBlock,
+      get stopAtMs() {
+        return stopAtMs
+      },
+      readBlockNumber: rpcUrl => {
+        if (fake.rejected.length > 0) {
+          readsAfter429++
+          if (readsAfter429 === 1) stopAtMs = Number.NEGATIVE_INFINITY
+          if (readsAfter429 === 2) fake.nextBlock()
+        }
+        return fake.readBlock(rpcUrl)
+      },
+      clock: fakeWaitClock(),
     })
-    setTimeout(() => fake.nextBlock(), 400)
     counters.total++
     const error = await retryOnRateLimit(addStep(demos, 99), retry).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(RateLimitError)
-    expect(Date.now()).toBeGreaterThanOrEqual(stopAtMs)
+    // The deadline passed during the wait, and the wait then saw block 2.
+    expect(retry.shouldStop()).toBe(true)
+    expect(readsAfter429).toBe(2)
+    expect(await fake.readBlock(fake.url)).toBe(2)
     expect(fake.rejected).toEqual([1])
     expect(counters.rateLimitRetries).toBe(0)
     expect(isCutOffAtDeadline(error)).toBe(true)
@@ -1383,9 +1430,10 @@ describe("runVerdict", () => {
 
   it("fails a run with no successful step, even when every step ended in a 429 at the deadline", () => {
     // A node that answers 429 for the whole run: no step succeeds, and every
-    // step is cut off at the deadline, so the error rate stays 0.
+    // step is cut off at the deadline. No step finished, so there is no error,
+    // and with nothing to divide by the error rate is 1.
     const counters = { ...freshCounters(), total: 4, rateLimitedAtDeadline: 4 }
-    expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 0 })
+    expect(errorRateOf(counters)).toEqual({ errorCount: 0, errorRate: 1 })
 
     const result = verdict(counters)
     expect(result.ok).toBe(false)
@@ -1395,6 +1443,21 @@ describe("runVerdict", () => {
   it("passes a run with successful steps and a few 429s at the deadline", () => {
     const counters = { ...freshCounters(), total: 24, ok: 20, rateLimitedAtDeadline: 4 }
     expect(verdict(counters)).toEqual({ ok: true, primaryIssues: ["rate_limit"] })
+  })
+
+  it("leaves steps cut off at the deadline out of the error rate's denominator", () => {
+    const strict = (counters: LoadgenCounters) =>
+      runVerdict({ counters, maxErrorRate: 0.1, leakedIdentityCount: 0, sampleCodeCounts: {} })
+    // 8 finished steps, 1 of them an error: 0.125, above 0.1.
+    const finished = { ...freshCounters(), total: 8, ok: 7, confirmError: 1 }
+    expect(errorRateOf(finished)).toEqual({ errorCount: 1, errorRate: 0.125 })
+    expect(strict(finished).ok).toBe(false)
+
+    // The same run with 4 more steps cut off at the deadline: they did not
+    // finish, so they do not bring the rate under MAX_ERROR_RATE.
+    const withCutOff = { ...finished, total: 12, rateLimitedAtDeadline: 4 }
+    expect(errorRateOf(withCutOff)).toEqual({ errorCount: 1, errorRate: 0.125 })
+    expect(strict(withCutOff)).toEqual({ ok: false, primaryIssues: ["rate_limit", "tx_pipeline"] })
   })
 
   it("still fails on the error rate and on leaked identities", () => {

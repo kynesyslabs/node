@@ -339,8 +339,10 @@ export function countStepFailure(counters: LoadgenCounters, error: unknown) {
 }
 
 /**
- * Errors over all steps, checked against MAX_ERROR_RATE. rateLimitedAtDeadline
- * is not an error, but runVerdict fails a run with no successful step.
+ * Errors over the finished steps, checked against MAX_ERROR_RATE. A step in
+ * rateLimitedAtDeadline did not finish: it is neither an error nor in the
+ * denominator. With no finished step the rate is 1, and runVerdict also fails
+ * a run with no successful step.
  */
 export function errorRateOf(counters: LoadgenCounters): { errorCount: number; errorRate: number } {
   const errorCount =
@@ -350,7 +352,8 @@ export function errorRateOf(counters: LoadgenCounters): { errorCount: number; er
     counters.networkError +
     counters.rateLimited +
     counters.cleanupError
-  return { errorCount, errorRate: counters.total > 0 ? errorCount / counters.total : 1 }
+  const finished = counters.total - counters.rateLimitedAtDeadline
+  return { errorCount, errorRate: finished > 0 ? errorCount / finished : 1 }
 }
 
 /**
@@ -664,17 +667,24 @@ export type RateLimitRetry = {
  * before the refused attempt, so a block that lands during the refusal counts;
  * the height is read only when a retry is possible at all. If no new block
  * shows up in time, the 429 is thrown. If the run has ended (shouldStop)
- * before the wait or once the new block shows up, the 429 is thrown marked as
- * cut off by the deadline (isCutOffAtDeadline), since another attempt was
- * still allowed. The general limiter's 429 (http429LimiterOf), rate-limit
- * messages without an HTTP 429, other errors, every 429 when stopOnRateLimit
- * is set, and a 429 with no retry left, are thrown to the caller unmarked.
+ * before the wait, once the new block shows up, or during the height read
+ * before the retry, the 429 is thrown marked as cut off by the deadline
+ * (isCutOffAtDeadline), since another attempt was still allowed. The general
+ * limiter's 429 (http429LimiterOf), rate-limit messages without an HTTP 429,
+ * other errors, every 429 when stopOnRateLimit is set, and a 429 with no
+ * retry left, are thrown to the caller unmarked.
  */
 export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
   // With retries off, no height is read.
   const canRetry = !opts.stopOnRateLimit && opts.maxRetries > 0
+  let refused: unknown
   for (let attempt = 0; ; attempt++) {
     const start = canRetry ? await opts.readHeight() : null
+    if (attempt > 0) {
+      // The run ended during the height read: do not send the retry.
+      if (opts.shouldStop()) throw markCutOffAtDeadline(refused)
+      opts.onRetry()
+    }
     try {
       return await step()
     } catch (error) {
@@ -685,7 +695,7 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
       if (!(await opts.waitForNextBlock(start))) throw error
       // The run ended during the wait: do not start another step.
       if (opts.shouldStop()) throw markCutOffAtDeadline(error)
-      opts.onRetry()
+      refused = error
     }
   }
 }
