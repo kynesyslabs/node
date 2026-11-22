@@ -103,9 +103,10 @@ A 429 can still occur when the node's limiter has not yet seen the new block (it
 
 To push more identity load than 4 confirms per block, use:
 
-- fewer workers per target (`CONCURRENCY`);
 - more targets (`TARGETS`): the cap is per node;
-- more source addresses: run loadgen containers or hosts side by side, each with its own wallets (`WALLETS` or `WALLET_FILES`); two processes that share a wallet race on its nonce.
+- more source addresses: the cap counts per source address as the node sees it (the socket peer address, or behind a trusted proxy the forwarded client address; IPv6 addresses in one /64 count as one), so extra loadgen processes add load only when each reaches the node from its own address: separate hosts with distinct addresses, or containers on the nodes' own Docker network. Several containers on one host talking to a remote node share the host's address and its one cap. Give each process its own wallets (`WALLETS` or `WALLET_FILES`); two processes that share a wallet race on its nonce.
+
+Lowering `CONCURRENCY` keeps a run within the cap (fewer 429s); it does not add load.
 
 Do not whitelist the loadgen to get around the cap. Loopback is exempt, and so are requests signed by the target node's own key, a staked validator's key, or (on a network with no validator rows) a known peer's key, but a Docker bridge address or gateway (e.g. `172.17.0.1`) counts as a remote client. Whitelisting it on a public node would exempt any traffic that reaches the node through that bridge, which can include internet traffic that Docker forwards to a published port through its proxy.
 
