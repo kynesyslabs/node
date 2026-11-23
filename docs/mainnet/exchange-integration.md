@@ -74,7 +74,7 @@ five states:
 | `pending` | In the node's mempool, not in a block yet | Wait. |
 | `included` | In a block and executed. `blockNumber` is set. | Credit after the finality rule below. |
 | `failed` | In a block but not executed, or executed and refused. `code` and `message` say why. | Do not credit. See "Fee on a failed transaction". |
-| `dropped` | This node no longer holds it in its mempool, and no block has taken it. `reason` says why. Not a terminal state. | Do not credit. Wait as for `unknown`: another node may still include it. Never re-sign it with a new nonce. |
+| `dropped` | This node no longer holds it in its mempool, and no block has taken it. `reason` in the reply (not `extra`) says why. Not a terminal state. | Do not credit. Wait as for `unknown`: another node may still include it. Never re-sign it with a new nonce. |
 | `unknown` | The node does not know the hash. `result` 404 (`extra.reason` `not_found`) when the node is synced, 503 (`node_not_synced`) when it is not. | Ask a synced node. If a synced node answers 404 after the expiry window below, the transaction is gone. |
 
 `dropped` is per node and kept in memory for the 50,000 most recent drops,
@@ -193,7 +193,8 @@ After a timeout:
    sign a new transaction with a new nonce for it, since another node may
    still include it. Only a block is final.
 3. Treat it as dead only when all of these hold:
-   - a synced node returns `unknown` or `dropped` for the hash;
+   - a synced node returns `unknown` (`result` 404), or `dropped` with
+     `checkedThroughBlock` at the current chain head;
    - the chain head is more than 50 blocks past the transaction's reference
      block (see "Expiry");
    - more than 10 minutes have passed since its signed timestamp;
