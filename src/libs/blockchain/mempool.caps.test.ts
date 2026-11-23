@@ -747,18 +747,78 @@ describe("dropped record of the sweeps", () => {
         }
     })
 
-    it("records the stale txs cleanMempool removes, and not those already on chain", async () => {
+    // A fake table for cleanMempool. Its deletes remove rows from `pool`; a
+    // delete with no WHERE removes every row, as in Postgres. `afterRead`
+    // runs once the read is taken, before any delete: what another caller
+    // does to the table in between.
+    function installCleanupTable(
+        rows: Array<{ hash: string; reference_block: number }>,
+        afterRead: () => void = () => {},
+    ) {
         const m = Mempool as any
-        m.repo.find = async () => [
+        pool = rows.map(row => ({ hash: row.hash, tx: { ...row } }))
+        m.repo.find = async () => {
+            const read = pool.map(h => ({ hash: h.hash, reference_block: h.tx.reference_block }))
+            afterRead()
+            return read
+        }
+        m.repo.delete = async (where: { hash: { _value: string[] } }) => {
+            const before = pool.length
+            pool = pool.filter(h => !where.hash._value.includes(h.hash))
+            return { affected: before - pool.length }
+        }
+        m.repo.createQueryBuilder = () => {
+            let match = (_h: Held) => true
+            const qb: Record<string, unknown> = {}
+            for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
+            qb.where = (sql: string, p: { hashes: string[]; cutoff?: number }) => {
+                match = h =>
+                    p.hashes.includes(h.hash) &&
+                    (!sql.includes(":cutoff") || h.tx.reference_block < (p.cutoff as number))
+                return qb
+            }
+            qb.execute = async () => {
+                const removed = pool.filter(match)
+                pool = pool.filter(h => !match(h))
+                return { raw: removed.map(h => ({ hash: h.hash })), affected: removed.length }
+            }
+            return qb
+        }
+    }
+
+    it("records the stale txs cleanMempool removes, and not those already on chain", async () => {
+        installCleanupTable([
             { hash: "0xstale-ref", reference_block: 10 },
             { hash: "0xexecuted", reference_block: 100 },
             { hash: "0xlive", reference_block: 100 },
-        ]
+        ])
         ;(chain.getExistingTransactionHashes as any).mockResolvedValueOnce(new Set(["0xexecuted"]))
         expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 1, executedRemoved: 1 })
+        expect(pool.map(h => h.hash)).toEqual(["0xlive"])
         expect(getDroppedTx("0xstale-ref")).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
         expect(getDroppedTx("0xexecuted")).toBeNull()
         expect(getDroppedTx("0xlive")).toBeNull()
+    })
+
+    // cleanMempool does not hold the mempool lock and live sync calls it, so
+    // a tx can be admitted between its read and its delete.
+    it("keeps a tx admitted while cleanMempool runs, even when every row it read is stale", async () => {
+        installCleanupTable([{ hash: "0xstale-ref", reference_block: 10 }], () =>
+            pool.push({ hash: "0xadmitted", tx: { hash: "0xadmitted", reference_block: 100 } }),
+        )
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 1, executedRemoved: 0 })
+        expect(pool.map(h => h.hash)).toEqual(["0xadmitted"])
+        expect(getDroppedTx("0xstale-ref")).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
+        expect(getDroppedTx("0xadmitted")).toBeNull()
+    })
+
+    it("keeps a stale tx that was admitted again with a fresh reference block while cleanMempool runs", async () => {
+        installCleanupTable([{ hash: "0xreadmitted", reference_block: 10 }], () => {
+            pool[0].tx.reference_block = 100
+        })
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 0, executedRemoved: 0 })
+        expect(pool.map(h => h.hash)).toEqual(["0xreadmitted"])
+        expect(getDroppedTx("0xreadmitted")).toBeNull()
     })
 })
 

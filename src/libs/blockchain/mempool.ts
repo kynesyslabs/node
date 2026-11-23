@@ -1783,22 +1783,33 @@ export default class Mempool {
             return { staleRemoved: 0, executedRemoved: 0 }
         }
 
-        if (toDelete.length === all.length) {
-            await this.repo.createQueryBuilder().delete().execute()
-            log.debug(
-                `[Mempool.cleanMempool] Cleared entire mempool (${toDelete.length} txs)`,
-            )
-        } else {
-            await this.repo.delete({ hash: In(toDelete) })
-            log.debug(
-                `[Mempool.cleanMempool] Deleted ${toDelete.length} txs by hash`,
-            )
+        // Delete only the rows read above, by hash, without the mempool lock:
+        // a tx admitted since is in neither list and stays pooled, and a stale
+        // hash admitted again since with a fresh reference block is kept.
+        let staleRemoved: string[] = []
+        if (staleHashes.length > 0) {
+            const res = await this.repo
+                .createQueryBuilder()
+                .delete()
+                .from(MempoolTx)
+                .where("\"hash\" IN (:...hashes) AND \"reference_block\" < :cutoff", {
+                    hashes: staleHashes,
+                    cutoff,
+                })
+                .returning("\"hash\"")
+                .execute()
+            staleRemoved = returnedHashes(res.raw)
+            recordDropped(staleRemoved, "reference_block_expired", lastBlock)
         }
-        recordDropped(staleHashes, "reference_block_expired", lastBlock)
+        let executedRemoved = 0
+        if (executedHashes.length > 0) {
+            const res = await this.repo.delete({ hash: In(executedHashes) })
+            executedRemoved = res.affected ?? 0
+        }
+        log.debug(
+            `[Mempool.cleanMempool] Deleted ${staleRemoved.length} stale and ${executedRemoved} executed txs`,
+        )
 
-        return {
-            staleRemoved: staleHashes.length,
-            executedRemoved: executedHashes.length,
-        }
+        return { staleRemoved: staleRemoved.length, executedRemoved }
     }
 }
