@@ -20,6 +20,20 @@ import Hashing from "src/libs/crypto/hashing"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 
 const maxGossipPeers = 10
+// Gossip is the only way a node learns peers it was not introduced to by
+// hello: a node whose only contact restarted and forgot it stays cut off
+// until a round reaches it.
+export const PEER_GOSSIP_INTERVAL_MS = 30_000
+
+/**
+ * Digest of a peer list by identity only. Sync heights and URLs differ
+ * between views of the same set, so a digest over whole peer objects never
+ * matched and every round fetched every list.
+ */
+export function peerlistDigest(peers: { identity: string }[]): string {
+    const identities = [...new Set(peers.map(peer => peer.identity))].sort()
+    return Hashing.sha256(JSON.stringify(identities))
+}
 
 /**
  * Initiates the peer gossip process.
@@ -51,9 +65,17 @@ async function performPeerGossip() {
         return
     }
 
-    const selectedPeers = selectPeersForGossip(allPeers)
+    const others = allPeers.filter(
+        peer => peer.identity !== getSharedState.publicKeyHex,
+    )
+    if (others.length === 0) {
+        log.custom("peerGossip", "No peers to gossip with", true)
+        return
+    }
+
+    const selectedPeers = selectPeersForGossip(others)
     const orderedPeers = orderPeers(allPeers)
-    const peersHash = Hashing.sha256(JSON.stringify(orderedPeers))
+    const peersHash = peerlistDigest(allPeers)
 
     log.custom("peerGossip", `Hashed our peerlist: ${peersHash}`, false)
 

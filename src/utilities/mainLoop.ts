@@ -11,7 +11,10 @@ import log from "src/utilities/logger"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import { isNetworkAhead } from "src/libs/consensus/v2/routines/networkAheadVeto"
 import { getSharedState } from "./sharedState"
-import { peerGossip } from "src/libs/peer/routines/peerGossip"
+import {
+    PEER_GOSSIP_INTERVAL_MS,
+    peerGossip,
+} from "src/libs/peer/routines/peerGossip"
 import { pollPeerHeights } from "src/libs/peer/routines/pollPeerHeights"
 import { HEIGHT_PROBE_INTERVAL_MS } from "src/libs/consensus/v2/routines/committedBlock"
 import { handleError } from "src/errors/handleError"
@@ -49,6 +52,12 @@ export default async function mainLoop() {
         //     intervalMs: interval,
         //     budgetMs: 30_000,
         // }),
+        startLoopTask({
+            name: "peer_gossip",
+            fn: peerGossip,
+            intervalMs: () => PEER_GOSSIP_INTERVAL_MS,
+            budgetMs: 30_000,
+        }),
         startLoopTask({
             name: "height_poll",
             fn: pollPeerHeights,
