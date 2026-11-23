@@ -845,7 +845,7 @@ export default class Mempool {
             (nonceRule || isForkActive("nonceEnforcement", blockHeight))
         ) {
             try {
-                return await this.repo.manager.transaction(
+                const result = await this.repo.manager.transaction(
                     "READ COMMITTED",
                     async em => {
                         // Postgres advisory locks operate on signed
@@ -940,7 +940,6 @@ export default class Mempool {
                             nonce: transaction.content.nonce,
                             blockNumber: blockRef,
                         })
-                        noteEvicted()
 
                         return {
                             confirmationBlock: saved.blockNumber,
@@ -948,6 +947,10 @@ export default class Mempool {
                         }
                     },
                 )
+                // Only once the commit has removed the victims; a refusal
+                // returned from inside the callback evicts nothing.
+                if (result.error === "") noteEvicted()
+                return result
             } catch (error) {
                 let message = "Error: Failed to add transaction to mempool"
                 if (error instanceof QueryFailedError) {

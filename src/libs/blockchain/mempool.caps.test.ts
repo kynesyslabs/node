@@ -117,8 +117,8 @@ mock.module("@/forks/blockCapsGate", () => ({
 const { default: Mempool } = await import("./mempool")
 const { __resetMempoolLimits, __setMempoolLimits, chooseVictims, txStoredBytes, txTotalFee } =
     await import("./mempoolLimits")
-const { __clearDroppedTxs, getDroppedTx } = await import("./droppedTransactions")
-const { default: Chain } = await import("src/libs/blockchain/chain")
+const { __clearDroppedTxs: clearDroppedTxs, getDroppedTx } = await import("./droppedTransactions")
+const { default: chain } = await import("src/libs/blockchain/chain")
 // installPool replaces the sweep; the dropped-record tests run the real one.
 const realPruneExpiredByAge = Mempool.pruneExpiredByAge
 
@@ -276,7 +276,7 @@ beforeEach(() => {
     jest.spyOn(Date, "now").mockImplementation(() => clock)
     ;(Mempool as any).lastGossipEvictAttempt = 0
     deletedBy = {}
-    __clearDroppedTxs()
+    clearDroppedTxs()
     installPool()
 })
 
@@ -352,6 +352,22 @@ describe("eviction", () => {
         }
         expect((await rpc(makeTx({ fee: 50, from: "0xpayer", nonce: 11 }))).error).toMatch(/Mempool full/)
         for (const hash of ["0xhigh", "0xlow-new", "0xlow-old"]) expect(getDroppedTx(hash)).toBeNull()
+    })
+
+    it("records no victim when the database transaction that evicts fails to commit", async () => {
+        nonceEnforced = true
+        fund("0xpayer", 10)
+        const manager = (Mempool as any).repo.manager
+        const transaction = manager.transaction
+        manager.transaction = async (...args: unknown[]) => {
+            await transaction(...args)
+            throw new Error("commit failed")
+        }
+        calls = []
+        const refused = await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer", nonce: 1 }))
+        expect(calls).toEqual(["tx:begin", "delete", "save", "tx:end"])
+        expect(refused).toEqual({ confirmationBlock: null, error: "Error: Failed to add transaction to mempool" })
+        expect(getDroppedTx("0xlow-old")).toBeNull()
     })
 
     it("does not evict for a high fee the sender cannot pay", async () => {
@@ -688,7 +704,7 @@ describe("expiry sweep", () => {
 // status call answers "dropped" instead of "unknown".
 describe("dropped record of the sweeps", () => {
     it("records what a block's hygiene removes for its reference block or its age, and not the block's own txs", async () => {
-        ;(Mempool as any).pruneExpiredByAge = realPruneExpiredByAge
+        (Mempool as any).pruneExpiredByAge = realPruneExpiredByAge
         deletedBy = { reference_block: ["0xold-ref"], timestamp: ["0xstale"] }
         const pruned = await Mempool.pruneAfterBlock(101, ["0xincluded"])
         expect(pruned.expired).toBe(2)
@@ -702,7 +718,7 @@ describe("dropped record of the sweeps", () => {
     })
 
     it("records what the admission sweep removes for its age", async () => {
-        ;(Mempool as any).pruneExpiredByAge = realPruneExpiredByAge
+        (Mempool as any).pruneExpiredByAge = realPruneExpiredByAge
         ;(Mempool as any).lastAgeSweep = 0
         deletedBy = { timestamp: ["0xstale"] }
         expect(await Mempool.pruneExpiredByAge(NOW)).toBe(1)
@@ -716,7 +732,7 @@ describe("dropped record of the sweeps", () => {
             { hash: "0xexecuted", reference_block: 100 },
             { hash: "0xlive", reference_block: 100 },
         ]
-        ;(Chain.getExistingTransactionHashes as any).mockResolvedValueOnce(new Set(["0xexecuted"]))
+        ;(chain.getExistingTransactionHashes as any).mockResolvedValueOnce(new Set(["0xexecuted"]))
         expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 1, executedRemoved: 1 })
         expect(getDroppedTx("0xstale-ref")).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
         expect(getDroppedTx("0xexecuted")).toBeNull()
