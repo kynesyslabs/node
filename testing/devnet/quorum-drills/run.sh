@@ -58,6 +58,9 @@ NODE_EST_MB="${NODE_EST_MB:-1600}"
 HEADROOM_MB="${HEADROOM_MB:-3072}"
 RUNS_DIR="${RUNS_DIR:-${HERE}/runs}"
 MIN_DISK_GB="${MIN_DISK_GB:-10}"
+# --hosts preflight: how long a host whose load is above its core count may
+# take to settle (the previous scenario's teardown) before the run aborts
+LOAD_SETTLE_S="${LOAD_SETTLE_S:-180}"
 LOCKSTEP_TIMEOUT="${LOCKSTEP_TIMEOUT:-420}"
 PROGRESS_BLOCKS="${PROGRESS_BLOCKS:-3}"
 PROGRESS_TIMEOUT="${PROGRESS_TIMEOUT:-180}"
@@ -108,7 +111,7 @@ NETEM=""
 usage() {
     sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
-    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
+    echo "             RUNS_DIR MIN_DISK_GB LOAD_SETTLE_S STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
     echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
     echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
     echo "             RESTARTS REJOIN_BOOT_S REJOIN_SYNC_S REJOIN_ROUND_S REJOIN_TIMEOUT MAX_GAP_S (restart-* drills)"
