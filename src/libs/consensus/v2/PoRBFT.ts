@@ -1,6 +1,7 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
 import Mempool from "src/libs/blockchain/mempool"
+import { recordRefusedForBlock } from "src/libs/blockchain/droppedTransactions"
 import { holdSendersToCap } from "src/libs/blockchain/mempoolLimits"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
@@ -672,6 +673,7 @@ export async function consensusRoutine(): Promise<void> {
 
             // Remove the rest!
             await Mempool.removeTransactionsByHashes(Array.from(txsToRemove))
+            recordRefusedForBlock(failedTxsToRemove, blockTxs)
 
             const finalizeEnd = Date.now()
             log.only(

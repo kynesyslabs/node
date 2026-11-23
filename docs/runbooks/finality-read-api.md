@@ -77,10 +77,33 @@ pins the same network. `503 state_not_ready` while block 0 is not loaded,
 
 ### `getTransactionStatus {hash}`
 
-`{ state: "pending" | "included" | "failed" | "unknown", blockNumber?, code?, message?, checkedThroughBlock, resultCommittedInBlock? }`.
+`{ state: "pending" | "included" | "failed" | "dropped" | "unknown", blockNumber?, code?, message?, reason?, final?, droppedAtBlock?, droppedAt?, checkedThroughBlock, resultCommittedInBlock? }`.
 `included` means in a block and executed; a transaction a block keeps but
 does not execute is `failed`, never `included`. An unknown hash is `404`
 (`503 node_not_synced` while the node is behind).
+
+`dropped` (`200`) means this node removed the transaction from its mempool
+without a block taking it. `droppedAtBlock` is the node's head and
+`droppedAt` the time (ms) when it did. `reason` says why:
+
+| `reason` | Removed because | `final` |
+|---|---|---|
+| `reference_block_expired` | its reference block fell behind the deep window | `true` once `referenceBlockRoom10` is active, else `false` |
+| `expired` | its signed timestamp is older than the pool lifetime (10 minutes), or unusable | `false` |
+| `evicted_fee` | a higher-paying transaction took its place in a full pool | `false` |
+| `evicted_sender_cap` | its sender holds more pending transactions than the per-sender cap | `false` |
+| `seat_refused` | the staking re-judge refused this seat transaction | `false` |
+| `refused_for_block` | the block this node forged failed it and did not keep it | `false` |
+
+`final: true` means no node can include the transaction any more. With
+`final: false` another node may still hold and include it: keep waiting, and
+never re-sign it with a new nonce, or both may execute. A block or the
+mempool always wins: a dropped transaction that a block later carries reads
+`included` or `failed`, and one that comes back to the pool reads `pending`.
+
+The record is per node, in memory and bounded (the 50,000 most recent
+drops). A node that never held the transaction, has restarted since, or has
+forgotten it answers `unknown` as before.
 
 ### `getTransactionProof {hash}`
 

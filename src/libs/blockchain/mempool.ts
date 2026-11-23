@@ -1,8 +1,9 @@
-import { EntityManager, FindManyOptions, ILike, In, LessThanOrEqual, QueryFailedError, Repository, LessThan } from "typeorm"
+import { EntityManager, FindManyOptions, ILike, In, LessThanOrEqual, QueryFailedError, Repository } from "typeorm"
 import { Mutex } from "async-mutex"
 import Datasource from "@/model/datasource"
 
 import Chain from "./chain"
+import { recordDropped } from "./droppedTransactions"
 import log from "src/utilities/logger"
 import { pendingTxSignatureContext, isForkActive } from "@/forks"
 import { MempoolTx } from "@/model/entities/Mempool"
@@ -92,6 +93,11 @@ const SIGNED_TS_SQL =
     "THEN (\"content\"->>'timestamp')::bigint END)"
 
 type PoolTx = Transaction & { reference_block: number }
+
+/** The hashes of the rows a delete with RETURNING "hash" removed. */
+function returnedHashes(raw: unknown): string[] {
+    return Array.isArray(raw) ? raw.map((row: { hash: string }) => row.hash) : []
+}
 
 /**
  * Where a tx entered from. Only an RPC submit or a gossiped tx may displace
@@ -402,9 +408,11 @@ export default class Mempool {
             .delete()
             .from(MempoolTx)
             .where(`${notOwnRelaySql()} AND COALESCE(${SIGNED_TS_SQL} < :cutoff, TRUE)`, { cutoff })
+            .returning("\"hash\"")
             .execute()
         const removed = res.affected ?? 0
         for (let i = 0; i < removed; i++) countMempoolRejection("expired")
+        recordDropped(returnedHashes(res.raw), "expired")
         return removed
     }
 
@@ -827,6 +835,7 @@ export default class Mempool {
         const evict = verdict.evict
         const noteEvicted = () => {
             for (let i = 0; i < evict.length; i++) countMempoolRejection("evicted")
+            recordDropped(evict, "evicted_fee")
         }
 
         if (
@@ -1013,9 +1022,14 @@ export default class Mempool {
             const res = await this.repo.delete({ hash: In(includedHashes) })
             included = res.affected ?? 0
         }
-        const res = await this.repo.delete({
-            reference_block: LessThan(deepWindowCutoff(blockNumber)),
-        })
+        const res = await this.repo
+            .createQueryBuilder()
+            .delete()
+            .from(MempoolTx)
+            .where("\"reference_block\" < :cutoff", { cutoff: deepWindowCutoff(blockNumber) })
+            .returning("\"hash\"")
+            .execute()
+        recordDropped(returnedHashes(res.raw), "reference_block_expired", blockNumber)
         const aged = await this.pruneExpiredByAge(Date.now(), true)
         return { included, expired: (res.affected ?? 0) + aged }
     }
@@ -1141,6 +1155,7 @@ export default class Mempool {
             drop.push(hash)
         }
         if (drop.length > 0) await this.removeTransactionsByHashes(drop)
+        recordDropped(drop, "seat_refused")
         return drop
     }
 
@@ -1261,6 +1276,7 @@ export default class Mempool {
         if (evict.length > 0) {
             await this.repo.delete({ hash: In(evict) })
             evict.forEach(() => countMempoolRejection("evicted"))
+            recordDropped(evict, "evicted_sender_cap")
         }
         refuse.forEach(() => countMempoolRejection("sender_limit"))
         return txs.filter(tx => !refuse.has(tx.hash))
@@ -1303,6 +1319,7 @@ export default class Mempool {
         )
         await this.repo.delete({ hash: In(evict) })
         evict.forEach(() => countMempoolRejection("evicted"))
+        recordDropped(evict, "evicted_sender_cap")
         return evict
     }
 
@@ -1774,6 +1791,7 @@ export default class Mempool {
                 `[Mempool.cleanMempool] Deleted ${toDelete.length} txs by hash`,
             )
         }
+        recordDropped(staleHashes, "reference_block_expired", lastBlock)
 
         return {
             staleRemoved: staleHashes.length,

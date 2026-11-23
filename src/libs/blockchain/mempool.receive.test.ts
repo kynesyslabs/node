@@ -126,6 +126,7 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 }))
 
 import Mempool from "./mempool"
+import { __clearDroppedTxs, getDroppedTx } from "./droppedTransactions"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "src/utilities/sharedState"
 import {
@@ -163,6 +164,7 @@ function resetReceiveState() {
     roomFork = false
     heldBySender = []
     deletedHashes = []
+    __clearDroppedTxs()
     ;(Mempool as any).repo = {
         find: jest.fn(async () => mempoolRows),
         query: jest.fn(async () => {
@@ -522,6 +524,17 @@ describe("the own-pool seat re-judge", () => {
         expect(seatAdmittedHere("0xlate")).toBe(true)
     })
 
+    it("records the seat txs it drops as dropped, not final, and nothing it keeps", async () => {
+        seatPool([seatTx("0xmoved"), seatTx("0xdown")])
+        seatVerdicts.set("0xmoved", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xdown", { success: false, message: "timed out", unreachable: true })
+        await Mempool.startSeatRejudge()
+        expect(getDroppedTx("0xmoved")).toBeNull()
+        await Mempool.applySeatRefusals(101)
+        expect(getDroppedTx("0xmoved")).toMatchObject({ reason: "seat_refused", final: false })
+        expect(getDroppedTx("0xdown")).toBeNull()
+    })
+
     it("drops a refused tx at the next round start when no lock holds it", async () => {
         const deleted = seatPool([seatTx("0xX")])
         seatVerdicts.set("0xX", { success: false, message: "moved" })
@@ -707,6 +720,15 @@ describe("Mempool.receive per-sender cap", () => {
         expect(deletedHashes).toEqual(["0xheld63"])
     })
 
+    it("records the held tx it evicts as dropped, not final, and not the merged tx it refuses", async () => {
+        blockCapsOn = true
+        heldBySender = fullHold()
+        await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])
+        expect(getDroppedTx("0xheld63")).toMatchObject({ reason: "evicted_sender_cap", final: false })
+        // Never in this pool, so never dropped from it.
+        expect(getDroppedTx("0xhigh")).toBeNull()
+    })
+
     it("keeps the sender cap when two merge exchanges overlap", async () => {
         blockCapsOn = true
         heldBySender = fullHold().slice(0, 63)
@@ -772,6 +794,10 @@ describe("Mempool.receive per-sender cap", () => {
                 .sort(),
         ).toEqual(peerKeeps)
         expect(heldBySender.some(row => row.hash === "0xother")).toBe(true)
+        for (const hash of evicted) {
+            expect(getDroppedTx(hash)).toMatchObject({ reason: "evicted_sender_cap", final: false })
+        }
+        expect(getDroppedTx("0xother")).toBeNull()
     })
 
     it("evicts nothing from a pool within the sender cap", async () => {

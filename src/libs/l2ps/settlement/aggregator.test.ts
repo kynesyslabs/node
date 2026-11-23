@@ -343,6 +343,23 @@ describe("SettlementAggregator", () => {
         expect(statusOf(t)).toBe(L2PS_STATUS.BATCHED)
     })
 
+    it("re-queues a batch this node dropped from its mempool once it is past the window, as one never seen", async () => {
+        const t = pay(ALICE, BOB.account, 10n, 5n)
+        queue(t)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        await agg.cycle()
+        statuses.set("l1_1", { state: "dropped", reason: "reference_block_expired", final: true })
+
+        head = 106
+        await agg.cycle()
+        expect(submitted).toHaveLength(1)
+
+        head = 107
+        await agg.cycle()
+        expect(submitted).toHaveLength(2)
+        expect(statusOf(t)).toBe(L2PS_STATUS.BATCHED)
+    })
+
     it("re-queues a batch the chain never saw once it is past the window", async () => {
         const t = pay(ALICE, BOB.account, 10n, 5n)
         queue(t)

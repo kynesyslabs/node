@@ -24,6 +24,7 @@ jest.mock("src/libs/blockchain/chain", () => ({
 }))
 
 const { default: getTransactionStatus } = await import("./getTransactionStatus")
+const { __clearDroppedTxs, recordDropped } = await import("src/libs/blockchain/droppedTransactions")
 
 const FIXTURES = join(import.meta.dir, "../../../blockchain/finality/__fixtures__/requester-1059-1060")
 const load = (path: string) => JSON.parse(readFileSync(join(FIXTURES, path), "utf8"))
@@ -78,6 +79,7 @@ beforeEach(() => {
     sharedState.syncStatus = true
     sharedState.inSyncLoop = false
     sharedState.forkConfig = undefined as never
+    __clearDroppedTxs()
 })
 
 describe("N07, #1059 acceptance test 2: included but failed", () => {
@@ -157,5 +159,36 @@ describe("N01, #1059 acceptance test 5: not found, unsynced and lookup failure a
         expect(unsynced.response).toEqual({ state: "unknown", checkedThroughBlock: HEAD })
         expect(failed.result).toBe(500)
         expect(failed.extra).toMatchObject({ reason: "lookup_failed" })
+    })
+})
+
+describe("#973: a transaction this node dropped from its mempool", () => {
+    it("is answered 200 dropped, with its reason, finality and the height searched", async () => {
+        recordDropped([N07_HASH], "reference_block_expired", HEAD - 3)
+        const reply = await getTransactionStatus({ hash: N07_HASH })
+        expect(reply.result).toBe(200)
+        expect(reply.response).toEqual({
+            state: "dropped",
+            reason: "reference_block_expired",
+            final: false,
+            droppedAtBlock: HEAD - 3,
+            droppedAt: expect.any(Number),
+            checkedThroughBlock: HEAD,
+        })
+        expect(f04StatusStep(reply.response, N07_BLOCK)).toBe("indeterminate")
+    })
+
+    it("says final once the room can no longer widen", async () => {
+        sharedState.forkConfig = { referenceBlockRoom10: { activationHeight: 0 } } as never
+        recordDropped([N07_HASH], "reference_block_expired", HEAD - 3)
+        expect((await getTransactionStatus({ hash: N07_HASH })).response).toMatchObject({ state: "dropped", final: true })
+    })
+
+    it("leaves a hash the node never held 404 unknown", async () => {
+        recordDropped([N07_HASH], "evicted_fee", HEAD)
+        const other = "ab".repeat(32)
+        const reply = await getTransactionStatus({ hash: other })
+        expect([reply.result, reply.extra]).toEqual([404, { reason: "not_found" }])
+        expect(reply.response).toEqual({ state: "unknown", checkedThroughBlock: HEAD })
     })
 })

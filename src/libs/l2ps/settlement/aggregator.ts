@@ -593,8 +593,11 @@ export class SettlementAggregator {
             )
             return
         }
+        // A batch this node dropped from its pool is waited out like one
+        // never seen: another node may still include it.
         const expired =
-            status.state === "unknown" && head - batch.submittedAt > this.limits.expiryBlocks
+            (status.state === "unknown" || status.state === "dropped") &&
+            head - batch.submittedAt > this.limits.expiryBlocks
         if (status.state === "failed" || expired) {
             const why =
                 status.state === "failed"
