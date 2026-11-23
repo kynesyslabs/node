@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const logError = jest.fn()
 
@@ -25,6 +25,17 @@ jest.mock("src/utilities/sharedState", () => ({
 jest.mock("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: jest.fn() },
+}))
+
+// The mempool rejection counter, one reason per increment.
+let rejections: string[] = []
+mock.module("src/features/metrics/MetricsService", () => ({
+    getMetricsService: () => ({
+        createCounter: () => undefined,
+        incrementCounter: (_name: string, labels: { reason: string }) => {
+            rejections.push(labels.reason)
+        },
+    }),
 }))
 
 let onChainHashes = new Set<string>()
@@ -126,7 +137,7 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 }))
 
 import Mempool from "./mempool"
-import { __clearDroppedTxs, getDroppedTx } from "./droppedTransactions"
+import { __clearDroppedTxs, getDroppedTx, recordDropped } from "./droppedTransactions"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "src/utilities/sharedState"
 import {
@@ -141,6 +152,25 @@ import {
 let mempoolRows: Array<{ hash: string }> = []
 let heldBySender: Array<{ hash: string; sender: string; nonce: string }> = []
 let deletedHashes: string[] = []
+
+/**
+ * A query builder for a bulk delete. `remove` gets the WHERE's parameters
+ * and returns the hashes of the rows it removed, which RETURNING yields.
+ */
+const deleteBuilder = (remove: (params: Record<string, any>) => string[]) => () => {
+    let params: Record<string, any> = {}
+    const qb: Record<string, unknown> = {}
+    for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
+    qb.where = (_sql: string, p: Record<string, any>) => {
+        params = p
+        return qb
+    }
+    qb.execute = async () => {
+        const raw = remove(params).map(hash => ({ hash }))
+        return { raw, affected: raw.length }
+    }
+    return qb
+}
 
 const tx = (hash: string, referenceBlock: number, status = "pending") =>
     ({
@@ -164,6 +194,7 @@ function resetReceiveState() {
     roomFork = false
     heldBySender = []
     deletedHashes = []
+    rejections = []
     __clearDroppedTxs()
     ;(Mempool as any).repo = {
         find: jest.fn(async () => mempoolRows),
@@ -179,6 +210,12 @@ function resetReceiveState() {
                 row => !where.hash.value.includes(row.hash),
             )
             return { affected: where.hash.value.length }
+        }),
+        createQueryBuilder: deleteBuilder(({ hashes }) => {
+            deletedHashes.push(...hashes)
+            const removed = heldBySender.filter(row => hashes.includes(row.hash))
+            heldBySender = heldBySender.filter(row => !hashes.includes(row.hash))
+            return removed.map(row => row.hash)
         }),
     }
 }
@@ -334,13 +371,21 @@ const seatTx = (hash: string) => {
     return t
 }
 
-/** A pool whose rows are `rows`, recording the hashes deleted from it. */
+/**
+ * A pool whose rows are `rows`, recording the hashes deleted from it: by
+ * hash, or by the age sweep's signed timestamp before `cutoff`.
+ */
 function seatPool(rows: any[]) {
     const deleted: string[] = []
     ;(Mempool as any).repo = {
         find: jest.fn(async () => rows.filter(r => !deleted.includes(r.hash))),
-        delete: jest.fn(async (where: { hash: { _value: string[] } }) => {
-            deleted.push(...where.hash._value)
+        createQueryBuilder: deleteBuilder(({ hashes, cutoff }) => {
+            const removed = rows
+                .filter(r => !deleted.includes(r.hash))
+                .filter(r => (hashes ? hashes.includes(r.hash) : r.content.timestamp < cutoff))
+                .map(r => r.hash)
+            deleted.push(...(hashes ?? removed))
+            return removed
         }),
     }
     return deleted
@@ -535,6 +580,18 @@ describe("the own-pool seat re-judge", () => {
         expect(getDroppedTx("0xdown")).toBeNull()
     })
 
+    it("keeps the reason of the age sweep that removed a refused seat tx first", async () => {
+        seatPool([seatTx("0xX")])
+        seatVerdicts.set("0xX", { success: false, message: "moved" })
+        await Mempool.startSeatRejudge()
+        // Signed past the pool lifetime: the sweep takes it before the round start.
+        expect(await Mempool.pruneExpiredByAge(Date.now(), true)).toBe(1)
+        expect(getDroppedTx("0xX")).toMatchObject({ reason: "expired" })
+        // Still the refusal it was queued for, but its delete removes nothing.
+        expect(await Mempool.applySeatRefusals(101)).toEqual(["0xX"])
+        expect(getDroppedTx("0xX")).toMatchObject({ reason: "expired" })
+    })
+
     it("drops a refused tx at the next round start when no lock holds it", async () => {
         const deleted = seatPool([seatTx("0xX")])
         seatVerdicts.set("0xX", { success: false, message: "moved" })
@@ -727,6 +784,41 @@ describe("Mempool.receive per-sender cap", () => {
         expect(getDroppedTx("0xheld63")).toMatchObject({ reason: "evicted_sender_cap" })
         // Never in this pool, so never dropped from it.
         expect(getDroppedTx("0xhigh")).toBeNull()
+    })
+
+    // Another removal takes `hash` between the cap's read and its delete.
+    const goneAfterRead = (hash: string) => {
+        const read = (Mempool as any).repo.query
+        ;(Mempool as any).repo.query = jest.fn(async (...args: unknown[]) => {
+            const rows = await read(...args)
+            heldBySender = heldBySender.filter(row => row.hash !== hash)
+            recordDropped([hash], "expired")
+            return rows
+        })
+    }
+
+    it("records and counts as evicted only the held txs its delete removed", async () => {
+        blockCapsOn = true
+        heldBySender = fullHold()
+        goneAfterRead("0xheld63")
+        await Mempool.receive([fromSender("0xlow", 1), fromSender("0xlow2", 2)])
+        expect(deletedHashes.sort()).toEqual(["0xheld62", "0xheld63"])
+        expect(getDroppedTx("0xheld62")).toMatchObject({ reason: "evicted_sender_cap" })
+        expect(getDroppedTx("0xheld63")).toMatchObject({ reason: "expired" })
+        expect(rejections.filter(reason => reason === "evicted")).toHaveLength(1)
+    })
+
+    it("records and counts as evicted only the held txs the pool-wide cap's delete removed", async () => {
+        heldBySender = [
+            ...fullHold(),
+            { hash: "0xheld64", sender: SENDER, nonce: "74" },
+            { hash: "0xheld65", sender: SENDER, nonce: "75" },
+        ]
+        goneAfterRead("0xheld65")
+        expect((await Mempool.capPoolSenders()).sort()).toEqual(["0xheld64", "0xheld65"])
+        expect(getDroppedTx("0xheld64")).toMatchObject({ reason: "evicted_sender_cap" })
+        expect(getDroppedTx("0xheld65")).toMatchObject({ reason: "expired" })
+        expect(rejections.filter(reason => reason === "evicted")).toHaveLength(1)
     })
 
     it("keeps the sender cap when two merge exchanges overlap", async () => {

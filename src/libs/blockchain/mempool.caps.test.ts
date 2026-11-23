@@ -39,10 +39,14 @@ mock.module("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: jest.fn() },
 }))
+// The mempool rejection counter, one reason per increment.
+const rejections: string[] = []
 mock.module("src/features/metrics/MetricsService", () => ({
     getMetricsService: () => ({
         createCounter: () => undefined,
-        incrementCounter: () => undefined,
+        incrementCounter: (_name: string, labels: { reason: string }) => {
+            rejections.push(labels.reason)
+        },
     }),
 }))
 mock.module("src/libs/blockchain/chain", () => ({
@@ -117,7 +121,7 @@ mock.module("@/forks/blockCapsGate", () => ({
 const { default: Mempool } = await import("./mempool")
 const { __resetMempoolLimits, __setMempoolLimits, chooseVictims, txStoredBytes, txTotalFee } =
     await import("./mempoolLimits")
-const { __clearDroppedTxs: clearDroppedTxs, getDroppedTx } = await import("./droppedTransactions")
+const { __clearDroppedTxs: clearDroppedTxs, getDroppedTx, recordDropped } = await import("./droppedTransactions")
 const { default: chain } = await import("src/libs/blockchain/chain")
 // installPool replaces the sweep; the dropped-record tests run the real one.
 const realPruneExpiredByAge = Mempool.pruneExpiredByAge
@@ -190,12 +194,25 @@ function installPool() {
         Object.fromEntries(pool.map(h => [h.hash, true]))
     m.getMempool = async () => pool.map(h => h.tx)
 
-    const store = {
-        delete: async (where: { hash: unknown }) => {
+    // The by-hash delete with RETURNING: it yields only the rows still pooled.
+    const deleteByHash = () => {
+        let hashes: string[] = []
+        const qb: Record<string, unknown> = {}
+        for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
+        qb.where = (_sql: string, params: { hashes: string[] }) => {
+            hashes = params.hashes
+            return qb
+        }
+        qb.execute = async () => {
             calls.push("delete")
-            const hashes = (where.hash as { _value: string[] })._value
+            const raw = pool.filter(h => hashes.includes(h.hash)).map(h => ({ hash: h.hash }))
             pool = pool.filter(h => !hashes.includes(h.hash))
-        },
+            return { raw, affected: raw.length }
+        }
+        return qb
+    }
+    const store = {
+        createQueryBuilder: deleteByHash,
         save: async (row: Record<string, any>) => {
             calls.push("save")
             pool.push({ hash: row.hash, tx: row })
@@ -368,6 +385,29 @@ describe("eviction", () => {
         expect(calls).toEqual(["tx:begin", "delete", "save", "tx:end"])
         expect(refused).toEqual({ confirmationBlock: null, error: "Error: Failed to add transaction to mempool" })
         expect(getDroppedTx("0xlow-old")).toBeNull()
+    })
+
+    it("records no victim another removal took before the delete, on both insert paths", async () => {
+        fund("0xpayer", 10)
+        const m = Mempool as any
+        const candidates = m.listEvictionCandidates
+        // The age sweep takes each admission's victim after its eviction read.
+        const taken = ["0xlow-old", "0xlow-new"]
+        m.listEvictionCandidates = async () => {
+            const rows = await candidates()
+            const victim = taken.shift() as string
+            pool = pool.filter(h => h.hash !== victim)
+            recordDropped([victim], "expired")
+            return rows
+        }
+        rejections.length = 0
+        expect((await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))).error).toBe("")
+        expect(getDroppedTx("0xlow-old")).toMatchObject({ reason: "expired" })
+
+        nonceEnforced = true
+        expect((await rpc(makeTx({ hash: "0xmore", fee: 6, from: "0xpayer", nonce: 1 }))).error).toBe("")
+        expect(getDroppedTx("0xlow-new")).toMatchObject({ reason: "expired" })
+        expect(rejections.filter(reason => reason === "evicted")).toHaveLength(0)
     })
 
     it("does not evict for a high fee the sender cannot pay", async () => {

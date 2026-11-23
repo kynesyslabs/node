@@ -54,15 +54,21 @@ export function recordDropped(
 }
 
 /**
- * Records the txs a finished round removes from the pool for failing the
- * filters of its block (`removed`) that the block does not carry.
+ * Records the txs a finished round failed for the filters of its block
+ * (`failed`) that its delete removed from the pool (`removed`) and the block
+ * does not carry. A row another removal took first keeps that reason.
  */
 export function recordRefusedForBlock(
+    failed: Iterable<string>,
     removed: Iterable<string>,
     blockTxs: Array<{ hash: string }>,
 ): void {
+    const gone = new Set(removed)
     const carried = new Set(blockTxs.map(tx => tx.hash))
-    recordDropped([...removed].filter(hash => !carried.has(hash)), "refused_for_block")
+    recordDropped(
+        [...failed].filter(hash => gone.has(hash) && !carried.has(hash)),
+        "refused_for_block",
+    )
 }
 
 export function getDroppedTx(hash: string): DroppedTx | null {

@@ -241,6 +241,15 @@ describe.skipIf(!PG_URL)("mempool admission queries on Postgres", () => {
         expect(left).toEqual(["0xin-window"])
     })
 
+    it("returns from a by-hash delete only the rows it removed, in and out of a transaction (#973)", async () => {
+        await ds.getRepository(MempoolTx).insert([row("0xa", { ts: NOW }), row("0xb", { ts: NOW })])
+        expect(await Mempool.removeTransactionsByHashes(["0xa", "0xgone"])).toEqual(["0xa"])
+        const inTx = await ds.manager.transaction(em => Mempool.removeTransactionsByHashes(["0xa", "0xb"], em))
+        expect(inTx).toEqual(["0xb"])
+        expect(await Mempool.removeTransactionsByHashes([])).toEqual([])
+        expect(await ds.getRepository(MempoolTx).count()).toBe(0)
+    })
+
     it("plans eviction against the real pool for an RPC tx and leaves the pool untouched", async () => {
         const { __setMempoolLimits } = await import("./mempoolLimits")
         __setMempoolLimits({ maxTxs: 2 })

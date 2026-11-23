@@ -672,8 +672,8 @@ export async function consensusRoutine(): Promise<void> {
             ])
 
             // Remove the rest!
-            await Mempool.removeTransactionsByHashes(Array.from(txsToRemove))
-            recordRefusedForBlock(failedTxsToRemove, blockTxs)
+            const removed = await Mempool.removeTransactionsByHashes(Array.from(txsToRemove))
+            recordRefusedForBlock(failedTxsToRemove, removed, blockTxs)
 
             const finalizeEnd = Date.now()
             log.only(

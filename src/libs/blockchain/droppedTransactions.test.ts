@@ -105,9 +105,18 @@ describe("the bound", () => {
 
 describe("recordRefusedForBlock", () => {
     it("records only the removed txs the block does not carry", () => {
-        recordRefusedForBlock([hash(1), hash(2)], [{ hash: hash(2) }, { hash: hash(3) }])
+        const all = [hash(1), hash(2), hash(3)]
+        recordRefusedForBlock([hash(1), hash(2)], all, [{ hash: hash(2) }, { hash: hash(3) }])
         expect(getDroppedTx(hash(1))).toMatchObject({ reason: "refused_for_block" })
         expect(getDroppedTx(hash(2))).toBeNull()
         expect(getDroppedTx(hash(3))).toBeNull()
+    })
+
+    it("leaves a failed tx its delete did not remove with the reason of the removal that took it", () => {
+        recordDropped([hash(1)], "expired")
+        // hash(1) left the pool before the round's delete: only hash(2) is returned.
+        recordRefusedForBlock([hash(1), hash(2)], [hash(2)], [])
+        expect(getDroppedTx(hash(1))).toMatchObject({ reason: "expired" })
+        expect(getDroppedTx(hash(2))).toMatchObject({ reason: "refused_for_block" })
     })
 })
