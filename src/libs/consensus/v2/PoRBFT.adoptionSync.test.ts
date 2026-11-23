@@ -19,6 +19,8 @@ mock.module("src/libs/blockchain/validation/verifyBlock", () => ({
         Object.keys(b?.validation_data?.signatures ?? {}).length >= quorumSignatures
             ? { valid: true }
             : { valid: false, reason: "signatures short of a quorum" },
+    // Every stub signature counts, so the block is stored with all of them
+    withCountedSignatures: async (b: any) => b,
 }))
 
 const NATIVE_HASHES = { native_subnets_txs: "subnets", native_tlsnotary: "tls" }
