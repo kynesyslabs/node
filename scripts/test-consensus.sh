@@ -143,6 +143,7 @@ SUITE_FILES=(
     testing/monitoring/metricsExposure.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
+    testing/forks/governanceTxHash.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
