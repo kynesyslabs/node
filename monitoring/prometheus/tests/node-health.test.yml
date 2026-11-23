@@ -1,4 +1,5 @@
-# promtool unit tests for alerts/node-health.yml: NodeDown per validator and DeadMansSwitch.
+# promtool unit tests for alerts/node-health.yml: NodeDown per validator, DeadMansSwitch,
+# NodeFailing, MainLoopHeartbeatStale, PeersZero and DbDown.
 # The other rules in that file are tested in alerts.test.yml.
 # Run: scripts/check-monitoring.sh
 rule_files:
@@ -205,3 +206,81 @@ tests:
             exp_annotations:
               summary: No connected peers (only the node itself is online)
               description: "demos_peer_online_count has been 1 or less for >5m on validator-1. The count includes the node itself, so 1 means no other peer is online. Check network egress + bootstrap peer list."
+
+  # DbDown: the node's Postgres probe (demos_db_up) failing for the 1 m `for` fires, and the
+  # first good probe resolves it.
+  - interval: 1m
+    input_series:
+      # validator-1: Postgres down from minute 3 to minute 8, answering again from minute 9.
+      - series: 'demos_db_up{job="demos-node",instance="validator-1"}'
+        values: '1x2 0x5 1x10'
+      # validator-2: healthy throughout.
+      - series: 'demos_db_up{job="demos-node",instance="validator-2"}'
+        values: '1x17'
+      # validator-3: a Postgres restart fails one sample at minute 5, under the 1 m `for`.
+      - series: 'demos_db_up{job="demos-node",instance="validator-3"}'
+        values: '1x4 0 1x12'
+      # validator-4: the node goes away at minute 3. Its series go stale, as Prometheus
+      # marks them on a failed scrape: NodeDown pages, DbDown does not page a second time.
+      - series: 'up{job="demos-node",instance="validator-4"}'
+        values: '1x2 0x15'
+      - series: 'demos_db_up{job="demos-node",instance="validator-4"}'
+        values: '1x2 stale'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DbDown
+        exp_alerts: []
+      # validator-1 failed its first probe at minute 3: pending only.
+      - eval_time: 3m
+        alertname: DbDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: DbDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Validator cannot reach its Postgres
+              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+      # validator-3 failed one probe at minute 5: pending, so without `for: 1m` it would fire
+      # here next to validator-1. It is back at minute 6 and never fires.
+      - eval_time: 5m
+        alertname: DbDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Validator cannot reach its Postgres
+              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+      - eval_time: 8m
+        alertname: DbDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Validator cannot reach its Postgres
+              description: "demos_db_up has been 0 for >1m on validator-1: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+      # Recovered at minute 9: resolved at once.
+      - eval_time: 9m
+        alertname: DbDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DbDown
+        exp_alerts: []
+      # The vanished node is NodeDown's.
+      - eval_time: 6m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-4
+            exp_annotations:
+              summary: Demos node is down
+              description: "Prometheus failed to scrape validator-4 for >1m. The node may have crashed or its metrics server is unreachable."

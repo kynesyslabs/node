@@ -36,6 +36,8 @@ SUITE_FILES=(
     src/features/tlsnotary/notaryUnreachable.test.ts
     src/features/tlsnotary/tokenCreate.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
+    src/features/metrics/dbProbe.test.ts
+    src/features/metrics/MetricsCollector.dbProbe.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
