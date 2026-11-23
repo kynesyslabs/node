@@ -141,7 +141,7 @@ function makeBlock(overrides: Record<string, any> = {}) {
             ...(overrides.content ?? {}),
         },
         validation_data: overrides.validation_data ?? {
-            signatures: { [A]: "s1", [B]: "s2", [C]: "s3" },
+            signatures: { [A]: "01", [B]: "02", [C]: "03" },
         },
         ...Object.fromEntries(
             Object.entries(overrides).filter(
@@ -174,7 +174,7 @@ describe("verifyBlock", () => {
     it("does not count signatures from outside the pool", async () => {
         const block = makeBlock({
             validation_data: {
-                signatures: { [A]: "s1", [B]: "s2", [OUTSIDER]: "s3" },
+                signatures: { [A]: "01", [B]: "02", [OUTSIDER]: "03" },
             },
         })
         verifyingSigners = new Set([A, B, OUTSIDER])
@@ -223,7 +223,7 @@ describe("verifyBlock", () => {
         pool = [A, B, C]
         const block = makeBlock({
             validation_data: {
-                signatures: { [A]: "s1", [B]: "s2", [C]: "s3" },
+                signatures: { [A]: "01", [B]: "02", [C]: "03" },
             },
         })
         const result = await verifyBlock(block)
@@ -233,7 +233,7 @@ describe("verifyBlock", () => {
     it("pre-fork: accepts a small network reaching quorum of its pool", async () => {
         pool = [A, B]
         const block = makeBlock({
-            validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+            validation_data: { signatures: { [A]: "01", [B]: "02" } },
         })
         const result = await verifyBlock(block)
         expect(result.valid).toBe(true)
@@ -248,7 +248,7 @@ describe("verifyBlock", () => {
 
     it("rejects when quorum is not met", async () => {
         const block = makeBlock({
-            validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+            validation_data: { signatures: { [A]: "01", [B]: "02" } },
         })
         const result = await verifyBlock(block)
         expect(result.valid).toBe(false)
@@ -323,7 +323,7 @@ describe("verifyBlock", () => {
 
     it("skips the transaction re-check when the quorum fails", async () => {
         const block = makeBlock({
-            validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+            validation_data: { signatures: { [A]: "01", [B]: "02" } },
         })
         const result = await verifyBlock(block, [{ hash: "tx-1" }] as any)
         expect(result.valid).toBe(false)
@@ -343,7 +343,7 @@ describe("verifyBlock", () => {
         it("skips blocks without our signature", async () => {
             const block = makeBlock({
                 validation_data: {
-                    signatures: { [B]: "s2", [C]: "s3", [D]: "s4" },
+                    signatures: { [B]: "02", [C]: "03", [D]: "04" },
                 },
             })
             expect((await verifyBlock(block)).valid).toBe(true)
@@ -354,7 +354,7 @@ describe("verifyBlock", () => {
             verifyingSigners = new Set([B, C, D])
             const block = makeBlock({
                 validation_data: {
-                    signatures: { [A]: "s1", [B]: "s2", [C]: "s3", [D]: "s4" },
+                    signatures: { [A]: "01", [B]: "02", [C]: "03", [D]: "04" },
                 },
             })
             expect((await verifyBlock(block)).valid).toBe(true)
@@ -363,7 +363,7 @@ describe("verifyBlock", () => {
 
         it("skips a block without quorum", async () => {
             const block = makeBlock({
-                validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+                validation_data: { signatures: { [A]: "01", [B]: "02" } },
             })
             expect((await verifyBlock(block)).valid).toBe(false)
             expect(checkOwnSignature).not.toHaveBeenCalled()
@@ -386,7 +386,7 @@ describe("verifyBlock", () => {
         })
 
         it("checks our key written upper-case when it supplies the quorum", async () => {
-            const block = signed({ [A.toUpperCase()]: "s1", [B]: "s2", [C]: "s3" })
+            const block = signed({ [A.toUpperCase()]: "01", [B]: "02", [C]: "03" })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
         })
@@ -394,10 +394,10 @@ describe("verifyBlock", () => {
         it("checks the one spelling the quorum counted among many, with one verify", async () => {
             const block = signed({
                 ...Object.fromEntries(
-                    spellingsOfA.map((key, i) => [key, i === 0 ? "s1" : FORGED]),
+                    spellingsOfA.map((key, i) => [key, i === 0 ? "01" : FORGED]),
                 ),
-                [B]: "s2",
-                [C]: "s3",
+                [B]: "02",
+                [C]: "03",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).toHaveBeenCalledTimes(1)
@@ -409,11 +409,11 @@ describe("verifyBlock", () => {
         it("verifies none of the spellings the quorum skipped", async () => {
             const block = signed({
                 ...Object.fromEntries(
-                    spellingsOfA.map((key, i) => [key, i < 19 ? FORGED : "s1"]),
+                    spellingsOfA.map((key, i) => [key, i < 19 ? FORGED : "01"]),
                 ),
-                [B]: "s2",
-                [C]: "s3",
-                [D]: "s4",
+                [B]: "02",
+                [C]: "03",
+                [D]: "04",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
@@ -424,24 +424,24 @@ describe("verifyBlock", () => {
         it("does not check a later spelling the quorum did not count", async () => {
             const block = signed({
                 [A]: FORGED,
-                [A.toUpperCase()]: "s1",
-                [B]: "s2",
-                [C]: "s3",
+                [A.toUpperCase()]: "01",
+                [B]: "02",
+                [C]: "03",
             })
             // Our first spelling does not verify, so our identity does not count
             expect((await verifyBlock(block)).valid).toBe(false)
 
-            block.validation_data.signatures[D] = "s4"
+            block.validation_data.signatures[D] = "04"
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
         })
 
         it("checks the counted spelling, not the garbage exact key after it", async () => {
             const block = signed({
-                [A.toUpperCase()]: "s1",
+                [A.toUpperCase()]: "01",
                 [A]: FORGED,
-                [B]: "s2",
-                [C]: "s3",
+                [B]: "02",
+                [C]: "03",
             })
             // Valid only because our upper-case spelling counted
             expect((await verifyBlock(block)).valid).toBe(true)
@@ -451,10 +451,10 @@ describe("verifyBlock", () => {
         it("checks the exact key when the other spelling's signature does not verify", async () => {
             const block = signed({
                 [A.toUpperCase()]: FORGED,
-                [A]: "s1",
-                [B]: "s2",
-                [C]: "s3",
-                [D]: "s4",
+                [A]: "01",
+                [B]: "02",
+                [C]: "03",
+                [D]: "04",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
@@ -462,10 +462,10 @@ describe("verifyBlock", () => {
 
         it("checks a block once when both spellings verify", async () => {
             const block = signed({
-                [A]: "s1",
-                [A.toUpperCase()]: "s1",
-                [B]: "s2",
-                [C]: "s3",
+                [A]: "01",
+                [A.toUpperCase()]: "01",
+                [B]: "02",
+                [C]: "03",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).toHaveBeenCalledTimes(1)
@@ -475,9 +475,9 @@ describe("verifyBlock", () => {
             const block = signed({
                 [A]: FORGED,
                 [A.toUpperCase()]: FORGED,
-                [B]: "s2",
-                [C]: "s3",
-                [D]: "s4",
+                [B]: "02",
+                [C]: "03",
+                [D]: "04",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
@@ -486,10 +486,10 @@ describe("verifyBlock", () => {
         it("looks only at the exact key while the fork is dormant", async () => {
             getSharedState.forkConfig.canonicalSigners.activationHeight = null
             const block = signed({
-                [A.toUpperCase()]: "s1",
-                [B]: "s2",
-                [C]: "s3",
-                [D]: "s4",
+                [A.toUpperCase()]: "01",
+                [B]: "02",
+                [C]: "03",
+                [D]: "04",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
@@ -503,7 +503,7 @@ describe("verifyBlock", () => {
             const state = getSharedState as { publicKeyHex: string | null }
             state.publicKeyHex = null
             try {
-                const block = signed({ [A]: "s1", [B]: "s2", [C]: "s3" })
+                const block = signed({ [A]: "01", [B]: "02", [C]: "03" })
                 expect((await verifyBlock(block)).valid).toBe(true)
                 expect(checkOwnSignature).not.toHaveBeenCalled()
             } finally {
@@ -514,10 +514,10 @@ describe("verifyBlock", () => {
         it("looks only at blocks from the activation height on", async () => {
             getSharedState.forkConfig.canonicalSigners.activationHeight = 11
             const block = signed({
-                [A.toUpperCase()]: "s1",
-                [B]: "s2",
-                [C]: "s3",
-                [D]: "s4",
+                [A.toUpperCase()]: "01",
+                [B]: "02",
+                [C]: "03",
+                [D]: "04",
             })
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
@@ -527,7 +527,7 @@ describe("verifyBlock", () => {
 
 describe("verifyBlock under quorumParity", () => {
     const twoOfTwo = () =>
-        makeBlock({ validation_data: { signatures: { [A]: "s1", [B]: "s2" } } })
+        makeBlock({ validation_data: { signatures: { [A]: "01", [B]: "02" } } })
 
     it("rejects two signatures from a pool of two at shardSize 4", async () => {
         getSharedState.forkConfig.quorumParity.activationHeight = 0
@@ -582,7 +582,7 @@ describe("verifyBlock under committeeBinding", () => {
     it("keeps the bar at shardSize when the committee is smaller", async () => {
         committee = [A, B]
         const result = await verifyBlock(
-            makeBlock({ validation_data: { signatures: { [A]: "s1", [B]: "s2" } } }),
+            makeBlock({ validation_data: { signatures: { [A]: "01", [B]: "02" } } }),
         )
         expect(result.valid).toBe(false)
         expect(result.reason).toContain("need 3")
@@ -675,7 +675,7 @@ describe("verifyBlockCertificate", () => {
     })
 
     it("rejects a block without the quorum, and a malformed one without throwing", async () => {
-        const unsigned = makeBlock({ validation_data: { signatures: { [A]: "s1" } } })
+        const unsigned = makeBlock({ validation_data: { signatures: { [A]: "01" } } })
         expect((await verifyBlockCertificate(unsigned)).valid).toBe(false)
         expect((await verifyBlockCertificate({ number: 10, hash: "x" } as any)).valid).toBe(false)
     })
