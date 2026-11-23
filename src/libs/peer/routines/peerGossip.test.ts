@@ -27,7 +27,7 @@ jest.mock("src/utilities/sharedState", () => ({ getSharedState: sharedState }))
 
 const { default: peerManagerClass } = await import("../PeerManager")
 const { default: peerClass } = await import("../Peer")
-const { peerGossip, peerlistDigest } = await import("./peerGossip")
+const { MAX_NEW_PEERS_PER_ROUND, peerGossip, peerlistDigest, unknownPeersFromLists } = await import("./peerGossip")
 
 const peerman = peerManagerClass.getInstance()
 const online = () => (peerman as any).peerList as Record<string, any>
@@ -36,7 +36,12 @@ const hellos: string[] = []
 const sayHello = jest.spyOn(peerManagerClass, "sayHelloToPeer")
 
 /** A listed peer that answers gossip calls with `list` as its peer list. */
-function gossipPeer(identity: string, url: string, list: { identity: string; url: string }[]) {
+function gossipPeer(
+    identity: string,
+    url: string,
+    list: { identity: string; url: string; block?: number }[],
+    rawList?: unknown,
+) {
     const peer = new peerClass(url, identity)
     const calls: string[] = []
     peer.call = jest.fn(async (request: any) => {
@@ -47,13 +52,15 @@ function gossipPeer(identity: string, url: string, list: { identity: string; url
         }
         return {
             result: 200,
-            response: list.map(entry => ({
-                identity: entry.identity,
-                connection: { string: entry.url },
-                verification: {},
-                sync: { block: 0, block_hash: "", status: false },
-                status: {},
-            })),
+            response:
+                rawList ??
+                list.map(entry => ({
+                    identity: entry.identity,
+                    connection: { string: entry.url },
+                    verification: {},
+                    sync: { block: entry.block ?? 0, block_hash: "0xforged", status: true },
+                    status: { online: true },
+                })),
             require_reply: false,
             extra: null,
         }
@@ -115,5 +122,49 @@ describe("peerGossip", () => {
         await peerGossip()
 
         expect(calls).toEqual([])
+    })
+
+    it("never takes sync data for a known peer from a list", async () => {
+        gossipPeer("0xself", "http://45.0.0.1:53553", [])
+        const { peer: known } = gossipPeer("0xknown", "http://45.0.0.4:53557", [])
+        known.sync.block = 5
+        known.sync.block_hash = "0xreal"
+        gossipPeer("0xanchor", "http://45.0.0.2:53551", [
+            { identity: "0xknown", url: "http://45.0.0.4:53557", block: 1_000_000_000 },
+            { identity: "0xlate", url: "http://45.0.0.3:53555" },
+        ])
+
+        await peerGossip()
+
+        expect(known.sync.block).toBe(5)
+        expect(known.sync.block_hash).toBe("0xreal")
+        expect(hellos).toEqual(["0xlate"])
+    })
+
+    it("keeps the other lists when one peer answers garbage", async () => {
+        gossipPeer("0xself", "http://45.0.0.1:53553", [])
+        gossipPeer("0xbad", "http://45.0.0.5:53559", [{ identity: "0xx", url: "x" }], [
+            null,
+            { identity: 7 },
+            { identity: "0xnourl" },
+        ])
+        gossipPeer("0xworse", "http://45.0.0.6:53561", [{ identity: "0xy", url: "y" }], "not a list")
+        gossipPeer("0xanchor", "http://45.0.0.2:53551", [
+            { identity: "0xlate", url: "http://45.0.0.3:53555" },
+        ])
+
+        await peerGossip()
+
+        expect(hellos).toEqual(["0xlate"])
+    })
+})
+
+describe("unknownPeersFromLists", () => {
+    it("bounds the hellos one round can cause", () => {
+        const flood = Array.from({ length: 500 }, (_, i) => ({
+            identity: `0xflood${i}`,
+            connection: { string: `http://45.1.${Math.floor(i / 250)}.${i % 250}:53550` },
+        }))
+        expect(unknownPeersFromLists([flood, flood]).length).toBe(MAX_NEW_PEERS_PER_ROUND)
     })
 })

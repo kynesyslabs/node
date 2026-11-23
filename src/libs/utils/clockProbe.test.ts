@@ -164,6 +164,7 @@ async function ntpServer(
 function serverReply(unixMs: number): Buffer {
     const reply = Buffer.alloc(48)
     reply[0] = 0x1c // LI 0, version 3, mode 4 (server)
+    reply[1] = 2 // stratum
     const seconds = Math.floor(unixMs / 1000) + 2_208_988_800
     reply.writeUInt32BE(seconds >>> 0, 40)
     reply.writeUInt32BE(Math.floor(((unixMs % 1000) / 1000) * 2 ** 32), 44)
@@ -188,6 +189,23 @@ describe("queryNtpOffset", () => {
         server = await ntpServer(() => {
             const reply = Buffer.alloc(48)
             reply[0] = 0x1c
+            reply[1] = 2
+            return reply
+        })
+        await expect(queryNtpOffset("127.0.0.1", server.port, 1000)).rejects.toThrow(/implausible time/)
+    })
+
+    it("rejects a kiss-of-death reply and an unsynchronised leap indicator", async () => {
+        server = await ntpServer(() => {
+            const reply = serverReply(Date.now())
+            reply[1] = 0
+            return reply
+        })
+        await expect(queryNtpOffset("127.0.0.1", server.port, 1000)).rejects.toThrow(/implausible time/)
+        server.close()
+        server = await ntpServer(() => {
+            const reply = serverReply(Date.now())
+            reply[0] = 0xdc // LI 3, version 3, mode 4
             return reply
         })
         await expect(queryNtpOffset("127.0.0.1", server.port, 1000)).rejects.toThrow(/implausible time/)

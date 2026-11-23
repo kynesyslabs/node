@@ -52,6 +52,11 @@ export function readNtpTransmitTime(reply: Buffer): number | null {
     if (reply.length < NTP_PACKET_BYTES || (reply[0] & 0x07) !== NTP_MODE_SERVER) {
         return null
     }
+    // Leap indicator 3 is an unsynchronised server; stratum 0 is a
+    // kiss-of-death refusal. Neither carries a time to compare against.
+    if (reply[0] >> 6 === 3 || reply[1] === 0) {
+        return null
+    }
     const seconds = reply.readUInt32BE(40)
     const fraction = reply.readUInt32BE(44)
     return (seconds - NTP_UNIX_EPOCH_DELTA_S) * 1000 + (fraction * 1000) / 2 ** 32
