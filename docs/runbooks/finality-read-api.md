@@ -80,7 +80,10 @@ pins the same network. `503 state_not_ready` while block 0 is not loaded,
 `{ state: "pending" | "included" | "failed" | "dropped" | "unknown", blockNumber?, code?, message?, reason?, droppedAtBlock?, droppedAt?, checkedThroughBlock, resultCommittedInBlock? }`.
 `included` means in a block and executed; a transaction a block keeps but
 does not execute is `failed`, never `included`. An unknown hash is `404`
-(`503 node_not_synced` while the node is behind).
+(`503 node_not_synced` while the node is behind). The 503 is returned only in
+place of `unknown`: a node that is behind still answers `pending`,
+`included`, `failed` or `dropped` from what it holds, and `dropped` stays
+non-terminal.
 
 `dropped` (`200`) means this node no longer holds the transaction in its
 mempool, and no block has taken it. `droppedAtBlock` is the node's head and
