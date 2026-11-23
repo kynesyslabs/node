@@ -76,17 +76,17 @@ needs the genesis snapshot (a manifest and files matching the
 database:
 
 - **Fresh database or rebuild.** No snapshot is a refusal
-  (`src/libs/blockchain/genesis/restoreGenesisState.ts:71-79`), and so is a
-  genesis without `snapshot.manifestSha256`, a missing manifest or a manifest
-  that hashes differently
-  (`src/libs/blockchain/routines/findGenesisBlock.ts:265-274`,
-  `src/libs/blockchain/genesis/genesisPin.ts:245-261`). The snapshot is loaded
-  and verified file by file
-  (`src/libs/blockchain/genesis/loadSnapshot.ts:488`), the restore refuses a
-  manifest whose bytes do not hash to the declared value
-  (`src/libs/blockchain/genesis/restoreGenesisState.ts:64-70`), and
-  `assertCarryoverSnapshot` checks it before the database transaction opens
-  (`src/libs/blockchain/genesis/restoreGenesisState.ts:84-86`).
+  (`restoreGenesisState` in `src/libs/blockchain/genesis/restoreGenesisState.ts`),
+  and so is a genesis without `snapshot.manifestSha256`, a missing manifest or a
+  manifest that hashes differently
+  (`findGenesisBlock` in `src/libs/blockchain/routines/findGenesisBlock.ts`,
+  `declaredManifestProblem` in `src/libs/blockchain/genesis/genesisPin.ts`). The
+  snapshot is loaded and verified file by file
+  (`loadSnapshot` in `src/libs/blockchain/genesis/loadSnapshot.ts`), the restore
+  refuses a manifest whose bytes do not hash to the declared value
+  (`restoreGenesisState` in `src/libs/blockchain/genesis/restoreGenesisState.ts`),
+  and `assertCarryoverSnapshot` checks it before the database transaction opens
+  (`restoreGenesisState` in `src/libs/blockchain/genesis/restoreGenesisState.ts`).
 - **Every restart.** The node reads the stored block 0, and if it schedules
   `identityCarryover` at 0 it opens the snapshot again: no manifest, a manifest
   that does not hash to block 0's value, or a `gcr_main.jsonl` that does not
@@ -94,7 +94,7 @@ database:
   differs from the snapshot
   (`src/libs/blockchain/routines/findGenesisBlock.ts:188-199`,
   `src/libs/blockchain/genesis/verifyImportedIdentities.ts:40-77`,
-  `src/libs/blockchain/genesis/loadSnapshot.ts:560-594`).
+  `openBoundGcrMain` in `src/libs/blockchain/genesis/loadSnapshot.ts`).
   A restart does not re-hash the other snapshot files.
 
 The drills **do not cover any of this**: they run the legacy genesis path with
@@ -472,9 +472,9 @@ there and needs nothing):
   Postgres' `validator_set_snapshots`, not a file, so the empty
   `data/snapshot` mount does not matter. Block 0's row is written at boot:
   with no snapshot manifest `loadSnapshot` is unavailable
-  (`src/libs/blockchain/genesis/loadSnapshot.ts:470-476`),
+  (`loadSnapshot` in `src/libs/blockchain/genesis/loadSnapshot.ts`),
   `restoreGenesisState` returns false
-  (`src/libs/blockchain/genesis/restoreGenesisState.ts:71-79`; with
+  (`restoreGenesisState` in `src/libs/blockchain/genesis/restoreGenesisState.ts`; with
   `identityCarryover` off, as in the drills, it neither refuses nor restores),
   `generateGenesisBlock` takes the legacy path and seeds no validators
   (`src/libs/blockchain/chainGenesis.ts:71-85`), `ensureValidatorSeed` then

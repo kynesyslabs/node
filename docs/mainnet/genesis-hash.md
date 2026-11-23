@@ -135,14 +135,14 @@ each validator to report this digest.
 ### Snapshot manifest sha256
 
 `snapshotManifestHash` is the SHA-256 of the raw `manifest.json` bytes
-(`src/libs/blockchain/genesis/loadSnapshot.ts:547-552`; the tool's copy is
-`scripts/genesis-hash.ts`, `snapshotManifestSha256`). The genesis binds it as
-`snapshot.manifestSha256` (`declaredManifestHash`, `genesisPin.ts:224-238`). A
-node refuses a snapshot that hashes differently (`declaredManifestProblem`,
-`genesisPin.ts:245-261`): at boot, and again in the restore, which checks the
-hash of the manifest bytes it parses (`restoreGenesisState.ts:64-70`). It also
-refuses a pinned genesis that binds no snapshot while one is present
-(`freshGenesisProblems`, `genesisPin.ts:376-381`). The manifest lists a sha256
+(`src/libs/blockchain/genesis/loadSnapshot.ts`, `snapshotManifestHash`; the
+tool's copy is `scripts/genesis-hash.ts`, `snapshotManifestSha256`). The genesis
+binds it as `snapshot.manifestSha256` (`genesisPin.ts`, `declaredManifestHash`).
+A node refuses a snapshot that hashes differently (`genesisPin.ts`,
+`declaredManifestProblem`): at boot, and again in the restore, which checks the
+hash of the manifest bytes it parses (`restoreGenesisState.ts`,
+`restoreGenesisState`). It also refuses a pinned genesis that binds no snapshot
+while one is present (`genesisPin.ts`, `freshGenesisProblems`). The manifest lists a sha256
 per snapshot file, which the loader verifies, so this one value binds the
 whole snapshot. It is inside the genesis, so it is also covered by the data
 hash and the block 0 hash.
