@@ -135,14 +135,17 @@ if [ "${#ALLOW[@]}" -gt 0 ]; then
     done
     # A container reaching a node by this host's own address is not DNATed on
     # its bridge: docker-proxy takes it on INPUT, where ufw sees the bridge
-    # subnet as the source. Docker's default address pools.
-    for a in 172.16.0.0/12 192.168.0.0/16; do
+    # subnet as the source. The daemon's address pools when it sets them
+    # (a Coolify host uses 10.0.0.0/8), else Docker's defaults.
+    pools=$(jq -r '."default-address-pools"[]?.base' "${daemon}" 2>/dev/null)
+    [ -n "${pools}" ] || pools="172.16.0.0/12 192.168.0.0/16"
+    for a in ${pools}; do
         for r in "${rpc_range}" "${gossip_range}"; do
             ufw allow proto tcp from "${a}" to any port "${r}" comment qdrill-bridges >/dev/null
         done
     done
     ufw status | grep -q '^Status: active' || ufw --force enable >/dev/null
-    say "ufw: tcp ${rpc_range} and ${gossip_range} open to ${ALLOW[*]} and the docker bridges"
+    say "ufw: tcp ${rpc_range} and ${gossip_range} open to ${ALLOW[*]} and the docker pools" ${pools}
     # Published ports go through Docker's own iptables chains, before ufw's: a
     # port Docker publishes is reachable from anywhere whatever ufw says. So
     # the same restriction goes into DOCKER-USER, which Docker consults first
