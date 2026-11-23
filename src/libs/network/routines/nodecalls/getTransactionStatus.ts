@@ -16,7 +16,7 @@ interface InterfaceGetTransactionStatusData {
  * `checkedThroughBlock`: the height this node had searched through.
  *
  * A hash this node dropped from its mempool without a block taking it is
- * answered 200 "dropped", with `reason` and `final`, from a bounded in-memory
+ * answered 200 "dropped", with `reason`, from a bounded in-memory
  * record (droppedTransactions.ts). Any other hash not found is answered 404,
  * or 503 while this node is not synced
  * (before its first sync, two or more blocks behind, or with drifted state),

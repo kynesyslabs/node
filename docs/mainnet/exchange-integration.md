@@ -74,16 +74,18 @@ five states:
 | `pending` | In the node's mempool, not in a block yet | Wait. |
 | `included` | In a block and executed. `blockNumber` is set. | Credit after the finality rule below. |
 | `failed` | In a block but not executed, or executed and refused. `code` and `message` say why. | Do not credit. See "Fee on a failed transaction". |
-| `dropped` | This node removed it from its mempool without a block taking it. `reason` says why; `final` says whether any node can still include it. | Do not credit. With `final: false`, wait as for `unknown`: another node may still include it. Never re-sign it with a new nonce. |
+| `dropped` | This node no longer holds it in its mempool, and no block has taken it. `reason` says why. Not a terminal state. | Do not credit. Wait as for `unknown`: another node may still include it. Never re-sign it with a new nonce. |
 | `unknown` | The node does not know the hash. `result` 404 (`extra.reason` `not_found`) when the node is synced, 503 (`node_not_synced`) when it is not. | Ask a synced node. If a synced node answers 404 after the expiry window below, the transaction is gone. |
 
 `dropped` is per node and kept in memory for the 50,000 most recent drops,
 so a node that restarted or never held the transaction answers `unknown`
-instead. `final: true` is only given for a reference block that fell behind
-the deep window ("Expiry" below); every other reason (`expired`,
-`evicted_fee`, `evicted_sender_cap`, `seat_refused`, `refused_for_block`) is
-`final: false`. A block always wins: if one later carries the transaction,
-the node answers `included` or `failed`.
+instead. It is not a terminal state, whatever the `reason`
+(`reference_block_expired`, `expired`, `evicted_fee`, `evicted_sender_cap`,
+`seat_refused`, `refused_for_block`): do not treat it as "cannot execute".
+Another node may still hold and include the transaction, and it can come
+back to this node's pool. Keep checking; only a block is final. A block
+always wins: if one later carries the transaction, the node answers
+`included` or `failed`.
 
 A malformed or `0x`-prefixed hash gets `result` 400. A lookup error gets
 `result` 500; retry on another node.
@@ -157,13 +159,12 @@ it):
 |---|---|
 | up to 10 blocks behind | can execute |
 | 11 to 50 blocks behind | included as `failed` (`TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE`), no fee, nonce not used |
-| more than 50 blocks behind | not included at all; a node that held it answers `dropped` (`reference_block_expired`, `final: true`) for a while, others `unknown` |
+| more than 50 blocks behind | not included at all; a node that held it answers `dropped` (`reference_block_expired`, not terminal) for a while, others `unknown` |
 
 Separately, a node drops a pending transaction 10 minutes after its signed
-timestamp (`dropped`, `expired`, `final: false`: a peer that has not dropped
-it yet can still include it), and refuses one whose timestamp is more than 5
-minutes in its future. Sign withdrawals with a fresh reference block and the
-current time.
+timestamp (`dropped`, `expired`: a peer that has not dropped it yet can still
+include it), and refuses one whose timestamp is more than 5 minutes in its
+future. Sign withdrawals with a fresh reference block and the current time.
 
 Either way, never credit a failed transaction.
 
@@ -188,12 +189,11 @@ After a timeout:
 
 1. Query the stored hash with `getTransactionStatus` on two or more nodes.
 2. If it is `pending` or `included`, wait. Do nothing else. If it is
-   `dropped` with `final: false`, wait as well: never sign a new
-   transaction with a new nonce for it, since another node may still
-   include it.
+   `dropped`, whatever the `reason`, wait as well and keep checking: never
+   sign a new transaction with a new nonce for it, since another node may
+   still include it. Only a block is final.
 3. Treat it as dead only when all of these hold:
-   - a synced node returns `unknown`, or `dropped` with `final: true`, for
-     the hash;
+   - a synced node returns `unknown` for the hash;
    - the chain head is more than 50 blocks past the transaction's reference
      block (see "Expiry");
    - more than 10 minutes have passed since its signed timestamp;

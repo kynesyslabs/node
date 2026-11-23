@@ -531,7 +531,7 @@ describe("the own-pool seat re-judge", () => {
         await Mempool.startSeatRejudge()
         expect(getDroppedTx("0xmoved")).toBeNull()
         await Mempool.applySeatRefusals(101)
-        expect(getDroppedTx("0xmoved")).toMatchObject({ reason: "seat_refused", final: false })
+        expect(getDroppedTx("0xmoved")).toMatchObject({ reason: "seat_refused" })
         expect(getDroppedTx("0xdown")).toBeNull()
     })
 
@@ -724,7 +724,7 @@ describe("Mempool.receive per-sender cap", () => {
         blockCapsOn = true
         heldBySender = fullHold()
         await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])
-        expect(getDroppedTx("0xheld63")).toMatchObject({ reason: "evicted_sender_cap", final: false })
+        expect(getDroppedTx("0xheld63")).toMatchObject({ reason: "evicted_sender_cap" })
         // Never in this pool, so never dropped from it.
         expect(getDroppedTx("0xhigh")).toBeNull()
     })
@@ -795,7 +795,7 @@ describe("Mempool.receive per-sender cap", () => {
         ).toEqual(peerKeeps)
         expect(heldBySender.some(row => row.hash === "0xother")).toBe(true)
         for (const hash of evicted) {
-            expect(getDroppedTx(hash)).toMatchObject({ reason: "evicted_sender_cap", final: false })
+            expect(getDroppedTx(hash)).toMatchObject({ reason: "evicted_sender_cap" })
         }
         expect(getDroppedTx("0xother")).toBeNull()
     })

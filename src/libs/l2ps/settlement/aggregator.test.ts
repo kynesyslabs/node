@@ -348,7 +348,7 @@ describe("SettlementAggregator", () => {
         queue(t)
         const agg = new SettlementAggregator(deps(), LIMITS)
         await agg.cycle()
-        statuses.set("l1_1", { state: "dropped", reason: "reference_block_expired", final: true })
+        statuses.set("l1_1", { state: "dropped", reason: "reference_block_expired" })
 
         head = 106
         await agg.cycle()

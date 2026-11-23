@@ -1,7 +1,7 @@
 /**
  * The node-local record of txs that left the mempool without a block taking
- * them (#973): bounded by entry count, oldest first, and `final` only where
- * no node can include the tx any more.
+ * them (#973): bounded by entry count, oldest first, and never terminal: an
+ * entry says only that this node no longer holds the tx, and why.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
@@ -12,7 +12,6 @@ import {
     DROPPED_TX_LIMIT,
     __clearDroppedTxs,
     getDroppedTx,
-    isFinalDrop,
     recordDropped,
     recordRefusedForBlock,
 } from "./droppedTransactions"
@@ -24,6 +23,7 @@ const hash = (i: number) => i.toString(16).padStart(64, "0")
 beforeEach(() => {
     __clearDroppedTxs()
     getSharedState.forkConfig = cloneDefaultForkConfig()
+    // The deep window is at its final size, the case once claimed terminal.
     getSharedState.forkConfig.referenceBlockRoom10 = { activationHeight: 0 }
     getSharedState.lastBlockNumber = 500
 })
@@ -34,31 +34,24 @@ afterEach(() => {
     getSharedState.lastBlockNumber = savedHead
 })
 
-describe("final", () => {
-    it("is true for a reference block behind the deep window once the room is 10", () => {
-        recordDropped([hash(1)], "reference_block_expired", 700)
-        expect(getDroppedTx(hash(1))).toMatchObject({
-            reason: "reference_block_expired",
-            final: true,
-            droppedAtBlock: 700,
-        })
-    })
-
-    it("is false for that reason before referenceBlockRoom10, which widens the window once", () => {
-        getSharedState.forkConfig.referenceBlockRoom10 = { activationHeight: 1000 }
-        expect(isFinalDrop("reference_block_expired", 999)).toBe(false)
-        expect(isFinalDrop("reference_block_expired", 1000)).toBe(true)
-    })
-
-    it("is false for every reason another node may still include", () => {
-        const notFinal: DropReason[] = [
+describe("no entry is terminal", () => {
+    it("carries no final flag, for any reason", () => {
+        const reasons: DropReason[] = [
             "expired",
+            "reference_block_expired",
             "evicted_fee",
             "evicted_sender_cap",
             "seat_refused",
             "refused_for_block",
         ]
-        expect(notFinal.map(reason => isFinalDrop(reason, 700))).toEqual(notFinal.map(() => false))
+        reasons.forEach((reason, i) => recordDropped([hash(i)], reason, 700))
+        for (const [i, reason] of reasons.entries()) {
+            expect(getDroppedTx(hash(i))).toEqual({
+                reason,
+                droppedAtBlock: 700,
+                droppedAt: expect.any(Number),
+            })
+        }
     })
 })
 
@@ -82,10 +75,10 @@ describe("entries", () => {
         expect(getDroppedTx(hash(1))).toMatchObject({ reason: "expired", droppedAtBlock: 20 })
     })
 
-    it("are not replaced once final", () => {
-        recordDropped([hash(1)], "reference_block_expired", 10)
-        recordDropped([hash(1)], "refused_for_block", 10)
-        expect(getDroppedTx(hash(1))).toMatchObject({ reason: "reference_block_expired", final: true })
+    it("are replaced by a later drop for another reason after a reference block expiry", () => {
+        recordDropped([hash(1)], "reference_block_expired", 700)
+        recordDropped([hash(1)], "refused_for_block", 720)
+        expect(getDroppedTx(hash(1))).toMatchObject({ reason: "refused_for_block", droppedAtBlock: 720 })
     })
 })
 
@@ -113,7 +106,7 @@ describe("the bound", () => {
 describe("recordRefusedForBlock", () => {
     it("records only the removed txs the block does not carry", () => {
         recordRefusedForBlock([hash(1), hash(2)], [{ hash: hash(2) }, { hash: hash(3) }])
-        expect(getDroppedTx(hash(1))).toMatchObject({ reason: "refused_for_block", final: false })
+        expect(getDroppedTx(hash(1))).toMatchObject({ reason: "refused_for_block" })
         expect(getDroppedTx(hash(2))).toBeNull()
         expect(getDroppedTx(hash(3))).toBeNull()
     })

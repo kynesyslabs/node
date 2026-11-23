@@ -12,8 +12,7 @@ export interface L2PSHashUpdatePayload {
  *   - "failed"   — in a block but not executed (blocks keep failed
  *                  transactions); `code` and `message` say why
  *   - "dropped"  — this node removed it from its mempool without a block
- *                  taking it; `reason` says why, and `final` whether any node
- *                  can still include it (see droppedTransactions.ts)
+ *                  taking it; `reason` says why (see droppedTransactions.ts)
  *   - "unknown"  — not found anywhere
  *
  * "included" keeps its name for SDKs that wait on it; it is never returned
@@ -22,9 +21,9 @@ export interface L2PSHashUpdatePayload {
  * what the forger served for failures inside apply.
  *
  * "dropped" is node-local and bounded: a node that never held the tx, has
- * restarted since, or has forgotten it answers "unknown". With `final: false`
- * another node may still include it, so a wallet must not re-sign it with a
- * new nonce.
+ * restarted since, or has forgotten it answers "unknown". It is never
+ * terminal: another node may still include it, so a wallet must not re-sign
+ * it with a new nonce.
  */
 export type TxStatus = {
     state: "pending" | "included" | "failed" | "dropped" | "unknown"
@@ -32,7 +31,6 @@ export type TxStatus = {
     code?: string
     message?: string
     reason?: DropReason
-    final?: boolean
     /** This node's head when it dropped the tx. */
     droppedAtBlock?: number
     /** When it dropped the tx, in milliseconds since the epoch. */

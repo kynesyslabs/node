@@ -327,14 +327,14 @@ describe("eviction", () => {
         expect(calls).toEqual(["tx:begin", "delete", "save", "tx:end"])
     })
 
-    it("records each victim as dropped, not final, on both insert paths", async () => {
+    it("records each victim as dropped on both insert paths", async () => {
         fund("0xpayer", 10)
         expect((await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))).error).toBe("")
-        expect(getDroppedTx("0xlow-old")).toMatchObject({ reason: "evicted_fee", final: false, droppedAtBlock: 100 })
+        expect(getDroppedTx("0xlow-old")).toMatchObject({ reason: "evicted_fee", droppedAtBlock: 100 })
 
         nonceEnforced = true
         expect((await rpc(makeTx({ hash: "0xmore", fee: 6, from: "0xpayer", nonce: 1 }))).error).toBe("")
-        expect(getDroppedTx("0xlow-new")).toMatchObject({ reason: "evicted_fee", final: false })
+        expect(getDroppedTx("0xlow-new")).toMatchObject({ reason: "evicted_fee" })
         expect(getDroppedTx("0xhigh")).toBeNull()
     })
 
@@ -710,10 +710,9 @@ describe("dropped record of the sweeps", () => {
         expect(pruned.expired).toBe(2)
         expect(getDroppedTx("0xold-ref")).toMatchObject({
             reason: "reference_block_expired",
-            final: false,
             droppedAtBlock: 101,
         })
-        expect(getDroppedTx("0xstale")).toMatchObject({ reason: "expired", final: false })
+        expect(getDroppedTx("0xstale")).toMatchObject({ reason: "expired" })
         expect(getDroppedTx("0xincluded")).toBeNull()
     })
 
@@ -722,7 +721,30 @@ describe("dropped record of the sweeps", () => {
         ;(Mempool as any).lastAgeSweep = 0
         deletedBy = { timestamp: ["0xstale"] }
         expect(await Mempool.pruneExpiredByAge(NOW)).toBe(1)
-        expect(getDroppedTx("0xstale")).toMatchObject({ reason: "expired", final: false, droppedAtBlock: 100 })
+        expect(getDroppedTx("0xstale")).toMatchObject({ reason: "expired", droppedAtBlock: 100 })
+    })
+
+    // The reference block is set by the node that admits the tx and is not
+    // signed, so a drop for it is not terminal: the same signed tx, sent
+    // again while its timestamp is inside the lifetime, is admitted again.
+    it("admits again a tx dropped for its reference block, and never calls the drop final", async () => {
+        const state = sharedState as Record<string, unknown>
+        state.forkConfig = { referenceBlockRoom10: { activationHeight: 0 } }
+        try {
+            const tx = makeTx({ hash: "0xold-ref", ts: NOW - 60_000 })
+            deletedBy = { reference_block: [tx.hash] }
+            await Mempool.pruneAfterBlock(101, [])
+            expect(getDroppedTx(tx.hash)).toEqual({
+                reason: "reference_block_expired",
+                droppedAtBlock: 101,
+                droppedAt: NOW,
+            })
+            expect(await Mempool.checkAdmission(tx, "rpc")).toEqual({ evict: [] })
+            expect((await rpc(tx)).error).toBe("")
+            expect(pool.map(h => h.hash)).toEqual([tx.hash])
+        } finally {
+            delete state.forkConfig
+        }
     })
 
     it("records the stale txs cleanMempool removes, and not those already on chain", async () => {

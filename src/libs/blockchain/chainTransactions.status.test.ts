@@ -12,7 +12,7 @@ import { mockTransactionStore } from "./transactionStoreMocks"
 const { findOneBy, findByHash } = mockTransactionStore()
 
 const { getTransactionStatus } = await import("./chainTransactions")
-const { __clearDroppedTxs, recordDropped } = await import("./droppedTransactions")
+const { __clearDroppedTxs: clearDroppedTxs, recordDropped } = await import("./droppedTransactions")
 
 function storedRow(status: string, attrs: Record<string, unknown> | null = null) {
     return {
@@ -41,7 +41,7 @@ beforeEach(() => {
     findOneBy.mockResolvedValue(null)
     findByHash.mockReset()
     findByHash.mockResolvedValue(null)
-    __clearDroppedTxs()
+    clearDroppedTxs()
 })
 
 describe("Chain.getTransactionStatus", () => {
@@ -94,12 +94,11 @@ describe("Chain.getTransactionStatus", () => {
 // #973: a tx that left the mempool without a block taking it is told apart
 // from a hash the node never saw.
 describe("Chain.getTransactionStatus after a drop from the mempool", () => {
-    it("reports it dropped, with the reason, whether it is final, and when", async () => {
+    it("reports it dropped, with the reason and when", async () => {
         recordDropped(["85b8fcdc"], "evicted_fee", 480900)
         expect(await getTransactionStatus("85b8fcdc")).toEqual({
             state: "dropped",
             reason: "evicted_fee",
-            final: false,
             droppedAtBlock: 480900,
             droppedAt: expect.any(Number),
         })
