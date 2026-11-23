@@ -31,11 +31,11 @@ export type { SnapshotManifest } from "../../src/libs/blockchain/genesis/verifyS
  * by callers that don't want to compute the path themselves.
  */
 export async function verifyDefaultSnapshot(): Promise<SnapshotManifest> {
-    return verifySnapshot(SNAPSHOT_DIR)
+    return (await verifySnapshot(SNAPSHOT_DIR)).manifest
 }
 
 async function runCli(): Promise<void> {
-    const manifest = await verifySnapshot(SNAPSHOT_DIR)
+    const { manifest } = await verifySnapshot(SNAPSHOT_DIR)
     const m = manifest.files
     const validators = m["validators.jsonl"]
         ? ` validators=${m["validators.jsonl"].rows}`

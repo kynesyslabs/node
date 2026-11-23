@@ -156,6 +156,8 @@ export type SnapshotLoaderAvailable = {
     available: true
     snapshotDir: string
     manifest: SnapshotManifest
+    /** sha256 of the manifest.json bytes `manifest` was parsed from. */
+    manifestSha256: string
     streamGcrMain: () => AsyncIterable<GCRMainSeed>
     streamGcrStorageProgram: () => AsyncIterable<GCRStorageProgramSeed>
     streamIdentityCommitments: () => AsyncIterable<IdentityCommitmentSeed>
@@ -483,7 +485,7 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
     // Integrity gate: throws on any drift. If we got past `stat()` for the
     // dir + manifest above, a verify failure now is a HARD failure (the
     // operator intended to ship a snapshot but it's tampered / stale).
-    const manifest = await verifySnapshot(snapshotDir)
+    const { manifest, manifestSha256 } = await verifySnapshot(snapshotDir)
 
     const gcrMainPath = resolve(snapshotDir, "gcr_main.jsonl")
     const storagePath = resolve(snapshotDir, "gcr_storageprogram.jsonl")
@@ -526,6 +528,7 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
         available: true,
         snapshotDir,
         manifest,
+        manifestSha256,
         streamGcrMain,
         streamGcrStorageProgram,
         streamIdentityCommitments,
@@ -538,6 +541,8 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
  * sha256 of the raw manifest.json bytes, or null when no manifest is present.
  * The manifest lists a sha256 per snapshot file, which `verifySnapshot` checks,
  * so this one value binds the whole snapshot to the genesis that declares it.
+ * The boot check uses it before block 0 is built; the restore checks the hash
+ * of its own manifest read again (`restoreGenesisState`).
  */
 export async function snapshotManifestHash(): Promise<string | null> {
     const manifestPath = resolve(resolveSnapshotDir(), "manifest.json")

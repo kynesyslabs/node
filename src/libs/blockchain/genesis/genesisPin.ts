@@ -238,6 +238,29 @@ export function declaredManifestHash(genesisData: unknown): string | null {
 }
 
 /**
+ * Why a snapshot whose manifest.json hashes to `manifestHash` (null: no
+ * manifest found) is not the one `genesisData` declares, or null when it is or
+ * the genesis declares none.
+ */
+export function declaredManifestProblem(
+    genesisData: unknown,
+    manifestHash: string | null,
+): string | null {
+    const declared = declaredManifestHash(genesisData)
+    if (declared === null) return null
+    if (manifestHash === null) {
+        return (
+            "genesis declares a snapshot but no snapshot manifest was found " +
+            "(data/snapshot, or DEMOS_SNAPSHOT_DIR)"
+        )
+    }
+    if (manifestHash !== declared) {
+        return `snapshot manifest hashes to ${manifestHash}, genesis declares ${declared}`
+    }
+    return null
+}
+
+/**
  * Why block 0 built from `genesisData` would not be the same on every node,
  * or null when its timestamp fixes it.
  */
@@ -312,18 +335,8 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
     )
     const declared = declaredManifestHash(input.genesisData)
 
-    if (declared !== null) {
-        if (input.snapshotManifestHash === null) {
-            problems.push(
-                "genesis declares a snapshot but no snapshot manifest was found " +
-                    "(data/snapshot, or DEMOS_SNAPSHOT_DIR)",
-            )
-        } else if (input.snapshotManifestHash !== declared) {
-            problems.push(
-                `snapshot manifest hashes to ${input.snapshotManifestHash}, genesis declares ${declared}`,
-            )
-        }
-    }
+    const manifestProblem = declaredManifestProblem(input.genesisData, input.snapshotManifestHash)
+    if (manifestProblem) problems.push(manifestProblem)
     // Without a declared snapshot the legacy balances path runs and the user
     // data the carryover genesis promises never reaches the chain.
     if (input.carryoverAtGenesis === true && declared === null) {

@@ -838,6 +838,15 @@ this restart is a fallback there.
     them. The OmniProtocol framer waits for the rest of a partial auth block
     instead of refusing the frame, and the secretary ignores a validator
     phase it does not know.
+- From the first release after `v1.0.0-rc.14`:
+  - A snapshot restore on a fresh database restores only from the
+    `manifest.json` bytes whose sha256 the genesis declares
+    (`snapshot.manifestSha256`). The restore hashes the manifest it parses
+    and, when that differs from the declared value or no manifest is found,
+    refuses to boot before writing anything (`[GENESIS] Refusing to boot:
+    snapshot manifest hashes to ..., genesis declares ...`). An unchanged
+    snapshot restores as before, and a genesis that declares no manifest is
+    not affected. Nothing to do on upgrade.
 
 ## Known limits
 

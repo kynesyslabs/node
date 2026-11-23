@@ -156,6 +156,8 @@ SUITE_FILES=(
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
+    testing/genesis/restoreSnapshot.manifestPin.test.ts
+    testing/state-snapshot/verify-snapshot.test.ts
     tests/web2/proxy.test.ts
     src/libs/abstraction/web2/githubToken.test.ts
     scripts/test-consensus.registration.test.ts

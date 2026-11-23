@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { randomUUID } from "node:crypto"
@@ -238,7 +238,7 @@ describe("verifySnapshot — happy path", () => {
             identityRowsJsonl: "",
         })
 
-        const manifest = await verifySnapshot(snapshotDir)
+        const { manifest } = await verifySnapshot(snapshotDir)
 
         expect(manifest.schemaVersion).toBe(1)
         expect(manifest.files["gcr_main.jsonl"].rows).toBe(3)
@@ -251,8 +251,15 @@ describe("verifySnapshot — happy path", () => {
 
     it("returns the manifest object with correct source metadata", async () => {
         await writeFixture(snapshotDir, { gcrMainRows: [] })
-        const manifest = await verifySnapshot(snapshotDir)
+        const { manifest } = await verifySnapshot(snapshotDir)
         expect(manifest.source.host).toBe("test-host")
+    })
+
+    it("returns the sha256 of the manifest.json bytes it parsed", async () => {
+        await writeFixture(snapshotDir, { gcrMainRows: [] })
+        const bytes = await readFile(join(snapshotDir, "manifest.json"))
+        const { manifestSha256 } = await verifySnapshot(snapshotDir)
+        expect(manifestSha256).toBe(createHash("sha256").update(bytes).digest("hex"))
     })
 })
 
@@ -545,7 +552,7 @@ async function writeV2Fixture(dir: string, opts: V2Options = {}): Promise<void> 
 describe("verifySnapshot — schemaVersion 2", () => {
     it("valid v2 snapshot verifies and exposes validators + fork_state", async () => {
         await writeV2Fixture(snapshotDir)
-        const manifest = await verifySnapshot(snapshotDir)
+        const { manifest } = await verifySnapshot(snapshotDir)
         expect(manifest.schemaVersion).toBe(2)
         expect(manifest.files["validators.jsonl"]?.rows).toBe(1)
         expect(manifest.fork_state).toHaveLength(1)
