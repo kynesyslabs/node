@@ -396,19 +396,24 @@ def with_launch_forks(genesis, template, carryover=False):
         forks[name] = {"activationHeight": height, **entry}
     out = dict(genesis)
     out["forks"] = forks
-    return with_exempt_nft_seats(out)
+    return with_exempt_nft_seats(out, carryover)
 
 
-def with_exempt_nft_seats(genesis):
+def with_exempt_nft_seats(genesis, carryover=False):
     """Copy of `genesis` whose validators carry `nft_exempt: true` when its
     forks activate nftValidatorGating at 0; else `genesis` unchanged.
 
     Block 0 then refuses a seat without an NFT proof (seededNftReasons in
     src/features/staking/seedNft.ts). A drill has no Node NFTs and runs on a
     test chain id, where an exempt seat is allowed.
+
+    With `carryover` the list stays as it is: carryover.ts refuses
+    `nft_exempt` (a genesis-only rule), and the snapshot's validators.jsonl
+    then owns the set, where a row without NFT fields is exempt on a test
+    chain id (`fromChain`).
     """
     gating = (genesis.get("forks") or {}).get("nftValidatorGating")
-    if not _active_at_zero(gating) or not genesis.get("validators"):
+    if carryover or not _active_at_zero(gating) or not genesis.get("validators"):
         return genesis
     out = dict(genesis)
     out["validators"] = [{**v, "nft_exempt": True} for v in genesis["validators"]]
