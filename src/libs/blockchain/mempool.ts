@@ -1793,19 +1793,18 @@ export default class Mempool {
             return { staleRemoved: 0, executedRemoved: 0 }
         }
 
-        // Delete only the rows read above, by hash, without the mempool lock:
-        // a tx admitted since is in neither list and stays pooled, and a stale
-        // hash admitted again since with a fresh reference block is kept.
+        // No mempool lock is held, so rows may change after the read. Stale
+        // rows are deleted by the cutoff alone, with no per-hash list: a hash
+        // admitted again with a fresh reference block is kept, and a drop is
+        // recorded only for the rows the delete returns. Executed rows are
+        // deleted by hash, so a tx admitted since the read stays pooled.
         let staleRemoved: string[] = []
         if (staleHashes.length > 0) {
             const res = await this.repo
                 .createQueryBuilder()
                 .delete()
                 .from(MempoolTx)
-                .where("\"hash\" IN (:...hashes) AND \"reference_block\" < :cutoff", {
-                    hashes: staleHashes,
-                    cutoff,
-                })
+                .where("\"reference_block\" < :cutoff", { cutoff })
                 .returning("\"hash\"")
                 .execute()
             staleRemoved = returnedHashes(res.raw)

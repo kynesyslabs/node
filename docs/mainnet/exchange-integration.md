@@ -193,7 +193,7 @@ After a timeout:
    sign a new transaction with a new nonce for it, since another node may
    still include it. Only a block is final.
 3. Treat it as dead only when all of these hold:
-   - a synced node returns `unknown` for the hash;
+   - a synced node returns `unknown` or `dropped` for the hash;
    - the chain head is more than 50 blocks past the transaction's reference
      block (see "Expiry");
    - more than 10 minutes have passed since its signed timestamp;

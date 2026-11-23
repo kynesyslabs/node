@@ -811,9 +811,11 @@ describe("dropped record of the sweeps", () => {
             let match = (_h: Held) => true
             const qb: Record<string, unknown> = {}
             for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
-            qb.where = (sql: string, p: { hashes: string[]; cutoff?: number }) => {
+            // Each clause the SQL holds applies, so a per-hash list, if the
+            // delete still had one, would spare a row admitted after the read.
+            qb.where = (sql: string, p: { hashes?: string[]; cutoff?: number }) => {
                 match = h =>
-                    p.hashes.includes(h.hash) &&
+                    (!sql.includes(":...hashes") || (p.hashes as string[]).includes(h.hash)) &&
                     (!sql.includes(":cutoff") || h.tx.reference_block < (p.cutoff as number))
                 return qb
             }
@@ -859,6 +861,19 @@ describe("dropped record of the sweeps", () => {
         expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 0, executedRemoved: 0 })
         expect(pool.map(h => h.hash)).toEqual(["0xreadmitted"])
         expect(getDroppedTx("0xreadmitted")).toBeNull()
+    })
+
+    // The stale delete goes by the cutoff the read used, not by the hashes it
+    // read, so a row past that cutoff admitted after the read goes too.
+    it("deletes and records a stale tx admitted while cleanMempool runs", async () => {
+        installCleanupTable([{ hash: "0xstale-ref", reference_block: 10 }], () =>
+            pool.push({ hash: "0xlate-stale", tx: { hash: "0xlate-stale", reference_block: 10 } }),
+        )
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 2, executedRemoved: 0 })
+        expect(pool).toEqual([])
+        for (const hash of ["0xstale-ref", "0xlate-stale"]) {
+            expect(getDroppedTx(hash)).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
+        }
     })
 })
 
