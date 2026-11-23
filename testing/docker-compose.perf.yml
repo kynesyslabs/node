@@ -54,6 +54,10 @@ services:
       - TOKEN_WAIT_EXISTS_SEC=${TOKEN_WAIT_EXISTS_SEC:-120}
       - TOKEN_WAIT_DISTRIBUTION_SEC=${TOKEN_WAIT_DISTRIBUTION_SEC:-120}
       - TOKEN_WAIT_DISTRIBUTION=${TOKEN_WAIT_DISTRIBUTION:-true}
+      # GCR identity scenario config (empty = the scenario's default)
+      - GCR_IDENTITY_OVER_CAP=${GCR_IDENTITY_OVER_CAP:-}
+      - RATE_LIMIT_MAX_RETRIES=${RATE_LIMIT_MAX_RETRIES:-}
+      - STOP_ON_RATE_LIMIT=${STOP_ON_RATE_LIMIT:-}
     networks:
       - demos-network
     volumes:

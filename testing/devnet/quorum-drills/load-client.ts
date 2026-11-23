@@ -288,8 +288,10 @@ if (import.meta.main) {
     run().then(
         r => {
             log(`done: sent ${r.sent}, accepted ${r.accepted}, included ${r.included}, throttled ${r.throttled}`)
-            process.stdout.write(`LOAD_RESULT ${JSON.stringify(r)}\n`)
-            process.exit(0)
+            // Exiting before the write drains cuts the line short on a slow
+            // pipe (a remote host's docker run over ssh), and the run then
+            // finds no result.
+            process.stdout.write(`LOAD_RESULT ${JSON.stringify(r)}\n`, () => process.exit(0))
         },
         e => {
             log(`could not run: ${e instanceof Error ? e.stack ?? e.message : String(e)}`)

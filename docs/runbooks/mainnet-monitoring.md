@@ -159,6 +159,7 @@ loaded from the same directory and use the same routing. Among them:
 | PeersZero | `demos_peer_online_count <= 1` for 5 min; keeps firing 5 min after it clears | warning | The validator sees no other peer. The gauge counts the node itself (`PeerManager.isPeerFresh`), so 1 means every real peer is gone and the rule cannot test for 0. Check network egress, the bootstrap peer list and the peers' own state. |
 | DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
 | DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
+| DbDown | `demos_db_up == 0` for 1 min: the node's own `SELECT 1` (every 15 s, 5 s timeout) fails or gets no answer | critical | The validator cannot reach its Postgres. It keeps running and serving RPC but cannot store or sync blocks, and `HeightStalled` does not see it. See [Postgres down](#postgres-down-dbdown). A node that stops exporting metrics is `NodeDown` instead. |
 | DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. It proves only that Prometheus, Alertmanager and the path to the dead-man receiver work. If the external watchdog stops receiving it, one of those is down: check the monitoring host first. It does **not** prove that the `paging` or `slack` webhooks work: a wrong or forgotten URL there fails silently while the heartbeat stays healthy (see the test alert in setup step 4). |
 
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
@@ -319,6 +320,60 @@ least two servers, and only if no other group is as large).
 When `ClockOffset` fires, on the validator: `chronyc tracking` (or
 `timedatectl timesync-status`) shows the source and the offset. Fix the time
 service; the node needs no restart, the next probe clears the alert.
+
+## Postgres down (DbDown)
+
+Every 15 s the node runs `SELECT 1` through its own connection pool with a 5 s
+timeout, on a timer of its own, never on the consensus path:
+
+- `demos_db_up`: 1 when the last probe answered, 0 when it failed or got no
+  answer within 5 s. While an unanswered probe is still pending, the next ones
+  report 0 without sending another query.
+- `demos_db_probe_duration_seconds`: how long the last successful probe took,
+  including getting a pool connection, so a busy node pool also raises it.
+  It is not updated by failed probes, so it is stale while `demos_db_up` is 0.
+
+The log has `[DB] Postgres probe failed (demos_db_up=0): <error>` when the
+probe starts failing and again each time the error changes while it keeps
+failing, and `[DB] Postgres answers the probe again` once when it recovers.
+
+When Postgres goes away after boot the node does not exit. Its queries fail
+(`[SCHEDULER] Task "consensus_trigger" tick failed: ...` in the log), `/health`
+answers 503 with `status: failing` and `mempool_size: null`, and the main loop
+heartbeat stays fresh, so `NodeFailing` and `HeightStalled` stay quiet. If
+Postgres drops while the node is storing a block, the node cannot tell
+whether the block committed and stops (`[SIGNING] stopped until this process
+exits:`), which is `NodeDown`.
+
+`DbDown` fires once `demos_db_up` has been 0 for 1 min. An outage with at
+least one good probe each minute, for example Postgres crash-looping and
+restarting, does not fire it; it is seen only through `HeightStalled`, if
+blocks stop (the node's own queries succeed between restarts).
+
+When `DbDown` fires, on the validator:
+
+1. Read the error in the latest `[DB] Postgres probe failed` log line (a new
+   line is logged when the error changes). `ECONNREFUSED`,
+   `ENOTFOUND` or `EAI_AGAIN`: Postgres is not running, or `PG_HOST` /
+   `PG_PORT` are wrong.
+   `no answer within 5000 ms`: Postgres, or the network path to it, hangs, or
+   the node's own connection pool is fully in use. Check the node's connections
+   in `pg_stat_activity` before you restart Postgres.
+2. Docker: `docker compose ps postgres` and `docker compose logs --tail 50
+   postgres`, then `docker compose up -d postgres`. Bare-metal `./run`: the
+   container is `postgres_<PG_PORT>` (`docker ps -a --filter name=postgres_`,
+   `docker logs --tail 50 postgres_<PG_PORT>`). External database: the database
+   host and the network path to it.
+3. A full disk stops Postgres. Check free space where Postgres keeps its data:
+   Docker, the `demos_pgdata` volume; `./run`, `postgres_<PG_PORT>/data_<PG_PORT>`
+   in the repository; external, the database host. `DiskSpaceLow` and
+   `DiskSpaceCritical` see that disk only when it is the filesystem of
+   `DISK_SPACE_PATH`.
+4. The pool opens new connections once Postgres answers, so the alert clears
+   with the next probe once the node's pool has a free connection; if it keeps
+   firing while Postgres answers (`psql` works), or the height still does not
+   advance a few minutes later, restart the node. If it stopped meanwhile
+   (`NodeDown`), start it once Postgres is healthy.
 
 ## Block watchdog stays off
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test"
+import * as fs from "node:fs"
+import * as path from "node:path"
 import { findProxyAuthPlaceholders, isPlaceholderAuthHash } from "./proxyChecks"
+
+const repo = path.resolve(import.meta.dir, "../..")
 
 const SENTINEL = "$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi"
 const REAL = "$2a$14$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789."
@@ -79,5 +83,39 @@ describe("findProxyAuthPlaceholders", () => {
                 PROXY_ALLOW_PLACEHOLDER_AUTH: "true",
             }),
         ).toEqual([])
+    })
+})
+
+/** The node service's block of a compose file, up to the service after it. */
+function composeNodeService(file: string, nextService: string): string {
+    const yml = fs.readFileSync(path.join(repo, file), "utf8")
+    const start = yml.indexOf("\n  node:\n")
+    const end = yml.indexOf(`\n  ${nextService}:\n`, start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    return yml.slice(start, end)
+}
+
+describe("the proxy check under docker compose", () => {
+    // .env is not copied into the image: only the variables listed under the
+    // node service reach the container. One the check reads but compose does
+    // not pass leaves that part of the check silent under docker.
+    it("gets every variable it reads from the compose files", () => {
+        const source = fs.readFileSync(path.join(import.meta.dir, "proxyChecks.ts"), "utf8")
+        const keys = [...new Set([...source.matchAll(/\benv\.([A-Z_]+)/g)].map(m => m[1]))]
+        expect(keys).toContain("MCP_ENABLED")
+        const node =
+            composeNodeService("docker-compose.yml", "reaper") +
+            composeNodeService("docker-compose.proxy.yml", "prometheus")
+        for (const key of keys) {
+            const listed = new RegExp(`^\\s+${key}: `, "m").test(node)
+            expect([key, listed]).toEqual([key, true])
+        }
+    })
+
+    it("keeps MCP off for an operator who does not set MCP_ENABLED", () => {
+        expect(composeNodeService("docker-compose.yml", "reaper")).toMatch(
+            /^\s+MCP_ENABLED: \$\{MCP_ENABLED:-false\}$/m,
+        )
     })
 })
