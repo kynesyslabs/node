@@ -1,13 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test"
-
-// What ntp-client hands back for the next request, whatever the server.
-let ntpAnswer: () => { err: unknown; date?: Date } = () => ({ err: new Error("no answer") })
-mock.module("ntp-client", () => ({
-    getNetworkTime: (_server: string, _port: number, cb: (err: unknown, date?: Date) => void) => {
-        const { err, date } = ntpAnswer()
-        cb(err, date)
-    },
-}))
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import dgram from "node:dgram"
 
 const gauges = new Map<string, number>()
 mock.module("src/features/metrics/MetricsService", () => ({
@@ -153,21 +145,90 @@ describe("checkClockAtBoot", () => {
     })
 })
 
+// A local SNTP server: `reply` builds the answer to each request, or null to stay silent.
+async function ntpServer(
+    reply: () => Buffer | null,
+    delayMs = 0,
+): Promise<{ port: number; close: () => void }> {
+    const socket = dgram.createSocket("udp4")
+    socket.on("message", (_request, from) => {
+        const answer = reply()
+        if (!answer) return
+        setTimeout(() => socket.send(answer, from.port, from.address), delayMs)
+    })
+    await new Promise<void>(resolve => socket.bind(0, "127.0.0.1", resolve))
+    return { port: socket.address().port, close: () => socket.close() }
+}
+
+// A server-mode reply whose transmit timestamp is `unixMs`.
+function serverReply(unixMs: number): Buffer {
+    const reply = Buffer.alloc(48)
+    reply[0] = 0x1c // LI 0, version 3, mode 4 (server)
+    const seconds = Math.floor(unixMs / 1000) + 2_208_988_800
+    reply.writeUInt32BE(seconds >>> 0, 40)
+    reply.writeUInt32BE(Math.floor(((unixMs % 1000) / 1000) * 2 ** 32), 44)
+    return reply
+}
+
 describe("queryNtpOffset", () => {
+    let server: { port: number; close: () => void } | null = null
+    afterEach(() => {
+        server?.close()
+        server = null
+    })
+
     it("reports a host clock ahead of the server as positive", async () => {
-        ntpAnswer = () => ({ err: null, date: new Date(Date.now() - 10_000) })
-        const offset = await queryNtpOffset(S1)
+        server = await ntpServer(() => serverReply(Date.now() - 10_000))
+        const offset = await queryNtpOffset("127.0.0.1", server.port, 1000)
         expect(offset).toBeGreaterThan(9_000)
         expect(offset).toBeLessThan(11_000)
     })
 
-    it("rejects the 1900 answer of an unsynchronised server", async () => {
-        ntpAnswer = () => ({ err: null, date: new Date(-2208988800 * 1000) })
-        await expect(queryNtpOffset(S1)).rejects.toThrow(/implausible time/)
+    it("rejects the zero timestamp of an unsynchronised server", async () => {
+        server = await ntpServer(() => {
+            const reply = Buffer.alloc(48)
+            reply[0] = 0x1c
+            return reply
+        })
+        await expect(queryNtpOffset("127.0.0.1", server.port, 1000)).rejects.toThrow(/implausible time/)
     })
 
-    it("passes a transport error on", async () => {
-        ntpAnswer = () => ({ err: "Timeout waiting for NTP response." })
-        await expect(queryNtpOffset(S1)).rejects.toThrow(/Timeout/)
+    it("rejects a reply too short to hold a timestamp", async () => {
+        server = await ntpServer(() => Buffer.alloc(12, 0x1c))
+        await expect(queryNtpOffset("127.0.0.1", server.port, 1000)).rejects.toThrow(/implausible time/)
+    })
+
+    it("gives up on a silent server", async () => {
+        server = await ntpServer(() => null)
+        await expect(queryNtpOffset("127.0.0.1", server.port, 100)).rejects.toThrow(/did not answer within 100 ms/)
+    })
+
+    it("lets a lookup that fails after the timeout pass without an uncaught error", async () => {
+        // The crash seen on validators: the old client closed its socket on
+        // timeout, then closed it again when the late DNS failure reached send.
+        const uncaught: unknown[] = []
+        const onUncaught = (error: unknown) => uncaught.push(error)
+        process.on("uncaughtException", onUncaught)
+        try {
+            await expect(queryNtpOffset("no-such-host.invalid", 123, 1)).rejects.toThrow(/did not answer/)
+            await new Promise(resolve => setTimeout(resolve, 1500))
+            expect(uncaught).toEqual([])
+        } finally {
+            process.off("uncaughtException", onUncaught)
+        }
+    })
+
+    it("lets a reply that comes after the timeout pass without an uncaught error", async () => {
+        const uncaught: unknown[] = []
+        const onUncaught = (error: unknown) => uncaught.push(error)
+        process.on("uncaughtException", onUncaught)
+        try {
+            server = await ntpServer(() => serverReply(Date.now()), 250)
+            await expect(queryNtpOffset("127.0.0.1", server.port, 50)).rejects.toThrow(/did not answer/)
+            await new Promise(resolve => setTimeout(resolve, 400))
+            expect(uncaught).toEqual([])
+        } finally {
+            process.off("uncaughtException", onUncaught)
+        }
     })
 })

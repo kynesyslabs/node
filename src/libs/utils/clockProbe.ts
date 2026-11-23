@@ -1,4 +1,4 @@
-import * as ntpClient from "ntp-client"
+import dgram from "node:dgram"
 import log from "src/utilities/logger"
 import { getMetricsService } from "src/features/metrics/MetricsService"
 import { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS } from "src/libs/consensus/v2/routines/cosignTimestamp"
@@ -27,7 +27,7 @@ export const CLOCK_OFFSET_WARN_MS = 1000
 const QUERY_TIMEOUT_MS = 3000
 const PROBE_INTERVAL_MS = 10 * 60 * 1000
 // A server that is not synchronised answers with a zero timestamp, which
-// ntp-client turns into 1900. No real reading is older than 2024-01-01.
+// reads as 1900. No real reading is older than 2024-01-01.
 const MIN_PLAUSIBLE_TIME_MS = 1_704_067_200_000
 
 /** Resolves to how far the host clock is ahead of `server`, in ms. */
@@ -40,27 +40,76 @@ export interface ClockProbeResult {
     answered: number
 }
 
-export function queryNtpOffset(server: string): Promise<number> {
+// Seconds between the NTP epoch (1900) and the Unix epoch (1970).
+const NTP_UNIX_EPOCH_DELTA_S = 2_208_988_800
+const NTP_PACKET_BYTES = 48
+// LI 0, version 3, mode 3 (client).
+const NTP_CLIENT_HEADER = 0x1b
+const NTP_MODE_SERVER = 4
+
+/** The server's transmit time from an SNTP reply, in Unix ms; null if the reply is malformed. */
+export function readNtpTransmitTime(reply: Buffer): number | null {
+    if (reply.length < NTP_PACKET_BYTES || (reply[0] & 0x07) !== NTP_MODE_SERVER) {
+        return null
+    }
+    const seconds = reply.readUInt32BE(40)
+    const fraction = reply.readUInt32BE(44)
+    return (seconds - NTP_UNIX_EPOCH_DELTA_S) * 1000 + (fraction * 1000) / 2 ** 32
+}
+
+/**
+ * One SNTP request on a socket this function owns end to end. The ntp-client
+ * package closed its socket from both its own timeout and the reply handler,
+ * so a reply arriving after the timeout threw "Not running" from a socket
+ * callback, and under Bun that took the whole node down.
+ */
+export function queryNtpOffset(
+    server: string,
+    port = 123,
+    timeoutMs = QUERY_TIMEOUT_MS,
+): Promise<number> {
     return new Promise((resolve, reject) => {
-        const sentAt = Date.now()
-        const timer = setTimeout(
-            () => reject(new Error(`${server} did not answer within ${QUERY_TIMEOUT_MS} ms`)),
-            QUERY_TIMEOUT_MS,
-        )
-        ntpClient.getNetworkTime(server, 123, (err, date) => {
+        const socket = dgram.createSocket("udp4")
+        let sentAt = Date.now()
+        let settled = false
+        const settle = (error: Error | null, offsetMs = 0) => {
+            if (settled) return
+            settled = true
             clearTimeout(timer)
+            socket.removeAllListeners("message")
+            try {
+                socket.close()
+            } catch {
+                // already closed: nothing left to release
+            }
+            if (error) reject(error)
+            else resolve(offsetMs)
+        }
+        const timer = setTimeout(
+            () => settle(new Error(`${server} did not answer within ${timeoutMs} ms`)),
+            timeoutMs,
+        )
+        // Stays attached after settle so a late socket error is never unhandled.
+        socket.on("error", error => settle(error))
+        socket.once("message", reply => {
             const receivedAt = Date.now()
-            if (err) {
-                reject(err instanceof Error ? err : new Error(String(err)))
+            const serverMs = readNtpTransmitTime(reply)
+            if (serverMs === null || !Number.isFinite(serverMs) || serverMs < MIN_PLAUSIBLE_TIME_MS) {
+                settle(new Error(`${server} answered an implausible time`))
                 return
             }
-            const serverMs = date?.getTime()
-            if (!Number.isFinite(serverMs) || serverMs < MIN_PLAUSIBLE_TIME_MS) {
-                reject(new Error(`${server} answered an implausible time (${String(date)})`))
-                return
-            }
-            resolve((sentAt + receivedAt) / 2 - serverMs)
+            settle(null, (sentAt + receivedAt) / 2 - serverMs)
         })
+        const request = Buffer.alloc(NTP_PACKET_BYTES)
+        request[0] = NTP_CLIENT_HEADER
+        try {
+            socket.send(request, 0, request.length, port, server, error => {
+                if (error) settle(error)
+                else sentAt = Date.now()
+            })
+        } catch (error) {
+            settle(error instanceof Error ? error : new Error(String(error)))
+        }
     })
 }
 
