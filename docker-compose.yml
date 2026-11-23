@@ -178,6 +178,10 @@ services:
       # its own volume, which node-exporter's filesystem metrics cover.
       DISK_SPACE_PATH: ${DISK_SPACE_PATH:-/app/data}
       RPC_SIGNALING_PORT: ${RPC_SIGNALING_PORT:-3005}
+      # MCP server, off unless .env turns it on (docs/runbooks/mcp-security.md).
+      # With docker-compose.proxy.yml and MCP_ENABLED=true the node refuses to
+      # start until MCP_BASIC_AUTH_HASH is a real hash (src/config/proxyChecks.ts).
+      MCP_ENABLED: ${MCP_ENABLED:-false}
       RPC_MCP_PORT: ${RPC_MCP_PORT:-3001}
       # Database — service name from this compose
       PG_HOST: postgres
