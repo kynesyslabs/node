@@ -138,7 +138,7 @@ if [ "${#ALLOW[@]}" -gt 0 ]; then
     # subnet as the source. The daemon's address pools when it sets them
     # (a Coolify host uses 10.0.0.0/8), else Docker's defaults.
     pools=$(jq -r '."default-address-pools"[]?.base' "${daemon}" 2>/dev/null)
-    [ -n "${pools}" ] || pools="172.16.0.0/12 192.168.0.0/16"
+    [[ -n "${pools}" ]] || pools="172.16.0.0/12 192.168.0.0/16"
     for a in ${pools}; do
         for r in "${rpc_range}" "${gossip_range}"; do
             ufw allow proto tcp from "${a}" to any port "${r}" comment qdrill-bridges >/dev/null

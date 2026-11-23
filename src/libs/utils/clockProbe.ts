@@ -113,7 +113,7 @@ export function queryNtpOffset(
                 else sentAt = Date.now()
             })
         } catch (error) {
-            settle(error instanceof Error ? error : new Error(String(error)))
+            settle(error instanceof Error ? error : new Error(`could not send to ${server}`))
         }
     })
 }

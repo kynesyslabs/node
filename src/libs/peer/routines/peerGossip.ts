@@ -31,7 +31,10 @@ export const PEER_GOSSIP_INTERVAL_MS = 30_000
  * matched and every round fetched every list.
  */
 export function peerlistDigest(peers: { identity: string }[]): string {
-    const identities = [...new Set(peers.map(peer => peer.identity))].sort()
+    // Code-unit order, not locale order: every node must hash the same bytes.
+    const identities = [...new Set(peers.map(peer => peer.identity))].sort(
+        (a, b) => Number(a > b) - Number(a < b),
+    )
     return Hashing.sha256(JSON.stringify(identities))
 }
 
@@ -69,7 +72,7 @@ async function performPeerGossip() {
         peer => peer.identity && peer.identity !== getSharedState.publicKeyHex,
     )
     if (others.length === 0) {
-        log.custom("peerGossip", "No peers to gossip with", true)
+        log.debug("[peerGossip] No other peers to gossip with")
         return
     }
 
@@ -100,17 +103,32 @@ export const MAX_PEERS_PER_LIST = 128
 export const MAX_NEW_PEERS_PER_ROUND = 32
 
 /**
+ * Up to `count` entries of `list`, starting at a random offset and wrapping.
+ * Lists arrive sorted by identity, so a fixed window would never reach a
+ * missing peer past it, and a capped round would retry the same failing
+ * candidates forever.
+ */
+function randomWindow<T>(list: T[], count: number, random: () => number): T[] {
+    if (list.length <= count) return list
+    const start = Math.floor(random() * list.length)
+    return Array.from({ length: count }, (_, i) => list[(start + i) % list.length])
+}
+
+/**
  * Peers named in remote lists that this node does not know yet. Only the
  * identity and URL are taken: a list never sets sync data or status, which
  * for a known peer come from its own hello (see PeerManager.setPeers). A
  * malformed list or entry is skipped without dropping the others.
  */
-export function unknownPeersFromLists(lists: unknown[]): Peer[] {
+export function unknownPeersFromLists(
+    lists: unknown[],
+    random: () => number = Math.random,
+): Peer[] {
     const peerManager = PeerManager.getInstance()
     const found = new Map<string, Peer>()
-    for (const list of lists) {
+    for (const list of randomWindow(lists, lists.length, random)) {
         if (!Array.isArray(list)) continue
-        for (const entry of list.slice(0, MAX_PEERS_PER_LIST)) {
+        for (const entry of randomWindow(list, MAX_PEERS_PER_LIST, random)) {
             if (found.size >= MAX_NEW_PEERS_PER_ROUND) return [...found.values()]
             const identity = entry?.identity
             const url = entry?.connection?.string
@@ -149,7 +167,7 @@ async function peersGossipProcess(differentPeerlistPeers: Peer[]) {
         .map(answer => answer.value.response)
 
     const newPeers = unknownPeersFromLists(lists)
-    log.custom("peerGossip", `New peers from gossip: ${newPeers.length}`, false)
+    log.debug(`[peerGossip] New peers from gossip: ${newPeers.length}`)
     if (newPeers.length > 0) {
         PeerManager.getInstance().setPeers(newPeers)
     }

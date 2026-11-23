@@ -165,6 +165,20 @@ describe("unknownPeersFromLists", () => {
             identity: `0xflood${i}`,
             connection: { string: `http://45.1.${Math.floor(i / 250)}.${i % 250}:53550` },
         }))
-        expect(unknownPeersFromLists([flood, flood]).length).toBe(MAX_NEW_PEERS_PER_ROUND)
+        expect(unknownPeersFromLists([flood, flood])).toHaveLength(MAX_NEW_PEERS_PER_ROUND)
+    })
+
+    it("reaches a missing peer past the first window of a long list", () => {
+        // The node knows every listed peer except the last, which no fixed
+        // window starting at entry 0 would ever reach.
+        const long = Array.from({ length: 300 }, (_, i) => ({
+            identity: `0xp${String(i).padStart(3, "0")}`,
+            connection: { string: `http://45.2.${Math.floor(i / 250)}.${i % 250}:53550` },
+        }))
+        for (const entry of long.slice(0, 299)) {
+            online()[entry.identity] = new peerClass(entry.connection.string, entry.identity)
+        }
+        expect(unknownPeersFromLists([long], () => 0).map(peer => peer.identity)).toEqual([])
+        expect(unknownPeersFromLists([long], () => 0.9).map(peer => peer.identity)).toEqual(["0xp299"])
     })
 })
