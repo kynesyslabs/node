@@ -3,7 +3,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { appendJsonl, getRunConfig, writeJson } from "../../framework/io"
 import { ReservoirSampler, summarizeLatency } from "../../framework/metrics"
 import { envBool, envFloat, envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeHexAddress, normalizeRpcUrl, nowMs, sleep } from "../../framework/common"
-import { BroadcastError, ConfirmError, ConvergenceError, RateLimitError, RpcTimeoutError, SetupError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
+import { ConvergenceError, RateLimitError, RpcTimeoutError, SetupError, loadgenErrorFromMessage, normalizeLoadgenError } from "../../framework/errors"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
 import { RATE_LIMIT_TX_PER_BLOCK } from "../../../../../src/utilities/constants"
 import {
@@ -675,6 +675,39 @@ export type RateLimitRetry = {
 }
 
 /**
+ * Whether a 429 on this attempt could still be retried: stopOnRateLimit is not
+ * set and the attempt is not the last one maxRetries allows. Always false with
+ * retries off (stopOnRateLimit set, or maxRetries 0).
+ */
+function attemptCanBeRetried(opts: RateLimitRetry, attempt: number): boolean {
+  return !opts.stopOnRateLimit && attempt < opts.maxRetries
+}
+
+/**
+ * Throws a refused attempt's error, unmarked, unless it is the identity confirm
+ * cap's HTTP 429 (isIdentityCapRateLimit) on an attempt that can still be
+ * retried (attemptCanBeRetried). If it is, but the run has already ended
+ * (shouldStop) before the block wait, the 429 is thrown marked as cut off by
+ * the deadline (isCutOffAtDeadline), since another attempt was still allowed.
+ */
+function throwUnlessRetryAllowed(error: unknown, attempt: number, opts: RateLimitRetry): void {
+  const retryAllowed = isIdentityCapRateLimit(error) && attemptCanBeRetried(opts, attempt)
+  if (!retryAllowed) throw error
+  if (opts.shouldStop()) throw markCutOffAtDeadline(error)
+}
+
+/**
+ * Called with the result of the block wait after the cap's 429. If no new
+ * block showed up in time, the cap is still spent, so the 429 is thrown and
+ * no other step is started. If the run ended during the wait (shouldStop),
+ * the 429 is thrown marked as cut off by the deadline (isCutOffAtDeadline).
+ */
+function throwUnlessNextBlock(error: unknown, newBlock: boolean, opts: RateLimitRetry): void {
+  if (!newBlock) throw error
+  if (opts.shouldStop()) throw markCutOffAtDeadline(error)
+}
+
+/**
  * Runs one step (a confirm + broadcast). An HTTP 429 from the node's per-block
  * identity confirm cap is back-pressure, so the step is retried after the next
  * block, up to maxRetries times. That block is one past the height read just
@@ -686,14 +719,17 @@ export type RateLimitRetry = {
  * (isCutOffAtDeadline), since another attempt was still allowed. The general
  * limiter's 429 (http429LimiterOf), rate-limit messages without an HTTP 429,
  * other errors, every 429 when stopOnRateLimit is set, and a 429 with no
- * retry left, are thrown to the caller unmarked.
+ * retry left, are thrown to the caller unmarked. Which error may be retried
+ * is decided by throwUnlessRetryAllowed, and what happens after the block
+ * wait by throwUnlessNextBlock.
  */
 export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimitRetry): Promise<T> {
-  // With retries off, no height is read.
-  const canRetry = !opts.stopOnRateLimit && opts.maxRetries > 0
   let refused: unknown
   for (let attempt = 0; ; attempt++) {
-    const start = canRetry && attempt < opts.maxRetries ? await opts.readHeight() : null
+    // The block wait after this attempt's 429 counts from this height. It is read
+    // only when that 429 could be retried: not with retries off, and not for the
+    // last allowed attempt.
+    const start = attemptCanBeRetried(opts, attempt) ? await opts.readHeight() : null
     if (attempt > 0) {
       // The run ended during the height read: do not send the retry.
       if (opts.shouldStop()) throw markCutOffAtDeadline(refused)
@@ -702,13 +738,8 @@ export async function retryOnRateLimit<T>(step: () => Promise<T>, opts: RateLimi
     try {
       return await step()
     } catch (error) {
-      const retryAllowed = isIdentityCapRateLimit(error) && !opts.stopOnRateLimit && attempt < opts.maxRetries
-      if (!retryAllowed) throw error
-      if (opts.shouldStop()) throw markCutOffAtDeadline(error)
-      // No new block in time: the cap is still spent, so do not start another step.
-      if (!(await opts.waitForNextBlock(start))) throw error
-      // The run ended during the wait: do not start another step.
-      if (opts.shouldStop()) throw markCutOffAtDeadline(error)
+      throwUnlessRetryAllowed(error, attempt, opts)
+      throwUnlessNextBlock(error, await opts.waitForNextBlock(start), opts)
       refused = error
     }
   }

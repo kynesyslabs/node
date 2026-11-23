@@ -521,7 +521,7 @@ describe("identity confirm 429", () => {
     // The two refused steps are still waiting for block 2, not failed, and
     // are not counted as retries until they are sent again.
     await Bun.sleep(50)
-    expect(fake.accepted.length).toBe(4)
+    expect(fake.accepted).toHaveLength(4)
     expect(retries).toBe(0)
     fake.nextBlock()
 
