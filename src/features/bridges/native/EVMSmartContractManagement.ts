@@ -38,6 +38,16 @@ interface ShardRotationData {
     executed: boolean
 }
 
+// Names the cause of a bridge key failure without its value: the ethers error
+// code when there is one (for example INVALID_ARGUMENT), otherwise the error's
+// class name. Never the message or other fields: they can quote the keys file
+// or the key
+function keyErrorKind(e: unknown): string {
+    if (!(e instanceof Error)) return typeof e
+    const code = (e as { code?: unknown }).code
+    return typeof code === "string" ? code : e.name
+}
+
 /**
  * Manages EVM tank contracts across multiple chains for native bridge operations
  * Handles USDC deposits, withdrawals, shard rotation, and tank monitoring
@@ -116,8 +126,18 @@ export class EVMSmartContractManagement {
             throw new Error(`Unsupported chain configuration: ${chainKey}`)
         }
 
-        const bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
-        log.debug("bridgePrivateKey: " + bridgePrivateKey)
+        // The key errors below carry only the error's kind and no cause,
+        // because initialize() and its callers log the message: a JSON parse
+        // error can quote the keys file, and ethers quotes a malformed key
+        let bridgePrivateKey: string | null
+        try {
+            bridgePrivateKey = JsonConfig.getBridgePrivateKey(chainKey)
+        } catch (e) {
+            const kind = keyErrorKind(e)
+            throw new Error(
+                `Failed to read the bridge private key for ${chainKey}: keys file unreadable, not valid JSON, or not a JSON object (${kind})`,
+            )
+        }
 
         if (!bridgePrivateKey) {
             log.error(`Bridge private key not found for ${chainKey}`)
@@ -128,7 +148,14 @@ export class EVMSmartContractManagement {
         // Create EVM instance
         const evmInstance = new EVM(rpcUrl, chainId)
         await evmInstance.connect()
-        await evmInstance.connectWallet(bridgePrivateKey)
+        try {
+            await evmInstance.connectWallet(bridgePrivateKey)
+        } catch (e) {
+            const kind = keyErrorKind(e)
+            throw new Error(
+                `Failed to load the bridge private key for ${chainKey} (${kind})`,
+            )
+        }
 
         log.debug("public key: " + evmInstance.getAddress())
 
