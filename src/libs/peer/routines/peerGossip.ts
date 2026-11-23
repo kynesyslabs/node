@@ -20,6 +20,23 @@ import Hashing from "src/libs/crypto/hashing"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 
 const maxGossipPeers = 10
+// Gossip is the only way a node learns peers it was not introduced to by
+// hello: a node whose only contact restarted and forgot it stays cut off
+// until a round reaches it.
+export const PEER_GOSSIP_INTERVAL_MS = 30_000
+
+/**
+ * Digest of a peer list by identity only. Sync heights and URLs differ
+ * between views of the same set, so a digest over whole peer objects never
+ * matched and every round fetched every list.
+ */
+export function peerlistDigest(peers: { identity: string }[]): string {
+    // Code-unit order, not locale order: every node must hash the same bytes.
+    const identities = [...new Set(peers.map(peer => peer.identity))].sort(
+        (a, b) => Number(a > b) - Number(a < b),
+    )
+    return Hashing.sha256(JSON.stringify(identities))
+}
 
 /**
  * Initiates the peer gossip process.
@@ -51,9 +68,16 @@ async function performPeerGossip() {
         return
     }
 
-    const selectedPeers = selectPeersForGossip(allPeers)
-    const orderedPeers = orderPeers(allPeers)
-    const peersHash = Hashing.sha256(JSON.stringify(orderedPeers))
+    const others = allPeers.filter(
+        peer => peer.identity && peer.identity !== getSharedState.publicKeyHex,
+    )
+    if (others.length === 0) {
+        log.debug("[peerGossip] No other peers to gossip with")
+        return
+    }
+
+    const selectedPeers = selectPeersForGossip(others)
+    const peersHash = peerlistDigest(allPeers)
 
     log.custom("peerGossip", `Hashed our peerlist: ${peersHash}`, false)
 
@@ -70,106 +94,83 @@ async function performPeerGossip() {
         return
     }
 
-    await peersGossipProcess(differentPeerlistPeers, orderedPeers)
+    await peersGossipProcess(differentPeerlistPeers)
+}
+
+// A list is untrusted input from any peer that passed hello; these bound how
+// many hellos one round can make this node send.
+export const MAX_PEERS_PER_LIST = 128
+export const MAX_NEW_PEERS_PER_ROUND = 32
+
+/**
+ * Up to `count` entries of `list`, starting at a random offset and wrapping.
+ * Lists arrive sorted by identity, so a fixed window would never reach a
+ * missing peer past it, and a capped round would retry the same failing
+ * candidates forever.
+ */
+function randomWindow<T>(list: T[], count: number, random: () => number): T[] {
+    if (list.length <= count) return list
+    const start = Math.floor(random() * list.length)
+    return Array.from({ length: count }, (_, i) => list[(start + i) % list.length])
 }
 
 /**
- * Processes gossip with peers that have different peer lists.
- * Requests full peer lists from these peers and merges them.
- * @param {Peer[]} differentPeerlistPeers - Peers with different peer list hashes.
- * @param {Peer[]} ourPeerlist - Our current peer list.
+ * Peers named in remote lists that this node does not know yet. Only the
+ * identity and URL are taken: a list never sets sync data or status, which
+ * for a known peer come from its own hello (see PeerManager.setPeers). A
+ * malformed list or entry is skipped without dropping the others.
  */
-async function peersGossipProcess(
-    differentPeerlistPeers: Peer[],
-    ourPeerlist: Peer[],
-) {
+export function unknownPeersFromLists(
+    lists: unknown[],
+    random: () => number = Math.random,
+): Peer[] {
+    const peerManager = PeerManager.getInstance()
+    const found = new Map<string, Peer>()
+    for (const list of randomWindow(lists, lists.length, random)) {
+        if (!Array.isArray(list)) continue
+        for (const entry of randomWindow(list, MAX_PEERS_PER_LIST, random)) {
+            if (found.size >= MAX_NEW_PEERS_PER_ROUND) return [...found.values()]
+            const identity = entry?.identity
+            const url = entry?.connection?.string
+            if (typeof identity !== "string" || typeof url !== "string") continue
+            if (
+                identity === getSharedState.publicKeyHex ||
+                peerManager.getPeer(identity) ||
+                found.has(identity)
+            ) {
+                continue
+            }
+            found.set(identity, new Peer(url, identity))
+        }
+    }
+    return [...found.values()]
+}
+
+/**
+ * Asks the peers whose lists differ for their full list and says hello to
+ * the peers it names that this node does not know.
+ */
+async function peersGossipProcess(differentPeerlistPeers: Peer[]) {
     const peerlistRequest: RPCRequest = {
         method: "nodeCall",
         params: [{ message: "getPeerlist", data: null, muid: null }],
     }
 
-    log.custom(
-        "peerGossip",
-        "Requesting peerlist from peers with different hashes",
-        false,
-    )
-    const responses = await Promise.all(
+    const responses = await Promise.allSettled(
         differentPeerlistPeers.map(peer => peer.call(peerlistRequest)),
     )
-    log.custom(
-        "peerGossip",
-        "Received peerlists from peers with different hashes",
-        false,
-    )
+    const lists = responses
+        .filter(
+            (answer): answer is PromiseFulfilledResult<RPCResponse> =>
+                answer.status === "fulfilled" && answer.value?.result === 200,
+        )
+        .map(answer => answer.value.response)
 
-    const peerlistsToMerge = responses
-        // INFO: Filter out failed responses and convert lists to Peer objects
-        .filter(response => response.result === 200)
-        .map(response => {
-            log.debug("[peerGossip] response: " + JSON.stringify(response))
-            return response.response.map((peer: Peer) => {
-                const peerInstance = new Peer()
-
-                peerInstance.identity = peer.identity
-                peerInstance.connection = peer.connection
-                peerInstance.verification = peer.verification
-                peerInstance.sync = peer.sync
-                peerInstance.status = peer.status
-
-                return peerInstance
-            })
-        })
-
-    peerlistsToMerge.unshift(ourPeerlist)
-
-    log.custom("peerGossip", "Merging peerlists", false)
-    await mergePeerlists(peerlistsToMerge)
-    log.custom("peerGossip", "Peerlists merged", false)
-}
-
-async function mergePeerlists(peerlists: Peer[][]): Promise<boolean> {
-    const peerMap = new Map<string, Peer>()
-
-    // Flatten and filter all peers at once, then process in batches
-    const allPeers = peerlists.flat().filter(peer => {
-        if (!peer) {
-            log.warning("[peerGossip] Peer is undefined, skipping")
-            return false
-        }
-        return true
-    })
-
-    // Process peers in batches to yield to event loop
-    const batchSize = 10
-    for (let i = 0; i < allPeers.length; i += batchSize) {
-        const batch = allPeers.slice(i, i + batchSize)
-
-        for (const peer of batch) {
-            const existingPeer = peerMap.get(peer.identity)
-
-            if (existingPeer) {
-                // Update existing peer if this one has higher block number
-                if (peer.sync.block > existingPeer.sync.block) {
-                    existingPeer.sync.block = peer.sync.block
-                    existingPeer.sync.block_hash = peer.sync.block_hash
-                    existingPeer.sync.status = peer.sync.status
-                }
-            } else {
-                // Add new peer
-                peerMap.set(peer.identity, peer)
-            }
-        }
-
-        // Yield to event loop every batch
-        if (i + batchSize < allPeers.length) {
-            await new Promise(resolve => setImmediate(resolve))
-        }
+    const newPeers = unknownPeersFromLists(lists)
+    log.debug(`[peerGossip] New peers from gossip: ${newPeers.length}`)
+    if (newPeers.length > 0) {
+        PeerManager.getInstance().setPeers(newPeers)
     }
-
-    const mergedPeerlist = Array.from(peerMap.values())
-    mergedPeerlist.sort((a, b) => a.identity.localeCompare(b.identity))
-    PeerManager.getInstance().setPeers(mergedPeerlist)
-    return true
 }
 
 /**
@@ -192,15 +193,6 @@ function selectPeersForGossip(peers: Peer[]): Peer[] {
 }
 
 /**
- * Orders peers based on their identity.
- * @param {Peer[]} peers - Peers to order.
- * @returns {Peer[]} - Ordered peers.
- */
-function orderPeers(peers: Peer[]): Peer[] {
-    return [...peers].sort((a, b) => a.identity.localeCompare(b.identity))
-}
-
-/**
  * Requests peer list hashes from selected peers.
  * @param {Peer[]} peers - Peers to request hashes from.
  * @returns {Promise<RPCResponse[]>} - Responses containing peer list hashes.
@@ -210,28 +202,20 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
         method: "nodeCall",
         params: [{ message: "getPeerlistHash", data: null, muid: null }],
     }
-
-    log.custom(
-        "peerGossip",
-        "Sending peerlist hash request to selected peers",
-        false,
+    // One answer per peer, in order: identifyDifferentPeers pairs them by index.
+    return Promise.all(
+        peers.map(peer =>
+            peer.call(peerlistHashRequest).catch(
+                error =>
+                    ({
+                        result: 500,
+                        response: null,
+                        require_reply: false,
+                        extra: error instanceof Error ? error.message : String(error),
+                    }) as RPCResponse,
+            ),
+        ),
     )
-    const promises = []
-    for (const peer of peers) {
-        if (!peer.identity) {
-            log.custom("peerGossip", "Peer has no identity, skipping", false)
-            log.warning(`[peerGossip] Peer has no identity: ${peer}`)
-            continue
-        }
-        log.debug(
-            `[peerGossip] Sending peerlist hash request to ${peer.identity}`,
-        )
-        promises.push(peer.call(peerlistHashRequest))
-    }
-    const responses = await Promise.all(promises)
-    log.custom("peerGossip", "Received peerlist hashes", false)
-
-    return responses
 }
 
 /**
@@ -250,7 +234,7 @@ function identifyDifferentPeers(
         const peerHash = response.response
         log.custom("peerGossip", `- Peerlist hash: ${peerHash}`, false)
 
-        if (peerHash !== ourHash) {
+        if (response.result === 200 && peerHash !== ourHash) {
             log.custom(
                 "peerGossip",
                 `[!] Peerlist hash mismatch, we will sync with this peer. Hash: ${peerHash}`,

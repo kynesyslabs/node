@@ -164,7 +164,7 @@ g["validators"] = [
     }
     for i, pk in enumerate(pubs)
 ]
-g = with_exempt_nft_seats(g)
+g = with_exempt_nft_seats(g, a.carryover)
 load_dir = os.path.join(inputs, "load")
 load_pubs = []
 if os.path.isdir(load_dir):

@@ -219,7 +219,16 @@ mh_preflight() {
         [ -n "${cver}" ] || abort_pre "host ${k}: no docker compose plugin"
         [ "${disk:-0}" -lt "${MIN_DISK_GB}" ] && abort_pre "host ${k}: free disk ${disk}G < ${MIN_DISK_GB}G"
         [ "${avail:-0}" -lt "${need}" ] && abort_pre "host ${k}: available RAM ${avail}M < ${need}M needed for $(mh_nodes_on "${k}") nodes (${NODE_EST_MB}M each incl. postgres + ${HEADROOM_MB}M headroom)"
-        awk -v l="${load}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && abort_pre "host ${k}: load ${load} > ${cores} cores"
+        # The 1-minute average still carries the previous run's teardown when a
+        # campaign starts the next scenario: wait for it to settle before
+        # calling the host busy
+        local settle_end=$((SECONDS + LOAD_SETTLE_S))
+        while awk -v l="${load}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && [ "${SECONDS}" -lt "${settle_end}" ]; do
+            say "host ${k}: load ${load} > ${cores} cores; waiting up to $((settle_end - SECONDS))s for it to settle"
+            sleep 15
+            load=$(mh_ssh "${k}" -n 'cut -d" " -f1 /proc/loadavg' 2>/dev/null) || load="${cores}.1"
+        done
+        awk -v l="${load}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && abort_pre "host ${k}: load ${load} > ${cores} cores after ${LOAD_SETTLE_S}s (LOAD_SETTLE_S)"
         [ "${swapping}" = 1 ] && abort_pre "host ${k}: actively swapping"
         [ "${harness:-0}" = 0 ] || abort_pre "host ${k}: another harness stack is running"
         MH_DIR[k]="${home}/qdrill-runs/${RUN_ID}"

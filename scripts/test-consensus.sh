@@ -36,6 +36,8 @@ SUITE_FILES=(
     src/features/tlsnotary/notaryUnreachable.test.ts
     src/features/tlsnotary/tokenCreate.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
+    src/features/metrics/dbProbe.test.ts
+    src/features/metrics/MetricsCollector.dbProbe.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -142,6 +144,7 @@ SUITE_FILES=(
     testing/monitoring/metricsExposure.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
+    testing/forks/governanceTxHash.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
@@ -189,6 +192,7 @@ SUITE_FILES=(
     src/libs/network/sudoReplayFloor.test.ts
     src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
+    testing/loadgen/src/features/gcr/gcr_identity_loadgen.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
     # Loadgen error logging (#708), including the guard against silent catches
     testing/loadgen/src/features/omni/close_log.test.ts
