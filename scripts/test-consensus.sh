@@ -39,6 +39,7 @@ SUITE_FILES=(
     src/features/web2/proxy/Proxy.contentType.test.ts
     src/features/metrics/dbProbe.test.ts
     src/features/metrics/MetricsCollector.dbProbe.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -75,6 +76,7 @@ SUITE_FILES=(
     src/libs/blockchain/mempool.editBinding.test.ts
     src/libs/blockchain/mempool.nextBlockRef.test.ts
     src/libs/blockchain/mempool.receive.test.ts
+    src/libs/blockchain/mempool.rowLimits.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
