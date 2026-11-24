@@ -1,7 +1,10 @@
 import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
-import { isWithinDeepWindow } from "src/libs/blockchain/referenceBlockWindow"
+import {
+    isWithinDeepWindow,
+    signedReferenceBlock,
+} from "src/libs/blockchain/referenceBlockWindow"
 import GossipManager from "src/libs/gossip/GossipManager"
 import { TXS_MAX_BYTES } from "src/libs/gossip/topics"
 import { estimateNextConfirmationBlock } from "src/libs/consensus/confirmationEstimate"
@@ -113,10 +116,11 @@ export async function retryUnpublishedTxs(): Promise<void> {
     if (unpublished.size === 0) return
     const head = getSharedState.lastBlockNumber ?? 0
     for (const [hash, validityData] of [...unpublished]) {
-        if (!isWithinDeepWindow(validityData.data.reference_block, head)) {
+        const reference = signedReferenceBlock(validityData.data.transaction)
+        if (reference === null || !isWithinDeepWindow(reference, head)) {
             unpublished.delete(hash)
             log.warning(
-                `[TX SUBMIT] ${hash} expired before the mesh took it (reference block ${validityData.data.reference_block}, head ${head})`,
+                `[TX SUBMIT] ${hash} expired before the mesh took it (reference block ${reference}, head ${head})`,
             )
             continue
         }
@@ -169,10 +173,8 @@ export async function submitValidatedTx(
     }
 
     const { error } = await Mempool.addTransactionWithLock(
-        {
-            ...transaction,
-            reference_block: validityData.data.reference_block,
-        },
+        // The pool takes the reference block from the signed content.
+        transaction as typeof transaction & { reference_block: number },
         undefined,
         { origin: "rpc" },
     )

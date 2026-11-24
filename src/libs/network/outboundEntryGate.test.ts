@@ -88,7 +88,7 @@ function tx(type: string, payload: unknown): any {
             valid: true,
             reference_block: 100,
             message: "",
-            transaction: { hash: HASH, blockNumber: 101, content: { type, from: "0xaa", data: [type, payload] } },
+            transaction: { hash: HASH, blockNumber: 101, content: { type, from: "0xaa", data: [type, payload], reference_block: 100 } },
         },
         signature: { type: "ed25519", data: "bb".repeat(64) },
         rpc_public_key: { type: "ed25519", data: OUR_KEY },

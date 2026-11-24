@@ -65,6 +65,8 @@ async function sdkSigner(osDenomination: boolean): Promise<Demos> {
     await demos.connectWallet(MNEMONIC)
     const stubs = demos as unknown as Record<string, unknown>
     stubs.rpc_url = "http://stub.invalid"
+    // sign() reads the chain height for the signed reference block
+    stubs.getLastBlockNumber = async () => TIP
     stubs.getNetworkInfo = async () => ({
         chainId: CHAIN_ID,
         forks: {

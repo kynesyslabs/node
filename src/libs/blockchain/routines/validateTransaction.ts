@@ -21,6 +21,10 @@ import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { signValidityData } from "../validation/validityData"
 import { checkTxAdmissible } from "../validation/txAdmission"
+import {
+    isReferenceBlockAllowed,
+    signedReferenceBlock,
+} from "../referenceBlockWindow"
 import { clientTxTypeRefusal } from "../validation/txTypes"
 import { isForkActive } from "@/forks"
 import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
@@ -161,7 +165,7 @@ async function quoteNativeSendFee(
         }
     }
     tx.attrs = {
-        reference_block: referenceBlock,
+        reference_block: signedReferenceBlock(tx) ?? referenceBlock,
         total_fee: total.toString(),
     }
     // Apply debits each payer's send, gas, and distribution edits together.
@@ -400,6 +404,26 @@ export async function confirmTransaction(
         tx, sender, referenceBlock, validityData,
     )
     if (admissionRefusal) return admissionRefusal
+
+    // `referenceBlock` above is this node's head and stays the height every
+    // fork, fee and admission check reads. The transaction's own reference
+    // block is the one its sender signed; it is only held to the window here
+    // and copied into the envelope.
+    const signedReference = signedReferenceBlock(tx)
+    if (
+        signedReference === null ||
+        !isReferenceBlockAllowed(signedReference, referenceBlock)
+    ) {
+        validityData.data.message =
+            "[Tx Validation] [REFERENCE BLOCK ERROR] content.reference_block " +
+            (signedReference === null
+                ? "is missing or not a block height"
+                : `${signedReference} is outside the allowed window at block ${referenceBlock}`) +
+            "; sign the transaction again\n"
+        validityData.data.valid = false
+        return await signValidityData(validityData)
+    }
+    validityData.data.reference_block = signedReference
 
     const nonceRefusal = await checkNonceAndEdit(tx, referenceBlock, validityData)
     if (nonceRefusal) return nonceRefusal

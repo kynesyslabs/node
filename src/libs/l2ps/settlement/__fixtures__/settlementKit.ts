@@ -172,6 +172,7 @@ export function batchTx(
                 },
             ],
             transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+            reference_block: 100,
         },
     } as any
 }

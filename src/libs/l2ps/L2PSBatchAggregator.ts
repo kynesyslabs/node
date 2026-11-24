@@ -835,6 +835,11 @@ export class L2PSBatchAggregator {
             // This ensures uniqueness and proper ordering, preventing replay attacks
             const batchNonce = await this.getNextBatchNonce()
 
+            // The tip at submit time, signed in the content: peers drop a tx
+            // whose reference block is outside the deep window at their head,
+            // and a resubmission takes a fresh one.
+            const referenceBlock = await Chain.getLastBlockNumber()
+
             // Create batch transaction content
             const transactionContent = {
                 type: "l2psBatch",
@@ -852,6 +857,7 @@ export class L2PSBatchAggregator {
                     additional_fee: 0,
                     rpc_address: null,
                 },
+                reference_block: referenceBlock,
             }
 
             // Create transaction hash
@@ -876,10 +882,7 @@ export class L2PSBatchAggregator {
                     data: uint8ArrayToHex(signature.signature),
                     domain: this.SIGNATURE_DOMAIN, // Include domain for verification
                 } : null,
-                // Peers drop a tx whose reference block is outside the deep
-                // window at their head, so it is the tip at submit time, as
-                // for every node-built tx; a resubmission takes a fresh one.
-                reference_block: await Chain.getLastBlockNumber(),
+                reference_block: referenceBlock,
                 status: "pending", // Required by MempoolTx entity
                 extra: null, // Optional field
             }

@@ -32,6 +32,7 @@ import {
     deepWindowCutoff,
     isWithinDeepWindow,
     referenceBlockRoomAt,
+    signedReferenceBlock,
 } from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
@@ -602,10 +603,11 @@ export default class Mempool {
     public static async ingestGossiped(
         validityData: ValidityData,
     ): Promise<{ accepted: boolean; reason?: string; confirmationBlock?: number }> {
-        const tx = {
-            ...validityData.data.transaction,
-            reference_block: validityData.data.reference_block,
-        } as Transaction & { reference_block: number }
+        // The envelope's reference block is not read: the row takes the one
+        // the sender signed, in addTransaction.
+        const tx = validityData.data.transaction as Transaction & {
+            reference_block: number
+        }
         const head = getSharedState.lastBlockNumber ?? 0
 
         const admission = await checkTxAdmissible(tx, {
@@ -689,6 +691,16 @@ export default class Mempool {
         if (unstorable !== null) {
             return { confirmationBlock: null, error: unstorable }
         }
+        // The row's reference block is the signed one, whatever the caller
+        // attached beside the transaction.
+        const signedReference = signedReferenceBlock(transaction)
+        if (signedReference === null) {
+            return {
+                confirmationBlock: null,
+                error: "Error: Transaction content has no valid reference_block",
+            }
+        }
+        transaction = { ...transaction, reference_block: signedReference }
         // Node-built L2PS batches and hash updates come here directly, so the
         // feature gates hold here too, not only at RPC and gossip intake.
         const featureOff =
@@ -1368,25 +1380,29 @@ export default class Mempool {
                 : new Set<string>()
 
         const unseenTransactions = unseenCandidates.filter(tx => {
-            // Unsigned and copied into integer columns as the peer sent them:
-            // one Postgres refuses fails the insert of every tx merged with it.
+            // blockNumber is unsigned and copied into an integer column as
+            // the peer sent it: one Postgres refuses fails the insert of
+            // every tx merged with it. The reference block is the signed one;
+            // the peer's own value beside the tx is replaced by it.
             const peerColumns = tx as unknown as { blockNumber?: unknown; reference_block?: unknown }
-            if (!isInt4(peerColumns.blockNumber) || !isInt4(peerColumns.reference_block)) {
+            const signedReference = signedReferenceBlock(tx)
+            if (!isInt4(peerColumns.blockNumber) || signedReference === null) {
                 log.error(
-                    `[Mempool.receive] Rejecting tx ${tx.hash}: blockNumber or reference_block is not an integer`,
+                    `[Mempool.receive] Rejecting tx ${tx.hash}: blockNumber is not an integer or the content has no valid reference_block`,
                 )
                 return false
             }
+            peerColumns.reference_block = signedReference
             if (onChain.has(tx.hash)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: already recorded on chain`,
                 )
                 return false
             }
-            if (!isWithinDeepWindow(peerColumns.reference_block, lastBlock)) {
+            if (!isWithinDeepWindow(signedReference, lastBlock)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
-                        `${peerColumns.reference_block} outside the allowed window at block ${lastBlock}`,
+                        `${signedReference} outside the allowed window at block ${lastBlock}`,
                 )
                 return false
             }
@@ -1604,13 +1620,14 @@ export default class Mempool {
             }
 
             if (validTransactions.length > 0) {
-                // The peer's own timestamp and nonce are unsigned: the row takes
-                // the signed ones, which the validator checked Postgres reads, as
-                // addTransaction does.
+                // The peer's own timestamp, nonce and reference block are
+                // unsigned: the row takes the signed ones, which the validator
+                // checked Postgres reads, as addTransaction does.
                 const rows = validTransactions.map(tx => ({
                     ...tx,
                     timestamp: tx.content.timestamp,
                     nonce: tx.content.nonce,
+                    reference_block: signedReferenceBlock(tx),
                 }))
                 try {
                     const { inserted } = await chunkedInsert(

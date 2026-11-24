@@ -93,8 +93,15 @@ interface TxOptions {
     signer?: TestAccount
 }
 
-const makeTx = (sender = alice, options: TxOptions = {}) =>
-    makeSignedTx(sender, bob, { ...options, height: HEIGHT })
+// A reference block named in attrs is also the one the sender signed.
+const makeTx = (sender = alice, options: TxOptions = {}) => {
+    const reference = options.attrs?.reference_block
+    return makeSignedTx(sender, bob, {
+        ...options,
+        height: HEIGHT,
+        ...(typeof reference === "number" ? { referenceBlock: reference } : {}),
+    })
+}
 
 function makeBlock(
     txs: any[],
@@ -367,6 +374,26 @@ describe("planBlockOutcome", () => {
         })
         await expect(
             planBlockOutcome(makeBlock([claimedConfirmed]), [claimedConfirmed]),
+        ).rejects.toBeInstanceOf(SyncBlockRejectedError)
+    })
+
+    it("judges the signed reference block, not the attrs a peer serves", async () => {
+        const expired = makeTx(alice, {
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 4 },
+        })
+        // The peer claims an in-window reference block for the same body.
+        expired.attrs = { reference_block: HEIGHT - 1 }
+        const plan = await planBlockOutcome(makeBlock([expired]), [expired])
+        expect(plan.failedBeforeApply.get(expired.hash)).toBe(
+            "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE",
+        )
+    })
+
+    it("rejects a block listing a transaction with no signed reference block", async () => {
+        const unsigned = makeSignedTx(alice, bob, { height: HEIGHT, referenceBlock: null })
+        await expect(
+            planBlockOutcome(makeBlock([unsigned]), [unsigned]),
         ).rejects.toBeInstanceOf(SyncBlockRejectedError)
     })
 

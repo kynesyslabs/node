@@ -70,7 +70,7 @@ function validityData(): any {
             valid: true,
             reference_block: 100,
             message: "",
-            transaction: { hash: HASH, blockNumber: 101, content: { type: "native", data: ["native", {}] } },
+            transaction: { hash: HASH, blockNumber: 101, content: { type: "native", data: ["native", {}], reference_block: 100 } },
         },
         signature: { type: "ed25519", data: "bb".repeat(64) },
         rpc_public_key: { type: "ed25519", data: OUR_KEY },
@@ -131,7 +131,7 @@ describe("broadcastTx disposition", () => {
 
     it("mempool: an L2PS transaction accepted into this node's L2PS mempool", async () => {
         const data = validityData()
-        data.data.transaction.content = { type: "l2psEncryptedTx", from: "0xaa", data: ["l2psEncryptedTx", { ciphertext: "x" }] }
+        data.data.transaction.content = { type: "l2psEncryptedTx", from: "0xaa", data: ["l2psEncryptedTx", { ciphertext: "x" }], reference_block: 100 }
         data.data.transaction.signature = { type: "ed25519", data: "cc".repeat(64) }
 
         const reply = await handleExecuteTransaction(data, "sender")
@@ -161,7 +161,7 @@ describe("broadcastTx disposition", () => {
             authorization: "Bearer tx-token",
         }))
         const data = validityData()
-        data.data.transaction.content = { type: "web2Request", from: "0xaa", data: ["web2Request", { message: {} }] }
+        data.data.transaction.content = { type: "web2Request", from: "0xaa", data: ["web2Request", { message: {} }], reference_block: 100 }
 
         await handleExecuteTransaction(data, "sender")
 

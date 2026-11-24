@@ -8,6 +8,7 @@ import {
     isReferenceBlockAllowed,
     isWithinDeepWindow,
     previousRuleHeights,
+    signedReferenceBlock,
 } from "../referenceBlockWindow"
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
@@ -204,10 +205,8 @@ const statusOf = (tx: Transaction) => tx.status
  * nonce is already spent. Everything else was applied and its status is
  * decided by the apply itself, which the caller runs locally.
  *
- * The reference block of a transaction is not part of what the sender signs;
- * it is read from the attrs the peer served. That is a limit of this check: a
- * peer can serve an expired tx as confirmed with an in-window reference block
- * and nothing here can tell. Closing it needs the block to commit to the attrs.
+ * The reference block is the one the sender signed in the transaction
+ * content, which the hash check has already covered.
  */
 export async function planBlockOutcome(
     block: Block,
@@ -240,17 +239,21 @@ export async function planBlockOutcome(
             continue
         }
 
-        const reference = tx.attrs?.reference_block
+        // The signed value: the attrs a peer serves are not read. A listed
+        // tx without one cannot have been admitted by any forger.
+        const reference = signedReferenceBlock(tx)
+        if (reference === null) {
+            throw new SyncBlockRejectedError(
+                `tx ${tx.hash} of block ${block.number} has no valid signed reference block`,
+            )
+        }
         const copy = Object.assign(
             Object.create(Object.getPrototypeOf(tx)),
             tx,
             { reference_block: reference },
         ) as MempoolTransaction
 
-        if (
-            typeof reference === "number" &&
-            !isReferenceBlockAllowed(reference, head)
-        ) {
+        if (!isReferenceBlockAllowed(reference, head)) {
             // Outside the deep window the forger never admits the tx at all,
             // so it cannot be in a block, failed or not.
             if (!isWithinDeepWindow(reference, head)) {

@@ -39,6 +39,7 @@ function batch(i: number) {
             nonce: 1_000 - i,
             gcr_edits: [],
             data: ["l2psBatch", {}],
+            reference_block: 100,
         },
     } as any
 }

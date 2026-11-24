@@ -68,6 +68,8 @@ export async function buildNodeHashUpdate(
     }
     tx.content.gcr_edits = await generateGcrEdits(tx as never)
 
+    // Signed with the rest of the content, as for a client's transaction.
+    Object.assign(tx.content, { reference_block: referenceBlock })
     const serialized = serializeTransactionContent(tx.content as never, referenceBlock)
     tx.hash = Hashing.sha256(serialized)
     // The stored body is the wire shape the hash covers.

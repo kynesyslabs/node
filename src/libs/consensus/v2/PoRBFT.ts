@@ -65,6 +65,7 @@ import {
     type FailedTranscation,
     type MempoolTransaction,
 } from "./routines/mempoolFilters"
+import { signedReferenceBlock } from "@/libs/blockchain/referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
@@ -465,7 +466,7 @@ export async function consensusRoutine(): Promise<void> {
                         tx.attrs = {
                             code: failed.code,
                             message: failed.message,
-                            reference_block: tx.reference_block,
+                            reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                             ...(failed.attrs ?? {}),
                         }
                     }
@@ -567,7 +568,7 @@ export async function consensusRoutine(): Promise<void> {
                         tx.attrs = {
                             code: failed.code,
                             message: failed.message,
-                            reference_block: tx.reference_block,
+                            reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                             ...(failed.attrs ?? {}),
                         }
                     }
@@ -583,7 +584,7 @@ export async function consensusRoutine(): Promise<void> {
                     if (tx) {
                         tx.status = TRANSACTION_STATUS.CONFIRMED
                         tx.attrs = {
-                            reference_block: tx.reference_block,
+                            reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                         }
                     }
                 }

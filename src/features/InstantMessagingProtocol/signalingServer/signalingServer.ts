@@ -678,6 +678,8 @@ export class SignalingServer {
             // the chain head once and reuse it as the mempool reference so
             // gating and reference block stay consistent.
             const referenceBlock = await Chain.getLastBlockNumber()
+            // Signed with the rest of the content, as for a client's transaction.
+            Object.assign(transaction.content, { reference_block: referenceBlock })
             transaction.hash = Hashing.sha256(
                 serializeTransactionContent(transaction.content, referenceBlock),
             )

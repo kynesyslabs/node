@@ -15,9 +15,15 @@ export const PEER = "0x" + "cd".repeat(32)
 export const VICTIM = "0x" + "9a".repeat(32)
 
 let sdkPostFork = true
+let sdkHead = 100
+/** The chain height the SDK signs against, which becomes the reference block. */
+export function sdkSignsAt(height: number): void {
+    sdkHead = height
+}
 export const demos: any = new Demos()
 await demos.connectWalletFromPrivateKey("0x" + "11".repeat(32), { algorithm: "ed25519" })
 demos.getAddressNonce = async () => 7
+demos.getLastBlockNumber = async () => sdkHead
 demos._isPostForkCached = async () => sdkPostFork
 demos._assertAmountAcceptableOnTargetNode = async () => {}
 demos._getNetworkParametersCached = async () => ({ networkFee: 1, rpcFee: 0 })

@@ -37,6 +37,8 @@ export interface TestTxOptions {
     legacyAmounts?: boolean
     /** Sign the chain-bound preimage for this chain id instead of the bare hash. */
     signatureChainId?: number
+    /** Signed reference block; `height - 1` by default, null leaves it out. */
+    referenceBlock?: number | null
 }
 
 export function makeSignedTx(
@@ -74,6 +76,11 @@ export function makeSignedTx(
             },
         ],
     }
+    const referenceBlock =
+        options.referenceBlock === undefined
+            ? options.height - 1
+            : options.referenceBlock
+    if (referenceBlock !== null) content.reference_block = referenceBlock
     const hash = createHash("sha256")
         .update(serializeTransactionContent(content, options.hashHeight ?? options.height))
         .digest("hex")
@@ -96,6 +103,6 @@ export function makeSignedTx(
         ed25519_signature: null,
         status: options.status ?? "confirmed",
         blockNumber: options.height,
-        attrs: options.attrs ?? { reference_block: options.height - 1 },
+        attrs: options.attrs ?? { reference_block: referenceBlock ?? options.height - 1 },
     }
 }
