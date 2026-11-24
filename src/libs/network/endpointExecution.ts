@@ -358,10 +358,8 @@ export async function handleExecuteTransaction(
                 break
             }
             const params = parseWeb2ProxyRequest(payload)
-            // This re-runs the request when the tx is broadcast. Drop the
-            // credential headers on the sensitive-key list and the tx's own
-            // authorization so the replay does not carry them; other
-            // credentials are not covered.
+            // This re-runs the request when the tx is broadcast. Only the
+            // allow-listed headers and no authorization are forwarded.
             params.web2Request.raw.headers = headersForReplay(
                 params.web2Request.raw.headers,
             )
