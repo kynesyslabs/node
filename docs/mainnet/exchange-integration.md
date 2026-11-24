@@ -84,8 +84,10 @@ instead. It is not a terminal state, whatever the `reason`
 `seat_refused`, `refused_for_block`): do not treat it as "cannot execute".
 Another node may still hold and include the transaction, and it can come
 back to this node's pool. Keep checking; only a block is final. A block
-always wins: if one later carries the transaction, the node answers
-`included` or `failed`.
+wins once this node has inserted it: the node then answers `included` or
+`failed`. While a block that carries the transaction is being inserted, a
+reply can still read `dropped` for a moment; it is not terminal, so keep
+polling and the next reply reads `included` or `failed`.
 
 A malformed or `0x`-prefixed hash gets `result` 400. A lookup error gets
 `result` 500; retry on another node.

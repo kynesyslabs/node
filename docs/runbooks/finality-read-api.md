@@ -87,7 +87,9 @@ non-terminal.
 
 `dropped` (`200`) means this node no longer holds the transaction in its
 mempool, and no block has taken it. `droppedAtBlock` is the node's head and
-`droppedAt` the time (ms) when it removed it. `reason` says why:
+`droppedAt` the time (ms) when it removed it. `droppedAtBlock` may be above
+`checkedThroughBlock` in the same reply when a block is inserted during the
+lookup. `reason` says why:
 
 | `reason` | Removed because |
 |---|---|
@@ -101,9 +103,12 @@ mempool, and no block has taken it. `droppedAtBlock` is the node's head and
 `dropped` is not a terminal state, whatever the reason. It does not mean the
 transaction cannot execute: another node may still hold and include it, and
 it can come back to this node's pool. Keep checking; only a block is final.
-Never re-sign it with a new nonce, or both may execute. A block or the
-mempool always wins: a dropped transaction that a block later carries reads
-`included` or `failed`, and one that comes back to the pool reads `pending`.
+Never re-sign it with a new nonce, or both may execute. A block wins once
+this node has inserted it, and the pool once the transaction is back in it:
+the transaction then reads `included` or `failed`, or `pending`. For a moment
+while such a block is being inserted, or the transaction admitted again, a
+reply can still read `dropped`; it is not terminal, so keep polling and the
+next reply reads `included`, `failed` or `pending`.
 
 The record is per node, in memory and bounded (the 50,000 most recent
 drops). A node that never held the transaction, has restarted since, or has
