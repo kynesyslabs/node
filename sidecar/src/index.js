@@ -25,6 +25,8 @@ import {
 } from "@scure/bip39"
 import { wordlist } from "@scure/bip39/wordlists/english.js"
 
+import { parseTopicLimits, sizeValidator, withinTopicLimit } from "./limits.js"
+
 const PROTOCOL_VERSION = 1
 const HEIGHTS_TOPIC = "demos/heights/1"
 const BLOCKS_TOPIC = "demos/blocks/1"
@@ -68,6 +70,34 @@ const PEER_EXCHANGE = true
 const ALLOW_PUBLISH_TO_ZERO_PEERS = true
 
 const slog = (msg) => process.stderr.write(`[SIDECAR] ${msg}\n`)
+
+// The parent's per-topic size bounds. Without them an oversized message
+// would be relayed across the mesh and only dropped by each node after
+// delivery, so the sidecar does not start.
+let topicLimits
+try {
+    topicLimits = parseTopicLimits(process.env.GOSSIP_TOPIC_MAX_BYTES, ALL_TOPICS)
+} catch (e) {
+    slog(`cannot start without topic size bounds: ${e.message}`)
+    process.exit(1)
+}
+
+const OVERSIZED_LOG_INTERVAL_MS = 30_000
+let oversizedSinceLog = 0
+let lastOversizedLogAt = 0
+
+// One line per interval however many arrive: every stderr line is logged
+// by the parent.
+function noteOversized(topic, length) {
+    oversizedSinceLog++
+    const now = Date.now()
+    if (now - lastOversizedLogAt < OVERSIZED_LOG_INTERVAL_MS) return
+    slog(
+        `refused ${oversizedSinceLog} oversized message(s) before relay; last: ${length} bytes on ${topic}`,
+    )
+    lastOversizedLogAt = now
+    oversizedSinceLog = 0
+}
 
 function componentLogger() {
     const makeLogger = (component) => {
@@ -165,6 +195,10 @@ const node = await createLibp2p({
     },
 })
 const pubsub = node.services.pubsub
+// Before any subscription, so no message is forwarded unchecked.
+for (const topic of ALL_TOPICS) {
+    pubsub.topicValidators.set(topic, sizeValidator(topicLimits, noteOversized))
+}
 for (const topic of ALWAYS_TOPICS) pubsub.subscribe(topic)
 slog(`libp2p up: peerId ${node.peerId.toString()} port ${PORT}`)
 
@@ -247,7 +281,14 @@ async function handleCommand(cmd) {
         }
         case "publish": {
             try {
-                await pubsub.publish(cmd.topic, Buffer.from(cmd.data, "base64"))
+                const data = Buffer.from(cmd.data, "base64")
+                // Topic validators do not run on a node's own messages.
+                if (!withinTopicLimit(topicLimits, cmd.topic, data.length)) {
+                    throw new Error(
+                        `message of ${data.length} bytes is over the size bound for ${cmd.topic}`,
+                    )
+                }
+                await pubsub.publish(cmd.topic, data)
                 send({ type: "publish_result", topic: cmd.topic, ok: true })
             } catch (e) {
                 slog(`publish to ${cmd.topic} failed: ${e.message}`)
