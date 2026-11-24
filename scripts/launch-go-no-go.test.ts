@@ -658,6 +658,15 @@ describe("checkLaunch", () => {
         expect(d.reasons.join("\n")).toContain("fork atomicWork is scheduled at 1000000")
     })
 
+    it("keeps canonicalSigners off at launch, as docs/mainnet/genesis.md states", () => {
+        expect(LAUNCH_DORMANT_FORKS).toContain("canonicalSigners")
+        expect(MAINNET_FORKS).not.toContain("canonicalSigners")
+        const forks = { ...mainnetForks(), canonicalSigners: { activationHeight: 1000000 } }
+        const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("fork canonicalSigners is scheduled at 1000000")
+    })
+
     it("launches with seats open by NFT only: the gate, tokenStaking and nftValidatorGating at block 0", () => {
         expect(MAINNET_FORKS).toContain("tokenStakingGate")
         expect(MAINNET_FORKS).toContain("tokenStaking")

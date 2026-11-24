@@ -227,6 +227,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
  */
 export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
     "atomicWork",
+    "canonicalSigners",
     "networkGovernance",
     "l2psGate",
     "tlsnDisabled",

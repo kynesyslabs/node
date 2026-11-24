@@ -76,6 +76,10 @@ SUITE_FILES=(
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/Sync.signerBoundary.test.ts
+    src/libs/blockchain/validation/verifyBlock.test.ts
+    src/libs/blockchain/validation/verifyBlock.crypto.test.ts
+    src/libs/blockchain/validation/signerRule.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/blockchain/routines/validateTransaction.feeBalance.test.ts
     src/libs/blockchain/routines/validateTransaction.fees.test.ts
