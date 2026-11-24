@@ -9,6 +9,7 @@ import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
 import { VersionedTransaction } from "@solana/web3.js"
 import { pickRpcUrl, sendSignedEvmTransaction } from "./rpcUrl"
+import errorKind, { logField } from "../errorKind"
 
 /**
  * Executes a XM pay operation and returns
@@ -105,8 +106,7 @@ export default async function handlePayOperation(
             }
     }
 
-    log.debug("[XMScript Parser] Non-EVM PAY: result")
-    log.debug(result)
+    log.debug(`[XMScript Parser] Non-EVM PAY: result ${result?.result}`)
 
     // REVIEW is this ok here?
     return result
@@ -122,9 +122,9 @@ export async function genericJsonRpcPay(
     rpcUrl: string,
     operation: IOperation,
 ) {
-    log.debug([
-        `[XMScript Parser] Generic JSON RPC Pay on: ${operation.chain}.${operation.subchain}`,
-    ])
+    log.debug(
+        `[XMScript Parser] Generic JSON RPC Pay on: ${logField(operation.chain)}.${logField(operation.subchain)}`,
+    )
     let instance: multichain.IBC
 
     try {
@@ -142,13 +142,15 @@ export async function genericJsonRpcPay(
 
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)
-        log.debug("[XMScript Parser] Generic JSON RPC Pay: result: ")
-        log.debug(result)
+        log.debug(
+            `[XMScript Parser] Generic JSON RPC Pay: result ${result?.result}`,
+        )
 
         return result
     } catch (error) {
-        log.error("[XMScript Parser] Generic JSON RPC Pay: error: ")
-        log.error(error)
+        log.error(
+            `[XMScript Parser] Generic JSON RPC Pay on ${logField(operation.chain)}.${logField(operation.subchain)} failed: ${errorKind(error)}`,
+        )
         return {
             result: "error",
             error: error.toString(),
@@ -201,11 +203,7 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
     log.debug(
         "[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
-    log.debug(chainID)
-
-    log.debug(operation.task.signedPayloads)
-
-    log.debug(operation.task.signedPayloads[0])
+    log.debug(`[XMScript Parser] EVM Pay: chain id ${chainID}`)
 
     return await sendSignedEvmTransaction(operation, chainID)
 }
@@ -217,11 +215,15 @@ async function handleXRPLPay(
     rpcUrl: string,
     operation: IOperation,
 ): Promise<TransactionResponse> {
+    const target = `${logField(operation.chain)} on ${logField(operation.subchain)}`
+    // NOTE An allow-listed caller URL is caller-supplied, so no URL is logged
+    const rpcKind =
+        rpcUrl === chainProviders[operation.chain]?.[operation.subchain]
+            ? "configured RPC"
+            : "allow-listed caller RPC"
+    log.debug(`[XMScript Parser] Ripple Pay: ${target}`)
     log.debug(
-        `[XMScript Parser] Ripple Pay: ${operation.chain} on ${operation.subchain}`,
-    )
-    log.debug(
-        `[XMScript Parser] Ripple Pay: we will use ${rpcUrl} to connect to ${operation.chain} on ${operation.subchain}`,
+        `[XMScript Parser] Ripple Pay: we will use the ${rpcKind} to connect to ${target}`,
     )
     log.debug(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
@@ -339,7 +341,7 @@ async function handleXRPLPay(
             extra: { code: txResult, validated: res.result.validated },
         }
     } catch (error) {
-        log.error("[XMScript Parser] Ripple Pay error: " + error)
+        log.error(`[XMScript Parser] Ripple Pay error: ${errorKind(error)}`)
         return {
             result: "error",
             error: error instanceof Error ? error.message : String(error),

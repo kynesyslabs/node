@@ -115,6 +115,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/outboundEntryGate.test.ts
     src/features/multichain/XMDispatcher.test.ts
+    src/features/multichain/XMDispatcher.logs.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/network/rateLimiter.loopback.test.ts
     src/libs/network/rpcGossipSize.test.ts
@@ -216,6 +217,11 @@ SUITE_FILES=(
     testing/loadgen/src/token_script_complex_policy_object_amounts.test.ts
     testing/loadgen/src/token_settle_check_balance_log.test.ts
     testing/loadgen/src/token_total_supply_log.test.ts
+    # XM contract reads, XM results and XM/DemosWork request logs
+    src/features/multichain/routines/errorKind.test.ts
+    src/features/multichain/routines/executors/contract_read.test.ts
+    src/features/multichain/routines/executors/executorLogs.test.ts
+    src/libs/network/routines/transactions/demosWork/handleDemosWorkRequest.test.ts
 )
 
 list_suite_files() {
