@@ -47,7 +47,7 @@ const API_KEY = "web2secretkey"
 function script(): any {
     return {
         operationOrder: ["op1"],
-        operations: { op1: { operationType: "base", work: ["s1", "s2"] } },
+        operations: { op1: { operationType: "base", id: ["s1", "s2"] } },
         steps: {
             s1: {
                 id: "s1",
