@@ -95,7 +95,7 @@ function web2Tx(from: string, headers: Record<string, string>): any {
             valid: true,
             reference_block: 100,
             message: "",
-            transaction: { hash: HASH, blockNumber: 101, content: { type: "web2Request", from, data: ["web2Request", payload] } },
+            transaction: { hash: HASH, blockNumber: 101, content: { type: "web2Request", from, reference_block: 100, data: ["web2Request", payload] } },
         },
         signature: { type: "ed25519", data: "bb".repeat(64) },
         rpc_public_key: { type: "ed25519", data: OUR_KEY },
