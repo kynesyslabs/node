@@ -123,6 +123,7 @@ function workTx(stepIds: string[], order: string[] = ["op1"]): any {
                 content: {
                     type: "demoswork",
                     from: SENDER,
+                    reference_block: 100,
                     data: ["demoswork", { operationOrder: order, operations, steps }],
                 },
             },
