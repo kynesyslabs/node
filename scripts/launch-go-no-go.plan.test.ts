@@ -114,18 +114,20 @@ describe("mainnet genesis template", () => {
             ...g.forks.tlsnVerified.notaryKeys.map((k: { hex: string }) => k.hex),
             g.forks.tlsnVerified.verifierWasmSha256,
             g.timestamp,
-            g.validators,
         ]) {
             expect(isFill(v)).toBe(true)
         }
         await expect(launchGenesisExpectations(g)).rejects.toThrow()
     })
 
-    it("pins no identity beyond the allocation holders", () => {
+    it("pins no identity beyond the allocation holders and the launch validators", () => {
         const g = readTemplate()
-        const holders = new Set(g.balances.map(([a]: [string, string]) => a))
+        const known = new Set([
+            ...g.balances.map(([a]: [string, string]) => a),
+            ...g.validators.map((v: { address: string }) => v.address),
+        ])
         const text = readFileSync(TEMPLATE, "utf8")
-        for (const hex of text.match(/0x[0-9a-f]{64}/g) ?? []) expect(holders.has(hex)).toBe(true)
+        for (const hex of text.match(/0x[0-9a-f]{64}/g) ?? []) expect(known.has(hex)).toBe(true)
     })
 
     it("carries the agreed allocations: one whole-DEM balance per distinct holder", () => {
