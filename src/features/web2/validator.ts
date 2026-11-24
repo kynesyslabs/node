@@ -10,9 +10,11 @@ export type UrlValidationResult =
  * - Rejects URLs without a hostname
  * - Rejects localhost and loopback IP addresses/hostnames (SSRF protection)
  * - Lowercases host, strips default ports, and removes fragments for canonicalization
+ * - Rejects a URL that is longer than SESSION_URL_MAX_CHARS once normalized
  * - Redacts sensitive data in error messages (does not echo the full URL)
  */
 import net from "node:net"
+import { SESSION_URL_MAX_CHARS } from "./dahr/sessionLimit"
 
 export function validateAndNormalizeHttpUrl(
     input: string,
@@ -140,7 +142,18 @@ export function validateAndNormalizeHttpUrl(
         // Remove fragment
         canonicalUrlObject.hash = ""
 
-        return { ok: true, normalizedUrl: canonicalUrlObject.toString() }
+        // 7. Limit the length of what the session's relay then holds.
+        // Measured here: percent-encoding makes a URL longer than it was sent.
+        const normalizedUrl = canonicalUrlObject.toString()
+        if (normalizedUrl.length > SESSION_URL_MAX_CHARS) {
+            return {
+                ok: false,
+                status: 400,
+                message: `Invalid URL: longer than ${SESSION_URL_MAX_CHARS} characters`,
+            }
+        }
+
+        return { ok: true, normalizedUrl }
     } catch {
         return { ok: false, status: 400, message: "Invalid URL format" }
     }
