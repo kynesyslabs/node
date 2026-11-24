@@ -53,6 +53,7 @@ SUITE_FILES=(
     src/libs/blockchain/finality/verify.test.ts
     src/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines.test.ts
     src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.granular.test.ts
+    src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.recreate.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/zkRoutines.test.ts
     src/libs/blockchain/gcr/handleGCR.atomic.test.ts
