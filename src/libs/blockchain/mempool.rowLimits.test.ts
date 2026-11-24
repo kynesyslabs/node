@@ -38,6 +38,7 @@ function message(to: string) {
             gcr_edits: [],
             nonce: 1,
             timestamp,
+            reference_block: 100,
             transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
         },
         signature: { type: "ed25519", data: "00" },
