@@ -1,149 +1,256 @@
 {
-  "properties": {
-    "id": 8587492,
-    "name": "FILL: network name (testnet: DEMOS)",
-    "currency": "FILL: currency symbol (testnet: DEM)",
-    "shardSize": 10,
-    "sudoPubkey": "FILL: lowercase 0x + 64 hex key allowed to sign award transactions, or delete this field to accept none"
-  },
-  "mutables": {
-    "minBlocksForValidationOnlineStatus": 4
-  },
-  "forks": {
-    "osDenomination": {
-      "activationHeight": 0
+    "properties": {
+        "id": 8587492,
+        "name": "DEMOS",
+        "currency": "DEM",
+        "shardSize": 10,
+        "sudoPubkey": "FILL: lowercase 0x + 64 hex key allowed to sign award transactions, or delete this field to accept none"
     },
-    "nonceEnforcement": {
-      "activationHeight": 0
+    "mutables": {
+        "minBlocksForValidationOnlineStatus": 4
     },
-    "signatureDomain": {
-      "activationHeight": 0
+    "forks": {
+        "osDenomination": {
+            "activationHeight": 0
+        },
+        "nonceEnforcement": {
+            "activationHeight": 0
+        },
+        "signatureDomain": {
+            "activationHeight": 0
+        },
+        "editBinding": {
+            "activationHeight": 0
+        },
+        "nonceIntegrity": {
+            "activationHeight": 0
+        },
+        "quorumParity": {
+            "activationHeight": 0
+        },
+        "committeeBinding": {
+            "activationHeight": 0
+        },
+        "commitLock": {
+            "activationHeight": 0
+        },
+        "finalityProofs": {
+            "activationHeight": 0
+        },
+        "identityCarryover": {
+            "activationHeight": 0
+        },
+        "stakeApplyChecks": {
+            "activationHeight": 0
+        },
+        "txTypeAllowList": {
+            "activationHeight": 0
+        },
+        "instantMessagingBinding": {
+            "activationHeight": 0
+        },
+        "nativeSendBinding": {
+            "activationHeight": 0
+        },
+        "canonicalAddresses": {
+            "activationHeight": 0
+        },
+        "feeBinding": {
+            "activationHeight": 0
+        },
+        "blockCaps": {
+            "activationHeight": 0
+        },
+        "unpinnedCommittee": {
+            "activationHeight": 0
+        },
+        "telegramSenderBinding": {
+            "activationHeight": 0
+        },
+        "xmRemoveCanonical": {
+            "activationHeight": 0
+        },
+        "tokenStakingGate": {
+            "activationHeight": 0
+        },
+        "tokenStaking": {
+            "activationHeight": 0
+        },
+        "nftValidatorGating": {
+            "activationHeight": 0
+        },
+        "l2psSettlement": {
+            "activationHeight": 0
+        },
+        "gasFeeSeparation": {
+            "activationHeight": 0,
+            "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"
+        },
+        "web2ProofBinding": {
+            "activationHeight": 0
+        },
+        "tlsnProofEnforcement": {
+            "activationHeight": 0
+        },
+        "l2psGate": {
+            "activationHeight": null
+        },
+        "tlsnDisabled": {
+            "activationHeight": null
+        },
+        "tlsnVerified": {
+            "activationHeight": 0,
+            "notaryKeys": [
+                {
+                    "id": "demos-notary-1",
+                    "alg": "k256",
+                    "hex": "FILL: primary notary public key from the notary key ceremony, 33-byte compressed secp256k1, lowercase 02 or 03 + 64 hex"
+                },
+                {
+                    "id": "demos-notary-standby",
+                    "alg": "k256",
+                    "hex": "FILL: cold standby notary public key from the notary key ceremony, 33-byte compressed secp256k1, lowercase 02 or 03 + 64 hex"
+                }
+            ],
+            "verifierWasmSha256": "FILL: sha256 of native/tlsn-verify/dist/demos_tlsn_verify.wasm in the launch release, 64 lowercase hex",
+            "maxPresentationBytes": 65536,
+            "freshnessWindowSec": 3600,
+            "futureSkewSec": 60
+        },
+        "xmProofBinding": {
+            "activationHeight": 0
+        },
+        "storageFeeSettlement": {
+            "activationHeight": 0
+        },
+        "referenceBlockRoom10": {
+            "activationHeight": 0
+        },
+        "keylessWeb2Identity": {
+            "activationHeight": 0
+        },
+        "atomicWork": {
+            "activationHeight": null
+        },
+        "canonicalSigners": {
+            "activationHeight": null
+        },
+        "networkGovernance": {
+            "activationHeight": null
+        }
     },
-    "editBinding": {
-      "activationHeight": 0
+    "snapshot": {
+        "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
     },
-    "nonceIntegrity": {
-      "activationHeight": 0
-    },
-    "quorumParity": {
-      "activationHeight": 0
-    },
-    "committeeBinding": {
-      "activationHeight": 0
-    },
-    "commitLock": {
-      "activationHeight": 0
-    },
-    "finalityProofs": {
-      "activationHeight": 0
-    },
-    "identityCarryover": {
-      "activationHeight": 0
-    },
-    "stakeApplyChecks": {
-      "activationHeight": 0
-    },
-    "txTypeAllowList": {
-      "activationHeight": 0
-    },
-    "instantMessagingBinding": {
-      "activationHeight": 0
-    },
-    "nativeSendBinding": {
-      "activationHeight": 0
-    },
-    "canonicalAddresses": {
-      "activationHeight": 0
-    },
-    "feeBinding": {
-      "activationHeight": 0
-    },
-    "blockCaps": {
-      "activationHeight": 0
-    },
-    "unpinnedCommittee": {
-      "activationHeight": 0
-    },
-    "telegramSenderBinding": {
-      "activationHeight": 0
-    },
-    "xmRemoveCanonical": {
-      "activationHeight": 0
-    },
-    "tokenStakingGate": {
-      "activationHeight": 0
-    },
-    "tokenStaking": {
-      "activationHeight": 0
-    },
-    "nftValidatorGating": {
-      "activationHeight": 0
-    },
-    "l2psSettlement": {
-      "activationHeight": 0
-    },
-    "gasFeeSeparation": {
-      "activationHeight": 0,
-      "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"
-    },
-    "web2ProofBinding": {
-      "activationHeight": 0
-    },
-    "tlsnProofEnforcement": {
-      "activationHeight": 0
-    },
-    "l2psGate": {
-      "activationHeight": null
-    },
-    "tlsnDisabled": {
-      "activationHeight": null
-    },
-    "tlsnVerified": {
-      "activationHeight": 0,
-      "notaryKeys": [
+    "balances": [
+        [
+            "0x1628e929d5105bbc2c53e386f9e3b6393b3e630b63757409025cacae95bc45c9",
+            "230000000000000000"
+        ],
+        [
+            "0x6c7c089b60f1a077ea63a6bdd4c7e24cda47ed38e2cde5c9140e00ac2d14d700",
+            "160000000000000000"
+        ],
+        [
+            "0x0e896c3d82ccb723cfee6ef514e6828e98b4ef1267bbdfd8f1baaf31000e22c6",
+            "30000000000000000"
+        ],
+        [
+            "0x404aaf4c9b6875552a21987e2d841a822529b346b6b0820f9107daa758cd1aa6",
+            "100000000000000000"
+        ],
+        [
+            "0xa90b8c4df9127fc14e6745edae4aae5675f5c047a7c071b2a0c8fde0784d65f8",
+            "300000000000000000"
+        ],
+        [
+            "0x2ad5030c32f3b5e4b4a5de68254dbb889046fd012c3dc3a1f58bf1ce26620e21",
+            "140000000000000000"
+        ],
+        [
+            "0x11dced2f2ce8ebd2f1eac8ff28da1680445a4464839ff9b096ff93227c2378d2",
+            "40000000000000000"
+        ]
+    ],
+    "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
+    "status": "confirmed",
+    "validators": [
         {
-          "id": "demos-notary-1",
-          "alg": "k256",
-          "hex": "FILL: primary notary public key from the notary key ceremony, 33-byte compressed secp256k1, lowercase 02 or 03 + 64 hex"
+            "address": "0x2294f976c596c081134bfcfb88b163104f92c0d03c24725f2d1d2f8c71a8243f",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "4jCLdgAGA5ra1wGcrNrqqCby5fVEpW8PvvdXCNJWErjP",
+            "nft_owner": "EdoCpYZcaXakjFzxWjxFn17r9Knh2EWWvHF516ADEBbj",
+            "nft_proof_tx": "5zLanNQUc4MEZEFY3Ep6Aigg5HjLgDoEoYkfaH5cFwq1t7LAe3i1ikZJFBfmwSKRgowqj7HmNCBsfBmTB1oVFFa"
         },
         {
-          "id": "demos-notary-standby",
-          "alg": "k256",
-          "hex": "FILL: cold standby notary public key from the notary key ceremony, 33-byte compressed secp256k1, lowercase 02 or 03 + 64 hex"
+            "address": "0x546e328193d550d5fa70c16a1a261e67bc8a45305f68a8f77ce578d2ea03a701",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "6129TwyaWtTrC29T1mwDeLUQV99hVu1jiXR8yhqMBoZf",
+            "nft_owner": "EdoCpYZcaXakjFzxWjxFn17r9Knh2EWWvHF516ADEBbj",
+            "nft_proof_tx": "37ZS6eaWkCabiz2uRoJyKB9Pjwtdv5ckEfnuturwShgzzewY3vySpaZqEb8itwnbPfUWqmsz2Mr1gexHEjPFnqtK"
+        },
+        {
+            "address": "0xb2b4f3d83e6b90a01796efd55ffb2e094d2a847656ad80fef552ed7f994b81a3",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "HUDgv4CzV1qrMgGpotUckVRmLaTwxrem4L4abveXXyKV",
+            "nft_owner": "EdoCpYZcaXakjFzxWjxFn17r9Knh2EWWvHF516ADEBbj",
+            "nft_proof_tx": "5fyZNGBaWbvegaxamSR3i39i4HBMhAVNkVFoFZ5LKc4UzQJq9JjcfqPVz1ZCV2EuKwsJKftHcoJYzUqjgiK88YrD"
+        },
+        {
+            "address": "0xdf57f37303510822e84f6d46b687def3b8e4b3db5d229bb88380c759d8a6d2c9",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "3ntMQwVdE1yKrQpuCQZXUwoqb4eVpifbm4wckp67i3va",
+            "nft_owner": "EdoCpYZcaXakjFzxWjxFn17r9Knh2EWWvHF516ADEBbj",
+            "nft_proof_tx": "25ZDzAoiakUv78oDWpq68ierQ9vmQhh8bZB8sMxCPz8TSgvpuLvk3GdZbEn9ou3j24RG4g89wL5H62JsJB1yy5Ak"
+        },
+        {
+            "address": "0x11798b111bacf7a26fef9d81d69e9007e1c59131fadde7eb22f3a96e8df04a75",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "3zqQpfYSXJJBfck7smF9nqhRBfCaDrNQ9wTw1t1XQYQj",
+            "nft_owner": "EdoCpYZcaXakjFzxWjxFn17r9Knh2EWWvHF516ADEBbj",
+            "nft_proof_tx": "5xrZqpWyytSFMnuMSwmLHpRjonBzHMsLtvBDiXGQEq5RYBFQbFph2W41thVUsDgHrAEkSKASyWbUs1WuvPosJn1f"
+        },
+        {
+            "address": "0x0d87b2216538deedcdd23c1349cb5447a70bad3579bf9b5c7c2900bcf2e4738f",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "9FaJVP5xXW725mweA7reLGHr8VXQznnZyB19NRT3wS61",
+            "nft_owner": "EdoCpYZcaXakjFzxWjxFn17r9Knh2EWWvHF516ADEBbj",
+            "nft_proof_tx": "qSDeM85Fh2PAgK9PGBeuCNrUd8bFE4ySCkm2WTs3w2nMnf2mUKjvXK52dohmj4HQ2tVxjyjn2ceTxa2AngQgZ9C"
+        },
+        {
+            "address": "0xd71c5772c8785dfec6dc91c2b6cc39c1bd8555d5ec577178cdcd9e13cde4c31b",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "0",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_mint": "HXm39YweyGmtz2QXihupNqkZWZihF7pYuH5qwk34Th8B",
+            "nft_owner": "uWgHabk4xKePexbvac1ff4yLBwsTWiyUhCtc2Ji51sT",
+            "nft_proof_tx": "3oebhpjJ1vmMJ9xiFyKPMkwBMZrY2kZ2N16yBuYLu41XjhvFWSrMkcYmZCQfo3FtDsYufNpiio9idYyaB6wJFhUD"
         }
-      ],
-      "verifierWasmSha256": "FILL: sha256 of native/tlsn-verify/dist/demos_tlsn_verify.wasm in the launch release, 64 lowercase hex",
-      "maxPresentationBytes": 65536,
-      "freshnessWindowSec": 3600,
-      "futureSkewSec": 60
-    },
-    "xmProofBinding": {
-      "activationHeight": 0
-    },
-    "storageFeeSettlement": {
-      "activationHeight": 0
-    },
-    "referenceBlockRoom10": {
-      "activationHeight": 0
-    },
-    "keylessWeb2Identity": {
-      "activationHeight": 0
-    },
-    "atomicWork": {
-      "activationHeight": null
-    },
-    "canonicalSigners": {
-      "activationHeight": null
-    },
-    "networkGovernance": {
-      "activationHeight": null
-    }
-  },
-  "snapshot": {
-    "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
-  },
-  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, whole starting balances in OS (1 DEM = 10^9 OS; see genesis.md)",
-  "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
-  "status": "confirmed",
-  "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\": \"0\", \"first_seen\": 0, \"valid_at\": 0, \"nft_mint\", \"nft_owner\", \"nft_proof_tx\"}, the NFT fields from scripts/genesis-seeds.ts; no nft_exempt"
+    ]
 }

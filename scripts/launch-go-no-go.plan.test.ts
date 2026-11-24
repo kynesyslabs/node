@@ -113,7 +113,6 @@ describe("mainnet genesis template", () => {
             g.forks.gasFeeSeparation.treasuryAddress,
             ...g.forks.tlsnVerified.notaryKeys.map((k: { hex: string }) => k.hex),
             g.forks.tlsnVerified.verifierWasmSha256,
-            g.balances,
             g.timestamp,
             g.validators,
         ]) {
@@ -122,9 +121,22 @@ describe("mainnet genesis template", () => {
         await expect(launchGenesisExpectations(g)).rejects.toThrow()
     })
 
-    it("pins no identity", () => {
+    it("pins no identity beyond the allocation holders", () => {
+        const g = readTemplate()
+        const holders = new Set(g.balances.map(([a]: [string, string]) => a))
         const text = readFileSync(TEMPLATE, "utf8")
-        expect(text).not.toMatch(/0x[0-9a-f]{64}/)
+        for (const hex of text.match(/0x[0-9a-f]{64}/g) ?? []) expect(holders.has(hex)).toBe(true)
+    })
+
+    it("carries the agreed allocations: one whole-DEM balance per distinct holder", () => {
+        const g = readTemplate()
+        const holders = g.balances.map(([a]: [string, string]) => a)
+        expect(new Set(holders).size).toBe(holders.length)
+        for (const [address, amount] of g.balances) {
+            expect(address).toMatch(/^0x[0-9a-f]{64}$/)
+            expect(amount).toMatch(/^[1-9]\d*$/)
+            expect(BigInt(amount) % 1_000_000_000n).toBe(0n)
+        }
     })
 
     it("carries the decided mainnet chain id, which is none of the refused ones", () => {
