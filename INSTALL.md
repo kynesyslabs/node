@@ -57,7 +57,7 @@ Keep NTP synced and alert on `demos_clock_offset_seconds` above 1 second. In the
 
 That's the whole list:
 
-- **Docker Engine** 28.0 or newer (required for reliable loopback-only port publication)
+- **Docker** 20.10 or newer
 - **Docker Compose** v2 (the `docker compose` plugin, not the legacy `docker-compose` Python script)
 - **git** 2.34 or newer with `ssh-keygen` (Ubuntu 22.04 ships both), to verify the signed release tag
 - **python3** (Ubuntu ships it), which the validator steps and `scripts/node-doctor` use to read `docker compose config`
@@ -483,7 +483,7 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 53550 | `RPC_PORT` | TCP | Node RPC (HTTP); the port in `EXPOSED_URL` |
 | 53551 | `OMNI_PORT` | TCP | OmniProtocol (peer-to-peer binary RPC; peers dial the port the node advertises, so publish it on the same number) |
 | 9095 | `GOSSIP_PORT` | TCP | Gossip; peers dial `EXPOSED_URL`'s host on this port |
-| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Published on every interface |
+| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Docker Compose publishes it on `RPC_SIGNALING_BIND` (loopback by default; clients use Caddy's `/signaling/`) |
 | 7047 | `TLSNOTARY_PORT` | TCP | TLSNotary notary, published on every interface whenever the `tlsnotary` profile is on |
 | 123 | | UDP, outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
@@ -565,6 +565,11 @@ need an additional `[::]` port mapping. A private host interface can be used
 instead. The same port variable controls both sides of the mapping and Caddy's
 upstream.
 `RPC_SIGNALING_BIND` controls Docker publication only; it is not a node setting.
+Docker Engine before 28.0 does not drop traffic that other hosts on the same
+local network segment send to a port published on `127.0.0.1`; on such a host
+with untrusted neighbours, upgrade Docker or block the loopback-published
+ports (signaling, L2PS messaging, TLSNotary per-session proxies) in the host
+firewall.
 
 **Bare metal and Bun:** signaling continues listening on all interfaces; use a
 host firewall or a TLS reverse proxy to control external access. `./run` and
@@ -1230,7 +1235,7 @@ Either way the subnet files land in the `demos_node_data` volume. Put the `.env`
 | 53551       | OmniProtocol | P2P communication (TCP)                 |
 | 9095        | Gossip       | Gossip sidecar (TCP)                    |
 | 7047        | TLSNotary    | TLSNotary server                        |
-| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it |
+| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it. Open only with `RPC_SIGNALING_BIND=0.0.0.0` (Docker publishes it on loopback otherwise, and Caddy serves `/signaling/`) or on bare metal |
 | 55000-55063 | WS Proxy     | Per-session TLSNotary proxies (TCP), on loopback for a reverse proxy on this host; bare metal uses 55000-57000. Not opened in the firewall ([Network Exposure](#network-exposure)) |
 | 123 (out)   | NTP          | Outbound UDP; host time sync and the node's clock offset check |
 

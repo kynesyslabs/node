@@ -16,8 +16,9 @@ const hasCompose = DOCKER !== undefined && spawnSync(DOCKER, ["compose", "versio
 describe("signaling operator guidance", () => {
     const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
 
-    it("requires an Engine version that keeps loopback publications local", () => {
-        expect(install).toMatch(/\*\*Docker Engine\*\* 28\.0 or newer/)
+    it("keeps the Docker minimum and names the pre-28 loopback exposure instead", () => {
+        expect(install).toMatch(/\*\*Docker\*\* 20\.10 or newer/)
+        expect(install).toContain("Docker Engine before 28.0 does not drop traffic")
     })
 
     it("documents signaling port drift and its log line for bare-metal operators", () => {

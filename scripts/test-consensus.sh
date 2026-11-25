@@ -40,6 +40,7 @@ SUITE_FILES=(
     src/features/metrics/dbProbe.test.ts
     src/features/metrics/MetricsCollector.dbProbe.test.ts
     src/features/InstantMessagingProtocol/signalingServer/signalingServer.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.limits.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
