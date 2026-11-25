@@ -875,6 +875,11 @@ this restart is a fallback there.
     `TRUSTED_PROXIES` to that proxy's address. A `TRUSTED_PROXIES` value in
     `.env` is still used as before; on a Compose node without
     `docker-compose.proxy.yml`, remove the docker bridge range from it.
+    Before upgrading a Caddy-fronted node (the rehearsal validators, the
+    public RPC and relay node), check that it starts with
+    `./run --docker --proxy` or has that `COMPOSE_FILE` line; a node that
+    gets `X-Forwarded-For` from a private address with an empty list logs
+    `X-Forwarded-For from <address> ignored: TRUSTED_PROXIES is empty`.
   - A `TRUSTED_PROXIES` entry with prefix length 0 (`0.0.0.0/0`, `::/0`)
     stops the node at startup with an error naming the entry.
   - The bundled Caddyfiles drop a client-sent `CF-Connecting-IP` header, as

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime, spyOn } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
 
@@ -66,6 +66,7 @@ mock.module("@/utilities/sharedState", () => ({
 
 const rateLimiterModule = await import("./middleware/rateLimiter")
 const { xffModeProblem } = await import("@/libs/blockchain/genesis/genesisPin")
+const { default: log } = await import("src/utilities/logger")
 
 describe("RateLimiter trusted internal requests", () => {
     let rateLimiter: InstanceType<typeof rateLimiterModule.RateLimiter>
@@ -495,6 +496,79 @@ describe("RateLimiter getClientIP — shipped compose defaults", () => {
             expect([client, ip]).toEqual([client, "172.18.0.3"])
         }
         limiter.destroy()
+    })
+})
+
+describe("RateLimiter getClientIP — Caddy without docker-compose.proxy.yml", () => {
+    const saved = {
+        TRUSTED_PROXIES: process.env.TRUSTED_PROXIES,
+        XFF_MODE: process.env.XFF_MODE,
+    }
+    beforeEach(() => {
+        delete process.env.TRUSTED_PROXIES
+        delete process.env.XFF_MODE
+    })
+    afterEach(() => {
+        setSystemTime()
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k]
+            else process.env[k] = v
+        }
+    })
+
+    function hints(warn: ReturnType<typeof spyOn>): string[] {
+        return warn.mock.calls
+            .map(c => String(c[0]))
+            .filter(m => m.includes("TRUSTED_PROXIES is empty"))
+    }
+
+    it("names the override file once when a private proxy forwards with no trust list, and keeps the socket key", () => {
+        const warn = spyOn(log, "warning").mockImplementation(() => undefined)
+        try {
+            setSystemTime(new Date("2026-11-26T00:00:00Z"))
+            const limiter = buildLimiter({})
+            expect(limiter.getXffMode()).toBe("off")
+            for (let i = 0; i < 5; i++) {
+                const ip = limiter.getClientIP(
+                    reqWith({ "x-forwarded-for": `203.0.113.${i}` }),
+                    fakeServer("172.18.0.3"),
+                )
+                expect(ip).toBe("172.18.0.3")
+            }
+            expect(hints(warn)).toHaveLength(1)
+            expect(hints(warn)[0]).toContain("docker-compose.proxy.yml")
+            setSystemTime(new Date("2026-11-26T00:11:00Z"))
+            limiter.getClientIP(
+                reqWith({ "x-forwarded-for": "203.0.113.9" }),
+                fakeServer("172.18.0.3"),
+            )
+            expect(hints(warn)).toHaveLength(2)
+            limiter.destroy()
+        } finally {
+            warn.mockRestore()
+        }
+    })
+
+    it("stays quiet for public sources, requests without the header and an explicit XFF_MODE=off", () => {
+        const warn = spyOn(log, "warning").mockImplementation(() => undefined)
+        try {
+            const auto = buildLimiter({})
+            auto.getClientIP(
+                reqWith({ "x-forwarded-for": "203.0.113.7" }),
+                fakeServer("198.51.100.4"),
+            )
+            auto.getClientIP(reqWith({}), fakeServer("172.18.0.3"))
+            auto.destroy()
+            const explicit = buildLimiter({ xffMode: "off" })
+            explicit.getClientIP(
+                reqWith({ "x-forwarded-for": "203.0.113.7" }),
+                fakeServer("172.18.0.3"),
+            )
+            explicit.destroy()
+            expect(hints(warn)).toHaveLength(0)
+        } finally {
+            warn.mockRestore()
+        }
     })
 })
 
