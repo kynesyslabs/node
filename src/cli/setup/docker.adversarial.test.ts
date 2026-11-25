@@ -25,7 +25,7 @@ interface Compose {
 let work: string
 beforeAll(() => {
     work = fs.mkdtempSync(path.join(os.tmpdir(), "demos-compose-"))
-    for (const f of ["docker-compose.yml", "docker-compose.devnet.yml"]) fs.copyFileSync(path.join(repo, f), path.join(work, f))
+    for (const f of ["docker-compose.yml", "docker-compose.devnet.yml", "docker-compose.proxy.yml"]) fs.copyFileSync(path.join(repo, f), path.join(work, f))
 })
 afterAll(() => fs.rmSync(work, { recursive: true, force: true }))
 
@@ -162,6 +162,20 @@ describe.skipIf(!hasCompose)("the reverse proxy follows the node's ports", () =>
         const c = compose(["docker-compose.yml"], { PROXY_DOMAIN: "node.example.org" }, "L2PS_MESSAGING_PORT=3100\n", ["proxy"])
         expect(c.json?.services.caddy.environment?.L2PS_MESSAGING_PORT).toBe("3100")
     })
+
+    it("trusts the bridge range only with the override that unpublishes the RPC port", () => {
+        const rpcPublished = (c: Compose) => (c.services.node.ports ?? []).some(p => p.target === 53550)
+        for (const files of [["docker-compose.yml"], ["docker-compose.yml", "docker-compose.devnet.yml"]]) {
+            const direct = compose(files, { PROXY_DOMAIN: "node.example.org" }, undefined, ["proxy"]).json as Compose
+            expect([files.length, direct.services.node.environment?.TRUSTED_PROXIES ?? ""]).toEqual([files.length, ""])
+            expect(rpcPublished(direct)).toBe(true)
+        }
+        const proxied = compose(["docker-compose.yml", "docker-compose.proxy.yml"], { PROXY_DOMAIN: "node.example.org" }, undefined, ["proxy"]).json as Compose
+        expect(proxied.services.node.environment?.TRUSTED_PROXIES).toBe("172.16.0.0/12")
+        expect(rpcPublished(proxied)).toBe(false)
+        const custom = compose(["docker-compose.yml", "docker-compose.proxy.yml"], { PROXY_DOMAIN: "node.example.org" }, "TRUSTED_PROXIES=192.168.16.0/20\n", ["proxy"]).json as Compose
+        expect(custom.services.node.environment?.TRUSTED_PROXIES).toBe("192.168.16.0/20")
+    })
 })
 
 describe("the Caddyfile", () => {
@@ -171,6 +185,15 @@ describe("the Caddyfile", () => {
         expect(caddyfile).toMatch(/handle_path \/messaging\/\*\s*\{\s*reverse_proxy node:\{\$L2PS_MESSAGING_PORT:3006\}/)
         expect(caddyfile).toMatch(/handle_path \/signaling\/\*\s*\{\s*reverse_proxy node:\{\$RPC_SIGNALING_PORT:3005\}/)
         expect(caddyfile).not.toMatch(/reverse_proxy node:300[56]\b/)
+    })
+
+    it("drops the client's X-Forwarded-For, X-Real-IP and CF-Connecting-IP in every bundled Caddyfile", () => {
+        for (const file of ["Caddyfile", "Caddyfile.devnet"]) {
+            const text = fs.readFileSync(path.join(repo, "monitoring/caddy", file), "utf8")
+            for (const header of ["X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP"]) {
+                expect([file, text.includes(`request_header -${header}\n`)]).toEqual([file, true])
+            }
+        }
     })
 
     it("uses only variables the compose file gives the caddy service", () => {

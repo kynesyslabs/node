@@ -6,6 +6,7 @@ const KEYS = [
     "RPC_MAX_BODY_BYTES",
     "RPC_PEER_MAX_BODY_BYTES",
     "RATE_LIMIT_BLOCK_DURATION_MS",
+    "TRUSTED_PROXIES",
 ] as const
 const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]))
 
@@ -51,5 +52,17 @@ describe("RPC limit settings", () => {
 
         process.env.RATE_LIMIT_BLOCK_DURATION_MS = "0"
         expect(() => loadConfig()).toThrow(/RATE_LIMIT_BLOCK_DURATION_MS must be a positive integer/)
+    })
+
+    it("refuses a TRUSTED_PROXIES entry with prefix length 0 and names it", () => {
+        for (const entry of ["0.0.0.0/0", "::/0", "10.1.2.3/0", "0.0.0.0/00"]) {
+            process.env.TRUSTED_PROXIES = `127.0.0.1,${entry}`
+            expect(() => loadConfig()).toThrow(`TRUSTED_PROXIES entry "${entry}" has prefix length 0`)
+        }
+    })
+
+    it("accepts proxy addresses and ranges in TRUSTED_PROXIES", () => {
+        process.env.TRUSTED_PROXIES = "172.16.0.0/12, 127.0.0.1,::1/128,10.0.0.0/8"
+        expect(loadConfig().core.trustedProxies).toEqual(["172.16.0.0/12", "127.0.0.1", "::1/128", "10.0.0.0/8"])
     })
 })

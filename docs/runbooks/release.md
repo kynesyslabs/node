@@ -862,6 +862,23 @@ this restart is a fallback there.
     sees it: behind a reverse proxy that is not listed in
     `TRUSTED_PROXIES` every client shares one cap (a proxy on the same
     host is loopback and skips it).
+  - The `TRUSTED_PROXIES` default in `docker-compose.yml` is empty, so a
+    Compose node reads the client address from the socket only and honours
+    no forwarding header. `docker-compose.proxy.yml` sets it to the docker
+    bridge range (`172.16.0.0/12`) when `.env` leaves it unset. Operators who
+    run Caddy from the `proxy` profile set
+    `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` in `.env` next
+    to the profile (or start with `./run --docker --proxy`); with the profile
+    alone every client behind Caddy shares one rate-limit counter. Operators
+    with their own proxy in front of a Compose node's published RPC port
+    follow `docs/runbooks/proxy-setup.md`, Prerequisites item 4, and set
+    `TRUSTED_PROXIES` to that proxy's address. A `TRUSTED_PROXIES` value in
+    `.env` is still used as before; on a Compose node without
+    `docker-compose.proxy.yml`, remove the docker bridge range from it.
+  - A `TRUSTED_PROXIES` entry with prefix length 0 (`0.0.0.0/0`, `::/0`)
+    stops the node at startup with an error naming the entry.
+  - The bundled Caddyfiles drop a client-sent `CF-Connecting-IP` header, as
+    they already did `X-Forwarded-For` and `X-Real-IP`.
 
 ## Known limits
 

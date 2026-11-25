@@ -33,6 +33,7 @@
 	request_header -X-Forwarded-Host
 	request_header -X-Forwarded-Proto
 	request_header -X-Real-IP
+	request_header -CF-Connecting-IP
 
 	encode zstd gzip
 

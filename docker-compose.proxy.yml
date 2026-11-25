@@ -16,10 +16,6 @@
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 #   COMPOSE_PROFILES=monitoring,tlsnotary,proxy
 #
-# Set EXPOSE_DIRECT_PORTS=true to undo (keep host ports + Caddy together;
-# useful during the smoke-test phase when you want to compare direct vs
-# proxied responses). Default false in this override file.
-#
 # Bare-metal deployments DO NOT use this file at all.
 # =============================================================================
 
@@ -31,6 +27,15 @@ services:
     # a route closed on purpose.
     environment:
       PROXY_ENABLED: "true"
+      # Caddy connects from the docker bridge range. It drops the
+      # X-Forwarded-For, X-Real-IP and CF-Connecting-IP headers clients send
+      # and sets X-Forwarded-For itself, so the node reads the client address
+      # Caddy saw. Clients Caddy itself sees from inside this range (IPv6 or
+      # hairpin clients relayed by docker, hosts on a 172.16.0.0/12 network)
+      # are counted as Caddy and share its rate-limit counter. The RPC port is
+      # not published below, so only the host and containers on the network
+      # reach the node's RPC from this range.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
       PROXY_ALLOW_PLACEHOLDER_AUTH: ${PROXY_ALLOW_PLACEHOLDER_AUTH:-}
       METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-}
       MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-}
