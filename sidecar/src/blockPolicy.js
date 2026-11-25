@@ -1,7 +1,6 @@
 // Dedup by confirmed block hash only; unverified variants keep their own message IDs.
 export const BLOCKS_TOPIC = "demos/blocks/1"
 const MAX_VERIFIED = 2048
-const MAX_BLOCK_BYTES = 1024 * 1024 + 4096
 
 function shallowObject(data) {
     let i = data[0] === 239 && data[1] === 187 && data[2] === 191 ? 3 : 0
@@ -37,9 +36,10 @@ export class BlockPolicy {
         }
     }
 
+    // Runs after the topic size bound (limits.js), so the parse is bounded.
     validate(_peer, msg) {
-        if (msg.data.length <= MAX_BLOCK_BYTES && !shallowObject(msg.data)) return "ignore"
-        if (this.verified.size > 0 && msg.data.length <= MAX_BLOCK_BYTES) {
+        if (!shallowObject(msg.data)) return "ignore"
+        if (this.verified.size > 0) {
             try {
                 // Confirmed blocks are deduped by hash.
                 const block = JSON.parse(new TextDecoder().decode(msg.data))

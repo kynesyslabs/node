@@ -26,7 +26,7 @@ import {
 } from "@scure/bip39"
 import { wordlist } from "@scure/bip39/wordlists/english.js"
 
-import { parseTopicLimits, sizeValidator, withinTopicLimit } from "./limits.js"
+import { parseTopicLimits, topicValidatorsFor, withinTopicLimit } from "./limits.js"
 
 const PROTOCOL_VERSION = 1
 const HEIGHTS_TOPIC = "demos/heights/1"
@@ -196,20 +196,13 @@ const node = await createLibp2p({
 })
 const pubsub = node.services.pubsub
 const blockPolicy = new BlockPolicy()
-const sized = sizeValidator(topicLimits, noteOversized)
-// Before any subscription, so no message is forwarded unchecked. A topic
-// holds one validator: a block is held to its size bound, then to the
-// known-block check, in the same one.
-for (const topic of ALL_TOPICS) {
-    pubsub.topicValidators.set(
-        topic,
-        topic === BLOCKS_TOPIC
-            ? (peer, msg) => {
-                  const verdict = sized(peer, msg)
-                  return verdict === "accept" ? blockPolicy.validate(peer, msg) : verdict
-              }
-            : sized,
-    )
+// Before any subscription, so no message is forwarded unchecked. A block is
+// held to its size bound before the known-block check parses it.
+const topicValidators = topicValidatorsFor(ALL_TOPICS, topicLimits, noteOversized, {
+    [BLOCKS_TOPIC]: (peer, msg) => blockPolicy.validate(peer, msg),
+})
+for (const [topic, validate] of topicValidators) {
+    pubsub.topicValidators.set(topic, validate)
 }
 for (const topic of ALWAYS_TOPICS) pubsub.subscribe(topic)
 slog(`libp2p up: peerId ${node.peerId.toString()} port ${PORT}`)

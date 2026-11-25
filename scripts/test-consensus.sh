@@ -99,6 +99,7 @@ SUITE_FILES=(
     src/libs/gossip/blockValidator.test.ts
     sidecar/src/blockPolicy.test.js
     src/libs/gossip/sidecarHealth.test.ts
+    src/libs/gossip/sidecarLimits.test.ts
     src/libs/gossip/txPublishPeers.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
