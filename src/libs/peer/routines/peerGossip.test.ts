@@ -24,6 +24,11 @@ const sharedState: Record<string, any> = {
     inPeerGossip: false,
 }
 jest.mock("src/utilities/sharedState", () => ({ getSharedState: sharedState }))
+// setPeers places each listed key against the validator table; none staked here.
+jest.mock("src/libs/blockchain/gcr/gcr", () => ({
+    __esModule: true,
+    default: { getGCRValidatorsAtBlockOrThrow: async () => [] },
+}))
 
 const { default: peerManagerClass } = await import("../PeerManager")
 const { default: peerClass } = await import("../Peer")
