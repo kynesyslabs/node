@@ -67,7 +67,7 @@ export function parseAllowlist(
  */
 export const NFT_ALLOWLIST_PATH = path.join(import.meta.dir, "nft-allowlist.json")
 export const NFT_ALLOWLIST_SHA256 =
-    "3da7c881016692f1724c34c4d68ce6233e6f34eb3a5cf34323022c8930bab116"
+    "f9a9c1cd829269f92fb1d23800dd53b1d348e808b56a8793e4e75bbda44a1f53"
 
 /**
  * Read the allowlist from disk. Throws when gating is on and the file is
