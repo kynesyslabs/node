@@ -28,7 +28,8 @@ import { wordlist } from "@scure/bip39/wordlists/english.js"
 
 import { parseTopicLimits, topicValidatorsFor, withinTopicLimit } from "./limits.js"
 
-const PROTOCOL_VERSION = 1
+// v2: the parent sends remember_block, which a v1 sidecar does not know.
+const PROTOCOL_VERSION = 2
 const HEIGHTS_TOPIC = "demos/heights/1"
 const TXS_TOPIC = "demos/txs/1"
 // Subscribed on command from the Bun side: only staked nodes ingest txs.

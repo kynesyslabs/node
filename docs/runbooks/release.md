@@ -914,6 +914,18 @@ this restart is a fallback there.
   - A call that names this node and is signed by another key than the sudo
     key may be dated up to 5 minutes ahead of this node's clock, like any
     other signed call (was 5 s). Sudo calls keep the 5 s limit.
+  - A block that arrives over gossip and is already stored, or was applied
+    from gossip, is not verified again: the node remembers the last 2048
+    such hashes, and copies of one block that are already being checked
+    or applied are skipped. On a stored copy the node still checks only
+    its own key's signature against its signing record. The gossip sidecar
+    is told each such hash and drops later copies of it before relaying
+    them, so a node relays a block it holds once, not once per signature
+    set. The sidecar's IPC protocol is now version 2; a sidecar bundle
+    from an earlier release exits at startup with `protocol version
+    mismatch` and the node keeps restarting it. `./run` rebuilds the
+    bundle when any file in `sidecar/src` is newer than it (before, only
+    `index.js` was compared), and the Docker image always builds it.
 
 ## Known limits
 

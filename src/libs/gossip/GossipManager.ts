@@ -49,7 +49,8 @@ import {
 import { getStakedSet } from "src/libs/consensus/stakedSet"
 import { markSubsystem, subsystemError } from "src/utilities/subsystemRegistry"
 
-const PROTOCOL_VERSION = 1
+// v2: remember_block, which a v1 sidecar does not know.
+const PROTOCOL_VERSION = 2
 const READY_TIMEOUT_MS = 10_000
 const IPC_RETRY_INTERVAL_MS = 100
 const STOP_KILL_ESCALATION_MS = 2000

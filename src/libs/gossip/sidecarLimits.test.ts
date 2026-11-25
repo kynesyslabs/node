@@ -143,3 +143,15 @@ describe("sidecar blocks topic validator", () => {
         expect(consulted).not.toHaveBeenCalled()
     })
 })
+
+describe("sidecar IPC protocol", () => {
+    it("is the same version on the node and in the sidecar", async () => {
+        const versionIn = async (file: string) => {
+            const source = await Bun.file(path.resolve(import.meta.dir, file)).text()
+            return source.match(/^const PROTOCOL_VERSION = (\d+)$/m)?.[1]
+        }
+        const node = await versionIn("./GossipManager.ts")
+        expect(node).toBeDefined()
+        expect(await versionIn("../../../sidecar/src/index.js")).toBe(node)
+    })
+})
