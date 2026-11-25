@@ -169,7 +169,7 @@ async function peersGossipProcess(differentPeerlistPeers: Peer[]) {
     const newPeers = unknownPeersFromLists(lists)
     log.debug(`[peerGossip] New peers from gossip: ${newPeers.length}`)
     if (newPeers.length > 0) {
-        PeerManager.getInstance().setPeers(newPeers)
+        await PeerManager.getInstance().setPeers(newPeers)
     }
 }
 

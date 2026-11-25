@@ -50,3 +50,26 @@ export function standbyKeepsKnownUrl(
     if (standby !== true || knownUrl === undefined) return false
     return parseNodeUrl(knownUrl)?.origin !== parseNodeUrl(claimedUrl)?.origin
 }
+
+/** How many addresses a hello reply carries, and the most we take from one. */
+export const HELLO_PEERLIST_SAMPLE_SIZE = 32
+
+/**
+ * The addresses a hello reply contributes: at most
+ * HELLO_PEERLIST_SAMPLE_SIZE well-formed entries, each a `url` and a
+ * `publicKey`.
+ */
+export function replyPeerlist(
+    list: unknown,
+): { url: string; publicKey: string }[] {
+    if (!Array.isArray(list)) return []
+    const peers: { url: string; publicKey: string }[] = []
+    for (const entry of list) {
+        if (peers.length >= HELLO_PEERLIST_SAMPLE_SIZE) break
+        const { url, publicKey } = (entry ?? {}) as Record<string, unknown>
+        if (typeof url === "string" && typeof publicKey === "string") {
+            peers.push({ url, publicKey })
+        }
+    }
+    return peers
+}
