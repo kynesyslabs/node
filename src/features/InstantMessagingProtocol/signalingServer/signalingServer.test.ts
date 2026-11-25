@@ -119,10 +119,27 @@ async function connect() {
 
 async function registered(clientId: string) {
     const client = await connect()
-    const proof = { algorithm: "ed25519", serializedSignedData: "AA==", serializedPublicKey: "AA==", serializedMessage: "AA==" }
+    // A proof without a challenge must sign the advertised key bytes ([1, 2, 3]).
+    const proof = { algorithm: "ed25519", serializedSignedData: "AA==", serializedPublicKey: "AA==", serializedMessage: "AQID" }
     client.send({ type: "register", payload: { clientId, publicKey: [1, 2, 3], verification: proof } })
     expect(await client.next()).toMatchObject({ type: "register", payload: { success: true } })
     return client
+}
+
+/**
+ * Registration refuses an ID this long, so a peer holding one is put in place
+ * directly: the message path must not rely on registration for the bound.
+ */
+function online(clientId: string): unknown[] {
+    const received: unknown[] = []
+    ;(server as any).peers.set(clientId, {
+        id: clientId,
+        ws: { readyState: WebSocket.OPEN, send: (frame: string) => received.push(frame) },
+        publicKey: new Uint8Array([1, 2, 3]),
+        signingPublicKey: new Uint8Array(32),
+        deliverQueued: false,
+    })
+    return received
 }
 
 const send = (targetId: unknown) => ({ type: "message", payload: { targetId, message: ENCRYPTED } })
@@ -140,12 +157,19 @@ describe("SignalingServer message target", () => {
 
     it("refuses it while the target is online", async () => {
         const sender = await registered("alice")
-        const target = await registered(LONG_ID)
+        const target = online(LONG_ID)
         sender.send(send(LONG_ID))
         const reply = await sender.next()
         expect(added.map(tx => tx.content.to.length)).toEqual([])
         expect(reply).toMatchObject(invalid)
-        expect(await target.next(200)).toBeNull()
+        expect(target).toEqual([])
+    })
+
+    it("cannot be registered by a key it does not name", async () => {
+        const client = await connect()
+        const proof = { algorithm: "ed25519", serializedSignedData: "AA==", serializedPublicKey: "AA==", serializedMessage: "AQID" }
+        client.send({ type: "register", payload: { clientId: LONG_ID, publicKey: [1, 2, 3], verification: proof } })
+        expect(await client.next()).toMatchObject(invalid)
     })
 
     it("measures it in UTF-8 bytes", async () => {
@@ -175,8 +199,17 @@ describe("SignalingServer message target", () => {
         })
     }
 
-    it("queues a message to an offline account as before", async () => {
+    it("refuses a message to an offline account in the default register mode, and writes nothing", async () => {
         const sender = await registered("alice")
+        sender.send(send(ACCOUNT))
+        expect(await sender.next()).toMatchObject({ type: "error", payload: { errorType: "PEER_NOT_FOUND" } })
+        expect(added).toEqual([])
+        expect(stored).toEqual([])
+    })
+
+    it("queues a message to an offline account in strict register mode as before", async () => {
+        const sender = await registered("alice")
+        ;(server as any).registerMode = "strict"
         sender.send(send(ACCOUNT))
         expect(await sender.next()).toMatchObject({ type: "message_queued", payload: { targetId: ACCOUNT, status: "offline" } })
         expect(added.map(tx => tx.content.to)).toEqual([ACCOUNT])
@@ -191,11 +224,13 @@ describe("SignalingServer message target", () => {
         expect(added.map(tx => tx.content.to)).toEqual([ACCOUNT])
     })
 
-    it("lets through a target ID of exactly the bytes its columns index", async () => {
+    it("lets a target ID of exactly the bytes its columns index past the bound", async () => {
         const sender = await registered("alice")
         const targetId = "x".repeat(INDEX_KEY_MAX_BYTES)
+        const target = online(targetId)
         sender.send(send(targetId))
-        expect(await sender.next()).toMatchObject({ type: "message_queued" })
+        await sender.next(300)
+        expect(target).toHaveLength(1)
         expect(added.map(tx => tx.content.to)).toEqual([targetId])
     })
 })
@@ -203,7 +238,7 @@ describe("SignalingServer message target", () => {
 describe("SignalingServer public key request", () => {
     it("refuses a target ID longer than its columns index", async () => {
         const client = await registered("alice")
-        await registered(LONG_ID)
+        online(LONG_ID)
         client.send({ type: "request_public_key", payload: { targetId: LONG_ID } })
         expect(await client.next()).toMatchObject(invalid)
     })

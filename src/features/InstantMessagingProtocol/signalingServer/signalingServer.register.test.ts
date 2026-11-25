@@ -313,7 +313,7 @@ describe("signaling registration", () => {
         expect(changelog).toContain("clients using the legacy registration proof do not receive them.")
         const ci = readFileSync(new URL("../../../../scripts/test-consensus.sh", import.meta.url), "utf8")
         expect(ci).toContain("src/config/loader.signalingRegisterMode.test.ts")
-        expect(ci).toContain("src/features/InstantMessagingProtocol/signalingServer/signalingServer.test.ts")
+        expect(ci).toContain("src/features/InstantMessagingProtocol/signalingServer/signalingServer.register.test.ts")
     })
     it.each(["transitional", "strict"] as const)("handles a legacy proof in %s mode", async mode => {
         const result = await attempt(harness(mode), "legacy-client", keyA, await proof(keyA))
@@ -465,6 +465,21 @@ describe("signaling registration", () => {
         try {
             await peer.connect()
             expect(server.peers.has("sdk-live-id")).toBe(true)
+        } finally { peer.disconnect(); server.server.stop(true) }
+    })
+    it("registers the installed SDK under an account-style ID in the configured default mode", async () => {
+        await ucrypto.generateIdentity("ml-dsa")
+        await ucrypto.generateIdentity("ml-kem-aes")
+        const publicKey = (await ucrypto.getIdentity("ml-kem-aes")).publicKey as Uint8Array
+        const server = new SignalingServer(0) as any
+        expect(server.registerMode).toBe("transitional")
+        server.deliverOfflineMessages = mock(async () => {})
+        // Apps name a peer after its ed25519 account while the SDK signs with ML-DSA.
+        const clientId = "0x" + "ab".repeat(32)
+        const peer = new MessagingPeer({ serverUrl: `ws://127.0.0.1:${server.server.port}`, clientId, publicKey })
+        try {
+            await peer.connect()
+            expect(server.peers.has(clientId)).toBe(true)
         } finally { peer.disconnect(); server.server.stop(true) }
     })
     it("interoperates with the installed SDK", async () => {

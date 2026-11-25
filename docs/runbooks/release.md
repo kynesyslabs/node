@@ -884,6 +884,24 @@ this restart is a fallback there.
     stops the node at startup with an error naming the entry.
   - The bundled Caddyfiles drop a client-sent `CF-Connecting-IP` header, as
     they already did `X-Forwarded-For` and `X-Real-IP`.
+  - Docker Compose publishes the signaling port (`RPC_SIGNALING_PORT`,
+    3005) on `127.0.0.1` only (`RPC_SIGNALING_BIND`). Messaging clients
+    reach it through Caddy's `/signaling/`. A node whose clients dial
+    `ws://<host>:3005` directly sets `RPC_SIGNALING_BIND=0.0.0.0` and
+    recreates the node container; a restart keeps the old publication.
+    Bare metal still listens on every interface. A signaling frame over
+    1 MiB closes the connection (code 1009).
+  - Signaling registration takes `SIGNALING_REGISTER_MODE`: `transitional`
+    (default) or `strict`; any other value stops the node. A connection
+    registers one client ID. A proof without a challenge must sign exactly
+    the advertised key, a client ID longer than 256 characters must be the
+    hex of the signing key, and a `0x` hex ID of the signing key's length
+    must be that key. In `transitional` a message to an offline recipient
+    gets `PEER_NOT_FOUND` and nothing is stored or written to the chain.
+    `strict` requires a `register_challenge` and an ed25519 proof for the
+    client ID equal to that key; SDK 4.0.24 signs with ML-DSA and requests
+    no challenge, so keep `transitional` until an SDK release supports it.
+    Mainnet validators run with `SIGNALING_ENABLED=false`.
 
 ## Known limits
 
