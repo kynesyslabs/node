@@ -28,6 +28,7 @@ SUITE_FILES=(
     src/config/loader.logsDir.test.ts
     src/config/loader.outbound.test.ts
     src/config/loader.rapidApi.test.ts
+    src/config/loader.signalingRegisterMode.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/crypto/keyErrorLogging.test.ts
@@ -41,6 +42,7 @@ SUITE_FILES=(
     src/features/metrics/MetricsCollector.dbProbe.test.ts
     src/features/InstantMessagingProtocol/signalingServer/signalingServer.test.ts
     src/features/InstantMessagingProtocol/signalingServer/signalingServer.limits.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.register.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -222,6 +224,7 @@ SUITE_FILES=(
     testing/loadgen/src/framework/common.test.ts
     testing/loadgen/src/framework/rpc_json_log.test.ts
     testing/loadgen/src/framework/silent_catch.test.ts
+    testing/loadgen/src/im_shared.test.ts
     testing/loadgen/src/rpc_ready_log.test.ts
     testing/loadgen/src/token_holders_export.test.ts
     testing/loadgen/src/token_names_from_runs.test.ts

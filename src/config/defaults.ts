@@ -93,6 +93,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // RPC_SIGNALING_BIND=0.0.0.0; the proxy routes /signaling/ to it.
         // Existing deployments expect signaling to be running.
         signalingEnabled: true,
+        signalingRegisterMode: "transitional",
         restore: false,
         expectedGenesisHash: "",
         expectedGenesisBlockHash: "",
