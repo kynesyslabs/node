@@ -305,6 +305,13 @@ export class RateLimiter {
      * client cannot flood logs. Cleared by `destroy()`.
      */
     private xffRejectLastLog = new Map<string, number>()
+    /**
+     * The mode is "off" only because TRUSTED_PROXIES is empty (no explicit
+     * XFF_MODE). A Caddy started without docker-compose.proxy.yml lands here
+     * and makes every client share its counter; the hint names the fix.
+     */
+    private xffOffByDefault = false
+    private unlistedProxyHintAt = 0
     /** Staked validator keys as of the last signed request; lowercase. */
     private validatorKeys: ReadonlySet<string> = new Set()
     /** The set is empty because the network has no validator rows, not because they could not be read. */
@@ -336,6 +343,10 @@ export class RateLimiter {
             explicitXffMode(config.xffMode),
             this.trustedProxies.length > 0,
         )
+
+        this.xffOffByDefault =
+            this.xffMode === "off" &&
+            explicitXffMode(config.xffMode) === undefined
 
         this.announceXffMode()
 
@@ -387,6 +398,33 @@ export class RateLimiter {
                     "Set TRUSTED_PROXIES to enable proxy-aware client IPs.",
             )
         }
+    }
+
+    /**
+     * A forwarding header from a private address with no trust list is
+     * almost always the operator's own reverse proxy left out of
+     * TRUSTED_PROXIES. Logged at most once per 10 minutes for the whole
+     * node, and never for public sources, so clients cannot fill the log.
+     */
+    private hintUnlistedProxy(socketIp: string): void {
+        const now = Date.now()
+        if (now - this.unlistedProxyHintAt < 10 * 60_000) return
+        let range: string
+        try {
+            range = ipaddr.parse(socketIp).range()
+        } catch {
+            return
+        }
+        if (range !== "private" && range !== "uniqueLocal") return
+        this.unlistedProxyHintAt = now
+        log.warning(
+            `[Rate Limiter] X-Forwarded-For from ${socketIp} ignored: TRUSTED_PROXIES is empty, ` +
+                "so every client behind that proxy shares its rate-limit counter. " +
+                "Behind the bundled Caddy start with `./run --docker --proxy` or set " +
+                "COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml in .env; " +
+                "behind another proxy list its address in TRUSTED_PROXIES " +
+                "(docs/runbooks/proxy-setup.md).",
+        )
     }
 
     /**
@@ -568,6 +606,9 @@ export class RateLimiter {
         const socketIp = socketAddr ? normalizeIP(socketAddr) : "unknown"
 
         if (this.xffMode === "off") {
+            if (this.xffOffByDefault && req.headers.has("x-forwarded-for")) {
+                this.hintUnlistedProxy(socketIp)
+            }
             return socketIp
         }
 

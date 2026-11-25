@@ -6,6 +6,7 @@
  */
 
 import * as dotenv from "dotenv"
+import ipaddr from "ipaddr.js"
 import { EnvKey } from "./envKeys"
 import { parseBoolFlag, parseDurationMs, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
@@ -844,8 +845,8 @@ function assertL2psLimitsSane(config: AppConfig): void {
 }
 
 /**
- * Reject request-size and block-duration settings that would switch a
- * protection off or make peer traffic fail.
+ * Reject request-size, block-duration and trusted-proxy settings that would
+ * switch a protection off or make peer traffic fail.
  */
 function assertRpcLimitsSane(config: AppConfig): void {
     const { rpcMaxBodyBytes: publicMax, rpcPeerMaxBodyBytes: peerMax } = config.server
@@ -866,6 +867,22 @@ function assertRpcLimitsSane(config: AppConfig): void {
     // the same as having no block at all.
     if (!Number.isInteger(blockMs) || blockMs <= 0) {
         problems.push(`RATE_LIMIT_BLOCK_DURATION_MS must be a positive integer (got ${blockMs})`)
+    }
+    // TRUSTED_PROXIES lists proxies only; prefix length 0 matches every
+    // address. Plain addresses and unreadable entries are left to the rate
+    // limiter, which logs and skips the unreadable ones.
+    for (const entry of config.core.trustedProxies) {
+        let bits: number | undefined
+        try {
+            bits = ipaddr.parseCIDR(entry)[1]
+        } catch {
+            continue
+        }
+        if (bits === 0) {
+            problems.push(
+                `TRUSTED_PROXIES entry "${entry}" has prefix length 0 and matches every address; list the proxies' own addresses`,
+            )
+        }
     }
 
     if (problems.length > 0) {
