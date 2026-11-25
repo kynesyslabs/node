@@ -57,7 +57,7 @@ Keep NTP synced and alert on `demos_clock_offset_seconds` above 1 second. In the
 
 That's the whole list:
 
-- **Docker** 20.10 or newer
+- **Docker Engine** 28.0 or newer (required for reliable loopback-only port publication)
 - **Docker Compose** v2 (the `docker compose` plugin, not the legacy `docker-compose` Python script)
 - **git** 2.34 or newer with `ssh-keygen` (Ubuntu 22.04 ships both), to verify the signed release tag
 - **python3** (Ubuntu ships it), which the validator steps and `scripts/node-doctor` use to read `docker compose config`
@@ -546,6 +546,44 @@ COMPOSE_PROFILES=tlsnotary
 ```
 
 Every command in this guide that names a volume or a container uses the names compose reports for the install it runs in (`$STATE_VOLUME`, `$SUFFIX`, step 3 of [Run a released image](#run-a-released-image-validators)), and each install keeps its signer list, release files, key copy and peer list in its own place. `docker compose down -v` removes only the volumes of the install it runs in. Each node also needs its own CPU and memory headroom ([System Requirements](#system-requirements)); a compose override can cap one (`mem_limit`, `cpus` under `services: node:`).
+
+#### Instant messaging signaling
+
+The SDK's `MessagingPeer` connects directly to a signaling WebSocket from wallets
+and browsers. Signaling is enabled by default (`SIGNALING_ENABLED=true`) and is
+independent of consensus. Each connection accepts payloads up to 1 MiB. Larger
+payloads close the connection with code 1009. Clients that send large encrypted
+messages must allow for JSON and encryption overhead within the payload limit.
+
+**Docker Compose:** the host port defaults to `127.0.0.1:3005:3005`. With the
+`proxy` profile, external SDK clients can use
+`wss://<PROXY_DOMAIN>/signaling/`; Caddy reaches the node over the container
+network. To opt in to direct public IPv4 WebSocket access, set
+`RPC_SIGNALING_BIND=0.0.0.0` in the host `.env` and allow inbound TCP on
+`RPC_SIGNALING_PORT` (default 3005). This publishes on IPv4 only; IPv6 clients
+need an additional `[::]` port mapping. A private host interface can be used
+instead. The same port variable controls both sides of the mapping and Caddy's
+upstream.
+`RPC_SIGNALING_BIND` controls Docker publication only; it is not a node setting.
+
+**Bare metal and Bun:** signaling continues listening on all interfaces; use a
+host firewall or a TLS reverse proxy to control external access. `./run` and
+`bun run start:bun` use `RPC_SIGNALING_PORT` when configured, otherwise
+`SIGNALING_SERVER_PORT` (default 3005), or the next free port if it is taken;
+check the `[PORT] signaling drifted` log line. Running
+`bun src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts`
+directly always uses port 3005. The same payload limit applies to all these
+entry points. Set `SIGNALING_ENABLED=false` to disable signaling when running
+the full node; the standalone server starts unconditionally.
+
+**Fresh installs and upgrades:** fresh Compose installs publish signaling on
+loopback. Before upgrading a node whose SDK clients use a direct public port,
+choose the Caddy route or explicitly set `RPC_SIGNALING_BIND=0.0.0.0`, then
+recreate the node container with `docker compose up -d --force-recreate node`
+using the updated image and compose file. Restarting an existing container
+alone retains its old port publication. Bare-metal and Bun deployments need a
+process restart to activate the payload limit; their listener address is
+unchanged.
 
 ### Profiles
 

@@ -13,6 +13,20 @@ setDefaultTimeout(60_000)
 const repo = path.resolve(import.meta.dir, "../../..")
 const hasCompose = DOCKER !== undefined && spawnSync(DOCKER, ["compose", "version"], { encoding: "utf8" }).status === 0
 
+describe("signaling operator guidance", () => {
+    const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+
+    it("requires an Engine version that keeps loopback publications local", () => {
+        expect(install).toMatch(/\*\*Docker Engine\*\* 28\.0 or newer/)
+    })
+
+    it("documents signaling port drift and its log line for bare-metal operators", () => {
+        const bareMetal = install.split("**Bare metal and Bun:**")[1]?.split("\n\n")[0] ?? ""
+        expect(bareMetal).toContain("next free port if it is taken")
+        expect(bareMetal).toContain("[PORT] signaling drifted")
+    })
+})
+
 interface Port {
     target: number
     published: string
@@ -62,6 +76,22 @@ describe.skipIf(!hasCompose)("compose files", () => {
         expect(messagingPorts(dflt)).toEqual([expect.objectContaining({ target: 3006, published: "3006" })])
         const custom = compose(BASE, { L2PS_MESSAGING_PORT: "3100" }).json as Compose
         expect(messagingPorts(custom)).toEqual([expect.objectContaining({ target: 3100, published: "3100" })])
+    })
+
+    it("binds signaling to loopback by default and accepts an explicit host bind", () => {
+        for (const [env, host_ip, port] of [
+            [{}, "127.0.0.1", 3005],
+            [{ RPC_SIGNALING_BIND: "" }, "127.0.0.1", 3005],
+            [{ RPC_SIGNALING_BIND: "0.0.0.0", RPC_SIGNALING_PORT: "3205" }, "0.0.0.0", 3205],
+        ] as const) {
+            for (const [files, published] of [[BASE, port], [DEVNET, 3105]] as const) {
+                const c = compose(files, env)
+                expect([c.status, c.stderr.slice(0, 200)]).toEqual([0, ""])
+                expect(c.json?.services.node.ports?.filter(p => p.target === port)).toEqual([
+                    expect.objectContaining({ host_ip, target: port, published: String(published) }),
+                ])
+            }
+        }
     })
 
     it("devnet moves only the host side, +100, and never keeps the base mapping next to it", () => {
@@ -138,6 +168,16 @@ describe.skipIf(!hasCompose)("compose files", () => {
         const c = compose(BASE, { DEMOS_SETUP_STRICT: "true", DEMOS_SETUP_L2PS_UID: "my_subnet" }).json
         expect(c?.services.node.environment).toMatchObject({ DEMOS_SETUP_STRICT: "true", DEMOS_SETUP_L2PS_UID: "my_subnet" })
     })
+})
+
+it("documents the signaling host bind after removing the proxy profile", () => {
+    const defaults = fs.readFileSync(path.join(repo, "src/config/defaults.ts"), "utf8")
+    const runbook = fs.readFileSync(path.join(repo, "docs/runbooks/proxy-setup.md"), "utf8")
+
+    expect(defaults).toMatch(/Compose publishes signaling on 127\.0\.0\.1/)
+    expect(defaults).toContain("RPC_SIGNALING_BIND=0.0.0.0")
+    expect(runbook).toMatch(/Signaling port 3005 stays on 127\.0\.0\.1/)
+    expect(runbook).toContain("RPC_SIGNALING_BIND=0.0.0.0")
 })
 
 describe.skipIf(!hasCompose)("the reverse proxy follows the node's ports", () => {
