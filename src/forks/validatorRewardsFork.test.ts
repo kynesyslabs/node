@@ -80,10 +80,7 @@ describe("where an award's points land", () => {
         getSharedState.forkConfig = snapshot
     })
 
-    it("a bucket is refused by name before the fork, and only validatorRewards is accepted under it", () => {
-        expect(awardBucketRefusal(undefined)).toBeNull()
-        expect(awardBucketRefusal(VALIDATOR_REWARDS_BUCKET)).not.toBeNull()
-        getSharedState.forkConfig.validatorRewards.activationHeight = 0
+    it("only validatorRewards may be named by an award transaction", () => {
         expect(awardBucketRefusal(undefined)).toBeNull()
         expect(awardBucketRefusal(VALIDATOR_REWARDS_BUCKET)).toBeNull()
         for (const other of ["weeklyChallenge", "referrals", "", null, 1, ["validatorRewards"]]) {

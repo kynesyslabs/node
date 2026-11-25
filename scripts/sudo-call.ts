@@ -15,7 +15,7 @@
  * Examples:
  *   --method rate-limit/unblock --params '["203.0.113.4"]'
  *   --method getCampaignData
- *   --method awardPoints --params '[{"message":[{"address":"0x…","points":10}]}]'
+ *   --method awardPoints --params '[{"bucket":"weeklyChallenge","message":[{"address":"0x…","points":10}]}]'
  */
 
 import { readFileSync } from "node:fs"

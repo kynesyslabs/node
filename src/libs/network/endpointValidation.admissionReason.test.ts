@@ -129,6 +129,9 @@ describe("RPC admission reasons", () => {
             "awardPoints: edit 0 carries unexpected fields",
             "awardPoints: edit 1 is not the credit its data implies",
             "awardPoints: edit 2 has an invalid or inconsistent date",
+            "awardPoints: data carries unexpected elements",
+            "awardPoints: unknown points bucket \"referrals\"",
+            "awardPoints: edit 0 does not name the bucket its data names",
             "gcr_edits do not match regenerated set",
             "value edits with no counterpart in the regenerated set (balance|0xabc|add|5)",
         ]) {

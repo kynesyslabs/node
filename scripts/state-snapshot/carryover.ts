@@ -218,14 +218,22 @@ function parseCanonicalRow(line: string, file: string, rowNo: number): Record<st
  * Sets totalPoints and every number in the breakdown to 0 and returns the
  * total removed. The breakdown keeps its keys: the award code reads them as
  * per-source counters and clamps each at 0, so an unlink after the import
- * cannot push an account below 0.
+ * cannot push an account below 0. Validator points, kept apart from
+ * totalPoints, are removed and counted too.
  */
 export function zeroPoints(points: unknown, where: string): number {
     if (!isRecord(points) || typeof points.totalPoints !== "number") {
         throw new Error(`${where}: no numeric points.totalPoints`)
     }
-    const removed = points.totalPoints
+    let removed = points.totalPoints
     points.totalPoints = 0
+    if (points.validatorPoints !== undefined) {
+        if (!isRecord(points.validatorPoints) || typeof points.validatorPoints.total !== "number") {
+            throw new Error(`${where}: no numeric points.validatorPoints.total`)
+        }
+        removed += points.validatorPoints.total
+        points.validatorPoints = { total: 0, awards: [] }
+    }
     const zeroNumbers = (value: unknown): unknown => {
         if (typeof value === "number") return 0
         if (Array.isArray(value)) return value.map(zeroNumbers)

@@ -497,8 +497,17 @@ describe("the award transaction", () => {
             )
         const both = async (tx: Transaction) => [(await verifyAdmissionEdits(tx)).ok, (await verifyEditsAtApply(tx)).ok]
 
-        it("is refused before validatorRewards", async () => {
+        it("is refused before validatorRewards, as a node without the fork refuses the edits", async () => {
             expect(await both(bucketed("validatorRewards"))).toEqual([false, false])
+            expect((await verifyEditsAtApply(bucketed("validatorRewards"))).reason).toBe("awardPoints: edit 0 carries unexpected fields")
+        })
+
+        it("is judged before validatorRewards exactly as a node without the fork judges it", async () => {
+            // Such a node reads data[1] and ignores what follows, so these are ordinary awards to it.
+            for (const tail of [["validatorRewards"], ["referrals"], [null], ["validatorRewards", "extra"]]) {
+                const tx = award({ data: ["awardPoints", structuredClone(accounts), ...tail] })
+                expect(await both(tx)).toEqual([true, true])
+            }
         })
 
         describe("under validatorRewards", () => {

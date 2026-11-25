@@ -243,6 +243,16 @@ describe("--zero-points", () => {
         expect(() => zeroPoints({}, "row 3")).toThrow("row 3: no numeric points.totalPoints")
     })
 
+    it("removes validator points too, and counts them in the total removed", () => {
+        const p = { ...points(7), validatorPoints: { total: 300, awards: [{ date: "2026-11-01T00:00:00.000Z", points: 300 }] } }
+        expect(zeroPoints(p, "row")).toBe(307)
+        expect(p.totalPoints).toBe(0)
+        expect(p.validatorPoints).toEqual({ total: 0, awards: [] })
+        expect(() => zeroPoints({ totalPoints: 1, validatorPoints: {} }, "row 4")).toThrow(
+            "row 4: no numeric points.validatorPoints.total",
+        )
+    })
+
     it("zeroes the listed accounts only and records the list in the manifest", async () => {
         const zeroFile = await list("group-a.txt", [FARM_1, FARM_2])
         const out = join(work, "out")

@@ -113,7 +113,7 @@ export async function runGcrPointsSmoke() {
 
   const awardRequest = {
     method: "awardPoints",
-    params: [{ message: [{ address: recipientAddress, points: pointsDelta }] }],
+    params: [{ bucket: "weeklyChallenge", message: [{ address: recipientAddress, points: pointsDelta }] }],
   }
   // rpcPost sends JSON.stringify(awardRequest), the bytes signed here.
   const sudoHeaders = await buildSudoHeaders(JSON.stringify(awardRequest), rpcBootstrap)

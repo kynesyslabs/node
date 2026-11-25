@@ -161,6 +161,49 @@ describe("GCR.awardPoints naming a points bucket", () => {
     })
 })
 
+describe("the award transaction the node builds", () => {
+    const { verifyAdmissionEdits } = require("../validation/editBinding")
+    const { default: txValidatorPool } = require("../validation/txValidatorPool")
+    const lookups = ["getAddressesByWeb2Usernames", "getAddressesByNativeAddresses", "getAddressesByXmAccounts"]
+    const saved: Record<string, unknown> = {}
+    let pool: unknown
+
+    beforeEach(() => {
+        getSharedState.forkConfig.validatorRewards.activationHeight = 0
+        nodeSignsWith(SIGNER)
+        ;(GCR as any).createAwardPointsTransaction = original.create
+        for (const name of lookups) {
+            saved[name] = (GCR as any)[name]
+            ;(GCR as any)[name] = async () => (name === "getAddressesByNativeAddresses" ? { [TARGET]: TARGET } : {})
+        }
+        pool = txValidatorPool.getInstance
+        txValidatorPool.getInstance = () => ({ sign: async () => ({ signature: new Uint8Array(64) }) })
+    })
+
+    afterEach(() => {
+        for (const name of lookups) (GCR as any)[name] = saved[name]
+        txValidatorPool.getInstance = pool
+    })
+
+    const build = (bucket?: string) =>
+        (GCR as any).createAwardPointsTransaction([{ address: TARGET, points: 10 }], bucket)
+
+    it("names the validatorRewards bucket in its data and in every edit, and passes admission", async () => {
+        const tx = await build("validatorRewards")
+        expect(tx.content.data[2]).toBe("validatorRewards")
+        expect(tx.content.gcr_edits.map((e: any) => e.bucket)).toEqual(["validatorRewards"])
+        expect(await verifyAdmissionEdits(tx)).toEqual({ ok: true })
+    })
+
+    it("carries no bucket anywhere for an ordinary award, and passes admission", async () => {
+        const tx = await build()
+        expect(tx.content.data).toHaveLength(2)
+        expect(tx.content.gcr_edits).toHaveLength(1)
+        expect("bucket" in tx.content.gcr_edits[0]).toBe(false)
+        expect(await verifyAdmissionEdits(tx)).toEqual({ ok: true })
+    })
+})
+
 describe("GCR.awardPoints behind the editBinding fork", () => {
     it("queues the award when the node signs with the genesis award signer", async () => {
         nodeSignsWith(SIGNER)

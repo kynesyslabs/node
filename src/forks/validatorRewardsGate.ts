@@ -20,12 +20,13 @@ export function validatorRewardsActive(height = getSharedState.lastBlockNumber ?
     return isForkActive("validatorRewards", height)
 }
 
-/** Why an award naming `bucket` is refused, or null. An award naming none is never refused here. */
+/**
+ * Why an award transaction naming `bucket` is refused under the fork, or
+ * null. One naming none is an ordinary award.
+ */
 export function awardBucketRefusal(bucket: unknown): string | null {
-    if (bucket === undefined) return null
-    if (!validatorRewardsActive()) return "an award names a points bucket only once validatorRewards is active"
-    if (bucket !== VALIDATOR_REWARDS_BUCKET) return `unknown points bucket ${JSON.stringify(bucket)}`
-    return null
+    if (bucket === undefined || bucket === VALIDATOR_REWARDS_BUCKET) return null
+    return `unknown points bucket ${JSON.stringify(bucket)}`
 }
 
 /**
