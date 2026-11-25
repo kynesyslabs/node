@@ -18,13 +18,14 @@ jest.mock("src/libs/consensus/stakedSet", () => ({
     getStakedSetHeight: () => 100,
 }))
 jest.mock("src/libs/blockchain/validation/validityData", () => ({ verifyValidityDataSignature: verify }))
-jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({ verifyBlock: async () => ({ valid: true }) }))
+jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({ verifyBlock: async () => ({ valid: true }), checkKnownBlockOwnSignature: async () => {} }))
+jest.mock("src/libs/blockchain/chain", () => ({ __esModule: true, default: { getBlockByHash: async () => null } }))
 jest.mock("@/forks", () => ({ serializeBlockContent: () => "" }))
 jest.mock("src/libs/crypto/hashing", () => ({ __esModule: true, default: { sha256: () => "" } }))
 jest.mock("./records", () => ({ isHeightsRecordShape: () => false, verifyHeightsRecord: async () => false }))
 jest.mock("./metrics", () => ({ countTxRateLimited: jest.fn(), recordVerdict: jest.fn() }))
 
-const { validateTxMessage } = await import("./validators")
+const { validateTxMessage } = await import("./validators?tx-validator-test" as "./validators")
 const { TXS_ORIGIN_BURST } = await import("./topics")
 
 function envelope(n: number): Uint8Array {
@@ -57,6 +58,7 @@ describe("validateTxMessage origin budget", () => {
         expect(verify).toHaveBeenCalledTimes(TXS_ORIGIN_BURST)
 
         expect((await validateTxMessage(envelope(TXS_ORIGIN_BURST), "forger")).result).toBe("ignore")
+        expect((await validateTxMessage(envelope(TXS_ORIGIN_BURST + 1), "forger")).result).toBe("ignore")
         expect(verify).toHaveBeenCalledTimes(TXS_ORIGIN_BURST)
 
         verify.mockImplementation(async () => true)

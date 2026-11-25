@@ -113,6 +113,64 @@ async function carriesOurSignature(
 }
 
 /**
+ * Holds a block carrying our signature against our signing record, with
+ * `counted` the signatures its quorum counted (see carriesOurSignature).
+ */
+async function checkOwnSignatureIn(
+    block: Block,
+    counted: Map<string, string>,
+): Promise<void> {
+    if (await carriesOurSignature(block, counted)) {
+        // Under commitLock the signing record keeps the round of each
+        // precommit, so that is the time the record is compared against.
+        checkOwnSignature({
+            number: block.number,
+            hash: block.hash,
+            timestamp: commitLockActive(block.number)
+                ? (block.validation_data as { round: number }).round
+                : block.content.timestamp,
+        })
+    }
+}
+
+/**
+ * The own-signature check verifyBlock makes, for a new certificate of a
+ * block this node already holds: another holder of our key may sign it.
+ * Only our key is tallied, one verify instead of the whole quorum, and the
+ * signature it picks for us is the one the full tally would count, because
+ * a member's count does not depend on the other entries.
+ */
+export async function checkKnownBlockOwnSignature(block: Block): Promise<void> {
+    const ownKey = getSharedState.publicKeyHex
+    const signatures = block.validation_data?.signatures
+    if (typeof ownKey !== "string" || !signatures || typeof signatures !== "object") {
+        return
+    }
+    const canonical = isForkActive("canonicalSigners", block.number)
+    const ownLower = ownKey.toLowerCase()
+    // No spelling of our key, nothing to check: a copy costs no table read.
+    const spellsOurs = Object.keys(signatures).some(key =>
+        canonical ? key.toLowerCase() === ownLower : key === ownKey,
+    )
+    if (!spellsOurs) return
+
+    let counted = new Map<string, string>()
+    const message = canonical ? certificateMessageOf(block) : null
+    if (message !== null) {
+        const { members } = await signerRuleOf(block.number)
+        if (members.includes(ownLower)) {
+            counted = await countedSignatures(
+                message,
+                signatures as Record<string, unknown>,
+                new Set([ownLower]),
+                true,
+            )
+        }
+    }
+    await checkOwnSignatureIn(block, counted)
+}
+
+/**
  * The signatures in `signatures` by members of `eligible` that verify over
  * `signedMessage`: the block hash, or under commitLock the vote message.
  * With `canonical` (the `canonicalSigners` fork) identities compare in
@@ -517,17 +575,7 @@ export async function verifyBlock(
 
     // After the quorum so a peer replaying one stray signature of ours on an
     // unaccepted block cannot stop this node from signing.
-    if (await carriesOurSignature(block, tally.counted)) {
-        // Under commitLock the signing record keeps the round of each
-        // precommit, so that is the time the record is compared against.
-        checkOwnSignature({
-            number: block.number,
-            hash: block.hash,
-            timestamp: commitLockActive(block.number)
-                ? (block.validation_data as { round: number }).round
-                : blockTimestamp,
-        })
-    }
+    await checkOwnSignatureIn(block, tally.counted)
 
     // Last, because it is the expensive check: only a block that already has
     // its quorum is worth verifying transaction by transaction.
