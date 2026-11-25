@@ -489,6 +489,60 @@ describe("the award transaction", () => {
         expect((await verifyEditsAtApply(tx)).ok).toBe(true)
     })
 
+    describe("naming a points bucket", () => {
+        const bucketed = (bucket: unknown, editBucket: unknown = bucket) =>
+            award(
+                { data: ["awardPoints", structuredClone(accounts), bucket] },
+                [credit(VICTIM, 10, { bucket: editBucket }), credit(PEER, 7, { bucket: editBucket })],
+            )
+        const both = async (tx: Transaction) => [(await verifyAdmissionEdits(tx)).ok, (await verifyEditsAtApply(tx)).ok]
+
+        it("is refused before validatorRewards", async () => {
+            expect(await both(bucketed("validatorRewards"))).toEqual([false, false])
+        })
+
+        describe("under validatorRewards", () => {
+            let before: number | null
+            beforeEach(() => {
+                before = getSharedState.forkConfig.validatorRewards.activationHeight
+                getSharedState.forkConfig.validatorRewards.activationHeight = 0
+            })
+            afterEach(() => {
+                getSharedState.forkConfig.validatorRewards.activationHeight = before
+            })
+
+            it("is accepted for validatorRewards when every edit names it", async () => {
+                expect(await both(bucketed("validatorRewards"))).toEqual([true, true])
+            })
+
+            it("is still accepted with no bucket at all", async () => {
+                expect(await both(award())).toEqual([true, true])
+            })
+
+            it("is refused for any other bucket", async () => {
+                for (const bucket of ["weeklyChallenge", "referrals", "", null, 7]) {
+                    expect(await both(bucketed(bucket))).toEqual([false, false])
+                }
+            })
+
+            it("is refused when an edit names another bucket, or none, or one the data does not", async () => {
+                expect(await both(bucketed("validatorRewards", "weeklyChallenge"))).toEqual([false, false])
+                const unnamed = award({ data: ["awardPoints", structuredClone(accounts), "validatorRewards"] })
+                expect(await both(unnamed)).toEqual([false, false])
+                const smuggled = award({}, [credit(VICTIM, 10, { bucket: "validatorRewards" }), credit(PEER, 7)])
+                expect(await both(smuggled)).toEqual([false, false])
+            })
+
+            it("is refused when the data carries more than the bucket", async () => {
+                const tx = award(
+                    { data: ["awardPoints", structuredClone(accounts), "validatorRewards", "extra"] },
+                    [credit(VICTIM, 10, { bucket: "validatorRewards" }), credit(PEER, 7, { bucket: "validatorRewards" })],
+                )
+                expect(await both(tx)).toEqual([false, false])
+            })
+        })
+    })
+
     it("is refused when signed by any other key", async () => {
         const tx = award({ from: SENDER, from_ed25519_address: SENDER })
         expect((await verifyAdmissionEdits(tx)).ok).toBe(false)

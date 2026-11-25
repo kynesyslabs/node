@@ -76,6 +76,17 @@ export class GCRMain {
                 nullifier: string
             }>
         }
+        /**
+         * Points awarded for running a validator (the `validatorRewards` fork).
+         * Not part of totalPoints or its breakdown.
+         */
+        validatorPoints?: {
+            total: number
+            awards: Array<{
+                date: string
+                points: number
+            }>
+        }
         lastUpdated: Date
     }
     @Column({ type: "jsonb", name: "referralInfo", default: () => "'{}'" })

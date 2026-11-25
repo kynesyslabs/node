@@ -223,7 +223,7 @@ export async function processPayload(
                 }
             }
             const awardPointsData = firstParam.message as AccountParams[]
-            const awardedAccounts = await GCR.awardPoints(awardPointsData)
+            const awardedAccounts = await GCR.awardPoints(awardPointsData, firstParam.bucket)
 
             return {
                 result: 200,

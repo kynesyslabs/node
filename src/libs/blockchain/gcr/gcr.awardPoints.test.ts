@@ -98,6 +98,33 @@ afterEach(() => {
 
 const award = () => GCR.awardPoints([{ address: TARGET, points: 10 } as never])
 
+describe("GCR.awardPoints naming a points bucket", () => {
+    const bucketed = (bucket: string) => GCR.awardPoints([{ address: TARGET, points: 10 } as never], bucket)
+
+    it("refuses before creating anything while validatorRewards is dormant", async () => {
+        nodeSignsWith(SIGNER)
+        expect(await bucketed("validatorRewards")).toMatchObject({ success: false })
+        expect(created).toBe(0)
+        expect(queued).toBe(0)
+    })
+
+    it("refuses an unknown bucket under the fork, and passes validatorRewards on to the transaction", async () => {
+        getSharedState.forkConfig.validatorRewards.activationHeight = 0
+        nodeSignsWith(SIGNER)
+        expect(await bucketed("referrals")).toMatchObject({ success: false })
+        expect(created).toBe(0)
+
+        let seen: unknown
+        ;(GCR as any).createAwardPointsTransaction = async (_accounts: unknown, bucket: unknown) => {
+            seen = bucket
+            return awardTx(getSharedState.publicKeyHex)
+        }
+        expect(await bucketed("validatorRewards")).toMatchObject({ success: true })
+        expect(seen).toBe("validatorRewards")
+        expect(queued).toBe(1)
+    })
+})
+
 describe("GCR.awardPoints behind the editBinding fork", () => {
     it("queues the award when the node signs with the genesis award signer", async () => {
         nodeSignsWith(SIGNER)

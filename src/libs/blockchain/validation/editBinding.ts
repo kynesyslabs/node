@@ -56,6 +56,7 @@ import {
     nftGatingAtTip,
     nftGatingRefusal,
 } from "@/forks/nftValidatorGatingGate"
+import { awardBucketRefusal } from "@/forks/validatorRewardsGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
@@ -340,6 +341,7 @@ const AWARD_EDIT_KEYS = new Set([
     "amount",
     "date",
     "txhash",
+    "bucket",
 ])
 
 /**
@@ -348,7 +350,9 @@ const AWARD_EDIT_KEYS = new Set([
  * addresses were resolved from the node's own records when the award was
  * created and travel in the signed data. So the rule is explicit: it is
  * signed by the award signer committed in genesis, and its edits are exactly
- * one points credit per resolved account in its own data.
+ * one points credit per resolved account in its own data. Under
+ * `validatorRewards` the data may name a bucket as its third element, and
+ * then every edit names the same one.
  *
  * The signer is read from block 0, never from node configuration, because apply
  * depends on it and every node must decide alike. A genesis that names none
@@ -364,10 +368,16 @@ function verifyAwardPoints(tx: Transaction): EditVerdict {
         return refuse("awardPoints: not signed by the genesis award signer")
     }
 
-    const accounts = (tx.content.data as unknown as [string, unknown])[1]
+    const data = tx.content.data as unknown as unknown[]
+    const accounts = data[1]
     if (!Array.isArray(accounts)) {
         return refuse("awardPoints: data carries no account list")
     }
+    if (data.length > 3) return refuse("awardPoints: data carries unexpected elements")
+    const bucket = data.length === 3 ? data[2] : undefined
+    if (data.length === 3 && bucket === undefined) return refuse("awardPoints: data names no points bucket")
+    const bucketProblem = awardBucketRefusal(bucket)
+    if (bucketProblem) return refuse(`awardPoints: ${bucketProblem}`)
     const expected = accounts.filter(
         a => typeof a?.address === "string" && a.address.length > 0,
     ) as Array<{ address: string; points: unknown }>
@@ -400,6 +410,9 @@ function verifyAwardPoints(tx: Transaction): EditVerdict {
             edit.amount !== points
         ) {
             return refuse(`awardPoints: edit ${i} is not the credit its data implies`)
+        }
+        if ("bucket" in edit !== (bucket !== undefined) || edit.bucket !== bucket) {
+            return refuse(`awardPoints: edit ${i} does not name the bucket its data names`)
         }
         // One award has one date; rollback finds its entries by it.
         const d = edit.date

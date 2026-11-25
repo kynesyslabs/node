@@ -3,6 +3,18 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
 import { Repository } from "typeorm"
 import { safeGCRSave } from "./utils"
+import { VALIDATOR_REWARDS_BUCKET, validatorRewardsActive } from "@/forks/validatorRewardsGate"
+
+/** Whether an award edit credits the validator total: it names that bucket, under `validatorRewards`. */
+function creditsValidatorPoints(editOperation: any): boolean {
+    return editOperation.bucket === VALIDATOR_REWARDS_BUCKET && validatorRewardsActive()
+}
+
+/** The account's validator points, kept apart from totalPoints and its breakdown. */
+function validatorPointsOf(account: GCRMain) {
+    account.points.validatorPoints ??= { total: 0, awards: [] }
+    return account.points.validatorPoints
+}
 
 /**
  * The award goes on the account the block's edits are applied to, which
@@ -21,6 +33,14 @@ export async function applyAwardPoints(
         points: amount,
     }
 
+    if (creditsValidatorPoints(editOperation)) {
+        const validatorPoints = validatorPointsOf(account)
+        validatorPoints.awards.push(challengeEntry)
+        validatorPoints.total += amount
+        account.points.lastUpdated = applyTime()
+        return { success: true, message: "Points awarded", entity: accountGCR }
+    }
+
     if (!account.points.breakdown.weeklyChallenge) {
         account.points.breakdown.weeklyChallenge = []
     }
@@ -37,6 +57,13 @@ export async function applyAwardPointsRollback(
     account: GCRMain,
 ): Promise<GCRResult> {
     const { account: address, amount, date } = editOperation
+
+    if (creditsValidatorPoints(editOperation)) {
+        const validatorPoints = validatorPointsOf(account)
+        validatorPoints.awards = validatorPoints.awards.filter(entry => entry.date !== date)
+        validatorPoints.total = Math.max(0, validatorPoints.total - amount)
+        return { success: true, message: "Points deducted", entity: account }
+    }
 
     if (!account.points.breakdown.weeklyChallenge) {
         account.points.breakdown.weeklyChallenge = []
