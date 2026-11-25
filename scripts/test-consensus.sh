@@ -28,6 +28,7 @@ SUITE_FILES=(
     src/config/loader.logsDir.test.ts
     src/config/loader.outbound.test.ts
     src/config/loader.rapidApi.test.ts
+    src/config/loader.signalingRegisterMode.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/crypto/keyErrorLogging.test.ts
