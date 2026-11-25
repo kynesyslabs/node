@@ -237,10 +237,9 @@ export async function validateBlockMessage(
         const storedBlock = await Chain.getBlockByHash(block.hash)
         if (storedBlock) {
             confirmBlock(block.hash)
-            if (
-                storedBlock.number === block.number &&
-                typeof block.validation_data.signatures[getSharedState.publicKeyHex] === "string"
-            ) {
+            // Any spelling of our key is checked, as verifyBlock checks it:
+            // checkKnownBlockOwnSignature returns at once when there is none.
+            if (storedBlock.number === block.number) {
                 await checkKnownBlockOwnSignature({
                     ...block,
                     number: storedBlock.number,
