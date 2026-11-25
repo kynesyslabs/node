@@ -61,7 +61,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import log from "@/utilities/logger"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import { getSharedState } from "@/utilities/sharedState"
-import { awardBucketRefusal } from "@/forks/validatorRewardsGate"
+import { VALIDATOR_REWARDS_BUCKET, awardCallBucketRefusal } from "@/forks/validatorRewardsGate"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     awardSignerProblem,
@@ -1035,16 +1035,26 @@ export default class GCR {
 
     /**
      * @param accounts List of accounts to award points to (supports multiple web2 platforms)
-     * @param bucket "validatorRewards" credits the separate validator total under that fork; omitted, the account's ordinary points
+     * @param bucket Required: "weeklyChallenge" for the account's ordinary points, or "validatorRewards" for the separate validator total under that fork
      * @returns Result of the award points operation
      */
-    static async awardPoints(accounts: AccountParams[], bucket?: string): Promise<{
+    static async awardPoints(accounts: AccountParams[], bucket: string): Promise<{
         success: boolean
         error?: string
         message: string
         txhash?: string
         confirmationBlock: number
     }> {
+        const bucketProblem = awardCallBucketRefusal(bucket)
+        if (bucketProblem) {
+            return {
+                success: false,
+                error: bucketProblem,
+                message: "Failed: " + bucketProblem,
+                confirmationBlock: null,
+            }
+        }
+
         if (!accounts || accounts.length === 0) {
             log.warning("No accounts provided")
             return {
@@ -1123,16 +1133,6 @@ export default class GCR {
             }
         }
 
-        const bucketProblem = awardBucketRefusal(bucket)
-        if (bucketProblem) {
-            return {
-                success: false,
-                error: bucketProblem,
-                message: "Failed: " + bucketProblem,
-                confirmationBlock: null,
-            }
-        }
-
         // Peers drop an award this node is not allowed to sign, so say so now
         // rather than report an award that never lands.
         const signerProblem = await awardSignerProblem()
@@ -1146,7 +1146,11 @@ export default class GCR {
             }
         }
 
-        const tx = await this.createAwardPointsTransaction(accounts, bucket)
+        // An ordinary award carries no bucket, as every award before the fork.
+        const tx = await this.createAwardPointsTransaction(
+            accounts,
+            bucket === VALIDATOR_REWARDS_BUCKET ? bucket : undefined,
+        )
 
         // The same check admission applies, before the award is queued.
         const edits = await verifyAdmissionEdits(tx)

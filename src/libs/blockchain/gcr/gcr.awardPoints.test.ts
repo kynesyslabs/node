@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
-let tip = 100
+const tip = 100
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: { getLastBlockNumber: async () => tip },
@@ -96,10 +96,46 @@ afterEach(() => {
     ;(Mempool as any).addTransactionWithLock = original.add
 })
 
-const award = () => GCR.awardPoints([{ address: TARGET, points: 10 } as never])
+const award = () => GCR.awardPoints([{ address: TARGET, points: 10 } as never], "weeklyChallenge")
 
 describe("GCR.awardPoints naming a points bucket", () => {
-    const bucketed = (bucket: string) => GCR.awardPoints([{ address: TARGET, points: 10 } as never], bucket)
+    const bucketed = (bucket: unknown) => GCR.awardPoints([{ address: TARGET, points: 10 } as never], bucket as string)
+
+    it("refuses a call that names no bucket, and says which ones exist", async () => {
+        nodeSignsWith(SIGNER)
+        for (const missing of [undefined, null]) {
+            const out = await bucketed(missing)
+            expect(out.success).toBe(false)
+            expect(out.error).toContain("bucket is required")
+            expect(out.error).toContain("\"weeklyChallenge\"")
+            expect(out.error).toContain("\"validatorRewards\"")
+        }
+        expect(created).toBe(0)
+        expect(queued).toBe(0)
+    })
+
+    it("names the options when the bucket is unknown, and says why validatorRewards is refused before the fork", async () => {
+        nodeSignsWith(SIGNER)
+        const unknown = await bucketed("referrals")
+        expect(unknown.error).toContain("unknown bucket \"referrals\"")
+        expect(unknown.error).toContain("\"weeklyChallenge\"")
+        expect(unknown.error).toContain("\"validatorRewards\"")
+        const early = await bucketed("validatorRewards")
+        expect(early.error).toContain("fork is not active")
+        expect(early.error).toContain("\"weeklyChallenge\"")
+        expect(created).toBe(0)
+    })
+
+    it("builds an ordinary award with no bucket when weeklyChallenge is named", async () => {
+        nodeSignsWith(SIGNER)
+        let seen: unknown = "unset"
+        ;(GCR as any).createAwardPointsTransaction = async (_accounts: unknown, bucket: unknown) => {
+            seen = bucket
+            return awardTx(getSharedState.publicKeyHex)
+        }
+        expect(await bucketed("weeklyChallenge")).toMatchObject({ success: true })
+        expect(seen).toBeUndefined()
+    })
 
     it("refuses before creating anything while validatorRewards is dormant", async () => {
         nodeSignsWith(SIGNER)
