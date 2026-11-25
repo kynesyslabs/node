@@ -1,4 +1,5 @@
 import {
+    checkKnownBlockOwnSignature,
     checkTimestampAgainstParent,
     checkTimestampNotAhead,
     verifyBlock,
@@ -369,6 +370,18 @@ describe("verifyBlock", () => {
     })
 
     describe("own-key self-check", () => {
+        it("checks a known block only when our certificate entry verifies", async () => {
+            const block = makeBlock()
+            await checkKnownBlockOwnSignature(block)
+            expect(checkOwnSignature).toHaveBeenCalledWith({
+                number: 10, hash: "valid-hash", timestamp: 1500,
+            })
+            checkOwnSignature.mockClear()
+            verifyingSigners.delete(A)
+            await checkKnownBlockOwnSignature(block)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
         it("checks an accepted block that carries our verified signature", async () => {
             await verifyBlock(makeBlock())
             expect(checkOwnSignature).toHaveBeenCalledWith({

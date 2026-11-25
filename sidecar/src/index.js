@@ -8,6 +8,7 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 import { inspect } from "node:util"
 import readline from "node:readline"
+import { BlockPolicy, BLOCKS_TOPIC } from "./blockPolicy.js"
 
 import { createLibp2p } from "libp2p"
 import { tcp } from "@libp2p/tcp"
@@ -29,7 +30,6 @@ import { parseTopicLimits, sizeValidator, withinTopicLimit } from "./limits.js"
 
 const PROTOCOL_VERSION = 1
 const HEIGHTS_TOPIC = "demos/heights/1"
-const BLOCKS_TOPIC = "demos/blocks/1"
 const TXS_TOPIC = "demos/txs/1"
 // Subscribed on command from the Bun side: only staked nodes ingest txs.
 const ALWAYS_TOPICS = [HEIGHTS_TOPIC, BLOCKS_TOPIC]
@@ -127,8 +127,8 @@ function componentLogger() {
 // block hash must not stand in for the message: the parent validates the
 // content only after gossipsub has deduplicated by ID, so an invalid
 // payload carrying a real hash would make the real message a duplicate.
-// Identical re-broadcasts still collapse; the parent dedups the rest by
-// transaction and block hash itself.
+// Identical re-broadcasts collapse; the parent dedups by transaction and block hash.
+// A known block hash is relayed once, then later copies are dropped.
 function gossipMsgId(msg) {
     return new Uint8Array(
         createHash("sha256")
@@ -195,9 +195,21 @@ const node = await createLibp2p({
     },
 })
 const pubsub = node.services.pubsub
-// Before any subscription, so no message is forwarded unchecked.
+const blockPolicy = new BlockPolicy()
+const sized = sizeValidator(topicLimits, noteOversized)
+// Before any subscription, so no message is forwarded unchecked. A topic
+// holds one validator: a block is held to its size bound, then to the
+// known-block check, in the same one.
 for (const topic of ALL_TOPICS) {
-    pubsub.topicValidators.set(topic, sizeValidator(topicLimits, noteOversized))
+    pubsub.topicValidators.set(
+        topic,
+        topic === BLOCKS_TOPIC
+            ? (peer, msg) => {
+                  const verdict = sized(peer, msg)
+                  return verdict === "accept" ? blockPolicy.validate(peer, msg) : verdict
+              }
+            : sized,
+    )
 }
 for (const topic of ALWAYS_TOPICS) pubsub.subscribe(topic)
 slog(`libp2p up: peerId ${node.peerId.toString()} port ${PORT}`)
@@ -265,6 +277,10 @@ pubsub.addEventListener("message", (evt) => {
 
 async function handleCommand(cmd) {
     switch (cmd.type) {
+        case "remember_block": {
+            blockPolicy.remember(cmd.hash)
+            break
+        }
         case "hello": {
             if (cmd.v !== PROTOCOL_VERSION) {
                 slog(`protocol version mismatch: client v${cmd.v}, ours v${PROTOCOL_VERSION}`)
