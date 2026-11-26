@@ -860,7 +860,7 @@ this restart is a fallback there.
     observed it at the parent (4 of 10) instead of `q` (7), and a member
     refuses a dictated list that differs from that rule in its view. The
     committee of every block at a multiple of 720 is drawn from the parent's
-    peerlist united with those of the 6 previous such blocks, so a
+    peerlist united with those of the 3 previous such blocks, so a
     committee of colluders that committed coalition-only lists keeps the
     chain for at most 720 blocks. It changes which committee signs a
     block, so a running chain takes it only at a coordinated height; the

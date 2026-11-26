@@ -80,9 +80,11 @@ export const POOL_REFRESH_INTERVAL = 720
 
 /**
  * How many earlier refresh blocks a refresh unites. A refresh misses the
- * honest set only if every one of them was signed by a captured committee.
+ * honest set only if every one of them was signed by a captured committee;
+ * a deeper window also brings back more validators that have since gone
+ * offline, and enough of them in one committee stall its height.
  */
-export const POOL_REFRESH_DEPTH = 6
+export const POOL_REFRESH_DEPTH = 3
 
 /** Whether block `height` draws its committee from the refreshed pool. */
 export function isPoolRefreshHeight(height: number): boolean {

@@ -59,7 +59,7 @@ Parameters (`src/libs/consensus/v2/routines/poolRules.ts`):
 |---|---|---|
 | floor | `n - q + 1` = 4 of 10 | the smallest count that always holds an honest report when at most `n - q` members collude |
 | `POOL_REFRESH_INTERVAL` | 720 blocks (about 84 min at 7 s) | the longest a captured committee keeps the chain; each refresh is one draw from a wider pool (see the trade-off below) |
-| `POOL_REFRESH_DEPTH` | 6 (4320 blocks, about 8.4 h) | a refresh restores the honest set unless all 6 sampled refresh blocks were signed by captured committees: about `p^6` for a per-committee capture chance `p`, 6e-11 for a third of the set, 3e-8 for 40% |
+| `POOL_REFRESH_DEPTH` | 3 (2160 blocks, about 4.2 h) | a refresh restores the honest set unless all 3 sampled refresh blocks were signed by captured committees: about `p^3` for a per-committee capture chance `p`, 8e-6 for a third of the set, 2e-4 for 40%. A depth of 6 would give 6e-11 and 3e-8, but it reaches back 8.4 h and brings back twice as many validators that have since gone offline (see the liveness trade-off) |
 
 The refresh never removes anyone the parent's list holds. With no
 committed peerlist at the parent (genesis, bootstrap) the existing staked
@@ -73,7 +73,7 @@ Under `committeeBinding` a committee with more than `n - q` offline members
 stalls its height until they return (`docs/design/committee-binding.md`,
 "Liveness trade-off"). With 10% of the staked set abandoned, 1.3% of
 refreshes would stall; at 20%, 12%. The sampled lists hold only validators
-some committee saw online within the last 8.4 hours.
+some committee saw online within the last 4.2 hours.
 
 ## Liveness trade-off
 
