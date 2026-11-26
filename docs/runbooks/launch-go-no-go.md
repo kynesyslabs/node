@@ -240,11 +240,12 @@ exposed by the node, so it comes from the T-24h posts). Then:
   members of the first committee
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
-  entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
-  third of the first committee's votes; on the mainnet chain id every entry
-  names its beneficial `owner`, and no owner runs more than that same cap; no
-  region hosts a third or more of the launch validators, and no owner,
-  operator, provider or region holds a third or more of block 0's stake
+  entry with no provider above `min(launch validators, shardSize) − q` and none holding more than a
+  third of the first committee's votes, counted per provider (owners and
+  operators above the same bounds, or at a third of block 0's stake, and
+  mainnet entries without an `owner` are warnings: there is no limit per
+  party); no region hosts a third or more of the launch validators, and no
+  provider or region holds a third or more of block 0's stake
   (`docs/mainnet/validator-concentration.md`); the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
   `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `tokenStaking`, `nftValidatorGating`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement`, `tlsnVerified` and `keylessWeb2Identity` at
