@@ -69,3 +69,49 @@ export function boundPoolFrom(
     if (pool.length >= floor || staked.size <= pool.length) return pool
     return [...staked].sort(compareIdentities)
 }
+
+/**
+ * Under `peerlistFloor`, the committee of every block at a multiple of this
+ * height is drawn from a wider pool (`poolRefreshHeights`). It is the
+ * longest a committee of `q` colluders keeps the chain with coalition-only
+ * peerlists. About 84 minutes at a 7 s block time.
+ */
+export const POOL_REFRESH_INTERVAL = 720
+
+/**
+ * How many earlier refresh blocks a refresh unites. A refresh misses the
+ * honest set only if every one of them was signed by a captured committee.
+ */
+export const POOL_REFRESH_DEPTH = 6
+
+/** Whether block `height` draws its committee from the refreshed pool. */
+export function isPoolRefreshHeight(height: number): boolean {
+    return height > 0 && height % POOL_REFRESH_INTERVAL === 0
+}
+
+/**
+ * The earlier refresh blocks whose committed peerlists the pool of block
+ * `height` unites with its parent's, newest first; genesis commits none.
+ */
+export function poolRefreshHeights(height: number): number[] {
+    const heights: number[] = []
+    for (let j = 1; j <= POOL_REFRESH_DEPTH; j++) {
+        const sample = height - j * POOL_REFRESH_INTERVAL
+        if (sample < 1) break
+        heights.push(sample)
+    }
+    return heights
+}
+
+/**
+ * The parent's committed peerlist united with the sampled ones. An empty
+ * parent list stays empty, so the bootstrap rule in eligiblePoolFrom (the
+ * whole staked set) still applies to it.
+ */
+export function refreshedPeerlist(
+    committed: string[],
+    samples: string[][],
+): string[] {
+    if (committed.length === 0) return committed
+    return [...new Set([...committed, ...samples.flat()])].sort(compareIdentities)
+}

@@ -12,6 +12,16 @@ export function quorumThreshold(shardSize: number): number {
 }
 
 /**
+ * Observations an identity needs to enter the merged peerlist under
+ * `peerlistFloor`: one more than the members a block can do without, so
+ * at least one report comes from outside any coalition that cannot sign
+ * alone.
+ */
+export function peerlistFloorThreshold(voters: number): number {
+    return voters - quorumThreshold(voters) + 1
+}
+
+/**
  * Whether a producer commits its block. The tally must clear 2/3 + 1 of
  * the members it polled and, independently, 2/3 + 1 of a full committee,
  * so a shard that shrank after liveness filtering cannot lower the bar.

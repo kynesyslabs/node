@@ -855,6 +855,18 @@ this restart is a fallback there.
     concentration" (`NOTE`, never `FAIL`). A mainnet entry without an
     `owner` is a warning too. Providers and regions keep their NO-GO
     limits. See `docs/mainnet/validator-concentration.md`.
+  - New fork `peerlistFloor`, at height 0 in the mainnet set. Under it an
+    identity enters a block's merged peerlist when `n - q + 1` voters
+    observed it at the parent (4 of 10) instead of `q` (7), and a member
+    refuses a dictated list that differs from that rule in its view. The
+    committee of every block at a multiple of 720 is drawn from the parent's
+    peerlist united with those of the 6 previous such blocks, so a
+    committee of colluders that committed coalition-only lists keeps the
+    chain for at most 720 blocks. It changes which committee signs a
+    block, so a running chain takes it only at a coordinated height; the
+    rehearsal restarts from a fresh genesis. A node that lacks one of the
+    sampled blocks refuses to draw that committee instead of guessing.
+    Design and numbers: `docs/design/peerlist-floor.md`.
 
 ## Known limits
 

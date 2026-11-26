@@ -6,7 +6,14 @@ import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
-import { boundPoolFrom, compareIdentities, eligiblePoolFrom } from "./poolRules"
+import {
+    boundPoolFrom,
+    compareIdentities,
+    eligiblePoolFrom,
+    isPoolRefreshHeight,
+    poolRefreshHeights,
+    refreshedPeerlist,
+} from "./poolRules"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import { quorumThreshold } from "../quorum"
 import { isForkActive } from "@/forks/forkGates"
@@ -33,9 +40,14 @@ export function getCommitteeFloor(): number {
     return quorumThreshold(getSharedState.shardSize)
 }
 
-/** Identities committed in a block's peerlist, normalised to lowercase. */
+/**
+ * Identities committed in a block's peerlist, normalised to lowercase. With
+ * `strict` a block this node does not hold throws instead of reading as an
+ * empty list.
+ */
 async function readCommittedPeerlist(
     lastBlockNumber: number,
+    strict = false,
 ): Promise<string[]> {
     if (lastBlockNumber < 1) {
         return []
@@ -43,6 +55,9 @@ async function readCommittedPeerlist(
 
     const committed: string[] = []
     const block = await Chain.getBlockByNumber(lastBlockNumber)
+    if (!block && strict) {
+        throw new Error(`[getShard] block ${lastBlockNumber} is missing`)
+    }
     const rawPeerlist = block?.content?.peerlist as unknown as unknown[]
     if (Array.isArray(rawPeerlist)) {
         for (const entry of rawPeerlist) {
@@ -52,6 +67,26 @@ async function readCommittedPeerlist(
         }
     }
     return committed
+}
+
+/**
+ * The peerlist the pool for block `parentNumber + 1` is drawn from: the
+ * parent's, or under `peerlistFloor` at a refresh height, the parent's
+ * united with the earlier refresh blocks' (docs/design/peerlist-floor.md).
+ * A sampled block this node does not hold throws: reading it as empty would
+ * draw another committee than the nodes that hold it.
+ */
+async function poolPeerlist(parentNumber: number): Promise<string[]> {
+    const committed = await readCommittedPeerlist(parentNumber)
+    const height = parentNumber + 1
+    if (!isForkActive("peerlistFloor", height) || !isPoolRefreshHeight(height)) {
+        return committed
+    }
+    const samples: string[][] = []
+    for (const sample of poolRefreshHeights(height)) {
+        samples.push(await readCommittedPeerlist(sample, true))
+    }
+    return refreshedPeerlist(committed, samples)
 }
 
 /**
@@ -174,7 +209,7 @@ async function chainEligiblePool(
         return poolCache.get(lastBlockNumber)
     }
 
-    const committed = await readCommittedPeerlist(lastBlockNumber)
+    const committed = await poolPeerlist(lastBlockNumber)
     const validatorAddresses = await poolValidatorAddresses(lastBlockNumber)
 
     const eligible = eligiblePoolFrom(committed, validatorAddresses)
