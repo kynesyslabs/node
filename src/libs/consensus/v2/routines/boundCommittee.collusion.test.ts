@@ -86,13 +86,13 @@ const atParent = (identity: string) => ({
  * Every member reports all ten validators at the parent, except that the
  * colluders, and the honest members in `honestMissingH`, leave H out.
  */
-function contributeRound(honestMissingH: Signer[]): void {
+async function contributeRound(honestMissingH: Signer[]): Promise<void> {
     const withoutH = validators.filter(v => v !== excluded)
     for (const member of validators) {
         const leavesHOut =
             colluders.includes(member) || honestMissingH.includes(member)
         const seen = leavesHOut ? withoutH : validators
-        contributePeerlist(PARENT + 1, member.identity, ids(seen).map(atParent))
+        await contributePeerlist(PARENT + 1, member.identity, ids(seen).map(atParent))
     }
 }
 
@@ -152,14 +152,14 @@ beforeEach(() => {
 
 describe("three colluders leaving one honest validator out (shardSize 10)", () => {
     it("cannot drop H on their own: seven honest reports are the quorum", async () => {
-        contributeRound([])
+        await contributeRound([])
         const merged = await computeMergedPeerlist(PARENT + 1, ids(validators))
         expect(merged).toContain(excluded.identity)
         expect(merged).toHaveLength(10)
     })
 
     it("drops H when one honest member also misses it", async () => {
-        contributeRound([honest[0]])
+        await contributeRound([honest[0]])
         const merged = await computeMergedPeerlist(PARENT + 1, ids(validators))
         expect(merged).not.toContain(excluded.identity)
         expect(merged).toHaveLength(9)

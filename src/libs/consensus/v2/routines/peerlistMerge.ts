@@ -9,6 +9,8 @@ import { quorumThreshold } from "../quorum"
 import { compareIdentities } from "./poolRules"
 
 export const MERGE_PEERLIST_MAX_ENTRIES_PER_PEER = 1000
+/** Entries of one report that are read before the rest is ignored. */
+export const MERGE_PEERLIST_MAX_EXAMINED_PER_PEER = 2000
 
 const MAX_IDENTITY_LENGTH = 20000
 const MAX_BLOCK_HASH_LENGTH = 256
@@ -35,8 +37,12 @@ let contributions = new Map<string, SyncObservation[]>()
 let snapshotBlockRef: number | null = null
 let snapshot: SyncObservation[] | null = null
 
+// The last non-empty staked set read, reused for every report of its height.
+let stakedCache: { height: number; set: Set<string> } | null = null
+
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetPeerlistMerge(): void {
+    stakedCache = null
     contributionsBlockRef = null
     contributions = new Map()
     snapshotBlockRef = null
@@ -54,15 +60,39 @@ export function freezeLocalSyncObservations(blockRef: number): void {
 
 /**
  * Our own observations for the exchange: the frozen snapshot for
- * `blockRef` when one exists, otherwise a live read.
+ * `blockRef` when one exists, otherwise a live read. Only staked identities
+ * are reported, so unstaked peers cannot fill a receiver's per-report cap.
  */
-export function getLocalSyncObservations(
+export async function getLocalSyncObservations(
     blockRef?: number,
-): SyncObservation[] {
-    if (blockRef !== undefined && blockRef === snapshotBlockRef && snapshot) {
-        return snapshot
+): Promise<SyncObservation[]> {
+    const table =
+        blockRef !== undefined && blockRef === snapshotBlockRef && snapshot
+            ? snapshot
+            : collectLocalSyncObservations()
+    let staked: Set<string> | null
+    try {
+        staked = await stakedAt(getSharedState.lastBlockNumber)
+    } catch (error) {
+        log.error(`[peerlistMerge] Validator read failed; reporting no peers: ${error}`)
+        return []
     }
-    return collectLocalSyncObservations()
+    if (!staked) return table
+    return table.filter(o => staked.has(o.identity.toLowerCase()))
+}
+
+/**
+ * The staked identities at `height`, the set computeMergedPeerlist filters
+ * the merged list by. Null on a development network, where nothing is
+ * filtered. Throws when the read fails.
+ */
+async function stakedAt(height: number): Promise<Set<string> | null> {
+    if (stakedCache?.height === height) return stakedCache.set
+    const validators = await GCR.getGCRValidatorsAtBlockOrThrow(height)
+    if (validators.length === 0) return null
+    const set = new Set(validators.map(v => v.address))
+    stakedCache = { height, set }
+    return set
 }
 
 /**
@@ -102,13 +132,14 @@ function collectLocalSyncObservations(): SyncObservation[] {
 /**
  * Records a shard member's reported peerlist for a consensus round.
  * Contributions are keyed by contributor, so re-reports replace rather
- * than accumulate. Entries are validated and capped per contributor.
+ * than accumulate. Only staked identities are kept, up to the cap, however
+ * many entries the report holds.
  */
-export function contributePeerlist(
+export async function contributePeerlist(
     blockRef: unknown,
     contributor: string,
     peerlist: unknown,
-): void {
+): Promise<void> {
     if (typeof blockRef !== "number" || !Number.isInteger(blockRef)) {
         return
     }
@@ -130,6 +161,17 @@ export function contributePeerlist(
         return
     }
 
+    // Read before touching the round's state, so nothing below awaits.
+    let staked: Set<string> | null
+    try {
+        staked = await stakedAt(blockRef - 1)
+    } catch (error) {
+        log.error(
+            `[peerlistMerge] Validator read failed; dropping ${contributor}'s peerlist for block ${blockRef}: ${error}`,
+        )
+        return
+    }
+
     if (contributionsBlockRef !== blockRef) {
         if (contributionsBlockRef !== null && blockRef < contributionsBlockRef) {
             return
@@ -138,55 +180,52 @@ export function contributePeerlist(
         contributionsBlockRef = blockRef
     }
 
-    // Cap BEFORE validating: lowercasing and regex-testing every element of
-    // an attacker-supplied array first would let a hostile contributor push
-    // unbounded work onto the consensus tick regardless of the cap. Slice to
-    // the cap up front so validation cost is bounded by the cap, not by the
-    // reported length.
-    if (peerlist.length > MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) {
-        log.warning(
-            `[peerlistMerge] Contributor ${contributor} reported ${peerlist.length} peers; ` +
-                `capping at ${MERGE_PEERLIST_MAX_ENTRIES_PER_PEER} for this round`,
-        )
+    // With a validator set, the first 2,000 entries are examined and the cap
+    // counts staked ones only, so an unstaked entry takes no slot. Without
+    // one, the report is cut to the cap before validating.
+    const candidates = peerlist.slice(
+        0,
+        staked
+            ? MERGE_PEERLIST_MAX_EXAMINED_PER_PEER
+            : MERGE_PEERLIST_MAX_ENTRIES_PER_PEER,
+    )
+    const entries: SyncObservation[] = []
+    for (const entry of candidates) {
+        if (entries.length >= MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) {
+            log.warning(
+                `[peerlistMerge] Contributor ${contributor} reported more than ` +
+                    `${MERGE_PEERLIST_MAX_ENTRIES_PER_PEER} peers; capping for this round`,
+            )
+            break
+        }
+        if (!entry || typeof entry !== "object") continue
+        const { identity, block, block_hash } = entry as Record<
+            string,
+            unknown
+        >
+        if (
+            typeof identity !== "string" ||
+            identity.length === 0 ||
+            identity.length > MAX_IDENTITY_LENGTH
+        ) {
+            continue
+        }
+        const normalized = identity.toLowerCase()
+        if (staked ? !staked.has(normalized) : !HEX_IDENTITY_REGEX.test(normalized)) {
+            continue
+        }
+        if (typeof block !== "number" || !Number.isInteger(block) || block < 0) {
+            continue
+        }
+        if (
+            typeof block_hash !== "string" ||
+            block_hash.length === 0 ||
+            block_hash.length > MAX_BLOCK_HASH_LENGTH
+        ) {
+            continue
+        }
+        entries.push({ identity: normalized, block, block_hash })
     }
-
-    const entries = peerlist
-        .slice(0, MERGE_PEERLIST_MAX_ENTRIES_PER_PEER)
-        .flatMap((entry): SyncObservation[] => {
-            if (!entry || typeof entry !== "object") {
-                return []
-            }
-            const { identity, block, block_hash } = entry as Record<
-                string,
-                unknown
-            >
-            if (
-                typeof identity !== "string" ||
-                identity.length === 0 ||
-                identity.length > MAX_IDENTITY_LENGTH
-            ) {
-                return []
-            }
-            const normalized = identity.toLowerCase()
-            if (!HEX_IDENTITY_REGEX.test(normalized)) {
-                return []
-            }
-            if (
-                typeof block !== "number" ||
-                !Number.isInteger(block) ||
-                block < 0
-            ) {
-                return []
-            }
-            if (
-                typeof block_hash !== "string" ||
-                block_hash.length === 0 ||
-                block_hash.length > MAX_BLOCK_HASH_LENGTH
-            ) {
-                return []
-            }
-            return [{ identity: normalized, block, block_hash }]
-        })
 
     contributions.set(contributor, entries)
 }
@@ -301,7 +340,7 @@ async function collectParentVotes(
 
     const ourKey = getSharedState.publicKeyHex.toLowerCase()
     if (voters.has(ourKey)) {
-        for (const observation of getLocalSyncObservations(blockRef)) {
+        for (const observation of await getLocalSyncObservations(blockRef)) {
             vote(ourKey, observation)
         }
     }

@@ -171,7 +171,7 @@ export default class ServerHandlers {
         // The contribution feeds the secretary's merge only, so it is
         // recorded independently of what happens to the transactions.
         if (envelope && sender) {
-            contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
+            await contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
         }
 
         // The reply is one frame. Our own requests carry only the pool we
@@ -188,7 +188,7 @@ export default class ServerHandlers {
             const replyTxs = capMergeReply(pending)
             responsePayload = {
                 txs: replyTxs,
-                peerlist: getLocalSyncObservations(envelope.blockRef),
+                peerlist: await getLocalSyncObservations(envelope.blockRef),
                 ...(replyTxs.length < pending.length ? { more: true } : {}),
             }
         } else {
