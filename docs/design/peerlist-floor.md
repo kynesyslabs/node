@@ -55,7 +55,11 @@ From the block at the fork height on:
    (the first `POOL_REFRESH_DEPTH` refreshes) the genesis validator set
    takes the place of the missing samples: genesis commits no peerlist, and
    a coalition that captured the lists before block 720 would otherwise find
-   only its own lists at every later refresh. It reads only hashed block content and the
+   only its own lists at every later refresh. The genesis set is the one
+   recorded after block 0, so it needs `finalityProofs` from block 1 (mainnet
+   and devnet); on a chain without that record the sample is left out rather
+   than read from the live table, which changes once a genesis validator
+   leaves. It reads only hashed block content and the
    validator set, so every node, sync included, draws the same committee,
    and verifyBlock already checks signatures against that committee. A
    committee that gathered `q` colluders and committed coalition-only lists

@@ -73,6 +73,8 @@ async function readCommittedPeerlist(
  * The peerlist the pool for block `parentNumber + 1` is drawn from: the
  * parent's, or under `peerlistFloor` at a refresh height, the parent's
  * united with the earlier refresh blocks' (docs/design/peerlist-floor.md).
+ * The genesis set is sampled only on a chain that recorded it, i.e. with
+ * `finalityProofs` active from block 1.
  * A sampled block this node does not hold throws: reading it as empty would
  * draw another committee than the nodes that hold it.
  */
@@ -84,11 +86,13 @@ async function poolPeerlist(parentNumber: number): Promise<string[]> {
     }
     const samples: string[][] = []
     for (const sample of poolRefreshHeights(height)) {
-        samples.push(
-            sample === 0
-                ? [...(await poolValidatorAddresses(0))].map(id => id.toLowerCase())
-                : await readCommittedPeerlist(sample, true),
-        )
+        if (sample > 0) {
+            samples.push(await readCommittedPeerlist(sample, true))
+        } else if (isForkActive("finalityProofs", 1)) {
+            // Only the recorded set after block 0 is fixed; the live table
+            // would answer differently once a genesis validator leaves.
+            samples.push([...(await poolValidatorAddresses(0))].map(id => id.toLowerCase()))
+        }
     }
     return refreshedPeerlist(committed, samples)
 }

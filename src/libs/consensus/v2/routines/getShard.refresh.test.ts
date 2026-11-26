@@ -33,7 +33,7 @@ jest.mock("src/utilities/sharedState", () => ({
         lastBlockNumber: 100,
         lastBlockHash: "tiphash",
         shardSize: 10,
-        forkConfig: { peerlistFloor: { activationHeight: null } },
+        forkConfig: { peerlistFloor: { activationHeight: null }, finalityProofs: { activationHeight: null } },
     },
 }))
 
@@ -58,6 +58,11 @@ jest.mock("src/libs/blockchain/chain", () => ({
     },
 }))
 
+jest.mock("src/libs/blockchain/finality/validatorSet", () => ({
+    validatorSetAt: jest.fn(async () => ({ validators: [] })),
+    activeIdentities: () => new Set(STAKED),
+}))
+
 jest.mock("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
     default: {
@@ -70,6 +75,7 @@ const sorted = (ids: string[]) => [...ids].sort()
 beforeEach(() => {
     __resetValidatorCache()
     getSharedState.forkConfig.peerlistFloor.activationHeight = null
+    getSharedState.forkConfig.finalityProofs.activationHeight = null
     missing = new Set()
     // The refresh blocks before the capture saw every online validator.
     peerlists = new Map([
@@ -131,11 +137,19 @@ describe("a captured chain: every block since the last refresh commits the coali
         expect(await getEligiblePool(REFRESH - 1)).toEqual(sorted([...HONEST, ...COALITION]))
     })
 
-    it("a capture before the first refresh: the first refresh draws from the genesis set", async () => {
+    it("a capture before the first refresh: the first refresh draws from the recorded genesis set", async () => {
         getSharedState.forkConfig.peerlistFloor.activationHeight = 0
+        getSharedState.forkConfig.finalityProofs.activationHeight = 0
         peerlists = new Map()
         expect(await getBoundPool(E - 1)).toEqual(sorted(STAKED))
         expect(await getEligiblePool(2 * E - 1)).toEqual(sorted(STAKED))
+    })
+
+    it("does not sample the genesis set where it was not recorded (finalityProofs after block 1)", async () => {
+        getSharedState.forkConfig.peerlistFloor.activationHeight = 0
+        getSharedState.forkConfig.finalityProofs.activationHeight = 2
+        peerlists = new Map()
+        expect(await getBoundPool(E - 1)).toEqual(sorted(COALITION))
     })
 
     it("refuses to draw when a sampled block is missing instead of reading it as empty", async () => {
