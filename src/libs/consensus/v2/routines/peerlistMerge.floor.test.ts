@@ -132,6 +132,20 @@ describe("the floor of n - q + 1", () => {
         expect(await computeMergedPeerlist(101, COMMITTEE)).toContain(COLLUDER_KEY)
     })
 
+    it("holds in a 9-member committee: 6 colluders cannot drop an honest validator", async () => {
+        __resetPeerlistMerge()
+        const short = [OUR_KEY, "d1", "d2", "e1", "e2", "e3", "e4", "e5", "e6"]
+        for (const member of ["d1", "d2"]) {
+            contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
+        }
+        for (const colluder of ["e1", "e2", "e3", "e4", "e5", "e6"]) {
+            contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
+        }
+        // Three honest reports (ours among them) meet the floor of 9 - 7 + 1.
+        expect(await computeMergedPeerlist(101, short)).toEqual(withColluderKey)
+        expect(await validateMergedPeerlist(101, [OUR_KEY, COLLUDER_KEY].sort(), short)).toBeNull()
+    })
+
     it("applies from the activation height of the block being forged", async () => {
         getSharedState.forkConfig.peerlistFloor.activationHeight = 102
         expect(await computeMergedPeerlist(101, COMMITTEE)).toEqual([OUR_KEY])

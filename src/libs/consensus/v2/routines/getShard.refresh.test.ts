@@ -14,7 +14,7 @@ const COALITION = [V(11), V(12), V(13), V(14), V(15), V(16), V(17)]
 const STAKED = [...HONEST, ...COALITION, V(20)] // V(20) staked but never seen online
 
 const E = POOL_REFRESH_INTERVAL
-const REFRESH = 3 * E // a refresh block with two earlier refresh blocks
+const REFRESH = 4 * E // a refresh block whose window holds three earlier refresh blocks, not genesis
 
 // Peerlists by block height; any other stored block commits the coalition only.
 let peerlists: Map<number, string[]>
@@ -91,9 +91,10 @@ describe("pool refresh heights", () => {
         expect(isPoolRefreshHeight(5 * E)).toBe(true)
     })
 
-    it("sample the previous refresh blocks, newest first, down to block 1", () => {
-        expect(poolRefreshHeights(E)).toEqual([])
-        expect(poolRefreshHeights(3 * E)).toEqual([2 * E, E])
+    it("sample the previous refresh blocks, newest first, and the genesis set (0) while the window reaches it", () => {
+        expect(poolRefreshHeights(E)).toEqual([0])
+        expect(poolRefreshHeights(3 * E)).toEqual([2 * E, E, 0])
+        expect(poolRefreshHeights(4 * E)).toEqual([3 * E, 2 * E, E])
         const deep = (POOL_REFRESH_DEPTH + 3) * E
         expect(poolRefreshHeights(deep)).toHaveLength(POOL_REFRESH_DEPTH)
         expect(poolRefreshHeights(deep)[0]).toBe(deep - E)
@@ -133,6 +134,13 @@ describe("a captured chain: every block since the last refresh commits the coali
         __resetValidatorCache()
         getSharedState.forkConfig.peerlistFloor.activationHeight = REFRESH
         expect(await getEligiblePool(REFRESH - 1)).toEqual(sorted([...HONEST, ...COALITION]))
+    })
+
+    it("a capture before the first refresh: the first refresh draws from the genesis set", async () => {
+        getSharedState.forkConfig.peerlistFloor.activationHeight = 0
+        peerlists = new Map()
+        expect(await getBoundPool(E - 1)).toEqual(sorted(STAKED))
+        expect(await getEligiblePool(2 * E - 1)).toEqual(sorted(STAKED))
     })
 
     it("refuses to draw when a sampled block is missing instead of reading it as empty", async () => {

@@ -857,10 +857,12 @@ this restart is a fallback there.
     limits. See `docs/mainnet/validator-concentration.md`.
   - New fork `peerlistFloor`, at height 0 in the mainnet set. Under it an
     identity enters a block's merged peerlist when `n - q + 1` voters
-    observed it at the parent (4 of 10) instead of `q` (7), and a member
+    observed it at the parent (4 of 10; `m - q + 1` for a committee of `m`
+    short of 10) instead of `q` (7), and a member
     refuses a dictated list that differs from that rule in its view. The
     committee of every block at a multiple of 720 is drawn from the parent's
-    peerlist united with those of the 3 previous such blocks, so a
+    peerlist united with those of the 3 previous such blocks (the genesis
+    validator set while that window reaches back past block 1), so a
     committee of colluders that committed coalition-only lists keeps the
     chain for at most 720 blocks. It changes which committee signs a
     block, so a running chain takes it only at a coordinated height; the

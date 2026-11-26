@@ -35,11 +35,17 @@ describe("peerlistFloor config", () => {
 
 describe("the floor", () => {
     it("is one more than the members a block can do without", () => {
-        expect(peerlistFloorThreshold(10)).toBe(4)
         expect(quorumThreshold(10)).toBe(7)
+        expect(peerlistFloorThreshold(10, 7)).toBe(4)
         for (const n of [1, 3, 4, 7, 10, 13, 30]) {
-            expect(peerlistFloorThreshold(n)).toBe(n - quorumThreshold(n) + 1)
-            expect(peerlistFloorThreshold(n)).toBeGreaterThanOrEqual(1)
+            expect(peerlistFloorThreshold(n, quorumThreshold(n))).toBe(n - quorumThreshold(n) + 1)
         }
+    })
+
+    it("follows a committee short of shardSize, which still needs the full bar", () => {
+        expect(peerlistFloorThreshold(9, 7)).toBe(3)
+        expect(peerlistFloorThreshold(8, 7)).toBe(2)
+        expect(peerlistFloorThreshold(7, 7)).toBe(1)
+        expect(peerlistFloorThreshold(5, 7)).toBe(1)
     })
 })

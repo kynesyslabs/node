@@ -84,7 +84,11 @@ async function poolPeerlist(parentNumber: number): Promise<string[]> {
     }
     const samples: string[][] = []
     for (const sample of poolRefreshHeights(height)) {
-        samples.push(await readCommittedPeerlist(sample, true))
+        samples.push(
+            sample === 0
+                ? [...(await poolValidatorAddresses(0))].map(id => id.toLowerCase())
+                : await readCommittedPeerlist(sample, true),
+        )
     }
     return refreshedPeerlist(committed, samples)
 }

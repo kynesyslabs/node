@@ -32,9 +32,14 @@ the purge would start within a few blocks of launch.
 From the block at the fork height on:
 
 1. **Floor.** An identity observed at the parent block enters the merged
-   peerlist when at least `n - q + 1` voters report it (4 of 10). `n` and
-   `q` are the ones the round already uses: `shardSize` and its quorum under
-   `committeeBinding`, else the round's voters. Under `committeeBinding` a
+   peerlist when at least `m - q + 1` voters report it, and at least 1:
+   4 of a full committee of 10. `m` is the round's real committee size and
+   `q` the block's signature bar the round already uses (the quorum of
+   `shardSize` under `committeeBinding`, else of the round's voters). A
+   committee short of `shardSize` (a pool of 9, say) still needs `q`
+   signatures, so `m - q` colluders cannot sign alone and leave `m - q + 1`
+   honest members; a floor fixed at 4 would let 6 of 9 drop an honest
+   validator that only the other 3 report. Under `committeeBinding` a
    member accepts a dictated list only when every entry has at least that
    many reports in its view and
    every staked identity with that many is present, the same symmetric check
@@ -46,7 +51,11 @@ From the block at the fork height on:
    the committee is drawn from the parent's committed peerlist united with
    the committed peerlists of blocks `h - j * POOL_REFRESH_INTERVAL` for
    `j = 1 .. POOL_REFRESH_DEPTH` (those at height 1 or more), then filtered
-   by the staked set as usual. It reads only hashed block content and the
+   by the staked set as usual. While that window reaches back past block 1
+   (the first `POOL_REFRESH_DEPTH` refreshes) the genesis validator set
+   takes the place of the missing samples: genesis commits no peerlist, and
+   a coalition that captured the lists before block 720 would otherwise find
+   only its own lists at every later refresh. It reads only hashed block content and the
    validator set, so every node, sync included, draws the same committee,
    and verifyBlock already checks signatures against that committee. A
    committee that gathered `q` colluders and committed coalition-only lists
@@ -57,7 +66,7 @@ Parameters (`src/libs/consensus/v2/routines/poolRules.ts`):
 
 | Name | Value | Why |
 |---|---|---|
-| floor | `n - q + 1` = 4 of 10 | the smallest count that always holds an honest report when at most `n - q` members collude |
+| floor | `m - q + 1`, at least 1 = 4 of 10 | the smallest count that always holds an honest report when at most `m - q` members collude |
 | `POOL_REFRESH_INTERVAL` | 720 blocks (about 84 min at 7 s) | the longest a captured committee keeps the chain; each refresh is one draw from a wider pool (see the trade-off below) |
 | `POOL_REFRESH_DEPTH` | 3 (2160 blocks, about 4.2 h) | a refresh restores the honest set unless all 3 sampled refresh blocks were signed by captured committees: about `p^3` for a per-committee capture chance `p`, 8e-6 for a third of the set, 2e-4 for 40%. A depth of 6 would give 6e-11 and 3e-8, but it reaches back 8.4 h and brings back twice as many validators that have since gone offline (see the liveness trade-off) |
 

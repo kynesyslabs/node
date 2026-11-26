@@ -93,13 +93,20 @@ export function isPoolRefreshHeight(height: number): boolean {
 
 /**
  * The earlier refresh blocks whose committed peerlists the pool of block
- * `height` unites with its parent's, newest first; genesis commits none.
+ * `height` unites with its parent's, newest first. While the window reaches
+ * back past the first refresh block it ends with 0, which stands for the
+ * genesis validator set: genesis commits no peerlist, and without it a
+ * coalition that captured the lists before the first refresh would find
+ * only its own lists to sample.
  */
 export function poolRefreshHeights(height: number): number[] {
     const heights: number[] = []
     for (let j = 1; j <= POOL_REFRESH_DEPTH; j++) {
         const sample = height - j * POOL_REFRESH_INTERVAL
-        if (sample < 1) break
+        if (sample < 1) {
+            heights.push(0)
+            break
+        }
         heights.push(sample)
     }
     return heights

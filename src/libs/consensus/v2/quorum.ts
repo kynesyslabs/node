@@ -13,12 +13,15 @@ export function quorumThreshold(shardSize: number): number {
 
 /**
  * Observations an identity needs to enter the merged peerlist under
- * `peerlistFloor`: one more than the members a block can do without, so
- * at least one report comes from outside any coalition that cannot sign
- * alone.
+ * `peerlistFloor`: one more than the members a block can do without. A
+ * coalition below `quorum` leaves at least that many honest members, so
+ * every honest member's report together reaches the floor and a list
+ * without them gets no honest signature. `quorum` is the block's signature
+ * bar, which a committee short of shardSize must still reach, so the floor
+ * follows the committee's real size, never shardSize.
  */
-export function peerlistFloorThreshold(voters: number): number {
-    return voters - quorumThreshold(voters) + 1
+export function peerlistFloorThreshold(voters: number, quorum: number): number {
+    return Math.max(1, voters - quorum + 1)
 }
 
 /**

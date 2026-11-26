@@ -281,7 +281,7 @@ async function collectParentVotes(
         ? getSharedState.shardSize
         : voters.size
     const threshold = isForkActive("peerlistFloor", blockRef)
-        ? peerlistFloorThreshold(n)
+        ? peerlistFloorThreshold(voters.size, quorumThreshold(n))
         : quorumThreshold(n)
     const votes = new Map<string, Set<string>>()
     const vote = (voter: string, observation: SyncObservation) => {
