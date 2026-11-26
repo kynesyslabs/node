@@ -180,21 +180,21 @@ export async function contributePeerlist(
         contributionsBlockRef = blockRef
     }
 
-    // With a validator set, the first 2,000 entries are examined and the cap
-    // counts staked ones only, so an unstaked entry takes no slot. Without
-    // one, the report is cut to the cap before validating.
+    // With a validator set, the cap is the larger of 1,000 and the staked
+    // count and counts staked entries only, so an unstaked entry takes no
+    // slot; twice the cap is examined. Without one, the report is cut to the
+    // cap before validating.
+    const cap = Math.max(MERGE_PEERLIST_MAX_ENTRIES_PER_PEER, staked?.size ?? 0)
     const candidates = peerlist.slice(
         0,
-        staked
-            ? MERGE_PEERLIST_MAX_EXAMINED_PER_PEER
-            : MERGE_PEERLIST_MAX_ENTRIES_PER_PEER,
+        staked ? Math.max(MERGE_PEERLIST_MAX_EXAMINED_PER_PEER, 2 * cap) : cap,
     )
     const entries: SyncObservation[] = []
     for (const entry of candidates) {
-        if (entries.length >= MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) {
+        if (entries.length >= cap) {
             log.warning(
                 `[peerlistMerge] Contributor ${contributor} reported more than ` +
-                    `${MERGE_PEERLIST_MAX_ENTRIES_PER_PEER} peers; capping for this round`,
+                    `${cap} peers; capping for this round`,
             )
             break
         }
@@ -381,7 +381,19 @@ export async function validateMergedPeerlist(
     shardMembers?: string[],
 ): Promise<string[] | null> {
     if (!Array.isArray(peerlist)) return null
-    if (peerlist.length > MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) return null
+
+    // Same validator set the secretary filtered with, so an unstaked peer
+    // the shard observed is neither required nor allowed.
+    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
+        blockRef - 1,
+    )) as Validators[]
+    // The list holds staked identities once each, so it is no longer than
+    // the larger of the cap and the staked count.
+    const maxLength = Math.max(
+        MERGE_PEERLIST_MAX_ENTRIES_PER_PEER,
+        activeValidators.length,
+    )
+    if (peerlist.length > maxLength) return null
 
     for (const [index, entry] of peerlist.entries()) {
         if (
@@ -400,11 +412,6 @@ export async function validateMergedPeerlist(
 
     const list = peerlist as string[]
 
-    // Same validator set the secretary filtered with, so an unstaked peer
-    // the shard observed is neither required nor allowed.
-    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
-        blockRef - 1,
-    )) as Validators[]
     const validatorAddresses = new Set<string>(
         activeValidators
             .map(v => v.address)

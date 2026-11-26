@@ -187,7 +187,8 @@ describe("unstaked peers at the tip", () => {
         expect(read).toHaveBeenCalledTimes(1)
     })
 
-    it("leave the cap counting staked entries only", async () => {
+    it("leave the cap counting staked entries only, raised to the staked count", async () => {
+        // 1,050 validators: every one is kept despite 900 unstaked entries.
         const many = Array.from(
             { length: MERGE_PEERLIST_MAX_ENTRIES_PER_PEER + 50 },
             (_, i) => "f" + i.toString(16).padStart(63, "0"),
@@ -196,9 +197,9 @@ describe("unstaked peers at the tip", () => {
         const unstaked = flood.slice(0, 900).map(p => obs(p.identity))
         const report = [...unstaked, ...many.map(id => obs(id))]
         await contributePeerlist(101, "c1", report)
-        expect(await computeMergedPeerlist(101, ["c1"])).toEqual(
-            many.slice(0, MERGE_PEERLIST_MAX_ENTRIES_PER_PEER),
-        )
+        const merged = await computeMergedPeerlist(101, ["c1"])
+        expect(merged).toEqual(many)
+        expect(await validateMergedPeerlist(101, merged)).toEqual(many)
     })
 })
 
