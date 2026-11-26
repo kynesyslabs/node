@@ -129,28 +129,16 @@ describe("genesisScheduleProblems", () => {
         ).toEqual([])
     })
 
-    // data/genesis.json as shipped: its chain id (8587492) is not a test
-    // network's and its forks field declares only some of the forks this build
-    // knows, so the check names every other one, pinned or not, and a node
-    // booting from this file is refused. Update this case with the file.
-    it("reports the shipped data/genesis.json as a mainnet genesis that leaves forks undeclared", () => {
+    // data/genesis.json is the test network's genesis: its chain id is one
+    // NON_MAINNET_CHAIN_IDS lists, so it may declare only some forks and a
+    // node boots from it with this build's defaults for the rest.
+    it("accepts the shipped data/genesis.json as a test network genesis", () => {
         const shipped = shippedGenesis()
-        expect(chainIdOf(shipped)).toBe(8587492)
-        expect(isMainnetChainId(chainIdOf(shipped))).toBe(true)
-        const undeclared = Object.keys(DEFAULT_FORK_CONFIG).filter(
-            name => !Object.hasOwn(shipped.forks, name),
-        )
-        expect(undeclared).not.toContain("gasFeeSeparation")
-        const expected = [
-            `the genesis does not declare ${undeclared.join(", ")}: on a mainnet chain id every ` +
-                "fork this build knows needs an activationHeight (a height or null), or it takes " +
-                "this build's default",
-        ]
-        for (const pin of ["", PIN]) {
-            expect(
-                genesisScheduleProblems({ fileGenesisData: shipped, pin, blockPin: "" }),
-            ).toEqual(expected)
-        }
+        expect(chainIdOf(shipped)).toBe(1)
+        expect(isMainnetChainId(chainIdOf(shipped))).toBe(false)
+        expect(
+            genesisScheduleProblems({ fileGenesisData: shipped, pin: "", blockPin: "" }),
+        ).toEqual([])
     })
 })
 
