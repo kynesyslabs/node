@@ -23,12 +23,17 @@ builds privately has the same digest the public release publishes later.
 
 1. **Private fork.** On the GitHub advisory for the report, create the
    temporary private fork. Branch from the commit mainnet runs, fix it there,
-   and get the second maintainer's review on the fork's pull request.
+   and set `version` in `package.json` to the patch version in the same
+   commit: the release workflow refuses a tag whose `package.json` differs,
+   and a later version bump would change the image digest. Get the second
+   maintainer's review on the fork's pull request.
 2. **Signed tag.** Tag the fix commit with the next patch version, signed
    with a release key (`git tag -s`). Push the tag to the private fork only.
 3. **Two builds.** Both maintainers build the image from the tag with the
    command below and post the digest in the advisory thread. The digests must
-   be equal; if they are not, stop and find out why.
+   be equal; if they are not, stop and find out why. Each digest comes from
+   the build's own `image.tar` (last line of the command), not from the
+   Docker image store.
 4. **Operators.** Add the patching operators as collaborators on the
    advisory. Each one fetches the tag, checks the signature
    (`git verify-tag`), builds with the same command, and confirms that the
@@ -38,10 +43,12 @@ builds privately has the same digest the public release publishes later.
    reads them), and restart one validator at a time, never two at once. Each operator posts
    the running digest and its validator addresses in the thread.
 5. **Coverage.** When the confirmed validators are more than two thirds of
-   the active set, the maintainers push the same commit to `stabilisation`,
-   push the same signed tag to the public repository, and let the release
-   workflow publish it. The workflow rebuilds the same digest from the public
-   commit.
+   the active set, the maintainers merge the fix into `stabilisation` with a
+   merge commit (never squash or rebase: the tagged commit must stay the same
+   commit and become an ancestor of `stabilisation`, or the workflow refuses
+   the tag), push the same signed tag to the public repository, and let the
+   release workflow publish it. The workflow rebuilds the same digest from
+   the tagged commit.
 6. **Disclosure.** Publish the advisory and announce the upgrade to the
    remaining operators through the normal release notes. The reporter is
    credited unless they asked not to be.
@@ -50,7 +57,8 @@ Build command (the same inputs as `release.yml`):
 
 ```bash
 TAG=vX.Y.Z
-git checkout "$TAG"
+# a fresh clone: untracked files in an old one would enter the build
+git clone --branch "$TAG" <fork url> node-patch && cd node-patch
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
 GIT_COMMIT=$(git rev-parse HEAD) \
 GIT_COMMIT_MESSAGE=$(git log -1 --format=%s) \
@@ -67,7 +75,8 @@ tar -xOf image.tar index.json | jq -r '.manifests[0].digest'
 ```
 
 `GIT_BRANCH` is the tag name, as in the workflow; any other value changes
-the digest.
+the digest. Use a current Docker with buildx; if two builders get different
+digests from the same tag, compare `docker buildx version` first.
 
 ## Rules
 

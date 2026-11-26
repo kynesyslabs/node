@@ -42,6 +42,12 @@ the running release before the node starts.
 ## Alerts
 
 - `DbDown`: the node cannot reach its database.
-- `DiskSpaceLow` and `DiskSpaceCritical`: the volume that holds the database
-  is filling up (`monitoring/prometheus/alerts/node-health.yml`). Low disk
-  warns; the node does not refuse to start on it.
+- `DiskSpaceLow` (under 20 GiB free) and `DiskSpaceCritical` (under 5 GiB):
+  the node's data volume is filling up
+  (`monitoring/prometheus/alerts/node-health.yml`). They watch
+  `DISK_SPACE_PATH`, not Postgres: when the database lives on another disk
+  or host, watch that disk separately (`node_filesystem_avail_bytes`,
+  `docs/runbooks/mainnet-monitoring.md`).
+- Below `MIN_DISK_SPACE` (5 GiB by default) the node refuses to start, so
+  `DiskSpaceCritical` means it will not come back after a restart or an
+  upgrade. Free space before restarting it.

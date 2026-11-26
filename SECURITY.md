@@ -18,8 +18,8 @@ what an attacker gains. A report about the SDK goes to
   assessment within 7 days.
 - A fix for a Critical or High issue ships to the validators first, as a
   signed release, before the details are published. The advisory is made
-  public once validators holding more than two thirds of the committee run
-  the fix.
+  public once more than two thirds of the active validators run the fix
+  (`docs/runbooks/private-patch.md`).
 - We credit the reporter in the advisory unless they ask not to be named.
 
 ## Severity

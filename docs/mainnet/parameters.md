@@ -74,12 +74,15 @@ them like the values above.
 | `SIGNALING_ENABLED` | `false` | The WebRTC signaling server (`RPC_SIGNALING_PORT`, 3005) serves instant-messaging clients; consensus does not use it. While it runs, each online message becomes a node-signed `instantMessaging` transaction with no fee, and the online path has no per-sender cap. When it is off, the node logs `Signaling server disabled (SIGNALING_ENABLED=false)` and `/health` lists the `signaling` subsystem as skipped. Compose still publishes the port; nothing answers on it. |
 | `XM_ENABLED`, `DEMOSWORK_ENABLED` | `false` | Decided 2026-11-27: off at launch. Cross-chain (XM) execution is on by default in code (`src/config/defaults.ts`) but has never run on a live network, and it dispatches to outside chains before the transaction is admitted (mainnet-launch#38). With the switch off the node refuses XM requests and DemosWork scripts (which share the XM dispatch path) with `FEATURE_DISABLED`; nothing on chain changes, so turning it on later is an operator setting, not a fork. Web2 requests stay on. It is turned on once the mainnet-launch#38 items are closed. |
 
-The `v1.0.0-rc.11` tag carries a sheet without these lines. A validator
-installing that tag appends `SIGNALING_ENABLED=false` to `.env` by hand,
-after the sheet, and confirms the container has it:
+The `v1.0.0-rc.11` tag carries a sheet without these lines, and tags before
+the one that publishes this page lack the `XM_ENABLED` and
+`DEMOSWORK_ENABLED` lines. A validator installing such a tag appends the
+missing ones (`SIGNALING_ENABLED=false`, `XM_ENABLED=false`,
+`DEMOSWORK_ENABLED=false`) to `.env` by hand, after the sheet, and confirms
+the container has all three:
 
 ```bash
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" | grep '^SIGNALING_ENABLED='
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" | grep -E '^(SIGNALING|XM|DEMOSWORK)_ENABLED='
 ```
 
 L2PS and TLSNotary are not switched here: `l2psSettlement` and `tlsnVerified`
