@@ -16,6 +16,19 @@ groups:
           summary: No new block for over 5 minutes
           description: "demos_seconds_since_last_block = {{ $value }} on {{ $labels.instance }}. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
 
+      # Names whom to restart during a committee stall, minutes before HeightStalled.
+      # One series per bound committee member this validator cannot reach while too
+      # few are live; the value is the block height it holds up. Every retry at that
+      # height draws the same committee, so nothing recovers until they are back.
+      - alert: CommitteeMembersOffline
+        expr: demos_committee_member_offline > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Committee member {{ $labels.identity }} is offline; block {{ $value | printf `%.0f` }} waits for it"
+          description: "{{ $labels.instance }} cannot reach {{ $labels.identity }}, a member of the bound committee for block {{ $value | printf `%.0f` }}, and too few members are live to forge it. Every retry draws the same committee, so the chain waits until enough of them are back: restart the named validators (docs/runbooks/chain-halt-recovery.md, Tier 1). If one validator names every other member, that validator is the one cut off; check its network first."
+
       # Not latched. The counter rises once per disagreeing peer per round, and genesis has
       # a shard of 10, so one round where 4 of 9 peers refuse this node's candidate (mempool
       # lag) already counts 4. That must clear on its own, not latch for 7 days.

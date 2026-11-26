@@ -129,3 +129,38 @@ export function setConsensusAbstaining(abstaining: boolean): void {
         /* ignore */
     }
 }
+
+// The height the series below hold up; 0 while none are set.
+let committeeOfflineHeight = 0
+
+/**
+ * Names the bound committee members this node sees offline while too few are
+ * live to forge `height`. Every retry at a height draws the same committee, so
+ * these are the validators operators must bring back. The series are replaced
+ * on each call, so only the current committee is ever exported.
+ */
+export function setCommitteeOffline(height: number, offline: string[]): void {
+    try {
+        const metrics = getMetricsService()
+        metrics.resetGauge("committee_member_offline")
+        committeeOfflineHeight = offline.length > 0 ? height : 0
+        for (const identity of offline) {
+            metrics.setGauge("committee_member_offline", height, {
+                identity: identity.toLowerCase(),
+            })
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * Clears the series once the height they hold up is committed: a node that
+ * stops drawing committees (syncing, shutting down) must not keep naming them.
+ */
+export function clearCommitteeOfflineAtOrBelow(lastBlockNumber: number): void {
+    if (committeeOfflineHeight === 0 || lastBlockNumber < committeeOfflineHeight) {
+        return
+    }
+    setCommitteeOffline(0, [])
+}
