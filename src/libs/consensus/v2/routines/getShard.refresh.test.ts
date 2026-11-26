@@ -22,14 +22,9 @@ let missing: Set<number>
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
+    default: Object.fromEntries(
+        ["debug", "info", "warning", "error", "only", "custom"].map(level => [level, jest.fn()]),
+    ),
 }))
 
 jest.mock("src/utilities/sharedState", () => ({
