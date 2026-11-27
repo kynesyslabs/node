@@ -30,13 +30,17 @@ function readOp(chain: string, subchain: string, params: unknown): any {
 function fakeInstance(calls: unknown[][] = []) {
     return {
         getContractInstance: async () => ({
-            balanceOf: async (...args: unknown[]) => (calls.push(args), 42n),
-            transfer: async () => {
-                throw new Error("a read must never call a state-changing method")
+            getFunction: (signature: string) => {
+                if (signature !== "balanceOf(address)") {
+                    throw new Error(`a read must not call ${signature}`)
+                }
+                return async (...args: unknown[]) => (calls.push(args), 42n)
             },
         }),
     }
 }
+
+const BALANCE = { address: HOLDER, abi: ERC20_ABI, method: "balanceOf" }
 
 afterEach(() => jest.restoreAllMocks())
 
@@ -58,7 +62,7 @@ describe("contract_read RPC resolution", () => {
     it("reports an unknown subchain and an inherited key as not found", async () => {
         const create = spyOn(multichain.EVM, "createInstance")
         for (const [chain, subchain] of [["eth", "nowhere"], ["eth", "constructor"], ["constructor", "name"]]) {
-            const reply = await handleContractRead(readOp(chain, subchain, { address: HOLDER }), 1)
+            const reply = await handleContractRead(readOp(chain, subchain, { ...BALANCE, params: "[]" }), 1)
             expect(reply).toMatchObject({ result: "error", error: `RPC URL not found for ${chain}.${subchain}` })
         }
         expect(create).not.toHaveBeenCalled()
@@ -78,4 +82,40 @@ describe("contract_read RPC resolution", () => {
         expect(urls).toEqual([evmProviders.eth.sepolia])
         expect(reply).toMatchObject({ status: true })
     })
+})
+
+describe("contract_read arguments and method", () => {
+    function withInstance(calls: unknown[][] = []) {
+        spyOn(multichain.EVM, "getInstance").mockReturnValue({ ...fakeInstance(calls), connect: async () => true } as any)
+    }
+
+    it("accepts a JSON list, a JSON object, an array or no params", async () => {
+        const calls: unknown[][] = []
+        withInstance(calls)
+        for (const params of [JSON.stringify([HOLDER]), JSON.stringify({ a: HOLDER }), [HOLDER]]) {
+            const reply = await handleContractRead(readOp("eth", "sepolia", { ...BALANCE, params }), 11155111)
+            expect(reply).toEqual({ result: 42n, status: true })
+        }
+        expect(calls).toEqual([[HOLDER], [HOLDER], [HOLDER]])
+    })
+
+    const refused: Array<[string, unknown, string]> = [
+        ["null params", null, "Missing contract read params"],
+        ["no address", { ...BALANCE, address: "" }, "Missing contract address"],
+        ["no ABI", { ...BALANCE, abi: undefined }, "Missing contract ABI"],
+        ["a malformed ABI", { ...BALANCE, abi: "{not json" }, "Invalid contract ABI"],
+        ["a method missing from the ABI", { ...BALANCE, method: "connect" }, "is not in the ABI"],
+        ["a state-changing method", { ...BALANCE, method: "transfer" }, "not a view or pure function"],
+        ["unparseable params", { ...BALANCE, params: "{oops" }, "Invalid contract method params"],
+        ["a scalar params value", { ...BALANCE, params: "5" }, "Invalid contract method params"],
+    ]
+    for (const [label, params, error] of refused) {
+        it(`refuses ${label} without calling the contract`, async () => {
+            const calls: unknown[][] = []
+            withInstance(calls)
+            const reply = await handleContractRead(readOp("eth", "sepolia", params), 11155111)
+            expect(reply).toMatchObject({ result: "error", error: expect.stringContaining(error) })
+            expect(calls).toEqual([])
+        })
+    }
 })
