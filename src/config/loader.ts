@@ -589,6 +589,14 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.WEB2_MAX_INFLIGHT_TOTAL,
                 d.outbound.web2MaxInflightTotal,
             ),
+            web2MaxSessionsPerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_SESSIONS_PER_CALLER,
+                d.outbound.web2MaxSessionsPerCaller,
+            ),
+            web2MaxSessionsTotal: envStrictInt(
+                EnvKey.WEB2_MAX_SESSIONS_TOTAL,
+                d.outbound.web2MaxSessionsTotal,
+            ),
             tlsnotaryAllowedPorts: envList(
                 EnvKey.TLSNOTARY_ALLOWED_PORTS,
                 d.outbound.tlsnotaryAllowedPorts.map(String),
@@ -722,6 +730,8 @@ function assertOutboundSane(config: AppConfig): void {
             o.web2MaxBytesPerHourPerCaller,
         ],
         [EnvKey.WEB2_MAX_INFLIGHT_TOTAL, o.web2MaxInflightTotal],
+        [EnvKey.WEB2_MAX_SESSIONS_PER_CALLER, o.web2MaxSessionsPerCaller],
+        [EnvKey.WEB2_MAX_SESSIONS_TOTAL, o.web2MaxSessionsTotal],
     ]
     for (const [key, value] of web2Caps) {
         if (!Number.isSafeInteger(value) || value <= 0) {

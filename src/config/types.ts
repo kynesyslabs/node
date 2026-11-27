@@ -328,6 +328,10 @@ export interface OutboundConfig {
     web2MaxBytesPerHourPerCaller: number
     /** web2 fetches running at once on this node, all callers and paths together. */
     web2MaxInflightTotal: number
+    /** web2 (DAHR) sessions one caller may hold open at once. */
+    web2MaxSessionsPerCaller: number
+    /** web2 (DAHR) sessions open at once on this node, all callers together. */
+    web2MaxSessionsTotal: number
     /** Target ports the TLSNotary relay may connect to. */
     tlsnotaryAllowedPorts: number[]
     /** Dev only: let the TLSNotary relay reach private and loopback addresses. */

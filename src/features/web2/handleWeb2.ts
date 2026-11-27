@@ -3,6 +3,8 @@ import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 import { DAHR } from "./dahr/DAHR"
 import { sanitizeWeb2RequestForLogging } from "src/features/web2/sanitizeWeb2Request"
 import log from "src/utilities/logger"
+import { DAHRSessionLimitError } from "src/features/web2/dahr/sessionLimitError"
+import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
 
 /**
  * Handles a Web2 request.
@@ -18,6 +20,7 @@ import log from "src/utilities/logger"
  */
 export async function handleWeb2(
     web2Request: IWeb2Request,
+    caller?: Web2FetchCaller,
 ): Promise<string | DAHR> {
     // TODO Remember that web2 could need to be signed and could need a fee
     log.debug("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
@@ -35,12 +38,14 @@ export async function handleWeb2(
 
     try {
         const dahrFactoryInstance = DAHRFactory.instance
-        const dahr = await dahrFactoryInstance.createDAHR(web2Request)
+        const dahr = await dahrFactoryInstance.createDAHR(web2Request, caller)
 
         log.debug("[handleWeb2] DAHR instance created.")
 
         return dahr
     } catch (error) {
+        // The caller answers this one with a 429, not a generic 400.
+        if (error instanceof DAHRSessionLimitError) throw error
         log.error("Error in handleWeb2:", error)
         const errorMsg = error instanceof Error ? error.message : String(error)
         return errorMsg

@@ -242,6 +242,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         web2MaxFetchesPerMinutePerCaller: 10,
         web2MaxBytesPerHourPerCaller: 100 * 1024 * 1024,
         web2MaxInflightTotal: 32,
+        web2MaxSessionsPerCaller: 8,
+        web2MaxSessionsTotal: 256,
         tlsnotaryAllowedPorts: [443],
         tlsnotaryAllowPrivateTargets: false,
     },
