@@ -366,6 +366,11 @@ export class MetricsService {
             "1 while the node skips consensus rounds because its fork schedule differs from its peers, else 0",
             [],
         )
+        this.createGauge(
+            "committee_member_offline",
+            "Per bound committee member this node cannot reach while too few members are live to forge: the block height it holds up. Empty once enough are live or the height commits",
+            ["identity"],
+        )
 
         log.debug("[METRICS] Core metrics registered")
     }
@@ -514,6 +519,14 @@ export class MetricsService {
                 gauge.set(value)
             }
         }
+    }
+
+    /**
+     * Drop every labelled series of a gauge
+     */
+    public resetGauge(name: string): void {
+        if (!this.config.enabled) return
+        this.gauges.get(this.config.prefix + name)?.reset()
     }
 
     /**

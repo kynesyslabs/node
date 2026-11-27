@@ -1002,6 +1002,21 @@ this restart is a fallback there.
     rehearsal restarts from a fresh genesis. A node that lacks one of the
     sampled blocks refuses to draw that committee instead of guessing.
     Design and numbers: `docs/design/peerlist-floor.md`.
+  - A new gauge, `demos_committee_member_offline{identity}`, names each
+    bound committee member a validator cannot reach while too few are live
+    to forge the next block (value: that height), and the critical alert
+    `CommitteeMembersOffline` fires on it after 1 min. It clears once
+    enough members are live or the height commits. Operators restart the
+    named validators without waiting for `HeightStalled`
+    (`docs/runbooks/chain-halt-recovery.md`).
+  - A snapshot restore on a fresh database restores only from the
+    `manifest.json` bytes whose sha256 the genesis declares
+    (`snapshot.manifestSha256`). The restore hashes the manifest it parses
+    and, when that differs from the declared value or no manifest is found,
+    refuses to boot before writing anything (`[GENESIS] Refusing to boot:
+    snapshot manifest hashes to ..., genesis declares ...`). An unchanged
+    snapshot restores as before, and a genesis that declares no manifest is
+    not affected. Nothing to do on upgrade.
 
 ## Known limits
 

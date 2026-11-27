@@ -198,7 +198,7 @@ async function main(): Promise<void> {
     )
     await rename(temporaryManifestPath, manifestPath)
 
-    const verified = await verifySnapshot(snapshotDir)
+    const { manifest: verified } = await verifySnapshot(snapshotDir)
     console.log(
         `rehash OK (v${verified.schemaVersion}): updated ${changed.join(", ")} — verify OK`,
     )

@@ -304,26 +304,36 @@ export async function readFileSinglePass(
     }
 }
 
+/** A verified manifest and the sha256 of the exact manifest.json bytes it was parsed from. */
+export type VerifiedSnapshot = {
+    manifest: SnapshotManifest
+    /** The value a genesis declares as `snapshot.manifestSha256`. */
+    manifestSha256: string
+}
+
 /**
  * Verify a snapshot directory against its manifest. Throws with an
  * operator-facing message on any mismatch.
+ *
+ * manifest.json is read once; the returned hash is that of the bytes parsed.
  *
  * @param snapshotDir absolute path to the directory containing
  *   `manifest.json` + the three `.jsonl` files.
  */
 export async function verifySnapshot(
     snapshotDir: string,
-): Promise<SnapshotManifest> {
+): Promise<VerifiedSnapshot> {
     const manifestPath = resolve(snapshotDir, "manifest.json")
-    let manifestRaw: string
+    let manifestBytes: Buffer
     try {
-        manifestRaw = await readFile(manifestPath, "utf8")
+        manifestBytes = await readFile(manifestPath)
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         throw new Error(`cannot read manifest at ${manifestPath}: ${msg}`)
     }
 
-    const manifest = parseManifest(manifestRaw)
+    const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex")
+    const manifest = parseManifest(manifestBytes.toString("utf8"))
 
     // gcr_main: single pass for sha256 + row count + balance sum.
     const gcrMainPath = resolve(snapshotDir, "gcr_main.jsonl")
@@ -423,5 +433,5 @@ export async function verifySnapshot(
         }
     }
 
-    return manifest
+    return { manifest, manifestSha256 }
 }

@@ -13,7 +13,7 @@ import type { EntityManager } from "typeorm"
 
 import { identityCarryoverActiveAtGenesis } from "@/forks/identityCarryoverGate"
 import { assertCarryoverSnapshot } from "./carryover"
-import { GenesisRefusal } from "./genesisPin"
+import { GenesisRefusal, declaredManifestProblem } from "./genesisPin"
 import type { SnapshotLoader } from "./loadSnapshot"
 import { restoreSnapshot } from "./restoreSnapshot"
 import { mergeGenesisBalances } from "./mergeGenesisBalances"
@@ -41,6 +41,11 @@ const STEPS: GenesisStateSteps = {
  * so a failure leaves the database empty. Returns false when there is no
  * snapshot and the caller takes the legacy genesisData.balances path.
  *
+ * When the genesis declares `snapshot.manifestSha256`, the manifest this
+ * restore parsed must hash to it, or it is refused before the transaction
+ * opens. The per-file hashes the restore streams against come from that
+ * manifest, so the rows written are those the declared manifest lists.
+ *
  * Under identityCarryover the snapshot is checked in full before the
  * transaction opens, and a missing snapshot is refused: the legacy path
  * would build a chain without the user data the genesis promises.
@@ -52,9 +57,17 @@ export async function restoreGenesisState(
         balances?: unknown
         forks?: unknown
         validators?: unknown
+        snapshot?: unknown
     },
     steps: GenesisStateSteps = STEPS,
 ): Promise<boolean> {
+    const manifestProblem = declaredManifestProblem(
+        genesisData,
+        snapshot.available ? snapshot.manifestSha256 : null,
+    )
+    if (manifestProblem) {
+        throw new GenesisRefusal(`[GENESIS] Refusing to boot: ${manifestProblem}`)
+    }
     const carryover = identityCarryoverActiveAtGenesis()
     if (!snapshot.available) {
         if (carryover) {

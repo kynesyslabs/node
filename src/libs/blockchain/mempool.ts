@@ -1,8 +1,9 @@
-import { EntityManager, FindManyOptions, ILike, In, LessThanOrEqual, QueryFailedError, Repository, LessThan } from "typeorm"
+import { EntityManager, FindManyOptions, ILike, In, LessThanOrEqual, QueryFailedError, Repository } from "typeorm"
 import { Mutex } from "async-mutex"
 import Datasource from "@/model/datasource"
 
 import Chain from "./chain"
+import { recordDropped } from "./droppedTransactions"
 import log from "src/utilities/logger"
 import { pendingTxSignatureContext, isForkActive } from "@/forks"
 import { MempoolTx } from "@/model/entities/Mempool"
@@ -96,6 +97,11 @@ const SIGNED_TS_SQL =
     "THEN (\"content\"->>'timestamp')::bigint END)"
 
 type PoolTx = Transaction & { reference_block: number }
+
+/** The hashes of the rows a delete with RETURNING "hash" removed. */
+function returnedHashes(raw: unknown): string[] {
+    return Array.isArray(raw) ? raw.map((row: { hash: string }) => row.hash) : []
+}
 
 /**
  * Where a tx entered from. Only an RPC submit or a gossiped tx may displace
@@ -406,9 +412,11 @@ export default class Mempool {
             .delete()
             .from(MempoolTx)
             .where(`${notOwnRelaySql()} AND COALESCE(${SIGNED_TS_SQL} < :cutoff, TRUE)`, { cutoff })
+            .returning("\"hash\"")
             .execute()
         const removed = res.affected ?? 0
         for (let i = 0; i < removed; i++) countMempoolRejection("expired")
+        recordDropped(returnedHashes(res.raw), "expired")
         return removed
     }
 
@@ -841,10 +849,12 @@ export default class Mempool {
             return { confirmationBlock: null, error: refusal }
         }
         // Removed in the same database transaction as the insert, once the
-        // checks below have passed.
+        // checks below have passed. `evicted` is what that delete removed.
         const evict = verdict.evict
+        let evicted: string[] = []
         const noteEvicted = () => {
-            for (let i = 0; i < evict.length; i++) countMempoolRejection("evicted")
+            for (let i = 0; i < evicted.length; i++) countMempoolRejection("evicted")
+            recordDropped(evicted, "evicted_fee")
         }
 
         if (
@@ -854,7 +864,7 @@ export default class Mempool {
             (nonceRule || isForkActive("nonceEnforcement", blockHeight))
         ) {
             try {
-                return await this.repo.manager.transaction(
+                const result = await this.repo.manager.transaction(
                     "READ COMMITTED",
                     async em => {
                         // Postgres advisory locks operate on signed
@@ -941,7 +951,7 @@ export default class Mempool {
                                     error: rejectMessage("pool_full"),
                                 }
                             }
-                            await mempoolRepo.delete({ hash: In(evict) })
+                            evicted = await this.removeTransactionsByHashes(evict, em)
                         }
                         const saved = await mempoolRepo.save({
                             ...transaction,
@@ -949,7 +959,6 @@ export default class Mempool {
                             nonce: transaction.content.nonce,
                             blockNumber: blockRef,
                         })
-                        noteEvicted()
 
                         return {
                             confirmationBlock: saved.blockNumber,
@@ -957,6 +966,10 @@ export default class Mempool {
                         }
                     },
                 )
+                // Only once the commit has removed the victims; a refusal
+                // returned from inside the callback evicts nothing.
+                if (result.error === "") noteEvicted()
+                return result
             } catch (error) {
                 let message = "Error: Failed to add transaction to mempool"
                 if (error instanceof QueryFailedError) {
@@ -990,9 +1003,8 @@ export default class Mempool {
                 evict.length === 0
                     ? await this.repo.save(row)
                     : await this.repo.manager.transaction(async em => {
-                          const repo = em.getRepository(MempoolTx)
-                          await repo.delete({ hash: In(evict) })
-                          return await repo.save(row)
+                          evicted = await this.removeTransactionsByHashes(evict, em)
+                          return await em.getRepository(MempoolTx).save(row)
                       })
             noteEvicted()
 
@@ -1031,22 +1043,40 @@ export default class Mempool {
             const res = await this.repo.delete({ hash: In(includedHashes) })
             included = res.affected ?? 0
         }
-        const res = await this.repo.delete({
-            reference_block: LessThan(deepWindowCutoff(blockNumber)),
-        })
+        const res = await this.repo
+            .createQueryBuilder()
+            .delete()
+            .from(MempoolTx)
+            .where("\"reference_block\" < :cutoff", { cutoff: deepWindowCutoff(blockNumber) })
+            .returning("\"hash\"")
+            .execute()
+        recordDropped(returnedHashes(res.raw), "reference_block_expired", blockNumber)
         const aged = await this.pruneExpiredByAge(Date.now(), true)
         return { included, expired: (res.affected ?? 0) + aged }
     }
 
+    /**
+     * Deletes the rows of `hashes` and returns the hashes of the rows the
+     * delete removed, so a caller records a drop only for those: a row
+     * another removal took first keeps the reason that removal recorded.
+     */
     public static async removeTransactionsByHashes(
         hashes: string[],
         transactionalEntityManager?: EntityManager,
-    ) {
+    ): Promise<string[]> {
+        if (hashes.length === 0) return []
         // Use transactional EM for atomicity if provided by caller
         const repo = transactionalEntityManager
             ? transactionalEntityManager.getRepository(this.repo.target)
             : this.repo
-        return await repo.delete({ hash: In(hashes) })
+        const res = await repo
+            .createQueryBuilder()
+            .delete()
+            .from(MempoolTx)
+            .where("\"hash\" IN (:...hashes)", { hashes })
+            .returning("\"hash\"")
+            .execute()
+        return returnedHashes(res.raw)
     }
 
     /**
@@ -1158,7 +1188,7 @@ export default class Mempool {
             log.error(`[Mempool] Dropping own tx ${hash}: ${reason}`)
             drop.push(hash)
         }
-        if (drop.length > 0) await this.removeTransactionsByHashes(drop)
+        recordDropped(await this.removeTransactionsByHashes(drop), "seat_refused")
         return drop
     }
 
@@ -1276,10 +1306,9 @@ export default class Mempool {
                 `[Mempool.receive] Sender cap: refusing ${refuse.size} merged tx(s), evicting ${evict.length} held tx(s)`,
             )
         }
-        if (evict.length > 0) {
-            await this.repo.delete({ hash: In(evict) })
-            evict.forEach(() => countMempoolRejection("evicted"))
-        }
+        const evicted = await this.removeTransactionsByHashes(evict)
+        evicted.forEach(() => countMempoolRejection("evicted"))
+        recordDropped(evicted, "evicted_sender_cap")
         refuse.forEach(() => countMempoolRejection("sender_limit"))
         return txs.filter(tx => !refuse.has(tx.hash))
     }
@@ -1319,8 +1348,9 @@ export default class Mempool {
         log.warning(
             `[Mempool.capPoolSenders] Sender cap: evicting ${evict.length} held tx(s)`,
         )
-        await this.repo.delete({ hash: In(evict) })
-        evict.forEach(() => countMempoolRejection("evicted"))
+        const evicted = await this.removeTransactionsByHashes(evict)
+        evicted.forEach(() => countMempoolRejection("evicted"))
+        recordDropped(evicted, "evicted_sender_cap")
         return evict
     }
 
@@ -1786,21 +1816,32 @@ export default class Mempool {
             return { staleRemoved: 0, executedRemoved: 0 }
         }
 
-        if (toDelete.length === all.length) {
-            await this.repo.createQueryBuilder().delete().execute()
-            log.debug(
-                `[Mempool.cleanMempool] Cleared entire mempool (${toDelete.length} txs)`,
-            )
-        } else {
-            await this.repo.delete({ hash: In(toDelete) })
-            log.debug(
-                `[Mempool.cleanMempool] Deleted ${toDelete.length} txs by hash`,
-            )
+        // No mempool lock is held, so rows may change after the read. Stale
+        // rows are deleted by the cutoff alone, with no per-hash list: a hash
+        // admitted again with a fresh reference block is kept, and a drop is
+        // recorded only for the rows the delete returns. Executed rows are
+        // deleted by hash, so a tx admitted since the read stays pooled.
+        let staleRemoved: string[] = []
+        if (staleHashes.length > 0) {
+            const res = await this.repo
+                .createQueryBuilder()
+                .delete()
+                .from(MempoolTx)
+                .where("\"reference_block\" < :cutoff", { cutoff })
+                .returning("\"hash\"")
+                .execute()
+            staleRemoved = returnedHashes(res.raw)
+            recordDropped(staleRemoved, "reference_block_expired", lastBlock)
         }
+        let executedRemoved = 0
+        if (executedHashes.length > 0) {
+            const res = await this.repo.delete({ hash: In(executedHashes) })
+            executedRemoved = res.affected ?? 0
+        }
+        log.debug(
+            `[Mempool.cleanMempool] Deleted ${staleRemoved.length} stale and ${executedRemoved} executed txs`,
+        )
 
-        return {
-            staleRemoved: staleHashes.length,
-            executedRemoved: executedHashes.length,
-        }
+        return { staleRemoved: staleRemoved.length, executedRemoved }
     }
 }

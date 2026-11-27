@@ -49,6 +49,7 @@ SUITE_FILES=(
     src/libs/blockchain/chainBlocks.storedHead.test.ts
     src/libs/blockchain/chainTransactions.insert.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/droppedTransactions.test.ts
     src/libs/blockchain/finality/commitments.test.ts
     src/libs/blockchain/finality/requesterFixtures.test.ts
     src/libs/blockchain/finality/storageHistory.test.ts
@@ -75,6 +76,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/gcr/storableRows.test.ts
+    src/libs/blockchain/mempool.caps.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/mempool.editBinding.test.ts
     src/libs/blockchain/mempool.nextBlockRef.test.ts
@@ -181,6 +183,8 @@ SUITE_FILES=(
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
     testing/genesis/restoreSnapshot.hashAtRestore.test.ts
+    testing/genesis/restoreSnapshot.manifestPin.test.ts
+    testing/state-snapshot/verify-snapshot.test.ts
     tests/web2/proxy.test.ts
     tests/web2/dahrSessionCap.test.ts
     src/libs/abstraction/web2/githubToken.test.ts

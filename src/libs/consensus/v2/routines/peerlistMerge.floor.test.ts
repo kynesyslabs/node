@@ -67,27 +67,30 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
         getGCRValidatorsAtBlock: jest.fn(async () =>
             ["aa".repeat(32), "bb".repeat(32), "cc".repeat(32)].map(address => ({ address })),
         ),
+        getGCRValidatorsAtBlockOrThrow: jest.fn(async () =>
+            ["aa".repeat(32), "bb".repeat(32), "cc".repeat(32)].map(address => ({ address })),
+        ),
     },
 }))
 
 /** Honest members report us and HONEST; colluders report us and their own key only. */
-function contributeWithholding(): void {
+async function contributeWithholding(): Promise<void> {
     for (const member of HONEST_MEMBERS) {
-        contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
+        await contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
     }
     for (const colluder of COLLUDERS) {
-        contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
+        await contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
     }
 }
 
 const withHonest = [OUR_KEY, HONEST].sort()
 const withColluderKey = [OUR_KEY, HONEST, COLLUDER_KEY].sort()
 
-beforeEach(() => {
+beforeEach(async () => {
     __resetPeerlistMerge()
     getSharedState.forkConfig.peerlistFloor.activationHeight = null
     peers = [{ identity: HONEST, sync: { block: 100, block_hash: "tiphash" } }]
-    contributeWithholding()
+    await contributeWithholding()
 })
 
 describe("4 colluders that leave an honest validator out of their reports", () => {
@@ -118,10 +121,10 @@ describe("the floor of n - q + 1", () => {
     it("leaves out an identity 3 members report, and a member refuses it listed", async () => {
         __resetPeerlistMerge()
         for (const member of HONEST_MEMBERS) {
-            contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
+            await contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
         }
         for (const colluder of COLLUDERS.slice(0, 3)) {
-            contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
+            await contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
         }
         expect(await computeMergedPeerlist(101, COMMITTEE)).toEqual(withHonest)
         expect(await validateMergedPeerlist(101, withColluderKey, COMMITTEE)).toBeNull()
@@ -136,10 +139,10 @@ describe("the floor of n - q + 1", () => {
         __resetPeerlistMerge()
         const short = [OUR_KEY, "d1", "d2", "e1", "e2", "e3", "e4", "e5", "e6"]
         for (const member of ["d1", "d2"]) {
-            contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
+            await contributePeerlist(101, member, [obs(OUR_KEY), obs(HONEST)])
         }
         for (const colluder of ["e1", "e2", "e3", "e4", "e5", "e6"]) {
-            contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
+            await contributePeerlist(101, colluder, [obs(OUR_KEY), obs(COLLUDER_KEY)])
         }
         // Three honest reports (ours among them) meet the floor of 9 - 7 + 1.
         expect(await computeMergedPeerlist(101, short)).toEqual(withColluderKey)
