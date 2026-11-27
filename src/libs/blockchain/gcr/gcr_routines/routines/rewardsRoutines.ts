@@ -3,11 +3,11 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
 import { Repository } from "typeorm"
 import { safeGCRSave } from "./utils"
-import { VALIDATOR_REWARDS_BUCKET, validatorRewardsActive } from "@/forks/validatorRewardsGate"
+import { VALIDATOR_REWARDS_BUCKET } from "../../awardBuckets"
 
-/** Whether an award edit credits the validator total: it names that bucket, under `validatorRewards`. */
+/** Whether an award edit credits the validator total: it names that bucket. */
 function creditsValidatorPoints(editOperation: any): boolean {
-    return editOperation.bucket === VALIDATOR_REWARDS_BUCKET && validatorRewardsActive()
+    return editOperation.bucket === VALIDATOR_REWARDS_BUCKET
 }
 
 /** The account's validator points, kept apart from totalPoints and its breakdown. */

@@ -61,7 +61,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import log from "@/utilities/logger"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import { getSharedState } from "@/utilities/sharedState"
-import { VALIDATOR_REWARDS_BUCKET, awardCallBucketRefusal } from "@/forks/validatorRewardsGate"
+import { VALIDATOR_REWARDS_BUCKET, awardCallBucketRefusal } from "./awardBuckets"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     awardSignerProblem,
@@ -1035,7 +1035,7 @@ export default class GCR {
 
     /**
      * @param accounts List of accounts to award points to (supports multiple web2 platforms)
-     * @param bucket Required: "weeklyChallenge" for the account's ordinary points, or "validatorRewards" for the separate validator total under that fork
+     * @param bucket Required: "weeklyChallenge" for the account's ordinary points, or "validatorRewards" for the separate validator total
      * @returns Result of the award points operation
      */
     static async awardPoints(accounts: AccountParams[], bucket: string): Promise<{
@@ -1146,7 +1146,7 @@ export default class GCR {
             }
         }
 
-        // An ordinary award carries no bucket, as every award before the fork.
+        // An ordinary award carries no bucket.
         const tx = await this.createAwardPointsTransaction(
             accounts,
             bucket === VALIDATOR_REWARDS_BUCKET ? bucket : undefined,

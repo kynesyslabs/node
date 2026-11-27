@@ -36,7 +36,7 @@ console.log(result)
 
 The method call awards points to the accounts with the supplied list of twitter usernames. Only the first account to connect a twitter account is awarded points.
 
-The call must also name a `bucket` beside `message`, or it is refused: `"weeklyChallenge"` for the account's ordinary points, or `"validatorRewards"` for validator points, which are kept in a separate total and need the `validatorRewards` fork to be active.
+The call must also name a `bucket` beside `message`, or it is refused: `"weeklyChallenge"` for the account's ordinary points, or `"validatorRewards"` for validator points, which are kept in a separate total.
 
 ```sh
 SUDO_MNEMONIC="authorized mnemonic here" bun scripts/sudo-call.ts \

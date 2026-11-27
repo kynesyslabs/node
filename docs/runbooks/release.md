@@ -704,16 +704,15 @@ this restart is a fallback there.
     under the L1 nonce could settle again. Start it from a fresh genesis.
     The launch rehearsal restarts from a fresh genesis on this release;
     mainnet starts with it at block 0.
-  - New fork `validatorRewards`, at height 0 in the mainnet set. Under it
-    an award naming the `validatorRewards` bucket is credited to the
+  - An award naming the `validatorRewards` bucket is credited to the
     account's `points.validatorPoints` (`total` and the dated `awards`) and
     is not added to `points.totalPoints` or its breakdown, so validator
-    points and the other points can be converted at different rates.
+    points and the other points can be converted at different rates. This
+    is not fork-gated: every validator must run a release with it.
   - The `awardPoints` call now requires a `bucket` beside `message`, on
     every network: `"weeklyChallenge"` for the account's ordinary points, as
-    before, or `"validatorRewards"`, which a network that does not schedule
-    the fork refuses. A call that names none, or another, is refused with
-    the two options in the error. Callers must add the field.
+    before, or `"validatorRewards"`. A call that names none, or another, is
+    refused with the two options in the error. Callers must add the field.
   - New fork `keylessWeb2Identity`, at height 0 in the mainnet set. Under
     it `web2_identity_assign` with context `github`, `discord` or `twitter`
     is refused at admission and at apply; those accounts link only through

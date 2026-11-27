@@ -114,15 +114,12 @@ describe("GCR.awardPoints naming a points bucket", () => {
         expect(queued).toBe(0)
     })
 
-    it("names the options when the bucket is unknown, and says why validatorRewards is refused before the fork", async () => {
+    it("names the options when the bucket is unknown", async () => {
         nodeSignsWith(SIGNER)
         const unknown = await bucketed("referrals")
         expect(unknown.error).toContain("unknown bucket \"referrals\"")
         expect(unknown.error).toContain("\"weeklyChallenge\"")
         expect(unknown.error).toContain("\"validatorRewards\"")
-        const early = await bucketed("validatorRewards")
-        expect(early.error).toContain("fork is not active")
-        expect(early.error).toContain("\"weeklyChallenge\"")
         expect(created).toBe(0)
     })
 
@@ -137,15 +134,7 @@ describe("GCR.awardPoints naming a points bucket", () => {
         expect(seen).toBeUndefined()
     })
 
-    it("refuses before creating anything while validatorRewards is dormant", async () => {
-        nodeSignsWith(SIGNER)
-        expect(await bucketed("validatorRewards")).toMatchObject({ success: false })
-        expect(created).toBe(0)
-        expect(queued).toBe(0)
-    })
-
-    it("refuses an unknown bucket under the fork, and passes validatorRewards on to the transaction", async () => {
-        getSharedState.forkConfig.validatorRewards.activationHeight = 0
+    it("refuses an unknown bucket, and passes validatorRewards on to the transaction", async () => {
         nodeSignsWith(SIGNER)
         expect(await bucketed("referrals")).toMatchObject({ success: false })
         expect(created).toBe(0)
@@ -169,7 +158,6 @@ describe("the award transaction the node builds", () => {
     let pool: unknown
 
     beforeEach(() => {
-        getSharedState.forkConfig.validatorRewards.activationHeight = 0
         nodeSignsWith(SIGNER)
         ;(GCR as any).createAwardPointsTransaction = original.create
         for (const name of lookups) {

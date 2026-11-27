@@ -216,7 +216,6 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "l2psSettlement",
     "tlsnVerified",
     "keylessWeb2Identity",
-    "validatorRewards",
 ]
 
 /**

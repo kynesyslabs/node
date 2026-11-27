@@ -109,9 +109,6 @@
     },
     "keylessWeb2Identity": {
       "activationHeight": 0
-    },
-    "validatorRewards": {
-      "activationHeight": 0
     }
   },
   "balances": [

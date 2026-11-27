@@ -77,7 +77,7 @@ export class GCRMain {
             }>
         }
         /**
-         * Points awarded for running a validator (the `validatorRewards` fork).
+         * Points awarded for running a validator.
          * Not part of totalPoints or its breakdown.
          */
         validatorPoints?: {

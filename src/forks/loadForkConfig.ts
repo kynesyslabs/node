@@ -36,7 +36,6 @@ import type {
     StorageFeeSettlementConfig,
     ReferenceBlockRoom10Config,
     KeylessWeb2IdentityConfig,
-    ValidatorRewardsConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -475,9 +474,6 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.keylessWeb2Identity =
                 config as KeylessWeb2IdentityConfig
             return
-        case "validatorRewards":
-            getSharedState.forkConfig.validatorRewards = config as ValidatorRewardsConfig
-            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -659,8 +655,6 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return validateTlsnVerifiedEntry(base, entry)
         case "keylessWeb2Identity":
             return base as KeylessWeb2IdentityConfig
-        case "validatorRewards":
-            return base as ValidatorRewardsConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

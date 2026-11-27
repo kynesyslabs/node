@@ -497,58 +497,34 @@ describe("the award transaction", () => {
             )
         const both = async (tx: Transaction) => [(await verifyAdmissionEdits(tx)).ok, (await verifyEditsAtApply(tx)).ok]
 
-        it("is refused before validatorRewards, as a node without the fork refuses the edits", async () => {
-            expect(await both(bucketed("validatorRewards"))).toEqual([false, false])
-            expect((await verifyEditsAtApply(bucketed("validatorRewards"))).reason).toBe("awardPoints: edit 0 carries unexpected fields")
+        it("is accepted for validatorRewards when every edit names it", async () => {
+            expect(await both(bucketed("validatorRewards"))).toEqual([true, true])
         })
 
-        it("is judged before validatorRewards exactly as a node without the fork judges it", async () => {
-            // Such a node reads data[1] and ignores what follows, so these are ordinary awards to it.
-            for (const tail of [["validatorRewards"], ["referrals"], [null], ["validatorRewards", "extra"]]) {
-                const tx = award({ data: ["awardPoints", structuredClone(accounts), ...tail] })
-                expect(await both(tx)).toEqual([true, true])
+        it("is still accepted with no bucket at all", async () => {
+            expect(await both(award())).toEqual([true, true])
+        })
+
+        it("is refused for any other bucket", async () => {
+            for (const bucket of ["weeklyChallenge", "referrals", "", null, 7]) {
+                expect(await both(bucketed(bucket))).toEqual([false, false])
             }
         })
 
-        describe("under validatorRewards", () => {
-            let before: number | null
-            beforeEach(() => {
-                before = getSharedState.forkConfig.validatorRewards.activationHeight
-                getSharedState.forkConfig.validatorRewards.activationHeight = 0
-            })
-            afterEach(() => {
-                getSharedState.forkConfig.validatorRewards.activationHeight = before
-            })
+        it("is refused when an edit names another bucket, or none, or one the data does not", async () => {
+            expect(await both(bucketed("validatorRewards", "weeklyChallenge"))).toEqual([false, false])
+            const unnamed = award({ data: ["awardPoints", structuredClone(accounts), "validatorRewards"] })
+            expect(await both(unnamed)).toEqual([false, false])
+            const smuggled = award({}, [credit(VICTIM, 10, { bucket: "validatorRewards" }), credit(PEER, 7)])
+            expect(await both(smuggled)).toEqual([false, false])
+        })
 
-            it("is accepted for validatorRewards when every edit names it", async () => {
-                expect(await both(bucketed("validatorRewards"))).toEqual([true, true])
-            })
-
-            it("is still accepted with no bucket at all", async () => {
-                expect(await both(award())).toEqual([true, true])
-            })
-
-            it("is refused for any other bucket", async () => {
-                for (const bucket of ["weeklyChallenge", "referrals", "", null, 7]) {
-                    expect(await both(bucketed(bucket))).toEqual([false, false])
-                }
-            })
-
-            it("is refused when an edit names another bucket, or none, or one the data does not", async () => {
-                expect(await both(bucketed("validatorRewards", "weeklyChallenge"))).toEqual([false, false])
-                const unnamed = award({ data: ["awardPoints", structuredClone(accounts), "validatorRewards"] })
-                expect(await both(unnamed)).toEqual([false, false])
-                const smuggled = award({}, [credit(VICTIM, 10, { bucket: "validatorRewards" }), credit(PEER, 7)])
-                expect(await both(smuggled)).toEqual([false, false])
-            })
-
-            it("is refused when the data carries more than the bucket", async () => {
-                const tx = award(
-                    { data: ["awardPoints", structuredClone(accounts), "validatorRewards", "extra"] },
-                    [credit(VICTIM, 10, { bucket: "validatorRewards" }), credit(PEER, 7, { bucket: "validatorRewards" })],
-                )
-                expect(await both(tx)).toEqual([false, false])
-            })
+        it("is refused when the data carries more than the bucket", async () => {
+            const tx = award(
+                { data: ["awardPoints", structuredClone(accounts), "validatorRewards", "extra"] },
+                [credit(VICTIM, 10, { bucket: "validatorRewards" }), credit(PEER, 7, { bucket: "validatorRewards" })],
+            )
+            expect(await both(tx)).toEqual([false, false])
         })
     })
 

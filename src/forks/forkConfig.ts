@@ -617,26 +617,6 @@ export type ReferenceBlockRoom10Config = BaseForkConfig
 export type KeylessWeb2IdentityConfig = BaseForkConfig
 
 /**
- * `validatorRewards` fork: an incentive award may name the bucket its points
- * are credited to. The one bucket is `validatorRewards`: the award's data
- * carries it as a third element and each of its edits as `bucket`.
- *
- * Those points are kept apart from every other point an account holds, in
- * `points.validatorPoints` (`total` and the dated `awards`). They are not
- * added to `points.totalPoints` or to its breakdown, so the two kinds can be
- * converted at different rates.
- *
- * Before it, and for an award that names no bucket, points go to
- * `totalPoints` and `weeklyChallenge` as they always have; an award naming a
- * bucket is refused under `editBinding`, and apply ignores the field.
- *
- * Activation at H applies from the block applied on tip H. Dormant by default
- * (`activationHeight: null`); a mainnet genesis sets 0. No payload beyond the
- * base.
- */
-export type ValidatorRewardsConfig = BaseForkConfig
-
-/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -829,7 +809,6 @@ export type ForkName =
     | "nftValidatorGating"
     | "tlsnVerified"
     | "keylessWeb2Identity"
-    | "validatorRewards"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -873,7 +852,6 @@ export interface ForkConfigByName {
     nftValidatorGating: NftValidatorGatingConfig
     tlsnVerified: TlsnVerifiedConfig
     keylessWeb2Identity: KeylessWeb2IdentityConfig
-    validatorRewards: ValidatorRewardsConfig
 }
 
 /**
@@ -1259,14 +1237,6 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "GitHub, Discord and Twitter accounts link only through TLSNotary; the web2 " +
             "proof path that needed validator API keys refuses them.",
     },
-    validatorRewards: {
-        // Dormant by default: it changes where an award's points land, and a
-        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
-        activationHeight: null,
-        description:
-            "An incentive award may name the validatorRewards bucket, and its points are " +
-            "kept in a validator total apart from the account's other points.",
-    },
 }
 
 /**
@@ -1314,6 +1284,5 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         nftValidatorGating: { ...DEFAULT_FORK_CONFIG.nftValidatorGating },
         tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
         keylessWeb2Identity: { ...DEFAULT_FORK_CONFIG.keylessWeb2Identity },
-        validatorRewards: { ...DEFAULT_FORK_CONFIG.validatorRewards },
     }
 }
