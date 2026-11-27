@@ -38,6 +38,7 @@ mockCommitteeChain(sharedState, chain)
 const metrics = { equivocations: 0 }
 jest.mock("@/features/metrics/consensusMetrics", () => ({
     countIncludedTransactions: () => undefined,
+    setCommitteeOffline: () => undefined,
     countBlockHashMismatch: () => undefined,
     countConflictingBlock: () => undefined,
     countCommitLock: () => undefined,

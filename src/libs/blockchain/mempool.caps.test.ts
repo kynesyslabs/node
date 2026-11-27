@@ -39,10 +39,14 @@ mock.module("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: jest.fn() },
 }))
+// The mempool rejection counter, one reason per increment.
+const rejections: string[] = []
 mock.module("src/features/metrics/MetricsService", () => ({
     getMetricsService: () => ({
         createCounter: () => undefined,
-        incrementCounter: () => undefined,
+        incrementCounter: (_name: string, labels: { reason: string }) => {
+            rejections.push(labels.reason)
+        },
     }),
 }))
 mock.module("src/libs/blockchain/chain", () => ({
@@ -117,6 +121,28 @@ mock.module("@/forks/blockCapsGate", () => ({
 const { default: Mempool } = await import("./mempool")
 const { __resetMempoolLimits, __setMempoolLimits, chooseVictims, txStoredBytes, txTotalFee } =
     await import("./mempoolLimits")
+const { __clearDroppedTxs: clearDroppedTxs, getDroppedTx, recordDropped } = await import("./droppedTransactions")
+const { default: chain } = await import("src/libs/blockchain/chain")
+// installPool replaces the sweep; the dropped-record tests run the real one.
+const realPruneExpiredByAge = Mempool.pruneExpiredByAge
+
+// What each bulk delete (query builder) returns, keyed by a column its WHERE names.
+let deletedBy: Record<string, string[]> = {}
+const queryBuilder = () => {
+    let where = ""
+    const qb: Record<string, unknown> = {}
+    for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
+    qb.where = (sql: string) => {
+        where = sql
+        return qb
+    }
+    qb.execute = async () => {
+        const key = Object.keys(deletedBy).find(column => where.includes(column))
+        const rows = (key ? deletedBy[key] : []).map(hash => ({ hash }))
+        return { raw: rows, affected: rows.length }
+    }
+    return qb
+}
 
 interface Held {
     hash: string
@@ -168,12 +194,25 @@ function installPool() {
         Object.fromEntries(pool.map(h => [h.hash, true]))
     m.getMempool = async () => pool.map(h => h.tx)
 
-    const store = {
-        delete: async (where: { hash: unknown }) => {
+    // The by-hash delete with RETURNING: it yields only the rows still pooled.
+    const deleteByHash = () => {
+        let hashes: string[] = []
+        const qb: Record<string, unknown> = {}
+        for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
+        qb.where = (_sql: string, params: { hashes: string[] }) => {
+            hashes = params.hashes
+            return qb
+        }
+        qb.execute = async () => {
             calls.push("delete")
-            const hashes = (where.hash as { _value: string[] })._value
+            const raw = pool.filter(h => hashes.includes(h.hash)).map(h => ({ hash: h.hash }))
             pool = pool.filter(h => !hashes.includes(h.hash))
-        },
+            return { raw, affected: raw.length }
+        }
+        return qb
+    }
+    const store = {
+        createQueryBuilder: deleteByHash,
         save: async (row: Record<string, any>) => {
             calls.push("save")
             pool.push({ hash: row.hash, tx: row })
@@ -190,6 +229,7 @@ function installPool() {
     m.repo = {
         ...store,
         delete: async () => ({ affected: 0 }),
+        createQueryBuilder: queryBuilder,
         manager: {
             transaction: async (a: unknown, b?: unknown) => {
                 const fn = (typeof a === "function" ? a : b) as (e: unknown) => Promise<unknown>
@@ -255,6 +295,8 @@ beforeEach(() => {
     clock = NOW
     jest.spyOn(Date, "now").mockImplementation(() => clock)
     ;(Mempool as any).lastGossipEvictAttempt = 0
+    deletedBy = {}
+    clearDroppedTxs()
     installPool()
 })
 
@@ -303,6 +345,72 @@ describe("eviction", () => {
         calls = []
         await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))
         expect(calls).toEqual(["tx:begin", "delete", "save", "tx:end"])
+    })
+
+    it("records each victim as dropped on both insert paths", async () => {
+        fund("0xpayer", 10)
+        expect((await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))).error).toBe("")
+        expect(getDroppedTx("0xlow-old")).toMatchObject({ reason: "evicted_fee", droppedAtBlock: 100 })
+
+        nonceEnforced = true
+        expect((await rpc(makeTx({ hash: "0xmore", fee: 6, from: "0xpayer", nonce: 1 }))).error).toBe("")
+        expect(getDroppedTx("0xlow-new")).toMatchObject({ reason: "evicted_fee" })
+        expect(getDroppedTx("0xhigh")).toBeNull()
+    })
+
+    it("records no victim when the tx is not inserted after all", async () => {
+        nonceEnforced = true
+        nonceOfAccount = 10
+        fund("0xpayer", 100)
+        expect((await rpc(makeTx({ fee: 50, from: "0xpayer", nonce: 3 }))).error).toMatch(/Invalid nonce/)
+        const m = Mempool as any
+        const candidates = m.listEvictionCandidates
+        m.listEvictionCandidates = async () => {
+            const rows = await candidates()
+            sharedState.inConsensusLoop = true
+            return rows
+        }
+        expect((await rpc(makeTx({ fee: 50, from: "0xpayer", nonce: 11 }))).error).toMatch(/Mempool full/)
+        for (const hash of ["0xhigh", "0xlow-new", "0xlow-old"]) expect(getDroppedTx(hash)).toBeNull()
+    })
+
+    it("records no victim when the database transaction that evicts fails to commit", async () => {
+        nonceEnforced = true
+        fund("0xpayer", 10)
+        const manager = (Mempool as any).repo.manager
+        const transaction = manager.transaction
+        manager.transaction = async (...args: unknown[]) => {
+            await transaction(...args)
+            throw new Error("commit failed")
+        }
+        calls = []
+        const refused = await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer", nonce: 1 }))
+        expect(calls).toEqual(["tx:begin", "delete", "save", "tx:end"])
+        expect(refused).toEqual({ confirmationBlock: null, error: "Error: Failed to add transaction to mempool" })
+        expect(getDroppedTx("0xlow-old")).toBeNull()
+    })
+
+    it("records no victim another removal took before the delete, on both insert paths", async () => {
+        fund("0xpayer", 10)
+        const m = Mempool as any
+        const candidates = m.listEvictionCandidates
+        // The age sweep takes each admission's victim after its eviction read.
+        const taken = ["0xlow-old", "0xlow-new"]
+        m.listEvictionCandidates = async () => {
+            const rows = await candidates()
+            const victim = taken.shift() as string
+            pool = pool.filter(h => h.hash !== victim)
+            recordDropped([victim], "expired")
+            return rows
+        }
+        rejections.length = 0
+        expect((await rpc(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))).error).toBe("")
+        expect(getDroppedTx("0xlow-old")).toMatchObject({ reason: "expired" })
+
+        nonceEnforced = true
+        expect((await rpc(makeTx({ hash: "0xmore", fee: 6, from: "0xpayer", nonce: 1 }))).error).toBe("")
+        expect(getDroppedTx("0xlow-new")).toMatchObject({ reason: "expired" })
+        expect(rejections.filter(reason => reason === "evicted")).toHaveLength(0)
     })
 
     it("does not evict for a high fee the sender cannot pay", async () => {
@@ -638,6 +746,143 @@ describe("expiry sweep", () => {
         sharedState.inConsensusLoop = true
         await Mempool.pruneAfterBlock(101, [])
         expect(sweeps).toEqual([{ now: NOW, force: true }])
+    })
+})
+
+// #973: what leaves the pool without a block taking it is recorded, so the
+// status call answers "dropped" instead of "unknown".
+describe("dropped record of the sweeps", () => {
+    it("records what a block's hygiene removes for its reference block or its age, and not the block's own txs", async () => {
+        (Mempool as any).pruneExpiredByAge = realPruneExpiredByAge
+        deletedBy = { reference_block: ["0xold-ref"], timestamp: ["0xstale"] }
+        const pruned = await Mempool.pruneAfterBlock(101, ["0xincluded"])
+        expect(pruned.expired).toBe(2)
+        expect(getDroppedTx("0xold-ref")).toMatchObject({
+            reason: "reference_block_expired",
+            droppedAtBlock: 101,
+        })
+        expect(getDroppedTx("0xstale")).toMatchObject({ reason: "expired" })
+        expect(getDroppedTx("0xincluded")).toBeNull()
+    })
+
+    it("records what the admission sweep removes for its age", async () => {
+        (Mempool as any).pruneExpiredByAge = realPruneExpiredByAge
+        ;(Mempool as any).lastAgeSweep = 0
+        deletedBy = { timestamp: ["0xstale"] }
+        expect(await Mempool.pruneExpiredByAge(NOW)).toBe(1)
+        expect(getDroppedTx("0xstale")).toMatchObject({ reason: "expired", droppedAtBlock: 100 })
+    })
+
+    // The reference block is set by the node that admits the tx and is not
+    // signed, so a drop for it is not terminal: the same signed tx, sent
+    // again while its timestamp is inside the lifetime, is admitted again.
+    it("admits again a tx dropped for its reference block, and never calls the drop final", async () => {
+        const state = sharedState as Record<string, unknown>
+        state.forkConfig = { referenceBlockRoom10: { activationHeight: 0 } }
+        try {
+            const tx = makeTx({ hash: "0xold-ref", ts: NOW - 60_000 })
+            deletedBy = { reference_block: [tx.hash] }
+            await Mempool.pruneAfterBlock(101, [])
+            expect(getDroppedTx(tx.hash)).toEqual({
+                reason: "reference_block_expired",
+                droppedAtBlock: 101,
+                droppedAt: NOW,
+            })
+            expect(await Mempool.checkAdmission(tx, "rpc")).toEqual({ evict: [] })
+            expect((await rpc(tx)).error).toBe("")
+            expect(pool.map(h => h.hash)).toEqual([tx.hash])
+        } finally {
+            delete state.forkConfig
+        }
+    })
+
+    // A fake table for cleanMempool. Its deletes remove rows from `pool`; a
+    // delete with no WHERE removes every row, as in Postgres. `afterRead`
+    // runs once the read is taken, before any delete: what another caller
+    // does to the table in between.
+    function installCleanupTable(
+        rows: Array<{ hash: string; reference_block: number }>,
+        afterRead: () => void = () => {},
+    ) {
+        const m = Mempool as any
+        pool = rows.map(row => ({ hash: row.hash, tx: { ...row } }))
+        m.repo.find = async () => {
+            const read = pool.map(h => ({ hash: h.hash, reference_block: h.tx.reference_block }))
+            afterRead()
+            return read
+        }
+        m.repo.delete = async (where: { hash: { _value: string[] } }) => {
+            const before = pool.length
+            pool = pool.filter(h => !where.hash._value.includes(h.hash))
+            return { affected: before - pool.length }
+        }
+        m.repo.createQueryBuilder = () => {
+            let match = (_h: Held) => true
+            const qb: Record<string, unknown> = {}
+            for (const step of ["delete", "from", "returning"]) qb[step] = () => qb
+            // Each clause the SQL holds applies, so a per-hash list, if the
+            // delete still had one, would spare a row admitted after the read.
+            qb.where = (sql: string, p: { hashes?: string[]; cutoff?: number }) => {
+                match = h =>
+                    (!sql.includes(":...hashes") || (p.hashes as string[]).includes(h.hash)) &&
+                    (!sql.includes(":cutoff") || h.tx.reference_block < (p.cutoff as number))
+                return qb
+            }
+            qb.execute = async () => {
+                const removed = pool.filter(match)
+                pool = pool.filter(h => !match(h))
+                return { raw: removed.map(h => ({ hash: h.hash })), affected: removed.length }
+            }
+            return qb
+        }
+    }
+
+    it("records the stale txs cleanMempool removes, and not those already on chain", async () => {
+        installCleanupTable([
+            { hash: "0xstale-ref", reference_block: 10 },
+            { hash: "0xexecuted", reference_block: 100 },
+            { hash: "0xlive", reference_block: 100 },
+        ])
+        ;(chain.getExistingTransactionHashes as any).mockResolvedValueOnce(new Set(["0xexecuted"]))
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 1, executedRemoved: 1 })
+        expect(pool.map(h => h.hash)).toEqual(["0xlive"])
+        expect(getDroppedTx("0xstale-ref")).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
+        expect(getDroppedTx("0xexecuted")).toBeNull()
+        expect(getDroppedTx("0xlive")).toBeNull()
+    })
+
+    // cleanMempool does not hold the mempool lock and live sync calls it, so
+    // a tx can be admitted between its read and its delete.
+    it("keeps a tx admitted while cleanMempool runs, even when every row it read is stale", async () => {
+        installCleanupTable([{ hash: "0xstale-ref", reference_block: 10 }], () =>
+            pool.push({ hash: "0xadmitted", tx: { hash: "0xadmitted", reference_block: 100 } }),
+        )
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 1, executedRemoved: 0 })
+        expect(pool.map(h => h.hash)).toEqual(["0xadmitted"])
+        expect(getDroppedTx("0xstale-ref")).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
+        expect(getDroppedTx("0xadmitted")).toBeNull()
+    })
+
+    it("keeps a stale tx that was admitted again with a fresh reference block while cleanMempool runs", async () => {
+        installCleanupTable([{ hash: "0xreadmitted", reference_block: 10 }], () => {
+            pool[0].tx.reference_block = 100
+        })
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 0, executedRemoved: 0 })
+        expect(pool.map(h => h.hash)).toEqual(["0xreadmitted"])
+        expect(getDroppedTx("0xreadmitted")).toBeNull()
+    })
+
+    // The stale delete goes by the cutoff the read used, not by the hashes it
+    // read, so a row past that cutoff admitted after the read goes too.
+    it("deletes and records a stale tx admitted while cleanMempool runs", async () => {
+        installCleanupTable([{ hash: "0xstale-ref", reference_block: 10 }], () =>
+            pool.push({ hash: "0xlate-stale", tx: { hash: "0xlate-stale", reference_block: 10 } }),
+        )
+        expect(await Mempool.cleanMempool()).toEqual({ staleRemoved: 2, executedRemoved: 0 })
+        expect(pool).toEqual([])
+        for (const hash of ["0xstale-ref", "0xlate-stale"]) {
+            expect(getDroppedTx(hash)).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
+        }
     })
 })
 

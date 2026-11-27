@@ -349,3 +349,52 @@ describe("unpinnedCommittee", () => {
         expect(unpinned).not.toEqual(pinned)
     })
 })
+
+const { getMetricsService } = await import("src/features/metrics/MetricsService")
+const { clearCommitteeOfflineAtOrBelow } = await import(
+    "src/features/metrics/consensusMetrics"
+)
+
+describe("committee_member_offline metric", () => {
+
+    const offlineSeries = async () => {
+        const text = await getMetricsService().getMetrics()
+        return text
+            .split("\n")
+            .filter(l => l.startsWith("demos_committee_member_offline{"))
+            .map(l => {
+                const [, identity] = l.match(/identity="([^"]+)"/) ?? []
+                return { identity, value: Number(l.split(" ").pop()) }
+            })
+    }
+
+    it("names the members that hold up a height below the floor, then clears", async () => {
+        await getMetricsService().initialize()
+        const committee = await getBoundCommittee(100, "seed")
+        const others = committee.filter(id => id !== SELF)
+        const down = others.slice(0, 2)
+        onlinePeers = onlinePeers.filter(p => !down.includes(p.identity))
+
+        await getShard("seed", 100)
+        const series = await offlineSeries()
+        expect(series.map(s => s.identity).sort()).toEqual([...down].sort())
+        expect(series.every(s => s.value === 101)).toBe(true)
+
+        onlinePeers = committedPeerlist.map(id => onlinePeer(id))
+        await getShard("seed", 100)
+        expect(await offlineSeries()).toEqual([])
+    })
+
+    it("clears once the held-up height commits, even with no new draw", async () => {
+        const committee = await getBoundCommittee(100, "seed")
+        const down = committee.filter(id => id !== SELF).slice(0, 2)
+        onlinePeers = onlinePeers.filter(p => !down.includes(p.identity))
+        await getShard("seed", 100)
+        expect((await offlineSeries()).length).toBe(2)
+
+        clearCommitteeOfflineAtOrBelow(100)
+        expect((await offlineSeries()).length).toBe(2)
+        clearCommitteeOfflineAtOrBelow(101)
+        expect(await offlineSeries()).toEqual([])
+    })
+})

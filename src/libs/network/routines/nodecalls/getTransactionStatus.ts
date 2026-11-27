@@ -15,7 +15,10 @@ interface InterfaceGetTransactionStatusData {
  * Returns the lifecycle state of a transaction by hash (see TxStatus), with
  * `checkedThroughBlock`: the height this node had searched through.
  *
- * A hash not found is answered 404, or 503 while this node is not synced
+ * A hash this node dropped from its mempool without a block taking it is
+ * answered 200 "dropped", with `reason`, from a bounded in-memory
+ * record (droppedTransactions.ts). Any other hash not found is answered 404,
+ * or 503 while this node is not synced
  * (before its first sync, two or more blocks behind, or with drifted state),
  * so "not in this chain through H" is never confused with "this node is
  * behind"; a failed lookup is 500. `inSyncLoop` is not used: every consensus

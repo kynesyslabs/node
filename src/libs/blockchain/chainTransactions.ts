@@ -7,6 +7,7 @@ import { chunkedInsert, getTransactionsRepo } from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import type { L2PSHashUpdatePayload, TxStatus } from "./chainTypes"
 import Mempool from "./mempool"
+import { getDroppedTx } from "./droppedTransactions"
 import { getSharedState } from "@/utilities/sharedState"
 import { getBlockByHash } from "./chainBlocks"
 import { txMap as consensusTxMap } from "../consensus/v2/PoRBFT"
@@ -139,7 +140,8 @@ const MAX_MESSAGE_LENGTH = 512
  * The chain is read before the mempool: a transaction leaving the mempool
  * for a block between the two reads is then reported unknown, which the
  * caller's height bound (read before both) still makes true, rather than
- * pending after it is in a block.
+ * pending after it is in a block. This node's record of txs it dropped is
+ * read last, so a block or the pool taking the tx again wins over it.
  */
 export async function getTransactionStatus(hash: string): Promise<TxStatus> {
     const tx = await getTxByHash(hash)
@@ -160,6 +162,9 @@ export async function getTransactionStatus(hash: string): Promise<TxStatus> {
 
     const inMempool = await Mempool.findByHash(hash)
     if (inMempool) return { state: "pending" }
+
+    const dropped = getDroppedTx(hash)
+    if (dropped) return { state: "dropped", ...dropped }
 
     return { state: "unknown" }
 }

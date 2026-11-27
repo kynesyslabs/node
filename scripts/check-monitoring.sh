@@ -41,6 +41,7 @@ route() {
 route paging,slack severity=critical alertname=NodeDown instance=validator-1
 route paging,slack severity=critical alertname=DbDown instance=validator-1
 route paging,slack severity=critical alertname=ConflictingBlock
+route paging,slack severity=critical alertname=CommitteeMembersOffline instance=validator-1
 route paging,slack severity=critical alertname=ForeignSignature
 route paging,slack severity=critical alertname=PrecommitEquivocation
 route paging,slack severity=page alertname=Anything

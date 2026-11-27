@@ -49,7 +49,10 @@ Public updates follow the launch-week communication plan.
 
 ## Detect
 
-1. **Alerts.** `HeightStalled` firing on every validator at once (no new
+1. **Alerts.** `CommitteeMembersOffline` first: about a minute after a
+   committee falls below its quorum, it fires once per unreachable member,
+   with the member's identity and the held-up height, from every live
+   validator. Then `HeightStalled` firing on every validator at once (no new
    block for 300 s), `NetworkHeadStalled` from the network watcher, and
    `SignerCountLow` before it
    ([mainnet-monitoring.md](mainnet-monitoring.md), "Alerts";
@@ -73,8 +76,10 @@ Public updates follow the launch-week communication plan.
 
    `getValidatorSet` lists the staked validators at a height. The response
    shapes are in [finality-read-api.md](finality-read-api.md).
-3. **Name the missing members.** Each live validator logs, for the stuck
-   height:
+3. **Name the missing members.** The `CommitteeMembersOffline` alerts
+   name them (label `identity`, value the height). An identity named by
+   most validators is down; one validator naming every other member is
+   itself cut off. Each live validator also logs, for the stuck height:
 
    ```
    [getShard] <n> of the 10 bound committee members for block <h> are live, below the quorum of 7: the block cannot be forged until more of them are online. Offline: <identity>, ...
@@ -89,7 +94,10 @@ Public updates follow the launch-week communication plan.
 
 ## Tier 1: restart the same chain
 
-1. The coordinator posts the halt height, its hash and the offline list.
+1. The coordinator posts the halt height, its hash and the offline list
+   (the identities in the `CommitteeMembersOffline` alerts). Operators
+   need not wait for `HeightStalled`: a named validator can be restarted
+   as soon as its alert fires.
 2. Each named operator fixes the cause on its own host and starts the node
    with the same image, the same `.env` and the same volumes:
 

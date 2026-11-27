@@ -12,6 +12,7 @@ import { mockTransactionStore } from "./transactionStoreMocks"
 const { findOneBy, findByHash } = mockTransactionStore()
 
 const { getTransactionStatus } = await import("./chainTransactions")
+const { __clearDroppedTxs: clearDroppedTxs, recordDropped } = await import("./droppedTransactions")
 
 function storedRow(status: string, attrs: Record<string, unknown> | null = null) {
     return {
@@ -40,6 +41,7 @@ beforeEach(() => {
     findOneBy.mockResolvedValue(null)
     findByHash.mockReset()
     findByHash.mockResolvedValue(null)
+    clearDroppedTxs()
 })
 
 describe("Chain.getTransactionStatus", () => {
@@ -86,5 +88,42 @@ describe("Chain.getTransactionStatus", () => {
 
     it("reports a hash it holds nowhere as unknown", async () => {
         expect(await getTransactionStatus("85b8fcdc")).toEqual({ state: "unknown" })
+    })
+})
+
+// #973: a tx that left the mempool without a block taking it is told apart
+// from a hash the node never saw.
+describe("Chain.getTransactionStatus after a drop from the mempool", () => {
+    it("reports it dropped, with the reason and when", async () => {
+        recordDropped(["85b8fcdc"], "evicted_fee", 480900)
+        expect(await getTransactionStatus("85b8fcdc")).toEqual({
+            state: "dropped",
+            reason: "evicted_fee",
+            droppedAtBlock: 480900,
+            droppedAt: expect.any(Number),
+        })
+    })
+
+    it("reports it included when a block carries it after all", async () => {
+        recordDropped(["85b8fcdc"], "expired", 480870)
+        findOneBy.mockResolvedValue(storedRow("confirmed"))
+        expect(await getTransactionStatus("85b8fcdc")).toEqual({ state: "included", blockNumber: 480877 })
+    })
+
+    it("reports it failed when a block kept it without executing it", async () => {
+        recordDropped(["85b8fcdc"], "expired", 480870)
+        findOneBy.mockResolvedValue(storedRow("failed", { code: "TX_NONCE_INVALID_LOW" }))
+        expect(await getTransactionStatus("85b8fcdc")).toMatchObject({ state: "failed", code: "TX_NONCE_INVALID_LOW" })
+    })
+
+    it("reports it pending once it is back in the mempool", async () => {
+        recordDropped(["85b8fcdc"], "evicted_sender_cap", 480870)
+        findByHash.mockResolvedValue({ hash: "85b8fcdc" })
+        expect(await getTransactionStatus("85b8fcdc")).toEqual({ state: "pending" })
+    })
+
+    it("still reports a hash it never held unknown", async () => {
+        recordDropped(["85b8fcdc"], "evicted_fee", 480900)
+        expect(await getTransactionStatus("0badc0de")).toEqual({ state: "unknown" })
     })
 })
