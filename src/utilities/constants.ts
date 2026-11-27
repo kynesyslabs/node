@@ -27,6 +27,13 @@ export const PEER_LIVENESS_WINDOW_MS = 30_000
 export const XM_MAX_OPERATIONS = 16
 /** Longest operation name an XM script may use. */
 export const XM_MAX_OPERATION_NAME_LENGTH = 128
+/**
+ * How long an Aptos submit may take before its outcome is reported as
+ * unknown. The node may have taken the transaction even when no answer came.
+ */
+export const XM_APTOS_SUBMIT_TIMEOUT_MS = 10_000
+/** How long an XRPL submit waits for a validated result before it is unknown. */
+export const XM_XRPL_SUBMIT_DEADLINE_MS = 30_000
 
 // --- Mempool admission caps ---
 // Identical on every validator, so the pool a committee member would drop is

@@ -9,6 +9,18 @@ import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
 import { VersionedTransaction } from "@solana/web3.js"
 import { pickRpcUrl, sendSignedEvmTransaction } from "./rpcUrl"
+import { xrplSignedTxHash } from "./signedTxHash"
+import { XM_XRPL_SUBMIT_DEADLINE_MS } from "src/utilities/constants"
+
+const XRPL_DEADLINE = Symbol("xrpl-deadline")
+
+function deadline(ms: number): { done: Promise<typeof XRPL_DEADLINE>; clear: () => void } {
+    let timer: ReturnType<typeof setTimeout>
+    const done = new Promise<typeof XRPL_DEADLINE>(resolve => {
+        timer = setTimeout(() => resolve(XRPL_DEADLINE), ms)
+    })
+    return { done, clear: () => clearTimeout(timer) }
+}
 
 /**
  * Executes a XM pay operation and returns
@@ -210,7 +222,8 @@ async function handleXRPLPay(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
     const xrplInstance = new multichain.XRPL(rpcUrl)
-    const connected = await xrplInstance.connect()
+    // No auto-reconnect: the client is closed once this one submit settles.
+    const connected = await xrplInstance.connect(false)
     log.debug("CONNECT RETURNED: ", connected)
 
     if (!connected) {
@@ -273,8 +286,27 @@ async function handleXRPLPay(
             }
         }
 
-        // Submit transaction and wait for validation
-        const res = await xrplInstance.provider.submitAndWait(txBlob)
+        // submitAndWait has no deadline of its own. Past ours the tx may
+        // still be validated, so the outcome is unknown, not failed.
+        const hash = xrplSignedTxHash(txBlob)
+        const wait = deadline(XM_XRPL_SUBMIT_DEADLINE_MS)
+        let res: Awaited<ReturnType<typeof xrplInstance.provider.submitAndWait>>
+        try {
+            const settled = await Promise.race([
+                xrplInstance.provider.submitAndWait(txBlob),
+                wait.done,
+            ])
+            if (settled === XRPL_DEADLINE) {
+                return {
+                    result: "unknown",
+                    hash,
+                    error: `No validated result within ${XM_XRPL_SUBMIT_DEADLINE_MS / 1000} s; the transaction may still be included. Look up its hash before retrying.`,
+                }
+            }
+            res = settled
+        } finally {
+            wait.clear()
+        }
 
         // Extract transaction result - handle different response formats
         const meta = res.result.meta
@@ -306,6 +338,15 @@ async function handleXRPLPay(
         }
 
         const errorPrefix = txResult?.substring(0, 3)
+        if (errorPrefix === "ter") {
+            // Queued or retried by the server: it may still be validated.
+            return {
+                result: "unknown",
+                error: `${xrplErrorMessages.ter}: ${txResult} - ${resultMessage}`,
+                hash: txHash ?? hash,
+                extra: { code: txResult, validated: res.result.validated },
+            }
+        }
         if (errorPrefix && xrplErrorMessages[errorPrefix]) {
             return {
                 result: "error",
@@ -327,5 +368,9 @@ async function handleXRPLPay(
             result: "error",
             error: error instanceof Error ? error.message : String(error),
         }
+    } finally {
+        await Promise.resolve(xrplInstance.provider?.disconnect?.()).catch(
+            () => undefined,
+        )
     }
 }
