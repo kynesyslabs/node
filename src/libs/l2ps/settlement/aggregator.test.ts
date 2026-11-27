@@ -1203,3 +1203,101 @@ describe("recovery after a restart", () => {
         expect(statusOf(t)).toBe(L2PS_STATUS.CONFIRMED)
     })
 })
+
+describe("SettlementAggregator with L2PS messages in the queue", () => {
+    let seq = 0
+    /** An L2PS message row as the messaging service queues it: no amount, no edits. */
+    function message(overrides: Record<string, unknown> = {}): string {
+        const hash = `im_${++seq}`
+        rows.set(hash, {
+            hash,
+            original_hash: `orig_${hash}`,
+            l2ps_uid: UID,
+            encrypted_tx: {
+                hash: `orig_${hash}`,
+                content: {
+                    type: "instantMessaging",
+                    from: DAVE.account,
+                    to: "ab".repeat(32),
+                    amount: 0,
+                    data: ["instantMessaging", { senderId: "cd".repeat(32), messageId: hash }],
+                    gcr_edits: [],
+                    nonce: 1_800_000_000_000 + seq,
+                    ...overrides,
+                },
+            },
+            status: L2PS_STATUS.EXECUTED,
+            block_number: head,
+        })
+        return hash
+    }
+    const finalOf = (hash: string) => history.filter(h => h.hash === hash).at(-1)
+
+    it("settles the send, carries the message in the same batch, and never fails it", async () => {
+        const send = pay(ALICE, BOB.account, 10n, 5n)
+        queue(send)
+        const im = message()
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        expect(await agg.cycle()).toEqual({ submitted: 1, transfers: 1 })
+        expect(submitted).toHaveLength(1)
+        expect(submitted[0].rows).toEqual([send.txHash, im])
+        expect(submitted[0].record.transfers).toHaveLength(1)
+        expect(rows.get(im)!.status).toBe(L2PS_STATUS.BATCHED)
+
+        statuses.set("l1_1", { state: "included", blockNumber: 101 })
+        head = 101
+        await agg.cycle()
+
+        expect(statusOf(send)).toBe(L2PS_STATUS.CONFIRMED)
+        expect(rows.get(im)!.status).toBe(L2PS_STATUS.CONFIRMED)
+        expect(finalOf(im)).toMatchObject({ status: "confirmed", l1: "l1_1" })
+        expect(history.some(h => h.hash === im && h.status === "failed")).toBe(false)
+    })
+
+    it("closes a message no batch carries this cycle without failing it", async () => {
+        const im = message()
+
+        await new SettlementAggregator(deps(), LIMITS).cycle()
+
+        expect(proveCalls).toBe(0)
+        expect(submitted).toHaveLength(0)
+        expect(rows.get(im)!.status).toBe(L2PS_STATUS.CONFIRMED)
+        expect(finalOf(im)).toMatchObject({ status: "confirmed" })
+    })
+
+    it("closes a lone message on a quiet subnet even below the batch minimum", async () => {
+        const send = pay(ALICE, BOB.account, 10n, 5n)
+        queue(send)
+        const im = message()
+
+        await new SettlementAggregator(deps(), { ...LIMITS, minBatchSize: 3 }).cycle()
+
+        expect(submitted).toHaveLength(0)
+        expect(statusOf(send)).toBe(L2PS_STATUS.EXECUTED)
+        expect(rows.get(im)!.status).toBe(L2PS_STATUS.CONFIRMED)
+    })
+
+    it("carries messages only in the slots a batch leaves free", async () => {
+        for (let n = 0; n < SETTLEMENT_TRANSFERS - 1; n++) queue(pay(ALICE, BOB.account, 1n, 5n + BigInt(n)))
+        const carried = message()
+        const closed = message()
+
+        await new SettlementAggregator(deps(), LIMITS).cycle()
+
+        expect(submitted[0].rows).toHaveLength(SETTLEMENT_TRANSFERS)
+        expect(submitted[0].rows.at(-1)).toBe(carried)
+        expect(rows.get(carried)!.status).toBe(L2PS_STATUS.BATCHED)
+        expect(rows.get(closed)!.status).toBe(L2PS_STATUS.CONFIRMED)
+    })
+
+    it("still drops an instantMessaging row that carries an amount or edits", async () => {
+        const paid = message({ amount: 5 })
+        const edited = message({ gcr_edits: [{ type: "balance" }] })
+
+        await new SettlementAggregator(deps(), LIMITS).cycle()
+
+        expect(rows.get(paid)!.status).toBe(L2PS_STATUS.FAILED)
+        expect(rows.get(edited)!.status).toBe(L2PS_STATUS.FAILED)
+    })
+})

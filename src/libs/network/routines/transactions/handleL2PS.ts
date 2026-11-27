@@ -187,6 +187,8 @@ async function queuedTransfersOf(
         // against the sender's balance instead of refusing the sender.
         const inner = await decryptInnerTx(instance, row.encrypted_payload as unknown as L2PSTransaction, "stored")
         const opened = openSettlementTransfer(inner as never, row.encrypted_hash ?? "")
+        // A message the node sent as this account draws on no balance.
+        if (opened.ok === false && opened.valueFree) continue
         if (opened.ok === false) throw new Error(`a queued transfer does not open: ${opened.reason}`)
         const { nonce, amount, fee } = opened.transfer
         queued.push({ l2psUid: row.l2ps_uid, nonce, amount, fee })

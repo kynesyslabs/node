@@ -6,7 +6,7 @@
  * drop it as soon as the queue row it could fall back to is swept.
  */
 
-import { describe, expect, it, jest } from "bun:test"
+import { describe, expect, it, jest, mock } from "bun:test"
 
 const ENVELOPE = { hash: "enc-hash", content: { data: ["l2psEncryptedTx", { ciphertext: "…" }] } }
 
@@ -38,12 +38,24 @@ jest.mock("@/libs/blockchain/transaction", () => {
         static hash(tx: Transaction) {
             tx.hash = "orig-hash"
         }
-        static async sign() {
-            return [true, { type: "ed25519", data: "sig" }]
-        }
     }
     return { __esModule: true, default: Transaction }
 })
+
+mock.module("@/libs/blockchain/validation/txValidatorPool", () => ({
+    __esModule: true,
+    default: {
+        getInstance: () => ({ sign: async () => ({ signature: new Uint8Array(64) }) }),
+    },
+}))
+
+mock.module("@/forks/signatureDomainGate", () => ({
+    txSignaturePreimageForPendingBlock: () => new Uint8Array(),
+}))
+
+mock.module("@/utilities/sharedState", () => ({
+    getSharedState: { publicKeyHex: "0x" + "01".repeat(32), signingAlgorithm: "ed25519" },
+}))
 
 jest.mock("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,

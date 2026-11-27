@@ -9,6 +9,10 @@
 import { dataSource } from "@/model/datasource"
 import log from "@/utilities/logger"
 import Transaction from "@/libs/blockchain/transaction"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
+import { txSignaturePreimageForPendingBlock } from "@/forks/signatureDomainGate"
+import { getSharedState } from "@/utilities/sharedState"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
@@ -479,15 +483,23 @@ export class L2PSMessagingService {
                 return { success: false, error: "L2PS network not loaded" }
             }
 
-            // Build a transaction that wraps the IM message
+            const nodeIdentity = getSharedState.publicKeyHex
+            if (!nodeIdentity) {
+                return { success: false, error: "Node identity is not loaded" }
+            }
+
+            // Every opener checks that `from` signed the transaction, and only
+            // the node can sign here, so the node is the sender of record and
+            // the message's sender travels in the payload.
             const tx = new Transaction({
                 content: {
                     type: "instantMessaging",
-                    from: fromKey,
-                    from_ed25519_address: fromKey,
+                    from: nodeIdentity,
+                    from_ed25519_address: nodeIdentity,
                     to: toKey,
                     amount: 0,
                     data: ["instantMessaging", {
+                        senderId: fromKey,
                         messageId,
                         messageHash,
                         encrypted,
@@ -505,13 +517,18 @@ export class L2PSMessagingService {
                 },
             })
 
-            // Hash and sign with node key
             Transaction.hash(tx)
-            const [signed, signature] = await Transaction.sign(tx)
-            if (!signed) {
-                return { success: false, error: "Failed to sign transaction" }
-            }
-            tx.signature = signature
+            // Openers verify the hash preimage of the block the transaction
+            // would land in (domain-bound once signatureDomain is active), not
+            // the serialized content.
+            const signature = await TxValidatorPool.getInstance().sign(
+                getSharedState.signingAlgorithm,
+                txSignaturePreimageForPendingBlock(tx.hash!),
+            )
+            tx.signature = {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            } as any
             const originalHash = tx.hash!
 
             // Encrypt as L2PS transaction
