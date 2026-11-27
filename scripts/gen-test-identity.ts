@@ -40,7 +40,7 @@ if (fs.existsSync(MNEMONIC_FILE) && !FORCE) {
     console.log(
         `[gen-test-identity] identity already exists at ${OUT_DIR}; pubkey=${existing}`,
     )
-    console.log(`[gen-test-identity] pass --force to regenerate`)
+    console.log("[gen-test-identity] pass --force to regenerate")
     process.exit(0)
 }
 
