@@ -164,5 +164,7 @@ export type TransactionStatus = typeof TRANSACTION_STATUS[keyof typeof TRANSACTI
 export const TWITTER_COOKIE_FILE = "twitter_cookies.json"
 /** Node-wide bytes of attested web2 responses kept for reuse at broadcast. */
 export const WEB2_ATTESTED_RETAIN_MAX_BYTES = 256 * 1024 * 1024
-/** How long an attested web2 response is kept for its broadcast. */
+/** How long the body of an attested web2 response is kept for its broadcast. */
 export const WEB2_ATTESTED_RETAIN_MS = 120_000
+/** Attested responses one web2 session keeps for broadcast; the oldest goes first. */
+export const WEB2_ATTESTED_PER_SESSION = 8

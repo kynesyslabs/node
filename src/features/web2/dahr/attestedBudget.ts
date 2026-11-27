@@ -1,7 +1,7 @@
 import { WEB2_ATTESTED_RETAIN_MAX_BYTES } from "src/utilities/constants"
 
-// Bytes of attested responses kept across all sessions. A response that
-// does not fit is not kept, and its broadcast fetches the origin again.
+// Bytes of attested response bodies kept across all sessions. A body that
+// does not fit is not kept; its broadcast stands on the status and hashes.
 let retained = 0
 
 export function reserveAttestedBytes(bytes: number): boolean {
