@@ -1266,6 +1266,18 @@ describe("SettlementAggregator with L2PS messages in the queue", () => {
         expect(finalOf(im)).toMatchObject({ status: "confirmed" })
     })
 
+    it("closes a lone message on a quiet subnet even below the batch minimum", async () => {
+        const send = pay(ALICE, BOB.account, 10n, 5n)
+        queue(send)
+        const im = message()
+
+        await new SettlementAggregator(deps(), { ...LIMITS, minBatchSize: 3 }).cycle()
+
+        expect(submitted).toHaveLength(0)
+        expect(statusOf(send)).toBe(L2PS_STATUS.EXECUTED)
+        expect(rows.get(im)!.status).toBe(L2PS_STATUS.CONFIRMED)
+    })
+
     it("carries messages only in the slots a batch leaves free", async () => {
         for (let n = 0; n < SETTLEMENT_TRANSFERS - 1; n++) queue(pay(ALICE, BOB.account, 1n, 5n + BigInt(n)))
         const carried = message()

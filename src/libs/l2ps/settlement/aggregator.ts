@@ -767,7 +767,7 @@ export class SettlementAggregator {
             this.blame.delete(hash)
         }
         const rows = [...fresh, ...parked].filter(row => !failed.has(row.hash))
-        if (rows.length < this.limits.minBatchSize) return batches
+        if (rows.length === 0) return batches
 
         const rowOf = new Map<string, L2PSMempoolTx>()
         const opened: DecryptedTransfer[] = []
@@ -790,7 +790,9 @@ export class SettlementAggregator {
             rowOf.set(row.hash, row)
             opened.push(verdict.transfer)
         }
-        if (opened.length === 0) {
+        // The minimum counts transfers only: messages need no L1 batch, so a
+        // quiet subnet must not keep them queued while it waits for traffic.
+        if (opened.length === 0 || opened.length < this.limits.minBatchSize) {
             await this.closeUncarried(valueFree)
             return batches
         }
