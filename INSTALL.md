@@ -483,7 +483,7 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 53550 | `RPC_PORT` | TCP | Node RPC (HTTP); the port in `EXPOSED_URL` |
 | 53551 | `OMNI_PORT` | TCP | OmniProtocol (peer-to-peer binary RPC; peers dial the port the node advertises, so publish it on the same number) |
 | 9095 | `GOSSIP_PORT` | TCP | Gossip; peers dial `EXPOSED_URL`'s host on this port |
-| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Published on every interface |
+| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Docker Compose publishes it on `RPC_SIGNALING_BIND` (loopback by default; clients use Caddy's `/signaling/`) |
 | 7047 | `TLSNOTARY_PORT` | TCP | TLSNotary notary, published on every interface whenever the `tlsnotary` profile is on |
 | 123 | | UDP, outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
@@ -546,6 +546,49 @@ COMPOSE_PROFILES=tlsnotary
 ```
 
 Every command in this guide that names a volume or a container uses the names compose reports for the install it runs in (`$STATE_VOLUME`, `$SUFFIX`, step 3 of [Run a released image](#run-a-released-image-validators)), and each install keeps its signer list, release files, key copy and peer list in its own place. `docker compose down -v` removes only the volumes of the install it runs in. Each node also needs its own CPU and memory headroom ([System Requirements](#system-requirements)); a compose override can cap one (`mem_limit`, `cpus` under `services: node:`).
+
+#### Instant messaging signaling
+
+The SDK's `MessagingPeer` connects directly to a signaling WebSocket from wallets
+and browsers. Signaling is enabled by default (`SIGNALING_ENABLED=true`) and is
+independent of consensus. Each connection accepts payloads up to 1 MiB. Larger
+payloads close the connection with code 1009. Clients that send large encrypted
+messages must allow for JSON and encryption overhead within the payload limit.
+
+**Docker Compose:** the host port defaults to `127.0.0.1:3005:3005`. With the
+`proxy` profile, external SDK clients can use
+`wss://<PROXY_DOMAIN>/signaling/`; Caddy reaches the node over the container
+network. To opt in to direct public IPv4 WebSocket access, set
+`RPC_SIGNALING_BIND=0.0.0.0` in the host `.env` and allow inbound TCP on
+`RPC_SIGNALING_PORT` (default 3005). This publishes on IPv4 only; IPv6 clients
+need an additional `[::]` port mapping. A private host interface can be used
+instead. The same port variable controls both sides of the mapping and Caddy's
+upstream.
+`RPC_SIGNALING_BIND` controls Docker publication only; it is not a node setting.
+Docker Engine before 28.0 does not drop traffic that other hosts on the same
+local network segment send to a port published on `127.0.0.1`; on such a host
+with untrusted neighbours, upgrade Docker or block the loopback-published
+ports (signaling, L2PS messaging, TLSNotary per-session proxies) in the host
+firewall.
+
+**Bare metal and Bun:** signaling continues listening on all interfaces; use a
+host firewall or a TLS reverse proxy to control external access. `./run` and
+`bun run start:bun` use `RPC_SIGNALING_PORT` when configured, otherwise
+`SIGNALING_SERVER_PORT` (default 3005), or the next free port if it is taken;
+check the `[PORT] signaling drifted` log line. Running
+`bun src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts`
+directly always uses port 3005. The same payload limit applies to all these
+entry points. Set `SIGNALING_ENABLED=false` to disable signaling when running
+the full node; the standalone server starts unconditionally.
+
+**Fresh installs and upgrades:** fresh Compose installs publish signaling on
+loopback. Before upgrading a node whose SDK clients use a direct public port,
+choose the Caddy route or explicitly set `RPC_SIGNALING_BIND=0.0.0.0`, then
+recreate the node container with `docker compose up -d --force-recreate node`
+using the updated image and compose file. Restarting an existing container
+alone retains its old port publication. Bare-metal and Bun deployments need a
+process restart to activate the payload limit; their listener address is
+unchanged.
 
 ### Profiles
 
@@ -1192,7 +1235,7 @@ Either way the subnet files land in the `demos_node_data` volume. Put the `.env`
 | 53551       | OmniProtocol | P2P communication (TCP)                 |
 | 9095        | Gossip       | Gossip sidecar (TCP)                    |
 | 7047        | TLSNotary    | TLSNotary server                        |
-| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it |
+| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it. Open only with `RPC_SIGNALING_BIND=0.0.0.0` (Docker publishes it on loopback otherwise, and Caddy serves `/signaling/`) or on bare metal |
 | 55000-55063 | WS Proxy     | Per-session TLSNotary proxies (TCP), on loopback for a reverse proxy on this host; bare metal uses 55000-57000. Not opened in the firewall ([Network Exposure](#network-exposure)) |
 | 123 (out)   | NTP          | Outbound UDP; host time sync and the node's clock offset check |
 

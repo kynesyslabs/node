@@ -122,6 +122,7 @@ export class SignalingServer {
                 return new Response("Upgrade failed", { status: 500 })
             },
             websocket: {
+                maxPayloadLength: 1024 * 1024,
                 message: this.handleMessage.bind(this),
                 open: this.handleOpen.bind(this),
                 close: this.handleClose.bind(this),
