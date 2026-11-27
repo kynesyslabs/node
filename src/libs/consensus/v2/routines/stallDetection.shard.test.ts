@@ -38,7 +38,10 @@ mock.module("src/libs/debug/nonceTrace", () => ({ debugAssertionsEnabled: () => 
 mock.module("src/libs/utils/calibrateTime", () => ({ getNetworkTimestamp: () => 1010 }))
 mock.module("src/libs/consensus/routines/consensusTime", () => ({ SECRETARY_ROTATION_GRACE_SECONDS: 90 }))
 mock.module("@/forks/forkGates", () => ({ isForkActive: () => false }))
-mock.module("@/features/metrics/consensusMetrics", () => ({ countMissedSignature: () => void missed++ }))
+mock.module("@/features/metrics/consensusMetrics", () => ({
+    countMissedSignature: () => void missed++,
+    setCommitteeOffline: () => undefined,
+}))
 mock.module("./getCommonValidatorSeed", () => ({ __esModule: true, default: async () => ({ commonValidatorSeed: seed }) }))
 
 class FakePeer {

@@ -41,6 +41,43 @@ tests:
               summary: No new block for over 5 minutes
               description: "demos_seconds_since_last_block = 450 on validator-1. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
 
+  # CommitteeMembersOffline: one series per unreachable member, held for 1 m.
+  - interval: 15s
+    input_series:
+      # validator-1 cannot reach two members of block 1234567's committee from 60 s on.
+      - series: 'demos_committee_member_offline{job="demos-node",instance="validator-1",identity="0xaa"}'
+        values: '_x3 1234567x20'
+      - series: 'demos_committee_member_offline{job="demos-node",instance="validator-1",identity="0xbb"}'
+        values: '_x3 1234567x20'
+      # validator-2 misses one member for 30 s only, shorter than the 1 m `for`.
+      - series: 'demos_committee_member_offline{job="demos-node",instance="validator-2",identity="0xcc"}'
+        values: '_x3 1234567x2 stale'
+    alert_rule_test:
+      # 30 s after the members dropped: pending only.
+      - eval_time: 90s
+        alertname: CommitteeMembersOffline
+        exp_alerts: []
+      # 75 s after: fires for each member validator-1 names, not for validator-2's blip.
+      - eval_time: 135s
+        alertname: CommitteeMembersOffline
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+              identity: "0xaa"
+            exp_annotations:
+              summary: "Committee member 0xaa is offline; block 1234567 waits for it"
+              description: "validator-1 cannot reach 0xaa, a member of the bound committee for block 1234567, and too few members are live to forge it. Every retry draws the same committee, so the chain waits until enough of them are back: restart the named validators (docs/runbooks/chain-halt-recovery.md, Tier 1). If one validator names every other member, that validator is the one cut off; check its network first."
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+              identity: "0xbb"
+            exp_annotations:
+              summary: "Committee member 0xbb is offline; block 1234567 waits for it"
+              description: "validator-1 cannot reach 0xbb, a member of the bound committee for block 1234567, and too few members are live to forge it. Every retry draws the same committee, so the chain waits until enough of them are back: restart the named validators (docs/runbooks/chain-halt-recovery.md, Tier 1). If one validator names every other member, that validator is the one cut off; check its network first."
+
   # ConsensusAbstaining: demos_consensus_abstaining == 1 held for 1 m, per validator.
   - interval: 15s
     input_series:
