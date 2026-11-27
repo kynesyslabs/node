@@ -19,6 +19,15 @@ export const PEER_RECHECK_INTERVAL_MS = 10_000
 /** A peer not heard from for this long no longer counts as online. */
 export const PEER_LIVENESS_WINDOW_MS = 30_000
 
+// --- Cross-chain (XM) scripts ---
+/**
+ * Most operations one XM script may carry. Each one is an outbound call the
+ * entry node makes to another chain before the tx is admitted.
+ */
+export const XM_MAX_OPERATIONS = 16
+/** Longest operation name an XM script may use. */
+export const XM_MAX_OPERATION_NAME_LENGTH = 128
+
 // --- Mempool admission caps ---
 // Identical on every validator, so the pool a committee member would drop is
 // the pool every other member drops too. They are not env settings on

@@ -13,13 +13,24 @@ export default class MultichainDispatcher {
         if (disabled) {
             return { success: false, message: disabled, results: {} }
         }
+        let script: XMScript
+        try {
+            script = XMParser.prepare(data)
+        } catch (e) {
+            const reason = e instanceof Error ? e.message : String(e)
+            return {
+                success: false,
+                message: `invalid_script: ${reason}`,
+                results: {},
+            }
+        }
         // The script carries the caller's signed payloads: log its shape only.
-        const names = Object.keys(data?.operations ?? {})
+        const names = Object.keys(script.operations)
         log.debug(
             `[XMChain Digestion] ${names.length} operation(s): ${names.join(", ")}`,
         )
         // REVIEW Execute
-        return await MultichainDispatcher.execute(data)
+        return await MultichainDispatcher.execute(script)
     }
 
     // INFO Check syntax of xM Script

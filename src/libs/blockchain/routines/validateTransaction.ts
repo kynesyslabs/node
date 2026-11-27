@@ -54,6 +54,10 @@ import {
     seatRateRefusal,
 } from "src/features/staking/seatAdmission"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
+import {
+    demoScriptXmRefusal,
+    xmScriptRefusal,
+} from "src/features/multichain/xmScriptShape"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -197,6 +201,14 @@ async function signWithNativeSendFeeQuote(
     return signValidityData(validityData)
 }
 
+function outboundScriptRefusal(tx: Transaction): string | null {
+    const type = tx.content?.type as string
+    const script = (tx.content?.data as unknown[] | undefined)?.[1]
+    if (type === "crosschainOperation") return xmScriptRefusal(script)
+    if (type === "demoswork") return demoScriptXmRefusal(script)
+    return null
+}
+
 async function checkAdmissionAndStructure(
     tx: Transaction,
     sender: string,
@@ -238,6 +250,17 @@ async function checkAdmissionAndStructure(
     if (featureRefusal) {
         validityData.data.message =
             "[Tx Validation] [TYPE ERROR] " + featureRefusal + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // The entry node runs these scripts against other chains at broadcast; a
+    // script it cannot run is refused before a fee is quoted for it.
+    const scriptRefusal = outboundScriptRefusal(tx)
+    if (scriptRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [STRUCTURE ERROR] " + scriptRefusal + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData

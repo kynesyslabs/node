@@ -23,9 +23,10 @@ mock.module("@/utilities/logger", () => ({ __esModule: true, default: recordingL
 mock.module("src/utilities/logger", () => ({ __esModule: true, default: recordingLog }))
 
 let payReply: unknown = { result: "success", hash: "0xabc" }
+const pay = jest.fn(async () => payReply)
 mock.module("./routines/executors/pay", () => ({
     __esModule: true,
-    default: async () => payReply,
+    default: pay,
     genericJsonRpcPay: async () => payReply,
 }))
 
@@ -49,6 +50,7 @@ function script(): any {
 }
 
 afterEach(() => {
+    pay.mockClear()
     lines.length = 0
     payReply = { result: "success", hash: "0xabc" }
 })
@@ -73,4 +75,14 @@ describe("an executor that returns nothing", () => {
             })
         })
     }
+})
+
+describe("a malformed script", () => {
+    it("is refused before any operation runs", async () => {
+        const out = await XMDispatcher.digest({ operations: [script().operations.sendIt] } as any)
+        expect(out.success).toBe(false)
+        expect(out.message).toContain("invalid_script")
+        expect(out.results).toEqual({})
+        expect(pay).not.toHaveBeenCalled()
+    })
 })

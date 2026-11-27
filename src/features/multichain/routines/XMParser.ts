@@ -9,6 +9,7 @@ import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
 import handleContractWrite from "./executors/contract_write"
 import handleBalanceQuery from "./executors/balance_query"
+import { xmScriptRefusal } from "../xmScriptShape"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -55,12 +56,11 @@ class XMParser {
         return xmscript
     }
 
-    // INFO Preparsing a script to be able to execute it later (e.g. checking the syntax)
-
-    static async prepare(script: XMScript): Promise<XMScript> {
-        const result: XMScript = script
-        // TODO
-        return result
+    /** Returns `script` when it is well formed; throws with the reason otherwise. */
+    static prepare(script: unknown): XMScript {
+        const refusal = xmScriptRefusal(script)
+        if (refusal) throw new Error(refusal)
+        return script as XMScript
     }
 
     // INFO This returns the results of the execution of the XMScript
@@ -71,12 +71,11 @@ class XMParser {
         }
     }> {
         const results = {}
-        let name: string, operation: IOperation
-        // Iterating over the operations
-        // TODO Enforce order
-        for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
+        let operation: IOperation
+        // Runs in the key order of `operations`; operations_order is not read.
+        const names = Object.keys(fullscript.operations)
+        for (const name of names) {
             try {
-                name = Object.keys(fullscript.operations)[id]
                 operation = fullscript.operations[name]
                 log.debug(
                     `[XMParser] ${name}: ${operation?.task?.type} on ${operation?.chain}.${operation?.subchain}`,
