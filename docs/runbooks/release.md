@@ -1064,6 +1064,14 @@ this restart is a fallback there.
     block, so nodes on mixed versions agree on blocks, but a subnet member
     still on rc.15 refuses every transfer: upgrade every member of a
     subnet. Nothing else to do on upgrade.
+  - An L2PS message's inner transaction is signed by the node over the
+    same preimage (`demos-tx:v1:<chainId>:<hash>` once `signatureDomain`
+    is active, the bare hash before), with the node as `content.from` and
+    the message sender in `data[1].senderId`. Before this release it was
+    signed over the serialized content and named the message sender as
+    `from`, so neither the node nor the SDK (`L2PS.decryptTx`) could open
+    it. L2PS transaction history now lists such a message under the node's
+    address and the recipient, not the sender. Nothing to do on upgrade.
 
 ## Known limits
 
