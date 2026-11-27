@@ -44,6 +44,11 @@ jest.mock("../blockchain/gcr/handleGCR", () => ({
     withDerivedFeeEdits: jest.fn((tx: any) => ({ ...tx, content: { ...tx.content, gcr_edits: ["derived fee"] } })),
 }))
 jest.mock("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal: () => null }))
+// The dry-run admission and replay claims are covered in outboundAdmission tests.
+jest.mock("./outboundAdmission", () => ({
+    outboundAdmissionRefusal: async () => null,
+    claimOutboundRun: () => true,
+}))
 jest.mock("src/libs/gossip/GossipManager", () => ({
     __esModule: true,
     default: { isEnabled: () => true },

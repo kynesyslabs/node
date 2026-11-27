@@ -51,6 +51,11 @@ mock.module("../blockchain/gcr/handleGCR", () => ({
     withDerivedFeeEdits: (tx: unknown) => tx,
 }))
 mock.module("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal }))
+// The dry-run admission and replay claims are covered in outboundAdmission tests.
+mock.module("./outboundAdmission", () => ({
+    outboundAdmissionRefusal: async () => null,
+    claimOutboundRun: () => true,
+}))
 mock.module("src/libs/gossip/GossipManager", () => ({
     __esModule: true,
     default: { isEnabled: () => gossipOn },
