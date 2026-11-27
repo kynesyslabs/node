@@ -326,7 +326,7 @@ describe("carry-over snapshot builder", () => {
         expect(() => launchValidatorRows({ validators: [{ ...LAUNCH[0], address: LAUNCH[0].address.toUpperCase() }] })).toThrow("lowercase")
         expect(() => launchValidatorRows([LAUNCH[0], LAUNCH[0]])).toThrow("twice")
         expect(() => launchValidatorRows([{ ...LAUNCH[0], staked_amount: 1000 }])).toThrow("staked_amount")
-        expect(() => launchValidatorRows([{ ...LAUNCH[0], staked_amount: "0" }])).toThrow("positive")
+        expect(() => launchValidatorRows([{ ...LAUNCH[0], staked_amount: "0" }])).toThrow("needs nft_mint")
         expect(() => launchValidatorRows([{ ...LAUNCH[0], first_seen: undefined }])).toThrow("first_seen")
         expect(() => launchValidatorRows([{ ...LAUNCH[0], connection_url: "" }])).toThrow("connection_url")
         expect(launchValidatorRows(LAUNCH).map(v => v.address)).toEqual(LAUNCH.map(v => v.address).sort())
