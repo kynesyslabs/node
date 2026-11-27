@@ -2,6 +2,7 @@
 // INFO Entry point for multichain requests
 
 import XMParser from "./routines/XMParser"
+import { logEntries, logField } from "./routines/errorKind"
 import { XMScript } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
@@ -35,29 +36,17 @@ export default class MultichainDispatcher {
                 results: {},
             }
         }
-        log.debug("\n\n")
-        log.debug("[XM Script full digest]")
-        log.debug(data)
-        log.debug("Stringed to:")
-        log.debug(JSON.stringify(data))
-        log.debug("\n\n")
-        log.debug("[XMChain Digestion] Processing multichain operation")
-        log.debug(data.operations)
-        log.debug("\n[XMChain Digestion] Having:")
-        log.debug(Object.keys(data.operations).length)
-        log.debug("operations")
-
-        log.debug("\n===== ANALYSIS ===== \n")
-        log.debug("\n===== FUNCTIONS ===== \n")
-        for (let i = 0; i < Object.keys(data.operations).length; i++) {
-            // Named function
-            log.debug(
-                "[XMChain Digestion] Found: " + Object.keys(data.operations)[i],
-            )
-        }
-        log.debug("\n===== END OF ANALYSIS ===== \n")
-        log.debug("[XMChain Digestion] Proceeding: execution phase")
-        // REVIEW Execute
+        // NOTE Only operation types, chains and counts are logged: a script
+        // carries signed transactions and call arguments
+        log.debug(
+            "[XMChain Digestion] Processing " +
+                logEntries(
+                    data.operations,
+                    "operation(s)",
+                    op =>
+                        `${logField(op?.task?.type)} on ${logField(op?.chain)}.${logField(op?.subchain)}`,
+                ),
+        )
         return await MultichainDispatcher.execute(data)
     }
 
@@ -69,16 +58,18 @@ export default class MultichainDispatcher {
 
     // INFO Executes a xM Script
     static async execute(script: XMScript) {
-        log.debug("[XM EXECUTE]: Script")
-        log.debug(JSON.stringify(script))
         const results = await XMParser.execute(script)
-        log.debug("[XM EXECUTE] Successfully executed")
-        log.debug("[XM EXECUTE] results: " + JSON.stringify(results))
+        // NOTE Keep this: it refuses results that cannot be serialised before admission
+        const resultsSize = JSON.stringify(results).length
+        log.debug(`[XM EXECUTE] results serialised, ${resultsSize} chars`)
 
         const totalOperations = Object.values(results).length
         const failedOperations = Object.values(results).filter(
             result => result.result === "error",
         ).length
+        log.debug(
+            `[XM EXECUTE] ${failedOperations} of ${totalOperations} operation(s) failed`,
+        )
 
         // INFO: If all operations failed, this demos tx won't be forged in the block
         if (failedOperations === totalOperations) {
