@@ -30,18 +30,43 @@ const FIELD_HEX = /^0x[0-9a-f]{64}$/
 const SIGNATURE_HEX = /^0x[0-9a-f]{128}$/
 const SALT_LIMIT = 1n << BigInt(8 * SALT_BYTES)
 
+/**
+ * `valueFree` marks a row that is not a transfer but moves nothing either (an
+ * L2PS message): it is not settled, and not a failure.
+ */
 export type TransferVerdict =
     | { ok: true; transfer: DecryptedTransfer }
-    | { ok: false; reason: string }
+    | { ok: false; reason: string; valueFree?: true }
 
 interface InnerTx {
     hash?: string
     content?: {
         type?: unknown
         from?: unknown
+        amount?: unknown
         nonce?: unknown
         data?: unknown
+        gcr_edits?: unknown
     }
+}
+
+export const VALUE_FREE_REASON = "an L2PS message moves no value, so there is nothing to settle"
+
+/**
+ * Whether the inner transaction is an L2PS message: an instantMessaging
+ * transaction with no amount and no edits. Read from the opened content
+ * alone, so every member classifies a row the same way.
+ */
+function isValueFreeMessage(content: InnerTx["content"]): boolean {
+    const data = content?.data
+    const edits = content?.gcr_edits
+    return (
+        content?.type === "instantMessaging" &&
+        Array.isArray(data) &&
+        data[0] === "instantMessaging" &&
+        (content.amount === 0 || content.amount === "0") &&
+        (edits === undefined || (Array.isArray(edits) && edits.length === 0))
+    )
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -71,6 +96,7 @@ export function openSettlementTransfer(inner: InnerTx, txHash: string): Transfer
     const refuse = (reason: string): TransferVerdict => ({ ok: false, reason })
     const content = inner?.content
     const data = content?.data
+    if (isValueFreeMessage(content)) return { ok: false, reason: VALUE_FREE_REASON, valueFree: true }
     if (content?.type !== "native" || !Array.isArray(data) || data[0] !== "native") {
         return refuse("an L2PS transfer must be a native send")
     }

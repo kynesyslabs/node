@@ -342,6 +342,30 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(JSON.stringify(response)).toContain("could not read")
     })
 
+    it("admits the sender past a queued L2PS message it sent, which draws on no balance", async () => {
+        unsettled.push({
+            l2ps_uid: UID,
+            nonce: 1_800_000_000_000n,
+            encrypted_hash: "im_row",
+            encrypted_payload: {
+                __inner: {
+                    hash: "im_orig",
+                    content: {
+                        type: "instantMessaging",
+                        from: ALICE.account,
+                        to: BOB.account,
+                        amount: 0,
+                        data: ["instantMessaging", { messageId: "m1" }],
+                        gcr_edits: [],
+                        nonce: 1_800_000_000_000,
+                    },
+                },
+            },
+        })
+        decrypted(transfer())
+        expect((await handleL2PS(tx)).result).toBe(200)
+    })
+
     it("refuses a transfer the balance covers only without the sender's queued transfers", async () => {
         // 100 OS: two queued transfers take 2 x (45 + 3), this one needs 5 + 3 more.
         queued(transfer({ nonce: 5n, amount: 45n * OS }))

@@ -51,8 +51,8 @@ import type { TxStatus } from "@/libs/blockchain/chainTypes"
 import { L2PS_STATUS, type L2PSStatus } from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
-import { SETTLEMENT_VERSION, fieldToHex } from "./encoding"
-import type { TransferVerdict } from "./transfer"
+import { SETTLEMENT_TRANSFERS, SETTLEMENT_VERSION, fieldToHex } from "./encoding"
+import { envelopeSizeRefusal, type TransferVerdict } from "./transfer"
 import type { TipAccount } from "./tipState"
 import type {
     DecryptedTransfer,
@@ -771,6 +771,7 @@ export class SettlementAggregator {
 
         const rowOf = new Map<string, L2PSMempoolTx>()
         const opened: DecryptedTransfer[] = []
+        const valueFree: L2PSMempoolTx[] = []
         for (const row of rows) {
             let verdict: TransferVerdict
             try {
@@ -782,13 +783,17 @@ export class SettlementAggregator {
                 return batches
             }
             if (verdict.ok === false) {
-                await this.drop(row, verdict.reason)
+                if (verdict.valueFree) valueFree.push(row)
+                else await this.drop(row, verdict.reason)
                 continue
             }
             rowOf.set(row.hash, row)
             opened.push(verdict.transfer)
         }
-        if (opened.length === 0) return batches
+        if (opened.length === 0) {
+            await this.closeUncarried(valueFree)
+            return batches
+        }
 
         const tip = await this.deps.tip(l2psUid, opened.flatMap(t => [t.from, t.to]))
         const minimumFee = await this.deps.minimumFee()
@@ -879,6 +884,43 @@ export class SettlementAggregator {
             candidates = candidates.filter(settles)
             suspects = suspects.filter(settles)
         }
+        await this.closeUncarried(this.carry(batches, valueFree))
         return batches
+    }
+
+    /**
+     * Puts value-free rows in the free row slots of this cycle's batches and
+     * returns the ones left over. They follow their batch to confirmed, or
+     * back to the queue with it. The record and proof cover the transfers
+     * only, so no validator reads them. A batch proved alone takes none: its
+     * failures count against every row in it.
+     */
+    private carry(batches: PlannedBatch[], valueFree: L2PSMempoolTx[]): L2PSMempoolTx[] {
+        const fits = valueFree.filter(row => envelopeSizeRefusal(row.encrypted_tx) === null)
+        const left = valueFree.filter(row => !fits.includes(row))
+        for (const batch of batches) {
+            if (batch.alone) continue
+            const free = SETTLEMENT_TRANSFERS - batch.rows.length
+            if (free > 0) batch.rows.push(...fits.splice(0, free))
+        }
+        return [...left, ...fits]
+    }
+
+    /**
+     * Closes value-free rows no batch of this cycle carries. Waiting for a
+     * transfer batch with room would keep them in the queue window, where
+     * enough of them hide every transfer behind them, and in the backlog the
+     * messaging share is capped by, so a subnet that only sends messages
+     * would stop taking them.
+     */
+    private async closeUncarried(rows: L2PSMempoolTx[]): Promise<void> {
+        if (rows.length === 0) return
+        // History first, as for a drop: a row is read by nothing once closed.
+        for (const row of rows) {
+            await this.deps.history(row.hash, "confirmed", "An L2PS message moves no value; nothing to settle on L1")
+        }
+        await this.deps.setRows(rows.map(row => row.hash), L2PS_STATUS.CONFIRMED)
+        // A failed batch that carried one counted against it too.
+        for (const row of rows) this.blame.delete(row.hash)
     }
 }

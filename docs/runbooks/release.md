@@ -1072,6 +1072,12 @@ this restart is a fallback there.
     `from`, so neither the node nor the SDK (`L2PS.decryptTx`) could open
     it. L2PS transaction history now lists such a message under the node's
     address and the recipient, not the sender. Nothing to do on upgrade.
+  - Under `l2psSettlement` the settlement loop no longer fails L2PS
+    messages (`instantMessaging`, no amount, no edits). A message rides in
+    a free row slot of a transfer batch and is confirmed with it; one that
+    no batch of the cycle carries is closed as confirmed with no L1 batch.
+    The settlement record and proof cover transfers only. An L2PS message
+    row signed by an older node still fails, since it cannot be opened.
 
 ## Known limits
 
