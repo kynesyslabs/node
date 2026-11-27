@@ -136,8 +136,8 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         if (connectionUrl !== null && (typeof connectionUrl !== "string" || connectionUrl === "")) {
             throw new Error(`${where} (${address}): connection_url must be null or a non-empty string`)
         }
-        if (typeof stakedAmount !== "string" || !/^[1-9]\d*$/.test(stakedAmount)) {
-            throw new Error(`${where} (${address}): staked_amount must be a positive decimal string`)
+        if (typeof stakedAmount !== "string" || !/^(0|[1-9]\d*)$/.test(stakedAmount)) {
+            throw new Error(`${where} (${address}): staked_amount must be a non-negative decimal string`)
         }
         for (const [name, value] of [["first_seen", firstSeen], ["valid_at", validAt]] as const) {
             if (!Number.isSafeInteger(value) || (value as number) < 0) {
@@ -151,6 +151,10 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
                 throw new Error(`${where} (${address}): ${name} must be null or a non-empty string`)
             }
             nft[name] = typeof value === "string" ? value : null
+        }
+        // The launch template seats validators by NFT with no bonded stake; a seat with neither has no claim.
+        if (stakedAmount === "0" && nft.nft_mint === null) {
+            throw new Error(`${where} (${address}): staked_amount "0" needs nft_mint: an unstaked seat is held by its NFT`)
         }
         if (v.nft_exempt === true) {
             throw new Error(`${where} (${address}): nft_exempt is a genesis rule; a carried-over seat needs its NFT`)
