@@ -13,28 +13,11 @@ export default class MultichainDispatcher {
         if (disabled) {
             return { success: false, message: disabled, results: {} }
         }
-        log.debug("\n\n")
-        log.debug("[XM Script full digest]")
-        log.debug(data)
-        log.debug("Stringed to:")
-        log.debug(JSON.stringify(data))
-        log.debug("\n\n")
-        log.debug("[XMChain Digestion] Processing multichain operation")
-        log.debug(data.operations)
-        log.debug("\n[XMChain Digestion] Having:")
-        log.debug(Object.keys(data.operations).length)
-        log.debug("operations")
-
-        log.debug("\n===== ANALYSIS ===== \n")
-        log.debug("\n===== FUNCTIONS ===== \n")
-        for (let i = 0; i < Object.keys(data.operations).length; i++) {
-            // Named function
-            log.debug(
-                "[XMChain Digestion] Found: " + Object.keys(data.operations)[i],
-            )
-        }
-        log.debug("\n===== END OF ANALYSIS ===== \n")
-        log.debug("[XMChain Digestion] Proceeding: execution phase")
+        // The script carries the caller's signed payloads: log its shape only.
+        const names = Object.keys(data?.operations ?? {})
+        log.debug(
+            `[XMChain Digestion] ${names.length} operation(s): ${names.join(", ")}`,
+        )
         // REVIEW Execute
         return await MultichainDispatcher.execute(data)
     }
@@ -47,11 +30,7 @@ export default class MultichainDispatcher {
 
     // INFO Executes a xM Script
     static async execute(script: XMScript) {
-        log.debug("[XM EXECUTE]: Script")
-        log.debug(JSON.stringify(script))
         const results = await XMParser.execute(script)
-        log.debug("[XM EXECUTE] Successfully executed")
-        log.debug("[XM EXECUTE] results: " + JSON.stringify(results))
 
         const totalOperations = Object.values(results).length
         const failedOperations = Object.values(results).filter(

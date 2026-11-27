@@ -77,15 +77,13 @@ class XMParser {
         for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
             try {
                 name = Object.keys(fullscript.operations)[id]
-                log.debug("[" + name + "] ")
                 operation = fullscript.operations[name]
-                log.debug("[XMParser]: full script operation")
-                log.debug(fullscript)
-                log.debug("[XMParser]: partial operation")
-                log.debug(operation)
+                log.debug(
+                    `[XMParser] ${name}: ${operation?.task?.type} on ${operation?.chain}.${operation?.subchain}`,
+                )
                 const result = await XMParser.executeOperation(operation)
                 results[name] = result
-                log.debug("[RESULT]: " + results[name])
+                log.debug(`[XMParser] ${name}: ${result?.result}`)
             } catch (e) {
                 log.error("[XM EXECUTE] Error: " + e)
                 results[name] = { result: "error", error: e.toString() }
@@ -132,13 +130,20 @@ class XMParser {
         // ANCHOR MVP
         /* SECTION Write tasks */
         switch (operation.task?.type) {
-            case "pay":
-                // eslint-disable-next-line no-var
-                var result = await handlePayOperation(operation, chainID)
-
-                // INFO: Adding chain info for debugging
+            case "pay": {
+                const result = await handlePayOperation(operation, chainID)
+                // The send may already have happened: report a missing reply
+                // as a failed op instead of throwing on it.
+                if (result === null || typeof result !== "object") {
+                    return {
+                        result: "error",
+                        error: "Executor returned no result",
+                        chain: `${operation.chain}.${operation.subchain}`,
+                    }
+                }
                 result["chain"] = `${operation.chain}.${operation.subchain}`
                 return result
+            }
 
             /* SECTION Read only tasks */
             // NOTE For the following tasks, we can safely skip checkSignedPayloads()

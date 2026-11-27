@@ -201,12 +201,7 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
     log.debug(
         "[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
-    log.debug(chainID)
-
-    log.debug(operation.task.signedPayloads)
-
-    log.debug(operation.task.signedPayloads[0])
-
+    log.debug(`[XMScript Parser] EVM Pay on chain id ${chainID}`)
     return await sendSignedEvmTransaction(operation, chainID)
 }
 
