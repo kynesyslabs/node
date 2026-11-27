@@ -95,11 +95,38 @@ describe("Aptos submit outcomes", () => {
 
     it("reports an answered refusal and an unreachable node as errors", async () => {
         const refused = new AxiosError("Bad Request", "ERR_BAD_REQUEST", undefined, undefined, {
+            status: 400,
             data: { message: "SEQUENCE_NUMBER_TOO_OLD" },
         } as never)
         spyOn(axios, "post").mockRejectedValueOnce(refused).mockRejectedValueOnce(new AxiosError("connect ECONNREFUSED", "ECONNREFUSED"))
         expect(await handleAptosPayRest(aptosOp)).toMatchObject({ result: "error", error: { message: "SEQUENCE_NUMBER_TOO_OLD" } })
         expect(await handleAptosPayRest(aptosOp)).toMatchObject({ result: "error" })
+    })
+
+    it.each([500, 502, 503, 504])(
+        "reports an HTTP %i answer as unknown with the hash, even with an error body",
+        async status => {
+            const answered = new AxiosError("Server error", "ERR_BAD_RESPONSE", undefined, undefined, {
+                status,
+                data: "<html>Bad Gateway</html>",
+            } as never)
+            spyOn(axios, "post").mockRejectedValue(answered)
+            const reply = await handleAptosPayRest(aptosOp)
+            expect(reply).toMatchObject({ result: "unknown", hash: aptos.hash, chain: "aptos.testnet" })
+            expect(reply.error).toContain(`HTTP ${status}`)
+        },
+    )
+
+    it("reports a full Aptos mempool (507 mempool_is_full) as an error", async () => {
+        const full = new AxiosError("Insufficient Storage", "ERR_BAD_RESPONSE", undefined, undefined, {
+            status: 507,
+            data: { message: "Mempool is full", error_code: "mempool_is_full" },
+        } as never)
+        spyOn(axios, "post").mockRejectedValue(full)
+        expect(await handleAptosPayRest(aptosOp)).toMatchObject({
+            result: "error",
+            error: { error_code: "mempool_is_full" },
+        })
     })
 
     it("reports an accepted submit as success with the node's hash", async () => {

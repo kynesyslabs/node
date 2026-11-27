@@ -8,13 +8,26 @@ import type { TransactionResponse } from "sdk/localsdk/multichain/types/multicha
 import { XM_APTOS_SUBMIT_TIMEOUT_MS } from "src/utilities/constants"
 import { aptosSignedTxHash } from "./signedTxHash"
 
+// Errors raised before any byte reached the Aptos node.
+const NOT_SENT_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ERR_INVALID_URL"])
+
+/**
+ * Whether an HTTP error answer proves the transaction was not taken: a 4xx
+ * refuses the request itself, and 507 with `mempool_is_full` is the Aptos
+ * node turning it away. Any other answer leaves the outcome open.
+ */
+function definitelyRefused(status: number, data: unknown): boolean {
+    if (status >= 400 && status < 500) return true
+    return (
+        status === 507 &&
+        (data as { error_code?: unknown } | null)?.error_code === "mempool_is_full"
+    )
+}
+
 /**
  * The outcome when the transaction may have reached the chain but the node
  * cannot tell: it names the hash so the caller can look it up.
  */
-// Errors raised before any byte reached the Aptos node.
-const NOT_SENT_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ERR_INVALID_URL"])
-
 function unknownOutcome(hash: string, chain: string, why: string): TransactionResponse {
     return {
         result: "unknown",
@@ -69,9 +82,14 @@ export default async function handleAptosPayRest(
                 timeout: XM_APTOS_SUBMIT_TIMEOUT_MS,
             })
         } catch (error) {
-            if (error instanceof AxiosError && error.response?.data) {
-                // The node answered and refused the transaction.
-                return { result: "error", error: error.response.data }
+            if (error instanceof AxiosError && error.response) {
+                const { status, data } = error.response
+                if (definitelyRefused(status, data)) {
+                    return { result: "error", error: data ?? `HTTP ${status}` }
+                }
+                // A 5xx may come from a gateway that already forwarded the
+                // transaction, or from a node that failed after taking it.
+                return unknownOutcome(hash, chain, `The Aptos node answered HTTP ${status}`)
             }
             const why = error instanceof Error ? error.message : String(error)
             const code = (error as { code?: string })?.code
