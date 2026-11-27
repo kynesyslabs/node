@@ -36,7 +36,7 @@ export default async function handlePayOperation(
     log.debug("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    const rpcUrl = pickRpcUrl(
+    const rpcUrl = await pickRpcUrl(
         operation.rpc,
         chainProviders[operation.chain]?.[operation.subchain],
     )

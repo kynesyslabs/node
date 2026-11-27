@@ -107,7 +107,8 @@ describe("XM executors ignore a caller-named RPC URL", () => {
 })
 
 describe("an allow-listed caller RPC stays with that caller", () => {
-    const partner = "https://rpc.partner.example/"
+    // A public IP literal: the host check needs no DNS for it.
+    const partner = "https://8.8.8.8/"
 
     it.each([
         ["pay", (o: any) => handlePayOperation(o, 11155111)],
@@ -120,7 +121,7 @@ describe("an allow-listed caller RPC stays with that caller", () => {
         const real = appConfig.getInstance()
         spyOn(appConfig, "getInstance").mockReturnValue({
             ...real,
-            outbound: { ...real.outbound, xmRpcAllowlist: ["rpc.partner.example"] },
+            outbound: { ...real.outbound, xmRpcAllowlist: ["8.8.8.8"] },
         } as any)
 
         const used: string[] = []
@@ -185,33 +186,68 @@ describe("EVM RPC lookup reads configured keys only", () => {
 
 describe("pickRpcUrl", () => {
     const configured = "https://rpc.configured.example/"
+    const publicHost = async () => "8.8.8.8"
+    const pick = (caller: unknown, allowlist: string[]) =>
+        pickRpcUrl(caller, configured, allowlist, publicHost)
 
-    it("uses the caller URL only when its host or origin is allow-listed", () => {
+    it("uses the caller URL only when its host or origin is allow-listed", async () => {
         const caller = "https://rpc.partner.example:8545/v1"
-        expect(pickRpcUrl(caller, configured, [])).toBe(configured)
-        expect(pickRpcUrl(caller, configured, ["rpc.partner.example"])).toBe(caller)
-        expect(pickRpcUrl(caller, configured, ["RPC.Partner.Example"])).toBe(caller)
+        expect(await pick(caller, [])).toBe(configured)
+        expect(await pick(caller, ["rpc.partner.example"])).toBe(caller)
+        expect(await pick(caller, ["RPC.Partner.Example"])).toBe(caller)
+        expect(await pick(caller, ["https://rpc.partner.example:8545"])).toBe(caller)
+        expect(await pick(caller, ["https://rpc.partner.example"])).toBe(configured)
+        expect(await pick(caller, ["partner.example"])).toBe(configured)
+    })
+
+    it("refuses non-http(s)/ws(s) schemes and malformed URLs even when listed", async () => {
+        expect(await pick("file:///etc/passwd", ["", "etc"])).toBe(configured)
+        expect(await pick("not a url", ["not a url"])).toBe(configured)
+        expect(await pick(42, ["42"])).toBe(configured)
+    })
+
+    it("falls back to the configured URL when the caller named none", async () => {
+        expect(await pick(undefined, ["x"])).toBe(configured)
+        expect(await pick("", ["x"])).toBe(configured)
+    })
+})
+
+describe("an allow-listed RPC host must be public", () => {
+    const configured = "https://rpc.configured.example/"
+
+    it.each([
+        ["http://127.0.0.1:8545/", "127.0.0.1"],
+        ["http://10.0.0.5:8545/", "10.0.0.5"],
+        ["http://169.254.169.254/latest/", "169.254.169.254"],
+        ["http://[::1]:8545/", "[::1]"],
+        ["http://[fd00::1]/", "[fd00::1]"],
+        ["http://[::ffff:127.0.0.1]/", "[::ffff:7f00:1]"],
+    ])("ignores listed literal %s", async (caller, host) => {
+        // Listed: with a resolver that lets it through, the caller URL wins.
+        expect(await pickRpcUrl(caller, configured, [host], async () => host)).toBe(caller)
+        // The real resolver: literals are judged without DNS.
+        expect(await pickRpcUrl(caller, configured, [host])).toBe(configured)
+    })
+
+    it("ignores a listed name that resolves to a private address", async () => {
+        const toPrivate = async () => {
+            throw new Error("Target rpc.internal.example resolves to a private, loopback or link-local address")
+        }
         expect(
-            pickRpcUrl(caller, configured, ["https://rpc.partner.example:8545"]),
-        ).toBe(caller)
-        expect(
-            pickRpcUrl(caller, configured, ["https://rpc.partner.example"]),
+            await pickRpcUrl("https://rpc.internal.example/", configured, ["rpc.internal.example"], toPrivate),
         ).toBe(configured)
-        expect(pickRpcUrl(caller, configured, ["partner.example"])).toBe(
-            configured,
-        )
     })
 
-    it("refuses non-http(s)/ws(s) schemes and malformed URLs even when listed", () => {
-        expect(pickRpcUrl("file:///etc/passwd", configured, ["", "etc"])).toBe(
-            configured,
-        )
-        expect(pickRpcUrl("not a url", configured, ["not a url"])).toBe(configured)
-        expect(pickRpcUrl(42, configured, ["42"])).toBe(configured)
+    it("ignores a listed name that does not resolve", async () => {
+        const unresolved = async () => {
+            throw Object.assign(new Error("getaddrinfo ENOTFOUND rpc.partner.invalid"), { code: "ENOTFOUND" })
+        }
+        expect(
+            await pickRpcUrl("https://rpc.partner.invalid/", configured, ["rpc.partner.invalid"], unresolved),
+        ).toBe(configured)
     })
 
-    it("falls back to the configured URL when the caller named none", () => {
-        expect(pickRpcUrl(undefined, configured, ["x"])).toBe(configured)
-        expect(pickRpcUrl("", configured, ["x"])).toBe(configured)
+    it("uses a listed public literal", async () => {
+        expect(await pickRpcUrl("https://8.8.8.8/", configured, ["8.8.8.8"])).toBe("https://8.8.8.8/")
     })
 })
