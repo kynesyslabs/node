@@ -145,7 +145,7 @@ class XMParser {
             }
 
             /* SECTION Read only tasks */
-            // NOTE For the following tasks, we can safely skip checkSignedPayloads()
+            // Reads send nothing signed; pay and contract_write check their payloads.
             // ANCHOR MVP
             // INFO Read contract task
             case "contract_read":

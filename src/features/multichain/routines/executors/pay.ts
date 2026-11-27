@@ -3,7 +3,7 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
-import checkSignedPayloads from "src/utilities/checkSignedPayloads"
+import { signedPayloadsRefusal } from "src/utilities/checkSignedPayloads"
 import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
@@ -22,22 +22,10 @@ export default async function handlePayOperation(
 ) {
     let result: TransactionResponse
 
-    log.debug("[XMScript Parser] Pay task. Examining payloads (require 1)...")
-    // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
-
-    // NOTE Generic sanity check on payloads
-    if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
-        log.debug(
-            "[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)",
-        )
-        return {
-            result: "error",
-            error: "Invalid signedPayloads length",
-        }
+    const payloadRefusal = signedPayloadsRefusal(1, operation)
+    if (payloadRefusal) {
+        return { result: "error", error: payloadRefusal }
     }
-    log.debug(
-        "[XMScript Parser] Pay task payloads are ok: Valid payloads (require 1 has 1)",
-    )
     // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
     if (operation.is_evm) {
         // If is EVM, send tx and return the result
