@@ -478,15 +478,15 @@ for img in "${PREFLIGHT_IMAGES[@]}"; do
 done
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
 SWAP_IMAGE_ID=""
-if [ -n "${SWAP_IMAGE}" ]; then
+if [[ -n "${SWAP_IMAGE}" ]]; then
     case "${SCENARIO}" in restart-*) ;; *) abort_pre "SWAP_IMAGE applies to restart-* drills only" ;; esac
-    [ -z "${HOSTS_FILE:-}" ] || abort_pre "SWAP_IMAGE runs on one host only"
+    [[ -z "${HOSTS_FILE:-}" ]] || abort_pre "SWAP_IMAGE runs on one host only"
     SWAP_IMAGE_ID=$(docker image inspect "${SWAP_IMAGE}" --format '{{.Id}}' 2>/dev/null) ||
         abort_pre "image ${SWAP_IMAGE} is not present locally"
     # The compose file is written for IMAGE's start path and user
     for field in .Config.Entrypoint .Config.Cmd .Config.User; do
-        [ "$(docker image inspect "${IMAGE}" --format "{{json ${field}}}")" = \
-          "$(docker image inspect "${SWAP_IMAGE}" --format "{{json ${field}}}")" ] ||
+        [[ "$(docker image inspect "${IMAGE}" --format "{{json ${field}}}")" == \
+          "$(docker image inspect "${SWAP_IMAGE}" --format "{{json ${field}}}")" ]] ||
             abort_pre "SWAP_IMAGE ${SWAP_IMAGE} differs from ${IMAGE} in ${field}"
     done
 fi
@@ -1349,9 +1349,9 @@ pg_limit_gate() {
     rm -f "${f}"
     # The logs of containers an image swap replaced (swap_image)
     for f in "${LOG_DIR}"/node-*.preswap-*.log; do
-        [ -e "${f}" ] || continue
-        n=$(grep -ac "too many clients" "${f}"); [ $? -le 1 ] || pg_gate_unreadable "${f}" "grep failed"
-        [ "${n}" -gt 0 ] && { hits=$((hits + n)); nodes+="${f##*/}"$'\n'; }
+        [[ -e "${f}" ]] || continue
+        n=$(grep -ac "too many clients" "${f}"); [[ $? -le 1 ]] || pg_gate_unreadable "${f}" "grep failed"
+        [[ "${n}" -gt 0 ]] && { hits=$((hits + n)); nodes+="${f##*/}"$'\n'; }
     done
     if [ -e "${LOG_DIR}/psql-errors.log" ]; then
         n=$(grep -ac "too many clients" "${LOG_DIR}/psql-errors.log"); [ $? -le 1 ] || pg_gate_unreadable "${LOG_DIR}/psql-errors.log" "grep failed"
@@ -2139,28 +2139,28 @@ restart_count_of() { # $1 node
 # Node $1 stopped at once and recreated on SWAP_IMAGE. Its database and inputs
 # stay, as on an operator's host; fails unless the new container runs it.
 swap_image() { # $1 node
-    local tmp="${RUN_DIR}/compose.yml.tmp" cid why n=1
-    jq --arg s "node-$1" --arg img "${SWAP_IMAGE}" '.services[$s].image = $img' \
+    local node="$1" tmp="${RUN_DIR}/compose.yml.tmp" cid why n=1
+    jq --arg s "node-${node}" --arg img "${SWAP_IMAGE}" '.services[$s].image = $img' \
         "${RUN_DIR}/compose.yml" > "${tmp}" && mv -f "${tmp}" "${RUN_DIR}/compose.yml" || return 1
-    dc stop -t 0 "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
+    dc stop -t 0 "node-${node}" >> "${STEP_LOG}" 2>&1 || return 1
     # Removing the container drops its log: keep it, as node-*.log, for
     # pg_limit_gate and the teardown's backstop
-    while [ -e "${LOG_DIR}/node-$1.preswap-${n}.log" ]; do n=$((n + 1)); done
-    why=$(read_node_log "$1" "${LOG_DIR}/node-$1.preswap-${n}.log") ||
-        { say "node-$1: log before the swap not kept whole: ${why}"; return 1; }
+    while [[ -e "${LOG_DIR}/node-${node}.preswap-${n}.log" ]]; do n=$((n + 1)); done
+    why=$(read_node_log "${node}" "${LOG_DIR}/node-${node}.preswap-${n}.log") ||
+        { say "node-${node}: log before the swap not kept whole: ${why}"; return 1; }
     # -v: the old container's anonymous volumes would outlive the run
-    dc rm -f -v "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
+    dc rm -f -v "node-${node}" >> "${STEP_LOG}" 2>&1 || return 1
     # The node does not migrate at boot: a release that adds a migration needs
     # it run with the new image before it starts, as an operator's update does
-    if [ "${START_PATH}" = image ]; then
-        timeout 300 docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" run --rm --no-deps -T --entrypoint bun "node-$1" \
+    if [[ "${START_PATH}" == image ]]; then
+        timeout 300 docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" run --rm --no-deps -T --entrypoint bun "node-${node}" \
             -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts \
-            >> "${STEP_LOG}" 2>&1 || { say "node-$1: migration:run with ${SWAP_IMAGE} failed"; return 1; }
+            >> "${STEP_LOG}" 2>&1 || { say "node-${node}: migration:run with ${SWAP_IMAGE} failed"; return 1; }
     fi
-    dc up -d --no-deps "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
-    cid=$(cid_of "$1") && [ -n "${cid}" ] || return 1
-    [ "$(bdocker inspect -f '{{.Image}}' "${cid}" 2>/dev/null)" = "${SWAP_IMAGE_ID}" ] || return 1
-    event "node-$1 now on ${SWAP_IMAGE}"
+    dc up -d --no-deps "node-${node}" >> "${STEP_LOG}" 2>&1 || return 1
+    cid=$(cid_of "${node}") && [[ -n "${cid}" ]] || return 1
+    [[ "$(bdocker inspect -f '{{.Image}}' "${cid}" 2>/dev/null)" == "${SWAP_IMAGE_ID}" ]] || return 1
+    event "node-${node} now on ${SWAP_IMAGE}"
 }
 
 # One cycle on node $1, its record written to $2 (restartCountEnd filled in later)
@@ -2178,7 +2178,7 @@ restart_cycle() { # $1 victim, $2 record file
     [ "${drawn}" = 1 ] || restart_error "${v}" "not drawn into a committee past ${h} within ${REJOIN_TIMEOUT}s; not restarted"
     phase_ms=$(( RANDOM % (CONSENSUS_TIME * 1000) ))
     sleep "$(awk -v m="${phase_ms}" 'BEGIN { printf "%.3f", m / 1000 }')"
-    if [ -n "${SWAP_IMAGE}" ]; then
+    if [[ -n "${SWAP_IMAGE}" ]]; then
         swap_image "${v}" || { say "ABORT: moving node-${v} to ${SWAP_IMAGE} failed"; exit 2; }
     else
         dc restart -t 0 "node-${v}" >> "${STEP_LOG}" 2>&1 || { say "ABORT: restarting node-${v} failed"; exit 2; }
