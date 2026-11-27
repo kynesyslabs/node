@@ -4,7 +4,7 @@ import { StepResult } from "./handleDemosWorkRequest"
 // SECTION Operation types
 import { IWeb2Request, XMScript } from "@kynesyslabs/demosdk/types"
 // SECTION Handlers
-import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
+import type { INativePayload } from "@kynesyslabs/demosdk/types"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
 import handleL2PS from "../handleL2PS"

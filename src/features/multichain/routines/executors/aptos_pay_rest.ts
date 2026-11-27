@@ -4,19 +4,16 @@ import { Deserializer, SignedTransaction } from "@aptos-labs/ts-sdk"
 import { IOperation } from "@kynesyslabs/demosdk/types"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
-import {
-    XmTransactionResponse,
-    XmTransactionResult,
-} from "node_modules/@kynesyslabs/demosdk/build/multichain/core/types/interfaces"
+import type { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 
 export default async function handleAptosPayRest(
     operation: IOperation,
-): Promise<XmTransactionResponse> {
+): Promise<TransactionResponse> {
     try {
         const providerUrl = chainProviders.aptos[operation.subchain]
         if (!providerUrl) {
             return {
-                result: XmTransactionResult.error,
+                result: "error",
                 error: `Unsupported Aptos network: ${operation.subchain}`,
             }
         }
@@ -24,7 +21,7 @@ export default async function handleAptosPayRest(
         const payload = operation.task.signedPayloads[0]
         if (!payload) {
             return {
-                result: XmTransactionResult.error,
+                result: "error",
                 error: "No signed payloads",
             }
         }
@@ -37,7 +34,7 @@ export default async function handleAptosPayRest(
             SignedTransaction.deserialize(deserializer)
         } catch {
             return {
-                result: XmTransactionResult.error,
+                result: "error",
                 error: "Invalid signed payload",
             }
         }
@@ -52,21 +49,21 @@ export default async function handleAptosPayRest(
 
         if (response.data?.hash) {
             return {
-                result: XmTransactionResult.success,
+                result: "success",
                 hash: response.data.hash,
                 chain: operation.chain + "." + operation.subchain,
-            } as XmTransactionResponse
+            }
         }
 
         return {
-            result: XmTransactionResult.success,
+            result: "success",
             error: response.data,
         }
     } catch (error) {
         if (error instanceof AxiosError) {
             if (error.response?.data) {
                 return {
-                    result: XmTransactionResult.error,
+                    result: "error",
                     error: error.response.data,
                 }
             }
@@ -74,19 +71,19 @@ export default async function handleAptosPayRest(
             // check if is a timeout error
             if (error.message.includes("timeout")) {
                 return {
-                    result: XmTransactionResult.error,
+                    result: "error",
                     error: "Transaction timeout. Please try again",
                 }
             }
 
             return {
-                result: XmTransactionResult.error,
+                result: "error",
                 error: error.message,
             }
         }
 
         return {
-            result: XmTransactionResult.error,
+            result: "error",
             error: error.toString(),
         }
     }
