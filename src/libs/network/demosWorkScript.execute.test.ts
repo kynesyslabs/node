@@ -65,6 +65,12 @@ const submitValidatedTx = jest.fn(async () => ({
     confirmationBlock: 102,
 }))
 mock.module("./txSubmission", () => ({ submitValidatedTx }))
+// The dry-run admission (chain, mempool, rpc edits) is covered by its own tests
+const realAdmission = await import("./outboundAdmission")
+mock.module("./outboundAdmission", () => ({
+    ...realAdmission,
+    outboundAdmissionRefusal: async () => null,
+}))
 mock.module("src/libs/consensus/stakedSet", () => ({
     getStakedSet: async () => new Set<string>(),
     getStakedSetHeight: () => 0,
@@ -136,6 +142,8 @@ function workTx(stepIds: string[], order: string[] = ["op1"]): any {
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `s${i}`)
 
 afterEach(() => {
+    // Every case reuses one tx hash, and a run claims its hash
+    realAdmission.__resetOutboundClaims()
     applyTransaction.mockClear()
     submitValidatedTx.mockClear()
     handleNativeRequest.mockClear()
@@ -181,7 +189,8 @@ describe("demoswork tx execution", () => {
         expect(reply.response.result).toBe(200)
         expect(reply.response.response.operationsResults[0].success).toBe(true)
         expect(handleNativeRequest).toHaveBeenCalledTimes(2)
-        expect(applyTransaction).toHaveBeenCalledTimes(1)
+        // once as the dry run before any step, once before the mempool
+        expect(applyTransaction).toHaveBeenCalledTimes(2)
         expect(submitValidatedTx).toHaveBeenCalledTimes(1)
         expect(reply.extra).toMatchObject({ hash: HASH, disposition: "mempool" })
     })

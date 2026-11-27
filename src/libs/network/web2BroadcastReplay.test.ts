@@ -45,6 +45,12 @@ mock.module("../blockchain/gcr/handleGCR", () => ({
 mock.module("./txSubmission", () => ({
     submitValidatedTx: async () => ({ ok: true, published: true, confirmationBlock: 102 }),
 }))
+// The dry-run admission (chain, mempool, rpc edits) is covered by its own tests
+const realAdmission = await import("./outboundAdmission")
+mock.module("./outboundAdmission", () => ({
+    ...realAdmission,
+    outboundAdmissionRefusal: async () => null,
+}))
 mock.module("src/libs/consensus/stakedSet", () => ({
     getStakedSet: async () => new Set<string>(),
     getStakedSetHeight: () => 0,
@@ -68,6 +74,8 @@ function fakeDahr(sessionId: string) {
             originRequests.push({ ...params.headers })
             return { status: 200, statusText: "OK", headers: {}, data: "ok" }
         },
+        // No response attested earlier in the session, so each broadcast fetches
+        takeAttestedResponse: () => null,
     }
 }
 mock.module("src/features/web2/dahr/DAHRFactory", () => ({

@@ -4,7 +4,7 @@ import { StepResult } from "./handleDemosWorkRequest"
 // SECTION Operation types
 import { IWeb2Request, XMScript } from "@kynesyslabs/demosdk/types"
 // SECTION Handlers
-import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
+import type { INativePayload } from "@kynesyslabs/demosdk/types"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
 import handleL2PS from "../handleL2PS"
@@ -74,6 +74,10 @@ export default async function handleStep(
     } else if (context === "l2ps") {
         const l2psScript = task as unknown as L2PSTransaction
         result = await handleL2PS(l2psScript)
+        if (result?.result !== 200) {
+            stepResult.success = false
+            stepResult.error = `l2ps step failed with status ${result?.result}`
+        }
     }
     // ? // TODO: Add the other contexts
     else if (context === "activitypub") {
@@ -84,6 +88,10 @@ export default async function handleStep(
     } else if (context === "native") {
         const nativePayload = task as INativePayload
         result = await handleNativeRequest(nativePayload)
+        if (result?.result !== 200) {
+            stepResult.success = false
+            stepResult.error = `native step failed with status ${result?.result}`
+        }
     } else {
         result = "Unknown context: " + context
         stepResult.error = "Unknown context: " + context

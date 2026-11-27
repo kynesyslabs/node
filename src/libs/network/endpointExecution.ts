@@ -17,6 +17,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
 import { tlsnAdmissionCopy } from "../blockchain/gcr/tlsnTransitions"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import { attestedWeb2Response } from "./routines/transactions/web2AttestedResponse"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import { web2CallerForAddress } from "@/features/web2/web2FetchLimiter"
 import {
@@ -38,6 +39,11 @@ import {
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { gossipSizeRefusal, submitValidatedTx } from "./txSubmission"
+import {
+    claimOutboundRun,
+    outboundAdmissionRefusal,
+    releaseOutboundRun,
+} from "./outboundAdmission"
 import GossipManager from "src/libs/gossip/GossipManager"
 import { isSelfStaked } from "src/libs/consensus/stakedSet"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -149,6 +155,107 @@ function refusedForReferenceBlock(
     result.response = { error, message }
     result.extra = { error, message }
     return true
+}
+
+/**
+ * Marks `result` refused when the tx's signed edits would not apply on our
+ * state, or when this node does not take client txs (an unstaked node in
+ * production).
+ */
+async function refusedBySimulation(
+    result: ExecutionResult,
+    queriedTx: ValidityData["data"]["transaction"],
+): Promise<boolean> {
+    // Under tlsnVerified a TLSNotary tx is simulated with the edit the
+    // block will derive for it, so a store the block would refuse or
+    // fail is refused here, before it pays. The copy is the block's:
+    // the derived fee edits first, the TLSNotary edit last.
+    const tlsn = tlsnAdmissionCopy(queriedTx, withDerivedFeeEdits(queriedTx))
+    if (tlsn.ok === false) {
+        log.error(`[handleExecuteTransaction] TLSNotary tx refused: ${tlsn.reason}`)
+        result.success = false
+        result.response = false
+        result.extra = { error: tlsn.reason }
+        return true
+    }
+    const entities = await HandleGCR.prepareEntities([tlsn.tx])
+    const simulateResult = await HandleGCR.applyTransaction(
+        entities,
+        tlsn.tx,
+        false,
+        true,
+    )
+
+    if (!simulateResult.success) {
+        log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+        log.error(simulateResult.message)
+        result.success = false
+        result.response = false
+        result.extra = {
+            error: "Failed to apply GCREdit: " + simulateResult.message,
+        }
+        return true
+    }
+
+    // Only staked validators change network state. An unstaked node
+    // rejects client txs outright; there is no relay path any more.
+    if (getSharedState.PROD && !(await isSelfStaked())) {
+        result.success = false
+        result.response = {
+            message:
+                "This node is not a staked validator and does not accept transactions; submit to a validator RPC",
+        }
+        result.extra = { error: "NOT_A_VALIDATOR" }
+        return true
+    }
+    return false
+}
+
+/** Error code of a broadcast whose outbound operations already ran here. */
+export const OUTBOUND_ALREADY_RUN = "OUTBOUND_ALREADY_RUN"
+
+/**
+ * Marks `result` refused when the tx would be refused after its outbound
+ * calls for a reason already known now: the dry-run admission, the GCR
+ * simulation, the staked check. Those calls reach other chains or origins
+ * and cannot be taken back, so every refusal that does not depend on their
+ * result runs first. With `claim`, it also refuses a tx whose outbound
+ * operations this node already ran, so a re-broadcast never repeats them.
+ */
+async function refusedBeforeOutbound(
+    result: ExecutionResult,
+    validatedData: ValidityData,
+    queriedTx: ValidityData["data"]["transaction"],
+    run: { claim: boolean; referenceBlock: number; head: number },
+): Promise<boolean> {
+    const refusal = await outboundAdmissionRefusal(validatedData, queriedTx)
+    if (refusal) {
+        log.error(
+            `[handleExecuteTransaction] refusing ${queriedTx.hash} before its outbound calls: ${refusal}`,
+        )
+        result.success = false
+        result.response = { message: "Failed to add transaction to mempool" }
+        result.extra = {
+            confirmationBlock: null,
+            lastBlockNumber: getSharedState.lastBlockNumber,
+            error: refusal,
+        }
+        return true
+    }
+    if (await refusedBySimulation(result, queriedTx)) return true
+    if (
+        run.claim &&
+        !claimOutboundRun(queriedTx.hash, run.referenceBlock, run.head)
+    ) {
+        const message =
+            "This node already ran the outbound operations of this transaction; " +
+            "they are not sent twice. Sign a new transaction to try again."
+        result.success = false
+        result.response = { error: OUTBOUND_ALREADY_RUN, message }
+        result.extra = { error: OUTBOUND_ALREADY_RUN, message }
+        return true
+    }
+    return false
 }
 
 export async function handleExecuteTransaction(
@@ -271,17 +378,34 @@ export async function handleExecuteTransaction(
         result.success = true
     }
 
+    const outboundRun = {
+        claim: true,
+        referenceBlock: blockNumber,
+        head: lastBlockNumber,
+    }
+
     switch (tx.content.type as string) {
         case "crosschainOperation": {
             if (refusedAsDisabled(result, "xm")) break
+            if (await refusedBeforeOutbound(result, validatedData, queriedTx, outboundRun)) {
+                return result
+            }
             payload = tx.content.data
             const xmResult = await multichainDispatcher.digest(
                 payload[1] as XMScript,
             )
-            result.success = xmResult.success
+            // A partial run is admitted: the tx records what reached other
+            // chains. A run where every operation failed is refused; its
+            // claim is released only when no operation ran at all, since an
+            // executor may report an error after its transaction went out.
+            result.success = xmResult.success === true
+            if (!result.success && Object.keys(xmResult.results ?? {}).length === 0) {
+                releaseOutboundRun(queriedTx.hash)
+            }
             result.response = {
                 message: xmResult.message,
                 results: xmResult.results,
+                ...("outcomes" in xmResult ? { outcomes: xmResult.outcomes } : {}),
             }
             break
         }
@@ -357,9 +481,29 @@ export async function handleExecuteTransaction(
             ) {
                 break
             }
+            if (
+                await refusedBeforeOutbound(result, validatedData, queriedTx, {
+                    ...outboundRun,
+                    claim: false,
+                })
+            ) {
+                return result
+            }
+            const recorded = payload?.message?.web2Request
+            const attested = attestedWeb2Response(
+                payload?.message?.sessionId,
+                recorded?.raw,
+                recorded?.result,
+            )
+            if (attested) {
+                result.response = attested
+                result.success = true
+                break
+            }
             const params = parseWeb2ProxyRequest(payload)
-            // This re-runs the request when the tx is broadcast. Only the
-            // allow-listed headers and no authorization are forwarded.
+            // Without that attested response, this re-runs the request when
+            // the tx is broadcast. Only the allow-listed headers and no
+            // authorization are forwarded.
             params.web2Request.raw.headers = headersForReplay(
                 params.web2Request.raw.headers,
             )
@@ -369,6 +513,8 @@ export async function handleExecuteTransaction(
                 web2CallerForAddress(tx.content.from),
             )
             result.response = web2Result
+            // A refused or failed fetch has no response to record on chain.
+            result.success = web2Result?.result === 200
             const handleWeb2RequestEnd = Date.now()
             log.only(
                 `[SERVER] Web2 request processed in ${handleWeb2RequestEnd - handleWeb2RequestStart}ms`,
@@ -397,12 +543,18 @@ export async function handleExecuteTransaction(
                 result.extra = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
                 break
             }
+            if (await refusedBeforeOutbound(result, validatedData, queriedTx, outboundRun)) {
+                return result
+            }
             try {
                 const demosWorkResult = await handleDemosWorkRequest(
                     demosWorkScript,
                     web2CallerForAddress(tx.content.from),
                 )
                 result.response = demosWorkResult
+                // Failed steps are listed in the reply; the tx records the
+                // run either way.
+                result.success = demosWorkResult?.result === 200
             } catch (e) {
                 log.error("[handleExecuteTransaction] Error in demosWork: " + e)
                 result.success = false
@@ -479,48 +631,9 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        // Under tlsnVerified a TLSNotary tx is simulated with the edit the
-        // block will derive for it, so a store the block would refuse or
-        // fail is refused here, before it pays. The copy is the block's:
-        // the derived fee edits first, the TLSNotary edit last.
-        const tlsn = tlsnAdmissionCopy(queriedTx, withDerivedFeeEdits(queriedTx))
-        if (tlsn.ok === false) {
-            log.error(`[handleExecuteTransaction] TLSNotary tx refused: ${tlsn.reason}`)
-            result.success = false
-            result.response = false
-            result.extra = { error: tlsn.reason }
-            return result
-        }
-        const entities = await HandleGCR.prepareEntities([tlsn.tx])
-        const simulateResult = await HandleGCR.applyTransaction(
-            entities,
-            tlsn.tx,
-            false,
-            true,
-        )
-
-        if (!simulateResult.success) {
-            log.error("[handleExecuteTransaction] Failed to apply GCREdit")
-            log.error(simulateResult.message)
-            result.success = false
-            result.response = false
-            result.extra = {
-                error: "Failed to apply GCREdit: " + simulateResult.message,
-            }
-            return result
-        }
-
-        // Only staked validators change network state. An unstaked node
-        // rejects client txs outright; there is no relay path any more.
-        if (getSharedState.PROD && !(await isSelfStaked())) {
-            result.success = false
-            result.response = {
-                message:
-                    "This node is not a staked validator and does not accept transactions; submit to a validator RPC",
-            }
-            result.extra = { error: "NOT_A_VALIDATOR" }
-            return result
-        }
+        // Outbound types ran these before their calls too; state may have
+        // moved while the calls ran, so they are judged again.
+        if (await refusedBySimulation(result, queriedTx)) return result
 
         try {
             const submission = await submitValidatedTx(validatedData, queriedTx)

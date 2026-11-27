@@ -9,6 +9,7 @@ import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
 import handleContractWrite from "./executors/contract_write"
 import handleBalanceQuery from "./executors/balance_query"
+import { xmScriptRefusal } from "../xmScriptShape"
 import errorKind, { logField } from "./errorKind"
 
 // NOTE We define multichain into global so that we can use it later
@@ -56,12 +57,11 @@ class XMParser {
         return xmscript
     }
 
-    // INFO Preparsing a script to be able to execute it later (e.g. checking the syntax)
-
-    static async prepare(script: XMScript): Promise<XMScript> {
-        const result: XMScript = script
-        // TODO
-        return result
+    /** Returns `script` when it is well formed; throws with the reason otherwise. */
+    static prepare(script: unknown): XMScript {
+        const refusal = xmScriptRefusal(script)
+        if (refusal) throw new Error(refusal)
+        return script as XMScript
     }
 
     // INFO This returns the results of the execution of the XMScript
@@ -74,8 +74,7 @@ class XMParser {
         const results = {}
         let name: string, operation: IOperation
         const names = Object.keys(fullscript.operations)
-        // Iterating over the operations
-        // TODO Enforce order
+        // Runs in the key order of `operations`; operations_order is not read.
         for (let id = 0; id < names.length; id++) {
             // NOTE Only the first 10 operations get debug lines
             const listed = id < 10
@@ -147,16 +146,23 @@ class XMParser {
         // ANCHOR MVP
         /* SECTION Write tasks */
         switch (operation.task?.type) {
-            case "pay":
-                // eslint-disable-next-line no-var
-                var result = await handlePayOperation(operation, chainID)
-
-                // INFO: Adding chain info for debugging
+            case "pay": {
+                const result = await handlePayOperation(operation, chainID)
+                // The send may already have happened: report a missing reply
+                // as a failed op instead of throwing on it.
+                if (result === null || typeof result !== "object") {
+                    return {
+                        result: "error",
+                        error: "Executor returned no result",
+                        chain: `${operation.chain}.${operation.subchain}`,
+                    }
+                }
                 result["chain"] = `${operation.chain}.${operation.subchain}`
                 return result
+            }
 
             /* SECTION Read only tasks */
-            // NOTE For the following tasks, we can safely skip checkSignedPayloads()
+            // Reads send nothing signed; pay and contract_write check their payloads.
             // ANCHOR MVP
             // INFO Read contract task
             case "contract_read":

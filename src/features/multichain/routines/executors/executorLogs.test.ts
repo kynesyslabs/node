@@ -38,6 +38,7 @@ const { default: handleAptosContractRead } = await import(
 )
 const { genericJsonRpcPay } = await import("./pay")
 const { default: handleBalanceQuery } = await import("./balance_query")
+const outboundAddress = await import("src/utilities/outboundAddress")
 const { Config: appConfig } = await import("src/config")
 
 const ARG = "0xa11ce0000secretargument"
@@ -197,7 +198,8 @@ describe("Ripple pay logging", () => {
             },
         } as any)
 
-        expect(res.pay).toMatchObject({ result: "error" })
+        // A submit that throws may still have reached the ledger
+        expect(res.pay).toMatchObject({ result: "unknown" })
         expect(res.pay.error).toContain(TX_BLOB)
         expectNotLogged("secretblob")
         expect(logged).toContain(
@@ -212,6 +214,8 @@ describe("Ripple pay logging", () => {
             ...real,
             outbound: { ...real.outbound, xmRpcAllowlist: ["rpc.partner.example"] },
         } as any)
+        // The listed host must resolve to public addresses to be used
+        spyOn(outboundAddress, "resolvePublicAddress").mockResolvedValue(undefined as any)
         const connect = spyOn(multichain.XRPL.prototype, "connect").mockResolvedValue(false)
         const subchain = "testnet\n[forged] line " + "x".repeat(1000)
         const res = await xmParser.execute({

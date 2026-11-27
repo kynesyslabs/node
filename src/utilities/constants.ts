@@ -19,6 +19,24 @@ export const PEER_RECHECK_INTERVAL_MS = 10_000
 /** A peer not heard from for this long no longer counts as online. */
 export const PEER_LIVENESS_WINDOW_MS = 30_000
 
+// --- Cross-chain (XM) scripts ---
+/**
+ * Most operations one XM script may carry, its operations held in an
+ * ordinary object (prototype Object.prototype or null). Each one is an
+ * outbound call the entry node makes to another chain before the tx is
+ * admitted.
+ */
+export const MAX_XM_OPERATIONS = 32
+/** Longest operation name an XM script may use. */
+export const XM_MAX_OPERATION_NAME_LENGTH = 128
+/**
+ * How long an Aptos submit may take before its outcome is reported as
+ * unknown. The node may have taken the transaction even when no answer came.
+ */
+export const XM_APTOS_SUBMIT_TIMEOUT_MS = 10_000
+/** How long an XRPL submit waits for a validated result before it is unknown. */
+export const XM_XRPL_SUBMIT_DEADLINE_MS = 30_000
+
 // --- Mempool admission caps ---
 // Identical on every validator, so the pool a committee member would drop is
 // the pool every other member drops too. They are not env settings on
@@ -144,3 +162,9 @@ export type TransactionStatus = typeof TRANSACTION_STATUS[keyof typeof TRANSACTI
 
 // --- File defaults ---
 export const TWITTER_COOKIE_FILE = "twitter_cookies.json"
+/** Node-wide bytes of attested web2 responses kept for reuse at broadcast. */
+export const WEB2_ATTESTED_RETAIN_MAX_BYTES = 256 * 1024 * 1024
+/** How long the body of an attested web2 response is kept for its broadcast. */
+export const WEB2_ATTESTED_RETAIN_MS = 120_000
+/** Attested responses one web2 session keeps for broadcast; the oldest goes first. */
+export const WEB2_ATTESTED_PER_SESSION = 8

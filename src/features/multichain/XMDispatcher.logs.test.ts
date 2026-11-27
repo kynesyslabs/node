@@ -39,8 +39,9 @@ const multichain = await import("@kynesyslabs/demosdk/xm-localsdk")
 const { default: multichainDispatcher } = await import("./XMDispatcher")
 const { default: xmParser } = await import("./routines/XMParser")
 
-const SIGNED_OK = "0x02f8aa11signedok"
-const SIGNED_REJECTED = "0x02f8bb22signedrejected"
+// Hex, as the payload check requires; the tails are what must not be logged
+const SIGNED_OK = "0x02f8aa11c0ffee01"
+const SIGNED_REJECTED = "0x02f8bb22deadbeef02"
 
 function pay(signed: string): any {
     return {
@@ -70,6 +71,11 @@ afterEach(() => {
     logged.length = 0
 })
 
+/** Lets a script the shape check refuses reach the logging under test. */
+function skipShapeCheck() {
+    spyOn(xmParser, "prepare").mockImplementation((s: any) => s)
+}
+
 describe("XM script logging", () => {
     it("logs operation types, chains and counts, and no payloads or signed data", async () => {
         fakeChain()
@@ -79,13 +85,14 @@ describe("XM script logging", () => {
 
         const all = logged.join("\n")
         expect(all).toContain("\"pay\" on \"eth\".\"sepolia\"")
-        expect(all).not.toContain("signedok")
-        expect(all).not.toContain("signedrejected")
+        expect(all).not.toContain("c0ffee01")
+        expect(all).not.toContain("deadbeef02")
     })
 
     it("logs each operation type, chain and subchain as one escaped value of at most 64 characters", async () => {
         const field = (name: string) => `${name}\nforged ` + "x".repeat(1000)
         const logs = (name: string) => `"${name}\\nforged ` + "x".repeat(64 - name.length - 9) + "\""
+        skipShapeCheck()
         await multichainDispatcher.digest({
             operations: {
                 odd: {
@@ -108,6 +115,7 @@ describe("XM script logging", () => {
     })
 
     it("logs a field that is not a string as its type", async () => {
+        skipShapeCheck()
         await multichainDispatcher.digest({
             operations: {
                 odd: { chain: { url: "x" }, subchain: 5, is_evm: true, task: {} },
@@ -138,6 +146,7 @@ describe("XM script logging", () => {
             ]),
         )
         const first10 = Array.from({ length: 10 }, (_, i) => `"t${i}" on "c"."s"`).join(", ")
+        skipShapeCheck()
 
         await multichainDispatcher.digest({ operations } as any)
 
@@ -153,6 +162,7 @@ describe("XM script logging", () => {
         spyOn(xmParser,"execute").mockResolvedValue({
             read: { result: "readvalue" },
         } as any)
+        skipShapeCheck()
 
         await multichainDispatcher.digest({ operations: {} } as any)
 

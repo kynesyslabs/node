@@ -3,6 +3,7 @@ import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { Config } from "src/config"
 import log from "@/utilities/logger"
+import { resolvePublicAddress } from "src/utilities/outboundAddress"
 
 const RPC_SCHEMES = new Set(["http:", "https:", "ws:", "wss:"])
 
@@ -23,14 +24,18 @@ function isListed(url: URL, allowlist: readonly string[]): boolean {
 /**
  * The RPC URL an XM operation runs against: the node's configured one for the
  * chain, or the caller's only when the operator allow-listed its host (or full
- * origin). Honouring any caller URL would let a caller make the node fetch
- * arbitrary addresses, including the operator's private network.
+ * origin) and the host resolves to public addresses only. Honouring any caller
+ * URL would let a caller make the node fetch arbitrary addresses, including
+ * the operator's private network; a listed name can later be pointed there,
+ * so it is resolved on every use. The chain SDK client resolves the name
+ * again when it connects, so this does not pin the address it dials.
  */
-export function pickRpcUrl(
+export async function pickRpcUrl(
     callerUrl: unknown,
     configuredUrl: string | undefined,
     allowlist: readonly string[] = Config.getInstance().outbound.xmRpcAllowlist,
-): string | undefined {
+    resolveHost: (host: string) => Promise<unknown> = resolvePublicAddress,
+): Promise<string | undefined> {
     if (typeof callerUrl !== "string" || callerUrl === "") return configuredUrl
 
     let parsed: URL
@@ -39,13 +44,23 @@ export function pickRpcUrl(
     } catch {
         return configuredUrl
     }
-    if (RPC_SCHEMES.has(parsed.protocol) && isListed(parsed, allowlist)) {
-        return callerUrl
+    if (!RPC_SCHEMES.has(parsed.protocol) || !isListed(parsed, allowlist)) {
+        log.debug(
+            `[XM] Ignoring caller RPC URL for host ${parsed.hostname}: not in XM_RPC_ALLOWLIST`,
+        )
+        return configuredUrl
     }
-    log.debug(
-        `[XM] Ignoring caller RPC URL for host ${parsed.hostname}: not in XM_RPC_ALLOWLIST`,
-    )
-    return configuredUrl
+    try {
+        await resolveHost(parsed.hostname)
+    } catch (e) {
+        log.warning(
+            `[XM] Ignoring allow-listed RPC host ${parsed.hostname}: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return configuredUrl
+    }
+    return callerUrl
 }
 
 /**
@@ -53,7 +68,7 @@ export function pickRpcUrl(
  * only: names such as "constructor" or "toString" are inherited from
  * Object.prototype, not configured.
  */
-function configuredEvmUrl(
+export function configuredEvmUrl(
     chain: unknown,
     subchain: unknown,
 ): string | undefined {
@@ -78,7 +93,7 @@ export async function sendSignedEvmTransaction(
     chainID: number,
 ) {
     const configuredUrl = configuredEvmUrl(operation.chain, operation.subchain)
-    const rpcUrl = pickRpcUrl(operation.rpc, configuredUrl)
+    const rpcUrl = await pickRpcUrl(operation.rpc, configuredUrl)
     if (!rpcUrl) {
         return {
             result: "error",

@@ -46,6 +46,16 @@ mock.module("../blockchain/gcr/handleGCR", () => ({
 mock.module("./txSubmission", () => ({
     submitValidatedTx: async () => ({ ok: true, published: true, confirmationBlock: 102 }),
 }))
+// The dry-run admission and replay claims are covered in outboundAdmission tests.
+mock.module("./outboundAdmission", () => ({
+    outboundAdmissionRefusal: async () => null,
+    claimOutboundRun: () => true,
+    releaseOutboundRun: () => undefined,
+}))
+// Reusing an attested response is covered in web2AttestedResponse tests.
+mock.module("./routines/transactions/web2AttestedResponse", () => ({
+    attestedWeb2Response: () => null,
+}))
 mock.module("src/libs/consensus/stakedSet", () => ({
     getStakedSet: async () => new Set<string>(),
     getStakedSetHeight: () => 0,

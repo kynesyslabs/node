@@ -2,7 +2,8 @@
  * An EVM contract_read runs against the node's configured RPC for the chain
  * only, on a connection of its own: it never creates or replaces the per-chain
  * EVM instance that pay and contract_write broadcast through. It calls only a
- * function of the given ABI, and destroys its provider whatever the outcome.
+ * view or pure function of the given ABI, refusing any other method before it
+ * connects, and destroys its provider whatever the outcome.
  * A failed read logs only the error's class and code, never a revert reason.
  */
 
@@ -189,27 +190,21 @@ describe("EVM contract_read", () => {
 
     // Members of the ethers contract object that are not functions of the ABI
     it.each(["waitForDeployment", "getDeployedCode", "toString", "constructor"])(
-        "fails at once for %s, which the ABI lacks, and destroys the provider",
+        "refuses %s, which the ABI lacks, before connecting",
         async method => {
             const op = read("eth", "sepolia")
             op.task.params.method = method
-            quietLog.error.mockClear()
 
-            const res: any = await Promise.race([
-                xmParser.execute({ operations: { read: op } } as any),
-                Bun.sleep(1000).then(() => "still pending"),
-            ])
+            const res: any = await xmParser.execute({
+                operations: { read: op },
+            } as any)
 
-            expect(res).not.toBe("still pending")
-            expect(res.read.result).toBe("error")
-            expect(res.read.error).toContain("INVALID_ARGUMENT")
-            expect(quietLog.error.mock.calls).toEqual([
-                ["[XM EXECUTE] Operation 1 failed: TypeError INVALID_ARGUMENT"],
-            ])
-            expect(provider.getCode).not.toHaveBeenCalled()
-            expect(provider.once).not.toHaveBeenCalled()
+            expect(res.read).toEqual({
+                result: "error",
+                error: `Method ${method} is not in the ABI`,
+            })
+            expect(connect).not.toHaveBeenCalled()
             expect(provider.call).not.toHaveBeenCalled()
-            expect(provider.destroy).toHaveBeenCalledTimes(1)
         },
     )
 
@@ -231,5 +226,56 @@ describe("EVM contract_read", () => {
             task: { type: "pay", signedPayloads: ["0x00"] },
         } as any)
         expect(sentVia).toEqual([evmProviders.polygon.mainnet])
+    })
+})
+
+describe("contract_read arguments and method", () => {
+    const OWNER = "0x0000000000000000000000000000000000000002"
+
+    it.each([
+        ["a JSON list", JSON.stringify([OWNER])],
+        ["a JSON object", JSON.stringify({ owner: OWNER })],
+        ["an array", [OWNER]],
+    ])("accepts params given as %s", async (_label, params) => {
+        const op = read("eth", "sepolia")
+        op.task.params.params = params
+
+        const res = await handleContractRead(op, 11155111)
+
+        expect(res).toEqual({ result: 7n, status: true })
+        expect(provider.call.mock.calls[0][0]).toMatchObject({
+            data: new Interface(ABI).encodeFunctionData("balanceOf", [OWNER]),
+        })
+    })
+
+    const WITH_TRANSFER = [
+        ...ABI,
+        "function transfer(address,uint256) returns (bool)",
+    ]
+    it.each([
+        ["null params", null, "Missing contract read params"],
+        ["no address", { address: "" }, "Missing contract address"],
+        ["no ABI", { abi: undefined }, "Missing contract ABI"],
+        ["a malformed ABI", { abi: "{not json" }, "Invalid contract ABI"],
+        ["a method missing from the ABI", { method: "connect" }, "is not in the ABI"],
+        [
+            "a state-changing method",
+            { abi: WITH_TRANSFER, method: "transfer" },
+            "not a view or pure function",
+        ],
+        ["unparseable params", { params: "{oops" }, "Invalid contract method params"],
+        ["a scalar params value", { params: "5" }, "Invalid contract method params"],
+    ])("refuses %s without connecting", async (_label, change, error) => {
+        const op = read("eth", "sepolia")
+        op.task.params =
+            change === null ? null : { ...op.task.params, ...(change as object) }
+
+        const res = await handleContractRead(op, 11155111)
+
+        expect(res).toEqual({
+            result: "error",
+            error: expect.stringContaining(error as string),
+        })
+        expect(connect).not.toHaveBeenCalled()
     })
 })

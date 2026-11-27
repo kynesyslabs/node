@@ -135,7 +135,9 @@ function holdFetchSlots(key: string): () => void {
 
 /**
  * Characters of all the text a session holds: every string and key reachable
- * from it through plain objects, arrays, the session and its relay.
+ * from it through plain objects, arrays, the session and its relay. The
+ * response a session keeps for its broadcast (`_attested`) is left out: it is
+ * counted against the node-wide attested budget instead.
  */
 function heldChars(sessionId: string): number {
     const seen = new Set<object>()
@@ -151,7 +153,8 @@ function heldChars(sessionId: string): number {
             value instanceof Proxy
         if (!walked) return 0
         return Object.entries(value).reduce(
-            (sum, [key, item]) => sum + key.length + count(item),
+            (sum, [key, item]) =>
+                key === "_attested" ? sum : sum + key.length + count(item),
             0,
         )
     }

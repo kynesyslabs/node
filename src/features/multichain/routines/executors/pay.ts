@@ -3,13 +3,25 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
-import checkSignedPayloads from "src/utilities/checkSignedPayloads"
+import { signedPayloadsRefusal } from "src/utilities/checkSignedPayloads"
 import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
 import { VersionedTransaction } from "@solana/web3.js"
 import { pickRpcUrl, sendSignedEvmTransaction } from "./rpcUrl"
+import { xrplSignedTxHash } from "./signedTxHash"
+import { XM_XRPL_SUBMIT_DEADLINE_MS } from "src/utilities/constants"
 import errorKind, { logField } from "../errorKind"
+
+const XRPL_DEADLINE = Symbol("xrpl-deadline")
+
+function deadline(ms: number): { done: Promise<typeof XRPL_DEADLINE>; clear: () => void } {
+    let timer: ReturnType<typeof setTimeout>
+    const done = new Promise<typeof XRPL_DEADLINE>(resolve => {
+        timer = setTimeout(() => resolve(XRPL_DEADLINE), ms)
+    })
+    return { done, clear: () => clearTimeout(timer) }
+}
 
 /**
  * Executes a XM pay operation and returns
@@ -23,22 +35,10 @@ export default async function handlePayOperation(
 ) {
     let result: TransactionResponse
 
-    log.debug("[XMScript Parser] Pay task. Examining payloads (require 1)...")
-    // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
-
-    // NOTE Generic sanity check on payloads
-    if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
-        log.debug(
-            "[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)",
-        )
-        return {
-            result: "error",
-            error: "Invalid signedPayloads length",
-        }
+    const payloadRefusal = signedPayloadsRefusal(1, operation)
+    if (payloadRefusal) {
+        return { result: "error", error: payloadRefusal }
     }
-    log.debug(
-        "[XMScript Parser] Pay task payloads are ok: Valid payloads (require 1 has 1)",
-    )
     // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
     if (operation.is_evm) {
         // If is EVM, send tx and return the result
@@ -49,7 +49,7 @@ export default async function handlePayOperation(
     log.debug("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    const rpcUrl = pickRpcUrl(
+    const rpcUrl = await pickRpcUrl(
         operation.rpc,
         chainProviders[operation.chain]?.[operation.subchain],
     )
@@ -229,32 +229,35 @@ async function handleXRPLPay(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
     const xrplInstance = new multichain.XRPL(rpcUrl)
-    const connected = await xrplInstance.connect()
-    log.debug("CONNECT RETURNED: ", connected)
-
-    if (!connected) {
-        return {
-            result: "error",
-            error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
-        }
-    }
-
-    // REVIEW 10 seconds timeout for connection
-    let timer = 0
-    while (!xrplInstance.connected) {
-        await new Promise(resolve => setTimeout(resolve, 300))
-        timer += 300
-        if (timer > 10000) {
-            log.debug("[XMScript Parser] Ripple Pay: timeout")
+    // Set once submitAndWait starts: past it the tx may have landed.
+    let submitHash: string | null = null
+    try {
+        // No auto-reconnect: the client is closed once this one submit
+        // settles.
+        const connected = await xrplInstance.connect(false)
+        log.debug("CONNECT RETURNED: ", connected)
+        if (!connected) {
             return {
                 result: "error",
-                error: "Timeout in connecting to the XRP network",
+                error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
             }
         }
-    }
-    log.debug("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
-    try {
+        // REVIEW 10 seconds timeout for connection
+        let timer = 0
+        while (!xrplInstance.connected) {
+            await new Promise(resolve => setTimeout(resolve, 300))
+            timer += 300
+            if (timer > 10000) {
+                log.debug("[XMScript Parser] Ripple Pay: timeout")
+                return {
+                    result: "error",
+                    error: "Timeout in connecting to the XRP network",
+                }
+            }
+        }
+        log.debug("[XMScript Parser] Ripple Pay: connected to the XRP network")
+
         // Validate signedPayloads exists and has at least one element
         if (
             !operation.task.signedPayloads ||
@@ -292,8 +295,28 @@ async function handleXRPLPay(
             }
         }
 
-        // Submit transaction and wait for validation
-        const res = await xrplInstance.provider.submitAndWait(txBlob)
+        // submitAndWait has no deadline of its own. Past ours the tx may
+        // still be validated, so the outcome is unknown, not failed.
+        const hash = xrplSignedTxHash(txBlob)
+        submitHash = hash
+        const wait = deadline(XM_XRPL_SUBMIT_DEADLINE_MS)
+        let res: Awaited<ReturnType<typeof xrplInstance.provider.submitAndWait>>
+        try {
+            const settled = await Promise.race([
+                xrplInstance.provider.submitAndWait(txBlob),
+                wait.done,
+            ])
+            if (settled === XRPL_DEADLINE) {
+                return {
+                    result: "unknown",
+                    hash,
+                    error: `No validated result within ${XM_XRPL_SUBMIT_DEADLINE_MS / 1000} s; the transaction may still be included. Look up its hash before retrying.`,
+                }
+            }
+            res = settled
+        } finally {
+            wait.clear()
+        }
 
         // Extract transaction result - handle different response formats
         const meta = res.result.meta
@@ -325,6 +348,15 @@ async function handleXRPLPay(
         }
 
         const errorPrefix = txResult?.substring(0, 3)
+        if (errorPrefix === "ter") {
+            // Queued or retried by the server: it may still be validated.
+            return {
+                result: "unknown",
+                error: `${xrplErrorMessages.ter}: ${txResult} - ${resultMessage}`,
+                hash: txHash ?? hash,
+                extra: { code: txResult, validated: res.result.validated },
+            }
+        }
         if (errorPrefix && xrplErrorMessages[errorPrefix]) {
             return {
                 result: "error",
@@ -342,9 +374,18 @@ async function handleXRPLPay(
         }
     } catch (error) {
         log.error(`[XMScript Parser] Ripple Pay error: ${errorKind(error)}`)
-        return {
-            result: "error",
-            error: error instanceof Error ? error.message : String(error),
+        const message = error instanceof Error ? error.message : String(error)
+        if (submitHash) {
+            return {
+                result: "unknown",
+                hash: submitHash,
+                error: `${message}; the transaction may still be included. Look up its hash before retrying.`,
+            }
         }
+        return { result: "error", error: message }
+    } finally {
+        await Promise.resolve(xrplInstance.provider?.disconnect?.()).catch(
+            () => undefined,
+        )
     }
 }

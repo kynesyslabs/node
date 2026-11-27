@@ -64,7 +64,8 @@ function opsOf(count: number) {
 beforeEach(() => {
     delete process.env.XM_ENABLED
     executeOperation.mockReset()
-    executeOperation.mockImplementation(async () => ({ result: "ok" }))
+    // A read counts as done only when it reports its status (xmOpOutcome).
+    executeOperation.mockImplementation(async () => ({ result: "ok", status: true }))
     parserExecute.mockClear()
 })
 
@@ -125,7 +126,8 @@ describe("MultichainDispatcher.digest operations bound", () => {
         expect(res).toEqual({
             success: true,
             message: "all_ops_ok",
-            results: { op0: { result: "ok" } },
+            results: { op0: { result: "ok", status: true } },
+            outcomes: { op0: "ok" },
         })
         expect(executeOperation.mock.calls.map(c => c[0])).toEqual([op(0)])
     })
@@ -151,7 +153,7 @@ describe("MultichainDispatcher.digest operations bound", () => {
         const first = op(1)
         const second = op(2)
         executeOperation
-            .mockImplementationOnce(async () => ({ result: "ok" }))
+            .mockImplementationOnce(async () => ({ result: "ok", status: true }))
             .mockImplementationOnce(async () => ({
                 result: "error",
                 error: "boom",
@@ -163,9 +165,10 @@ describe("MultichainDispatcher.digest operations bound", () => {
             success: true,
             message: "partial_success",
             results: {
-                first: { result: "ok" },
+                first: { result: "ok", status: true },
                 second: { result: "error", error: "boom" },
             },
+            outcomes: { first: "ok", second: "failed" },
         })
         expect(executeOperation.mock.calls.map(c => c[0])).toEqual([
             first,

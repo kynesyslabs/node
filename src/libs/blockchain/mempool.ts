@@ -583,6 +583,68 @@ export default class Mempool {
             : null
     }
 
+    /** The sender, nonce and account the insert-time nonce rules judge a tx by. */
+    private static nonceTarget(transaction: Transaction, blockHeight: number) {
+        const senderFromRaw = transaction.content?.from
+        const senderFrom =
+            typeof senderFromRaw === "string"
+                ? senderFromRaw.toLowerCase()
+                : null
+        const txNonce = transaction.content?.nonce
+        // Under nonceIntegrity the nonce is read where the nonce edit acts,
+        // the ed25519 sender, which a PQC-signed tx does not carry in `from`.
+        const nonceRule =
+            isForkActive("nonceIntegrity", blockHeight) &&
+            expectsNonceEdit(transaction)
+        const ed25519Raw = transaction.content?.from_ed25519_address
+        const byEd25519 =
+            nonceRule && typeof ed25519Raw === "string" && ed25519Raw !== ""
+        // Locking and the pending-duplicate check ignore case; the account
+        // is read under the key apply and confirmation use, as signed.
+        const nonceAccount = byEd25519 ? ed25519Raw.toLowerCase() : senderFrom
+        const nonceAccountKey = byEd25519 ? ed25519Raw : senderFrom
+        return { senderFrom, txNonce, nonceRule, nonceAccount, nonceAccountKey }
+    }
+
+    /**
+     * The nonce refusal the insert would give `transaction` as the pool and
+     * the confirmed nonce stand now, or null. Read without the sender's
+     * lock, for a caller that runs something it cannot take back before the
+     * insert: a nonce already taken is refused before that runs, and the
+     * insert still decides under the lock.
+     */
+    public static async pendingNonceRefusal(
+        transaction: Transaction,
+    ): Promise<string | null> {
+        const blockHeight = getSharedState.lastBlockNumber ?? 0
+        const { senderFrom, txNonce, nonceRule, nonceAccount, nonceAccountKey } =
+            this.nonceTarget(transaction, blockHeight)
+        if (
+            !senderFrom ||
+            typeof txNonce !== "number" ||
+            (isSystemRelayTx(transaction) &&
+                senderFrom === getSharedState.publicKeyHex?.toLowerCase()) ||
+            !(nonceRule || isForkActive("nonceEnforcement", blockHeight))
+        ) {
+            return null
+        }
+        const account = await this.repo.manager
+            .getRepository(GCRMain)
+            .findOne({ where: { pubkey: nonceAccountKey } })
+        const accountNonce = account?.nonce ?? 0
+        if (txNonce <= accountNonce) {
+            return `Invalid nonce for transaction: ${transaction.hash} (expected >= ${accountNonce + 1})`
+        }
+        if (!nonceRule) return null
+        return await this.nonceAdmissionRefusal(
+            this.repo,
+            nonceAccount,
+            txNonce,
+            accountNonce,
+            blockHeight,
+        )
+    }
+
     /**
      * Add a transaction to the mempool with exclusive lock
      *
@@ -787,25 +849,9 @@ export default class Mempool {
         // fork inactive, when the tx doesn't carry a nonce, or when the
         // tx is a system relay type (see below) — those paths preserve
         // the legacy behaviour bit-identically.
-        const senderFromRaw = transaction.content?.from
-        const senderFrom =
-            typeof senderFromRaw === "string"
-                ? senderFromRaw.toLowerCase()
-                : null
-        const txNonce = transaction.content?.nonce
         const blockHeight = getSharedState.lastBlockNumber ?? 0
-        // Under nonceIntegrity the nonce is read where the nonce edit acts,
-        // the ed25519 sender, which a PQC-signed tx does not carry in `from`.
-        const nonceRule =
-            isForkActive("nonceIntegrity", blockHeight) &&
-            expectsNonceEdit(transaction)
-        const ed25519Raw = transaction.content?.from_ed25519_address
-        const byEd25519 =
-            nonceRule && typeof ed25519Raw === "string" && ed25519Raw !== ""
-        // Locking and the pending-duplicate check ignore case; the account
-        // is read under the key apply and confirmation use, as signed.
-        const nonceAccount = byEd25519 ? ed25519Raw.toLowerCase() : senderFrom
-        const nonceAccountKey = byEd25519 ? ed25519Raw : senderFrom
+        const { senderFrom, txNonce, nonceRule, nonceAccount, nonceAccountKey } =
+            this.nonceTarget(transaction, blockHeight)
 
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness

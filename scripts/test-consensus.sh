@@ -241,6 +241,19 @@ SUITE_FILES=(
     src/features/multichain/routines/executors/contract_read.test.ts
     src/features/multichain/routines/executors/executorLogs.test.ts
     src/libs/network/routines/transactions/demosWork/handleDemosWorkRequest.test.ts
+    src/features/multichain/routines/executors/unknownOutcome.test.ts
+    src/features/multichain/xmImportPaths.test.ts
+    src/features/multichain/xmLogging.test.ts
+    src/features/multichain/xmOutcome.test.ts
+    src/features/multichain/xmScriptShape.test.ts
+    src/features/web2/validator.test.ts
+    src/libs/blockchain/routines/validateTransaction.xmScript.test.ts
+    src/libs/network/outboundAdmission.test.ts
+    src/libs/network/outboundBeforeCalls.test.ts
+    src/libs/network/outboundSwitches.confirm.test.ts
+    src/libs/network/routines/transactions/demosWork/handleDemosWorkRequest.outcomes.test.ts
+    src/libs/network/routines/transactions/web2AttestedResponse.test.ts
+    src/utilities/checkSignedPayloads.test.ts
 )
 
 list_suite_files() {

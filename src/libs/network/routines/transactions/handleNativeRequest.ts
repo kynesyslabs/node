@@ -1,5 +1,5 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
+import type { INativePayload } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 
 /**

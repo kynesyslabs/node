@@ -14,6 +14,15 @@ import {
     isSuccessStatus,
     UnattestableResponseError,
 } from "src/features/web2/dahr/originStatus"
+import {
+    releaseAttestedBytes,
+    reserveAttestedBytes,
+} from "src/features/web2/dahr/attestedBudget"
+import { createHash } from "node:crypto"
+import {
+    WEB2_ATTESTED_PER_SESSION,
+    WEB2_ATTESTED_RETAIN_MS,
+} from "src/utilities/constants"
 
 export type DAHRStartProxyParams = IDAHRStartProxyParams & {
     /** Return non-2xx origin responses instead of refusing them. */
@@ -28,6 +37,10 @@ export type DAHRStartProxyParams = IDAHRStartProxyParams & {
 export class DAHR {
     private readonly _sessionId: string
     private readonly _proxy: Proxy
+    // Newest last. The evidence of a response (its request and hashes) is
+    // kept as long as the session, so a broadcast never depends on fetching
+    // the origin again; its body only while it fits the node-wide budget.
+    private _attested: AttestedEntry[] = []
 
     /**
      * Constructor for the DAHR class.
@@ -132,13 +145,90 @@ export class DAHR {
             )
         }
 
+        this.keepAttested(validation.normalizedUrl, method, web2Response, meter)
         return web2Response
+    }
+
+    private keepAttested(
+        url: string,
+        method: string,
+        response: IWeb2Result,
+        meter?: Web2FetchMeter,
+    ): void {
+        if (typeof response.responseHash !== "string") return
+        const entry: AttestedEntry = {
+            request: requestKey(url, method),
+            status: response.status,
+            statusText: String(response.statusText ?? "").slice(0, ATTESTED_STATUS_TEXT_MAX),
+            responseHash: response.responseHash,
+            responseHeadersHash: response.responseHeadersHash,
+            requestHash: response.requestHash,
+            body: null,
+        }
+        const bytes = attestedSize(response, meter)
+        if (reserveAttestedBytes(bytes)) {
+            const expiry = setTimeout(() => dropBody(entry), WEB2_ATTESTED_RETAIN_MS)
+            expiry.unref?.()
+            entry.body = { result: response, bytes, expiry }
+        }
+        this._attested.push(entry)
+        while (this._attested.length > WEB2_ATTESTED_PER_SESSION) {
+            dropBody(this._attested.shift())
+        }
+    }
+
+    /**
+     * A response this session attested, when `url` and `method` name its
+     * request and `claimed` carries its status and hashes; else null. Each is
+     * handed out once, so a broadcast stands on it instead of fetching the
+     * origin again, but only one broadcast. When its body is no longer kept,
+     * the reply carries the status and hashes without the body.
+     */
+    takeAttestedResponse(
+        url: string,
+        method: string,
+        claimed: unknown,
+    ): IWeb2Result | null {
+        if (!claimed || typeof claimed !== "object") return null
+        const c = claimed as Partial<IWeb2Result>
+        const request = requestKey(url, method)
+        const index = this._attested.findIndex(
+            e =>
+                e.request === request &&
+                c.status === e.status &&
+                c.responseHash === e.responseHash &&
+                c.responseHeadersHash === e.responseHeadersHash &&
+                (e.requestHash === undefined || c.requestHash === e.requestHash),
+        )
+        if (index < 0) return null
+        const [entry] = this._attested.splice(index, 1)
+        const kept = entry.body?.result
+        dropBody(entry)
+        return (
+            kept ?? {
+                status: entry.status,
+                statusText: entry.statusText,
+                headers: {},
+                data: null,
+                responseHash: entry.responseHash,
+                responseHeadersHash: entry.responseHeadersHash,
+                ...(entry.requestHash === undefined
+                    ? {}
+                    : { requestHash: entry.requestHash }),
+            }
+        )
+    }
+
+    private dropAttested(): void {
+        for (const entry of this._attested) dropBody(entry)
+        this._attested = []
     }
 
     /**
      * Stop the proxy.
      */
     async stopProxy(): Promise<void> {
+        this.dropAttested()
         await this._proxy.stopProxy()
     }
 
@@ -162,4 +252,41 @@ export class DAHR {
             },
         }
     }
+}
+
+const ATTESTED_STATUS_TEXT_MAX = 128
+
+interface AttestedEntry {
+    // sha256 of the method and normalized URL: the URL may be 4096 chars.
+    request: string
+    status: number
+    statusText: string
+    responseHash: string
+    responseHeadersHash: string
+    requestHash?: string
+    body: {
+        result: IWeb2Result
+        bytes: number
+        expiry: ReturnType<typeof setTimeout>
+    } | null
+}
+
+function requestKey(url: string, method: string): string {
+    return createHash("sha256").update(`${method}\n${url}`).digest("hex")
+}
+
+function dropBody(entry: AttestedEntry | undefined): void {
+    const body = entry?.body
+    if (!body) return
+    entry.body = null
+    clearTimeout(body.expiry)
+    releaseAttestedBytes(body.bytes)
+}
+
+// What a kept response costs: the bytes read from the origin, or its body
+// when the read was not metered.
+function attestedSize(result: IWeb2Result, meter?: Web2FetchMeter): number {
+    if (meter && meter.bytes > 0) return meter.bytes
+    const body = (result as { data?: unknown }).data
+    return typeof body === "string" ? Buffer.byteLength(body) : 0
 }

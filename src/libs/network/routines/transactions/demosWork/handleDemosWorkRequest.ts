@@ -141,7 +141,13 @@ export default async function handleDemosWorkRequest(
             content,
             web2Caller,
         )
+        // The script ran, so its tx records the run; failed operations are
+        // reported in `extra` and in their own results.
+        const failed = operationsResults.filter(op => !op.success)
         response.result = 200
+        if (failed.length > 0) {
+            response.extra = failed.map(op => op.error).join("\n").trim()
+        }
         response.response = {
             compiledScript: compiledScript,
             operationsResults: operationsResults,
