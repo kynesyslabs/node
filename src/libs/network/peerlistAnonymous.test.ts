@@ -1,14 +1,18 @@
 /**
- * The peerlist call needs no auth, so what it can change must not matter to
- * consensus: it teaches us addresses to verify, and never writes sync or
- * status for a peer we already track.
+ * A peerlist call teaches us addresses to verify, and never writes sync or
+ * status for a peer we already track. It is served to validators. A peer in
+ * the offline list and a staked validator are verified at the address this
+ * node holds for them, not at the listed one.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const OUR_KEY = "0x" + "aa".repeat(32)
 const VALIDATOR = "0x" + "bb".repeat(32)
 const STRANGER = "0x" + "cc".repeat(32)
+const UNSEEN_VALIDATOR = "0x" + "dd".repeat(32)
+const OFFLINE_PEER = "0x" + "ee".repeat(32)
+const LISTED_URL = "http://listed.example:53550"
 
 const sharedState: Record<string, unknown> = {
     publicKeyHex: OUR_KEY,
@@ -44,6 +48,13 @@ jest.mock("src/libs/consensus/stakedSet", () => ({
     invalidateStakedSet: () => undefined,
     __resetStakedSet: () => undefined,
 }))
+// The validator table at the head: a staked key and the address committed
+// with its stake, if any.
+const validators: { address: string; connection_url: string | null }[] = []
+mock.module("src/libs/blockchain/gcr/gcr", () => ({
+    __esModule: true,
+    default: { getGCRValidatorsAtBlockOrThrow: async () => validators },
+}))
 
 const { default: PeerManager } = await import("src/libs/peer/PeerManager")
 const { Peer } = await import("src/libs/peer")
@@ -66,6 +77,15 @@ function knownValidator() {
 
 beforeEach(() => {
     hellos.length = 0
+    validators.length = 0
+    validators.push({
+        address: VALIDATOR,
+        connection_url: "http://validator.example:53550",
+    })
+    const manager = PeerManager.getInstance()
+    for (const identity of Object.keys(manager.getOfflinePeers())) {
+        manager.removeOfflinePeer(identity)
+    }
     clearDiscreditedHeights()
     ;(PeerManager as any).sayHelloToPeer = async (peer: InstanceType<typeof Peer>) => {
         hellos.push(peer)
@@ -85,7 +105,7 @@ describe("anonymous peerlist", () => {
                 sync: { status: true, block: 9_000_000, block_hash: "forged" },
                 status: { online: true, ready: true, timestamp: Date.now() + 10 * 365 * 24 * 3600 * 1000 },
             },
-        ])
+        ], VALIDATOR)
 
         const after = PeerManager.getInstance().getPeer(VALIDATOR)
         expect(after.sync.block).toBe(100)
@@ -94,7 +114,7 @@ describe("anonymous peerlist", () => {
         expect(await isNetworkAhead("test")).toBe(false)
     })
 
-    it("still learns the address of an unknown peer, and verifies it with a hello", async () => {
+    it("learns the address of an unknown peer from a validator, and verifies it with a hello", async () => {
         knownValidator()
 
         const result = await ServerHandlers.handlePeerlist([
@@ -103,7 +123,7 @@ describe("anonymous peerlist", () => {
                 connection: { string: "http://stranger.example:53550" },
                 sync: { status: true, block: 9_000_000, block_hash: "forged" },
             },
-        ])
+        ], VALIDATOR)
 
         expect(result.response).toBe(true)
         expect(hellos.map(p => [p.identity, p.connection.string])).toEqual([
@@ -113,11 +133,84 @@ describe("anonymous peerlist", () => {
         expect(PeerManager.getInstance().getPeer(STRANGER)).toBeUndefined()
     })
 
+    it("verifies no more than two unknown peers a list names at one address", async () => {
+        knownValidator()
+        const unknown = (n: number) => "0x" + n.toString(16).padStart(64, "0")
+
+        await ServerHandlers.handlePeerlist(
+            [1, 2, 3, 4].map(n => ({
+                identity: unknown(n),
+                connection: { string: LISTED_URL },
+            })),
+            VALIDATOR,
+        )
+
+        expect(hellos.map(p => [p.identity, p.connection.string])).toEqual([
+            [unknown(1), LISTED_URL],
+            [unknown(2), LISTED_URL],
+        ])
+    })
+
+    it("verifies a staked validator it has not seen at the address committed with its stake", async () => {
+        knownValidator()
+        validators.push({
+            address: UNSEEN_VALIDATOR,
+            connection_url: "http://unseen.example:53550",
+        })
+
+        await ServerHandlers.handlePeerlist([
+            { identity: UNSEEN_VALIDATOR, connection: { string: LISTED_URL } },
+        ], VALIDATOR)
+
+        expect(hellos.map(p => [p.identity, p.connection.string])).toEqual([
+            [UNSEEN_VALIDATOR, "http://unseen.example:53550"],
+        ])
+    })
+
+    it("starts no hello for a staked validator without a committed address", async () => {
+        knownValidator()
+        validators.push({ address: UNSEEN_VALIDATOR, connection_url: null })
+
+        const result = await ServerHandlers.handlePeerlist([
+            { identity: UNSEEN_VALIDATOR, connection: { string: LISTED_URL } },
+        ], VALIDATOR)
+
+        expect(result.response).toBe(true)
+        expect(hellos).toHaveLength(0)
+    })
+
+    it("verifies a peer in the offline list at its stored address", async () => {
+        knownValidator()
+        PeerManager.getInstance().addOfflinePeer(
+            new Peer("http://offline.example:53550", OFFLINE_PEER),
+        )
+
+        await ServerHandlers.handlePeerlist([
+            { identity: OFFLINE_PEER, connection: { string: LISTED_URL } },
+        ], VALIDATOR)
+
+        expect(hellos.map(p => [p.identity, p.connection.string])).toEqual([
+            [OFFLINE_PEER, "http://offline.example:53550"],
+        ])
+    })
+
+    it("starts no hello for a caller that is not a validator", async () => {
+        knownValidator()
+
+        const result = await ServerHandlers.handlePeerlist([
+            { identity: STRANGER, connection: { string: "http://stranger.example:53550" } },
+        ])
+
+        expect(result.response).toBe(false)
+        expect(result.extra.peerlistState).toBe("rejected")
+        expect(hellos).toHaveLength(0)
+    })
+
     it("ignores malformed entries and non-list bodies", async () => {
         knownValidator()
 
-        const bad = await ServerHandlers.handlePeerlist({ data: [] })
-        await ServerHandlers.handlePeerlist([null, 5, { identity: 1 }, { identity: STRANGER }])
+        const bad = await ServerHandlers.handlePeerlist({ data: [] }, VALIDATOR)
+        await ServerHandlers.handlePeerlist([null, 5, { identity: 1 }, { identity: STRANGER }], VALIDATOR)
 
         expect(bad.response).toBe(false)
         expect(hellos).toHaveLength(0)

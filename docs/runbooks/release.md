@@ -675,6 +675,38 @@ this restart is a fallback there.
     first one that carries a transaction. Run from outside the validators'
     network, the old defaults timed a probe out and reported INCONCLUSIVE
     once the head was past block 20.
+  - The `peerlist` RPC call is served to validators (senders the mempool
+    merge accepts). Any other caller gets HTTP 200 with `response: false`
+    and `extra.peerlistState: "rejected"`. A hello reply contributes at
+    most 32 well-formed peer-list entries, the number a node sends, each a
+    `url` and a `publicKey`. For each key a hello reply or a `peerlist`
+    call names that is not online, the node says one hello: at the listed
+    address for a key it does not know, at its stored address for a peer in
+    its offline list, and at the `connection_url` committed with its stake
+    for a staked validator. A key the node does not know is left out when
+    its listed address is not a node URL (`http(s)://host[:port]`) or
+    points at the node itself, which on a node with `PROD=true` includes
+    every loopback address. A peer in the offline list or a staked
+    validator is left out the same way when its stored or committed address
+    points at the node itself. A key the node does not know is also left
+    out when its listed address is the address (the same scheme, host and
+    port) of a peer the node lists online. A node that changed its key is
+    reached at its old address through a list once the old key is in the
+    offline list, where the node moves it when its hello or its liveness
+    check to the old key is not answered. One list reaches at most 2 keys
+    the node does not know at one address (the same scheme, host and
+    port); stored and committed addresses do not count towards the 2. A
+    staked validator whose row in the validator table has no
+    `connection_url` (a genesis entry may leave it `null`) is not reached
+    through a list: the node logs its key in a `[PEERMANAGER]` warning, and
+    reaches it through the peer list file, gossip or that validator's own
+    hello. A validator that runs with `GOSSIP_ENABLED=false` therefore
+    needs a peer list file entry for every validator the genesis lists
+    without a `connection_url`. The node does not follow the list in the
+    reply of a peer it reached through a list (a hello reply's, a
+    `peerlist` call's, or one it merged from its peers' lists), so one
+    hello starts at most 32 more, and a peer list starts one hello for
+    each key it names.
   - A node with `TLSNOTARY_ENABLED=true` and no notary answering at
     `TLSNOTARY_HOST:TLSNOTARY_PORT` runs as a relay only: it logs a warning
     and keeps serving `requestTLSNproxy`, and `/health` no longer reports
@@ -862,6 +894,26 @@ this restart is a fallback there.
     sees it: behind a reverse proxy that is not listed in
     `TRUSTED_PROXIES` every client shares one cap (a proxy on the same
     host is loopback and skips it).
+  - HTTP peer requests also sign the node they are sent to, as Omni
+    requests do: that node's public key is part of the signed message and
+    is sent in an `audience` header. `hello_peer`, `mempool` and
+    `consensus_routine` are refused without it (HTTP 401), and a node
+    refuses a request that names another node (`Invalid signature: Request
+    is for another node`). When that is all that is wrong with a request
+    (its signature verifies and its timestamp is in the accepted window),
+    the refusal does not count towards the limit on failed signature
+    checks, for its signer or for the address it came from; it counts as
+    one request from that address. A validator's request over
+    `RPC_MAX_BODY_BYTES` is taken, up to `RPC_PEER_MAX_BODY_BYTES`, only
+    when it names this node. Every node of a network must be upgraded
+    together: a node on this release refuses those three methods from an
+    older node, and an older node accepts this release's requests only
+    while they are dated no more than 5 s ahead of its clock. A peer-list
+    entry whose public key is not the key of the node at its URL no longer
+    connects; correct the key.
+  - A call that names this node and is signed by another key than the sudo
+    key may be dated up to 5 minutes ahead of this node's clock, like any
+    other signed call (was 5 s). Sudo calls keep the 5 s limit.
   - `launch-go-no-go` no longer limits beneficial owners or operators.
     Anyone may run as many validators as they hold seat NFTs for, so an
     owner or operator above `min(launch, shardSize) - quorum` validators, a

@@ -120,6 +120,7 @@ SUITE_FILES=(
     src/libs/network/outboundEntryGate.test.ts
     src/features/multichain/XMDispatcher.test.ts
     src/features/multichain/XMDispatcher.logs.test.ts
+    src/libs/network/peerlistAnonymous.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/network/rateLimiter.loopback.test.ts
     src/libs/network/rpcGossipSize.test.ts
@@ -139,6 +140,7 @@ SUITE_FILES=(
     src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
     src/libs/omniprotocol/transport/ConnectionPool.perPeerCap.test.ts
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
+    src/libs/peer/helloReplyPeerlist.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts

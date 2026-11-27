@@ -94,11 +94,14 @@ export async function serverRpcBun() {
         bodyLimit({
             maxBytes: rpcMaxBodyBytes,
             peerMaxBytes: rpcPeerMaxBodyBytes,
-            // Only a signed request from a merge-eligible validator may send
-            // more than the public limit: the consensus mempool merge does.
+            // Only a request a merge-eligible validator signed for this node
+            // may send more than the public limit: the consensus mempool
+            // merge does.
             isPeer: async req => {
                 const auth = getAuthContext(req)
-                if (!auth.verified || !auth.publicKey) return false
+                if (!auth.verified || !auth.publicKey || !auth.audienceBound) {
+                    return false
+                }
                 const key = auth.publicKey.includes(":")
                     ? auth.publicKey.split(":")[1]
                     : auth.publicKey
@@ -515,7 +518,9 @@ export async function serverRpcBun() {
                 )
             }
 
-            if (SUDO_METHODS.has(payload.method) && !authCtx.audienceBound) {
+            // Peer and sudo methods alike: a request signed for one node is
+            // not a request to this one.
+            if (BODY_BOUND_METHODS.has(payload.method) && !authCtx.audienceBound) {
                 return jsonResponse(
                     {
                         result: 401,
