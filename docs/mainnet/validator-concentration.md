@@ -113,7 +113,13 @@ with 7 valid signatures carries whatever peerlist those 7 signed.
 *Reading:* 7 colluders in one committee can commit a peerlist of only
 colluders, and while it holds at least 7 entries every later pool, and so
 every later committee, is drawn from it alone (`getShard.ts:313-315`). One
-captured committee becomes a captured chain.
+captured committee becomes a captured chain. Before `peerlistFloor`, 4
+members were enough: an identity needed 7 reports, so 4 that left an
+honest validator out dropped it. Under `peerlistFloor` (height 0 on
+mainnet) an identity needs 4 reports, so dropping one takes 7, and every
+720th block draws its committee from the recent refresh blocks' peerlists
+too, which ends a capture within 720 blocks
+([peerlist-floor.md](../design/peerlist-floor.md)).
 
 ### Stake and joining
 
@@ -237,9 +243,9 @@ What it can abuse in Demos-specific state:
 8. **Re-run the owner cap at every set change**: any new validator goes
    into the same table, and `launch-go-no-go.ts --plan` is re-run on the new
    set before the change.
-9. **Fix the peerlist capture** (*reading*): bound how far a committed
-   peerlist may shrink the pool against the staked set per block, so one
-   captured committee cannot keep the chain. Needs a fork.
+9. **Fix the peerlist capture**: done by the `peerlistFloor` fork
+   ([peerlist-floor.md](../design/peerlist-floor.md)), at height 0 in the
+   mainnet set.
 10. **Slashing or ejection for equivocation**: today a proven double-sign
     is only logged. Needs a fork and a governance path.
 11. **Bigger committees** reduce the sampling risk (seats track the set
