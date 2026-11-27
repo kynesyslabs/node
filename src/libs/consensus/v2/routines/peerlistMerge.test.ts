@@ -187,6 +187,27 @@ describe("unstaked peers at the tip", () => {
         expect(read).toHaveBeenCalledTimes(1)
     })
 
+    it("share one validator read among reports that arrive together", async () => {
+        const read = GCR.getGCRValidatorsAtBlockOrThrow as jest.Mock
+        read.mockClear()
+        await Promise.all(
+            ["c1", "c2", "c3"].map(c =>
+                contributePeerlist(101, c, [obs(REPORTED_PEER)]),
+            ),
+        )
+        expect(read).toHaveBeenCalledTimes(1)
+    })
+
+    it("of an older round are dropped without a validator read", async () => {
+        const read = GCR.getGCRValidatorsAtBlockOrThrow as jest.Mock
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        read.mockClear()
+        for (let ref = 2; ref < 50; ref++) {
+            await contributePeerlist(ref, "c2", [])
+        }
+        expect(read).not.toHaveBeenCalled()
+    })
+
     it("leave the cap counting staked entries only, raised to the staked count", async () => {
         // 1,050 validators: every one is kept despite 900 unstaked entries.
         const many = Array.from(

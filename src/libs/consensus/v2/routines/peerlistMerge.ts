@@ -37,8 +37,9 @@ let contributions = new Map<string, SyncObservation[]>()
 let snapshotBlockRef: number | null = null
 let snapshot: SyncObservation[] | null = null
 
-// The last non-empty staked set read, reused for every report of its height.
-let stakedCache: { height: number; set: Set<string> } | null = null
+// The staked-set read for the latest height asked, shared by every report of
+// that height, including reports that arrive while the read is in flight.
+let stakedCache: { height: number; set: Promise<Set<string> | null> } | null = null
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetPeerlistMerge(): void {
@@ -88,11 +89,20 @@ export async function getLocalSyncObservations(
  */
 async function stakedAt(height: number): Promise<Set<string> | null> {
     if (stakedCache?.height === height) return stakedCache.set
-    const validators = await GCR.getGCRValidatorsAtBlockOrThrow(height)
-    if (validators.length === 0) return null
-    const set = new Set(validators.map(v => v.address))
-    stakedCache = { height, set }
-    return set
+    const read = GCR.getGCRValidatorsAtBlockOrThrow(height).then(validators =>
+        validators.length === 0 ? null : new Set(validators.map(v => v.address)),
+    )
+    const entry = { height, set: read }
+    stakedCache = entry
+    try {
+        const set = await read
+        // An empty set is not kept: the next report reads again.
+        if (set === null && stakedCache === entry) stakedCache = null
+        return set
+    } catch (error) {
+        if (stakedCache === entry) stakedCache = null
+        throw error
+    }
 }
 
 /**
@@ -158,6 +168,11 @@ export async function contributePeerlist(
         log.warning(
             `[peerlistMerge] Ignoring ${contributor}'s peerlist for block ${blockRef}: past the round we can open (${ceiling})`,
         )
+        return
+    }
+
+    // An older round is dropped before any validator read.
+    if (contributionsBlockRef !== null && blockRef < contributionsBlockRef) {
         return
     }
 
