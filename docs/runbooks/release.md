@@ -914,6 +914,14 @@ this restart is a fallback there.
   - A call that names this node and is signed by another key than the sudo
     key may be dated up to 5 minutes ahead of this node's clock, like any
     other signed call (was 5 s). Sudo calls keep the 5 s limit.
+  - `launch-go-no-go` no longer limits beneficial owners or operators.
+    Anyone may run as many validators as they hold seat NFTs for, so an
+    owner or operator above `min(launch, shardSize) - quorum` validators, a
+    third of the first committee's votes or a third of block 0's stake is a
+    warning at T-0 and the advisory `--plan` line "owner and operator
+    concentration" (`NOTE`, never `FAIL`). A mainnet entry without an
+    `owner` is a warning too. Providers and regions keep their NO-GO
+    limits. See `docs/mainnet/validator-concentration.md`.
 
 ## Known limits
 

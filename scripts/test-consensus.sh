@@ -93,6 +93,7 @@ SUITE_FILES=(
     src/libs/blockchain/sdkTypes.typecheck.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
+    src/libs/consensus/v2/types/secretaryManager.silentSecretary.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
