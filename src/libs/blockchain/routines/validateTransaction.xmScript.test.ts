@@ -50,7 +50,7 @@ describe("confirm checks XM scripts", () => {
         const tx = onTheWire(await handMade("crosschainOperation", { operations: "x" }))
         const data = await confirm(tx)
         expect(data.valid).toBe(false)
-        expect(data.message).toContain("[STRUCTURE ERROR] XM script operations is not an object")
+        expect(data.message).toContain("[STRUCTURE ERROR] XM script refused: operations must be an object")
     })
 
     it("refuses a DemosWork tx with a malformed cross-chain step", async () => {

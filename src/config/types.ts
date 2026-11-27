@@ -86,6 +86,7 @@ export interface CoreConfig {
     mcpEnabled: boolean
     /** WebRTC signaling server for instant messaging; consensus does not use it. */
     signalingEnabled: boolean
+    signalingRegisterMode: "transitional" | "strict"
     restore: boolean
     /**
      * Full genesis data hash (sha256 hex) the operator expects the network to
@@ -328,9 +329,9 @@ export interface OutboundConfig {
     web2MaxBytesPerHourPerCaller: number
     /** web2 fetches running at once on this node, all callers and paths together. */
     web2MaxInflightTotal: number
-    /** web2 (DAHR) sessions one caller may hold open at once. */
+    /** web2 (DAHR) sessions one caller may hold; a new one closes its least recently used. */
     web2MaxSessionsPerCaller: number
-    /** web2 (DAHR) sessions open at once on this node, all callers together. */
+    /** web2 (DAHR) sessions this node holds at once; over it a create is refused. */
     web2MaxSessionsTotal: number
     /** Target ports the TLSNotary relay may connect to. */
     tlsnotaryAllowedPorts: number[]

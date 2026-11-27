@@ -25,6 +25,7 @@ import { isRound, precommitMessage } from "src/libs/consensus/v2/commitLock/mess
 import {
     boundPoolFrom,
     eligiblePoolFrom,
+    isPoolRefreshHeight,
 } from "src/libs/consensus/v2/routines/poolRules"
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
 import { compareCodeUnits } from "src/libs/crypto/canonicalJson"
@@ -136,6 +137,13 @@ export interface CommitteeRules {
      * otherwise count.
      */
     committee?: string[]
+    /**
+     * Whether the anchor's height is under peerlistFloor (mainnet: from
+     * block 0). At a refresh height the pool also unites earlier blocks'
+     * peerlists, which a proof does not carry, so without `committee` only a
+     * staked set no larger than the shard verifies. Default true.
+     */
+    peerlistFloor?: boolean
     /**
      * The hash of the block at `height` on a chain the client already holds
      * (its own synced chain or a checkpoint), or undefined when it holds
@@ -321,6 +329,18 @@ function signerPool(
             `block ${parent.number} is not on a chain the client holds and ${staked.size} validators are staked, ` +
                 `more than the shard size ${rules.shardSize}; supply its hash or the committee drawn for block ${parent.number + 1}`,
         )
+    }
+    if ((rules.peerlistFloor ?? true) && isPoolRefreshHeight(parent.number + 1)) {
+        if (staked.size > rules.shardSize) {
+            throw new Rejection(
+                "indeterminate",
+                `the committee for block ${parent.number + 1} is drawn from earlier blocks' peerlists too, ` +
+                    `and ${staked.size} validators are staked; supply the committee drawn for it`,
+            )
+        }
+        // The pool is a subset of a staked set no larger than the shard, so
+        // any quorum of it is 2/3 + 1 of every validator.
+        return stakedIds
     }
     const floor = quorumThreshold(rules.shardSize)
     const eligible = eligiblePoolFrom(peerlist, staked)

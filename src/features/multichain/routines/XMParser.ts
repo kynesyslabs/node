@@ -10,6 +10,7 @@ import handleContractRead from "./executors/contract_read"
 import handleContractWrite from "./executors/contract_write"
 import handleBalanceQuery from "./executors/balance_query"
 import { xmScriptRefusal } from "../xmScriptShape"
+import errorKind, { logField } from "./errorKind"
 
 // NOTE We define multichain into global so that we can use it later
 global.multichain = multichain
@@ -71,22 +72,38 @@ class XMParser {
         }
     }> {
         const results = {}
-        let operation: IOperation
-        // Runs in the key order of `operations`; operations_order is not read.
+        let name: string, operation: IOperation
         const names = Object.keys(fullscript.operations)
-        for (const name of names) {
+        // Runs in the key order of `operations`; operations_order is not read.
+        for (let id = 0; id < names.length; id++) {
+            // NOTE Only the first 10 operations get debug lines
+            const listed = id < 10
             try {
+                name = names[id]
                 operation = fullscript.operations[name]
-                log.debug(
-                    `[XMParser] ${name}: ${operation?.task?.type} on ${operation?.chain}.${operation?.subchain}`,
-                )
+                if (listed) {
+                    log.debug(
+                        `[XMParser] Operation ${id + 1}: ${logField(operation?.task?.type)} on ${logField(operation?.chain)}.${logField(operation?.subchain)}`,
+                    )
+                }
                 const result = await XMParser.executeOperation(operation)
                 results[name] = result
-                log.debug(`[XMParser] ${name}: ${result?.result}`)
+                // NOTE A read's result is its data: only the outcome is logged
+                if (listed) {
+                    log.debug(
+                        `[RESULT]: ${result?.result === "error" ? "error" : "ok"}`,
+                    )
+                }
             } catch (e) {
-                log.error("[XM EXECUTE] Error: " + e)
+                log.error(
+                    `[XM EXECUTE] Operation ${id + 1} failed: ${errorKind(e)}`,
+                )
                 results[name] = { result: "error", error: e.toString() }
             }
+        }
+        const unlisted = Object.keys(fullscript.operations).length - 10
+        if (unlisted > 0) {
+            log.debug(`[XMParser] ${unlisted} more operation(s) not listed`)
         }
 
         return results // REVIEW Is the type ok?

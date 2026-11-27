@@ -48,8 +48,8 @@ describe("outbound request settings", () => {
             web2MaxFetchesPerMinutePerCaller: 10,
             web2MaxBytesPerHourPerCaller: 100 * 1024 * 1024,
             web2MaxInflightTotal: 32,
-            web2MaxSessionsPerCaller: 160,
-            web2MaxSessionsTotal: 4096,
+            web2MaxSessionsPerCaller: 16,
+            web2MaxSessionsTotal: 1024,
             tlsnotaryAllowedPorts: [443],
             tlsnotaryAllowPrivateTargets: false,
         })
@@ -92,20 +92,25 @@ describe("outbound request settings", () => {
         process.env.WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER = " 30 "
         process.env.WEB2_MAX_BYTES_PER_HOUR_PER_CALLER = "1048576"
         process.env.WEB2_MAX_INFLIGHT_TOTAL = ""
-        process.env.WEB2_MAX_SESSIONS_PER_CALLER = "3"
-        process.env.WEB2_MAX_SESSIONS_TOTAL = "64"
         const o = loadConfig().outbound
         expect([
             o.web2MaxInflightPerCaller,
             o.web2MaxFetchesPerMinutePerCaller,
             o.web2MaxBytesPerHourPerCaller,
             o.web2MaxInflightTotal,
-            o.web2MaxSessionsPerCaller,
-            o.web2MaxSessionsTotal,
-        ]).toEqual([4, 30, 1048576, 32, 3, 64])
+        ]).toEqual([4, 30, 1048576, 32])
     })
 
-    it("refuse a web2 fetch cap that is zero, negative or not a plain integer", () => {
+    it("read the web2 session caps, with empty meaning the default", () => {
+        process.env.WEB2_MAX_SESSIONS_PER_CALLER = "4"
+        process.env.WEB2_MAX_SESSIONS_TOTAL = ""
+        const o = loadConfig().outbound
+        expect([o.web2MaxSessionsPerCaller, o.web2MaxSessionsTotal]).toEqual([
+            4, 1024,
+        ])
+    })
+
+    it("refuse a web2 fetch or session cap that is zero, negative or not a plain integer", () => {
         const caps = [
             "WEB2_MAX_INFLIGHT_PER_CALLER",
             "WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER",

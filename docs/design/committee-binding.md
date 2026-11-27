@@ -146,7 +146,9 @@ observed below quorum the secretary could choose among 2^k pools.
 Under `committeeBinding` a member accepts a dictated list only when every
 entry reaches quorum in its own view of the contributions, and every
 staked identity at quorum is present, so the list is fixed by the shard's
-observations. The voters are the bound committee and the quorum is the
+observations. Under `peerlistFloor` the bar is `n - q + 1` instead of the
+quorum, and refresh heights widen the pool
+([peerlist-floor.md](peerlist-floor.md)). The voters are the bound committee and the quorum is the
 block's signature bar (2/3 + 1 of shardSize), both chain data: a quorum
 counted from the members each node sees live would differ between the
 secretary and its members and make them disagree on an honest list. Sync does not re-run this check

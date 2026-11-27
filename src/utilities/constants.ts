@@ -21,10 +21,12 @@ export const PEER_LIVENESS_WINDOW_MS = 30_000
 
 // --- Cross-chain (XM) scripts ---
 /**
- * Most operations one XM script may carry. Each one is an outbound call the
- * entry node makes to another chain before the tx is admitted.
+ * Most operations one XM script may carry, its operations held in an
+ * ordinary object (prototype Object.prototype or null). Each one is an
+ * outbound call the entry node makes to another chain before the tx is
+ * admitted.
  */
-export const XM_MAX_OPERATIONS = 16
+export const MAX_XM_OPERATIONS = 32
 /** Longest operation name an XM script may use. */
 export const XM_MAX_OPERATION_NAME_LENGTH = 128
 /**

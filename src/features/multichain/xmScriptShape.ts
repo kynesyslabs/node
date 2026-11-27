@@ -2,8 +2,8 @@ import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import {
+    MAX_XM_OPERATIONS,
     XM_MAX_OPERATION_NAME_LENGTH,
-    XM_MAX_OPERATIONS,
 } from "src/utilities/constants"
 
 const XM_TASK_TYPES = new Set([
@@ -14,7 +14,11 @@ const XM_TASK_TYPES = new Set([
 ])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-    return Object.prototype.toString.call(value) === "[object Object]"
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return false
+    }
+    const proto = Object.getPrototypeOf(value)
+    return proto === Object.prototype || proto === null
 }
 
 function isKnownChain(chain: string): boolean {
@@ -73,19 +77,19 @@ function operationRefusal(name: string, op: unknown): string | null {
 export function xmScriptRefusal(script: unknown): string | null {
     if (!isPlainObject(script)) return "XM script is not an object"
     const operations = script.operations
-    if (!isPlainObject(operations)) {
-        return "XM script operations is not an object"
+    if (
+        !isPlainObject(operations) ||
+        Object.keys(operations).length > MAX_XM_OPERATIONS
+    ) {
+        return `XM script refused: operations must be an object of at most ${MAX_XM_OPERATIONS} entries`
     }
     const names = Object.keys(operations)
     if (names.length === 0) return "XM script has no operations"
-    if (names.length > XM_MAX_OPERATIONS) {
-        return `XM script has ${names.length} operations, over the limit of ${XM_MAX_OPERATIONS}`
-    }
     const order = script.operations_order
     if (
         order !== undefined &&
         (!Array.isArray(order) ||
-            order.length > XM_MAX_OPERATIONS ||
+            order.length > MAX_XM_OPERATIONS ||
             order.some(entry => typeof entry !== "string"))
     ) {
         return "XM script operations_order is not a list of operation names"

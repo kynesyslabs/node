@@ -1,100 +1,186 @@
 /**
- * A DemosWork script runs every operation and its tx records the run; a
- * failed step is reported in its operation's result and in `extra`.
+ * A received DemoScript is logged by its step count and step contexts only:
+ * its steps carry signed XM payloads and web2 requests. At most 10 contexts
+ * are logged, and `steps` that is not an object counts as no steps. A failed script logs
+ * only the error's kind, and a step logs its context and description as
+ * escaped values.
  */
 
-import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { afterEach, describe, expect, it, jest, mock } from "bun:test"
 
-const quietLog = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() }
-mock.module("src/utilities/logger", () => ({ __esModule: true, default: quietLog }))
-mock.module("@/utilities/logger", () => ({ __esModule: true, default: quietLog }))
+const logged: string[] = []
+const record = (...args: unknown[]) => {
+    logged.push(
+        args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
+    )
+}
+const recordingLog = {
+    debug: record,
+    info: record,
+    warn: record,
+    warning: record,
+    error: record,
+    only: record,
+}
+mock.module("src/utilities/logger", () => ({ __esModule: true, default: recordingLog }))
+mock.module("@/utilities/logger", () => ({ __esModule: true, default: recordingLog }))
 
-let xmReply: any = { success: true, message: "all_ops_ok", results: {} }
-const digest = jest.fn(async () => xmReply)
-mock.module("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: { digest } }))
-let web2Status = 200
-const handleWeb2ProxyRequest = jest.fn(async () => ({ result: web2Status, response: {}, extra: null }))
-mock.module("../handleWeb2ProxyRequest", () => ({ handleWeb2ProxyRequest }))
-let nativeStatus = 200
-const handleNativeRequest = jest.fn(async () => ({ result: nativeStatus }))
-mock.module("../handleNativeRequest", () => ({ __esModule: true, default: handleNativeRequest }))
-let l2psStatus = 200
-const handleL2PS = jest.fn(async () => ({ result: l2psStatus }))
-mock.module("../handleL2PS", () => ({ __esModule: true, default: handleL2PS }))
+// The steps themselves are not run here, only the request is received.
+const passThrough = async (script: unknown) => [script, []]
+let processOperations: (script: unknown) => Promise<unknown[]> = passThrough
+mock.module("./processOperations", () => ({
+    processOperations: (script: unknown) => processOperations(script),
+}))
+// handleStep is called directly with an unknown context: none of these run.
+mock.module("../handleWeb2ProxyRequest", () => ({ handleWeb2ProxyRequest: jest.fn() }))
+mock.module("../handleNativeRequest", () => ({ __esModule: true, default: jest.fn() }))
+mock.module("../handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
 
-const { default: handleDemosWorkRequest } = await import("./handleDemosWorkRequest")
+const { default: handleDemosWorkRequest } = await import(
+    "./handleDemosWorkRequest"
+)
+const { default: handleStep } = await import("./handleStep")
 
-function script(...ops: string[][]): any {
-    const steps: Record<string, any> = {}
-    const operations: Record<string, any> = {}
-    ops.forEach((contexts, i) => {
-        const ids = contexts.map((context, j) => {
-            const id = `s${i}_${j}`
-            steps[id] = { id, context, description: id, content: {}, output: {} }
-            return id
-        })
-        operations[`op${i}`] = { operationType: "base", id: ids }
-    })
-    return { operationOrder: Object.keys(operations), operations, steps }
+const SIGNED = "0x02f8cc33signedxmpayload"
+const API_KEY = "web2secretkey"
+
+function script(): any {
+    return {
+        operationOrder: ["op1"],
+        operations: { op1: { operationType: "base", id: ["s1", "s2"] } },
+        steps: {
+            s1: {
+                id: "s1",
+                context: "xm",
+                description: "pay",
+                content: {
+                    operations: {
+                        a: {
+                            chain: "eth",
+                            subchain: "sepolia",
+                            is_evm: true,
+                            task: { type: "pay", signedPayloads: [SIGNED] },
+                        },
+                    },
+                    operations_order: ["a"],
+                },
+                output: {},
+            },
+            s2: {
+                id: "s2",
+                context: "web2",
+                description: "fetch",
+                content: { raw: { url: `https://api.example/?key=${API_KEY}` } },
+                output: {},
+            },
+        },
+    }
 }
 
-beforeEach(() => {
-    xmReply = { success: true, message: "all_ops_ok", results: {} }
-    web2Status = 200
-    nativeStatus = 200
-    l2psStatus = 200
-    for (const f of [digest, handleWeb2ProxyRequest, handleNativeRequest, handleL2PS]) f.mockClear()
+afterEach(() => {
+    logged.length = 0
+    processOperations = passThrough
 })
 
-describe("handleDemosWorkRequest", () => {
-    it("returns 200 when every step succeeded", async () => {
-        const reply = await handleDemosWorkRequest(script(["xm", "web2"], ["native", "l2ps"]))
-        expect(reply.result).toBe(200)
-        expect(reply.response.operationsResults.every((o: any) => o.success)).toBe(true)
+describe("DemoScript request logging", () => {
+    it("logs the step count and contexts, and no step content", async () => {
+        const res = await handleDemosWorkRequest(script())
+
+        expect(res.result).toBe(200)
+        const all = logged.join("\n")
+        expect(all).not.toContain("signedxmpayload")
+        expect(all).not.toContain(API_KEY)
+        expect(all).toContain("2 step(s): \"xm\", \"web2\"")
     })
 
-    it("runs every operation after a failed one and reports the failure", async () => {
-        xmReply = { success: false, message: "all_ops_failed", results: {} }
-        const reply = await handleDemosWorkRequest(script(["xm"], ["web2"]))
-        expect(reply.result).toBe(200)
-        expect(String(reply.extra)).toContain("all_ops_failed")
-        expect(reply.response.operationsResults).toHaveLength(2)
-        expect(reply.response.operationsResults.map((o: any) => o.success)).toEqual([false, true])
-        expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
+    it("logs each step context as one escaped value of at most 64 characters", async () => {
+        const forged = script()
+        forged.steps.s1.context = "xm\nforged " + "x".repeat(1000)
+        forged.steps.s2.context = 7
+
+        await handleDemosWorkRequest(forged)
+
+        const lines = logged.filter(line => line.includes("forged"))
+        expect(lines).toEqual([
+            `2 step(s): "xm\\nforged ${"x".repeat(53)}", number`,
+        ])
     })
 
-    it("treats a partly executed XM step as done", async () => {
-        xmReply = { success: true, message: "partial_success", results: { a: { result: "success", hash: "0x1" } } }
-        const reply = await handleDemosWorkRequest(script(["xm"]))
-        expect(reply.result).toBe(200)
-        expect(reply.response.operationsResults[0].success).toBe(true)
+    it("logs a long string `steps` as no steps, without walking it", async () => {
+        const forged = script()
+        forged.operationOrder = []
+        forged.operations = {}
+        forged.steps = "a".repeat(4_000_000)
+
+        const started = performance.now()
+        const res = await handleDemosWorkRequest(forged)
+        const elapsed = performance.now() - started
+
+        expect(res.result).toBe(200)
+        expect(elapsed).toBeLessThan(100)
+        expect(logged).toContain("0 step(s): ")
+        expect(logged.every(line => line.length < 1000)).toBe(true)
     })
 
-    it("reports a non-200 web2 step as failed", async () => {
-        web2Status = 502
-        const reply = await handleDemosWorkRequest(script(["web2", "native"]))
-        expect(reply.result).toBe(200)
-        expect(reply.response.operationsResults[0].success).toBe(false)
+    it("logs the first 10 step contexts and counts the rest", async () => {
+        const many = script()
+        many.steps = Object.fromEntries(
+            Array.from({ length: 1000 }, (_, i) => [`s${i}`, { id: `s${i}`, context: `c${i}` }]),
+        )
+        const first10 = Array.from({ length: 10 }, (_, i) => `"c${i}"`).join(", ")
+
+        await handleDemosWorkRequest(many)
+
+        expect(logged.filter(line => line.includes("step(s)"))).toEqual([
+            `1000 step(s): ${first10}, 990 more`,
+        ])
     })
 
-    for (const [context, set] of [
-        ["native", () => (nativeStatus = 400)],
-        ["l2ps", () => (l2psStatus = 400)],
-    ] as const) {
-        it(`reports a non-200 ${context} step as failed`, async () => {
-            set()
-            const reply = await handleDemosWorkRequest(script([context]))
-            expect(reply.result).toBe(200)
-            expect(reply.response.operationsResults[0].success).toBe(false)
-            expect(String(reply.extra)).toContain(`${context} step failed`)
-        })
-    }
+    it("logs only the error kind when the script fails, and returns the full error", async () => {
+        processOperations = async () => {
+            throw new Error(`step failed for payload ${SIGNED}`)
+        }
 
-    it("reports an unimplemented conditional operation without refusing the run", async () => {
-        const s = script(["native"])
-        s.operations.op0.operationType = "conditional"
-        const reply = await handleDemosWorkRequest(s)
-        expect(reply.result).toBe(200)
-        expect(reply.response.operationsResults[0].success).toBe(false)
+        const res = await handleDemosWorkRequest(script())
+
+        expect(res.result).toBe(400)
+        expect(res.extra).toContain(SIGNED)
+        expect(logged.join("\n")).not.toContain("signedxmpayload")
+        expect(logged.filter(line => line.includes("Error processing"))).toEqual([
+            "[demosWork] [handleDemosWorkRequest] Error processing DemoScript: Error",
+        ])
+    })
+})
+
+describe("DemosWork step logging", () => {
+    it("logs the step context and description as escaped values of at most 64 characters", async () => {
+        const res = await handleStep({
+            id: "s1",
+            context: "xm\nforged " + "x".repeat(1000),
+            description: "pay\nforged " + "y".repeat(1000),
+            content: {},
+            output: {},
+        } as any)
+
+        expect(res.success).toBe(false)
+        expect(logged.filter(line => line.includes("forged"))).toEqual([
+            "[demosWork] [handleStep] Handling a step with context: " +
+                `"xm\\nforged ${"x".repeat(53)}" and description: ` +
+                `"pay\\nforged ${"y".repeat(52)}"`,
+        ])
+    })
+
+    it("logs a non-string context and description as their type", async () => {
+        await handleStep({
+            id: "s1",
+            context: { forged: true },
+            description: 7,
+            content: {},
+            output: {},
+        } as any)
+
+        expect(logged).toContain(
+            "[demosWork] [handleStep] Handling a step with context: object and description: number",
+        )
     })
 })

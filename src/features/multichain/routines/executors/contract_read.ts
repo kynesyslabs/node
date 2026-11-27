@@ -1,8 +1,10 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
 import { Interface, type FunctionFragment } from "ethers"
-import { configuredEvmInstance } from "./rpcUrl"
+import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
+import { configuredEvmUrl } from "./rpcUrl"
 import { handleAptosContractReadRest } from "./aptos_contract_read"
 import log from "@/utilities/logger"
+import { logField } from "../errorKind"
 
 type EvmReadCall =
     | { ok: true; fragment: FunctionFragment; args: unknown[] }
@@ -71,37 +73,51 @@ export function evmReadCall(params: unknown): EvmReadCall {
     return { ok: true, fragment, args }
 }
 
+/**
+ * An EVM read uses only the node's configured RPC for the chain, on a
+ * connection of its own: the SDK's per-chain instance, which pay and
+ * contract_write broadcast through, is never created or replaced here.
+ */
 async function handleEvmContractRead(operation: IOperation, chainID: number) {
     const call = evmReadCall(operation.task?.params)
     if (call.ok === false) return { result: "error", error: call.error }
 
-    // Reads use the node's configured RPC only, like pay and contract_write.
-    const evmInstance = await configuredEvmInstance(operation, chainID)
-    if (!evmInstance) {
+    const providerUrl = configuredEvmUrl(operation.chain, operation.subchain)
+    if (!providerUrl) {
         return {
             result: "error",
             error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
         }
     }
     const params = operation.task.params
-    const contractInstance = await evmInstance.getContractInstance(
-        params.address,
-        params.abi,
-    )
-    log.debug(`[XM Method] contract_read ${call.fragment.format()}`)
-    const result = await contractInstance.getFunction(call.fragment.format())(
-        ...call.args,
-    )
-    return {
-        result: result,
-        status: true,
+    const evmInstance = new EVM(providerUrl, chainID)
+    try {
+        await evmInstance.connect()
+        const contractInstance = await evmInstance.getContractInstance(
+            params.address,
+            params.abi,
+        )
+        const result = await contractInstance.getFunction(call.fragment.format())(
+            ...call.args,
+        )
+        log.debug("result from EVM read call received")
+        return {
+            result: result,
+            status: true,
+        }
+    } finally {
+        evmInstance.provider?.destroy?.()
     }
 }
 
+/** Reads a contract on an EVM chain or on Aptos. */
 export default async function handleContractRead(
     operation: IOperation,
     chainID: number,
 ) {
+    log.debug(
+        `[XM Method] Read contract on ${logField(operation.chain)}.${logField(operation.subchain)}`,
+    )
     if (operation.is_evm) {
         return await handleEvmContractRead(operation, chainID)
     }

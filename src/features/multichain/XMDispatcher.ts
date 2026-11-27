@@ -2,35 +2,45 @@
 // INFO Entry point for multichain requests
 
 import XMParser from "./routines/XMParser"
+import { logEntries, logField } from "./routines/errorKind"
 import { XMScript } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 import { xmOpOutcome, xmScriptVerdict, type XmOpOutcome } from "./xmOutcome"
+
+// digest refuses a script over this bound before any operation runs.
+export { MAX_XM_OPERATIONS } from "src/utilities/constants"
+
+type XmResults = Awaited<ReturnType<typeof XMParser.execute>>
 
 export default class MultichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript) {
         const disabled = featureDisabledMessage("xm")
         if (disabled) {
-            return { success: false, message: disabled, results: {} }
+            return { success: false, message: disabled, results: {} as XmResults }
         }
         let script: XMScript
         try {
             script = XMParser.prepare(data)
         } catch (e) {
-            const reason = e instanceof Error ? e.message : String(e)
             return {
                 success: false,
-                message: `invalid_script: ${reason}`,
-                results: {},
+                message: e instanceof Error ? e.message : String(e),
+                results: {} as XmResults,
             }
         }
-        // The script carries the caller's signed payloads: log its shape only.
-        const names = Object.keys(script.operations)
+        // NOTE Only operation types, chains and counts are logged: a script
+        // carries signed transactions and call arguments
         log.debug(
-            `[XMChain Digestion] ${names.length} operation(s): ${names.join(", ")}`,
+            "[XMChain Digestion] Processing " +
+                logEntries(
+                    script.operations,
+                    "operation(s)",
+                    op =>
+                        `${logField(op?.task?.type)} on ${logField(op?.chain)}.${logField(op?.subchain)}`,
+                ),
         )
-        // REVIEW Execute
         return await MultichainDispatcher.execute(script)
     }
 
@@ -51,6 +61,10 @@ export default class MultichainDispatcher {
      */
     static async execute(script: XMScript) {
         const results = await XMParser.execute(script)
+        // NOTE Keep this: it refuses results that cannot be serialised before admission
+        const resultsSize = JSON.stringify(results).length
+        log.debug(`[XM EXECUTE] results serialised, ${resultsSize} chars`)
+
         const outcomes: Record<string, XmOpOutcome> = {}
         for (const [name, reply] of Object.entries(results)) {
             outcomes[name] = xmOpOutcome(

@@ -6,6 +6,7 @@
  */
 
 import * as dotenv from "dotenv"
+import ipaddr from "ipaddr.js"
 import { EnvKey } from "./envKeys"
 import { parseBoolFlag, parseDurationMs, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
@@ -203,6 +204,9 @@ export function loadConfig(): Readonly<AppConfig> {
             signalingEnabled: envBool(
                 EnvKey.SIGNALING_ENABLED,
                 d.core.signalingEnabled,
+            ),
+            signalingRegisterMode: parseSignalingRegisterMode(
+                envStr(EnvKey.SIGNALING_REGISTER_MODE, d.core.signalingRegisterMode),
             ),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
             expectedGenesisHash: envStr(
@@ -624,6 +628,11 @@ export function loadConfig(): Readonly<AppConfig> {
     return deepFreeze(config)
 }
 
+function parseSignalingRegisterMode(raw: string): "transitional" | "strict" {
+    if (raw === "transitional" || raw === "strict") return raw
+    throw new Error(`[config] SIGNALING_REGISTER_MODE must be "transitional" or "strict" (got "${raw}")`)
+}
+
 /**
  * An unrecognised policy must stop the node: falling back to a default would
  * silently give an operator who typed "abstian" the opposite of what they meant.
@@ -702,8 +711,8 @@ function assertConsensusTimingSane(config: AppConfig): void {
 
 /**
  * A cap or lifetime of 0 or less would refuse every web2 response or expire
- * every session at once, and a fetch cap of 0 would refuse every web2 fetch;
- * a bad port would silently allow nothing. Skipping certificate checks is a
+ * every session at once, a fetch cap of 0 would refuse every web2 fetch and a
+ * session cap of 0 every web2 create; a bad port would silently allow nothing. Skipping certificate checks is a
  * dev setting and must not reach a production node.
  */
 function assertOutboundSane(config: AppConfig): void {
@@ -844,8 +853,8 @@ function assertL2psLimitsSane(config: AppConfig): void {
 }
 
 /**
- * Reject request-size and block-duration settings that would switch a
- * protection off or make peer traffic fail.
+ * Reject request-size, block-duration and trusted-proxy settings that would
+ * switch a protection off or make peer traffic fail.
  */
 function assertRpcLimitsSane(config: AppConfig): void {
     const { rpcMaxBodyBytes: publicMax, rpcPeerMaxBodyBytes: peerMax } = config.server
@@ -866,6 +875,22 @@ function assertRpcLimitsSane(config: AppConfig): void {
     // the same as having no block at all.
     if (!Number.isInteger(blockMs) || blockMs <= 0) {
         problems.push(`RATE_LIMIT_BLOCK_DURATION_MS must be a positive integer (got ${blockMs})`)
+    }
+    // TRUSTED_PROXIES lists proxies only; prefix length 0 matches every
+    // address. Plain addresses and unreadable entries are left to the rate
+    // limiter, which logs and skips the unreadable ones.
+    for (const entry of config.core.trustedProxies) {
+        let bits: number | undefined
+        try {
+            bits = ipaddr.parseCIDR(entry)[1]
+        } catch {
+            continue
+        }
+        if (bits === 0) {
+            problems.push(
+                `TRUSTED_PROXIES entry "${entry}" has prefix length 0 and matches every address; list the proxies' own addresses`,
+            )
+        }
     }
 
     if (problems.length > 0) {

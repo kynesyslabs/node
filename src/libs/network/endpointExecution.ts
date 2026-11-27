@@ -11,6 +11,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
+import { demoScriptRefusal } from "./routines/transactions/demosWork/scriptLimits"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
@@ -501,10 +502,8 @@ export async function handleExecuteTransaction(
             }
             const params = parseWeb2ProxyRequest(payload)
             // Without that attested response, this re-runs the request when
-            // the tx is broadcast. Drop the
-            // credential headers on the sensitive-key list and the tx's own
-            // authorization so the replay does not carry them; other
-            // credentials are not covered.
+            // the tx is broadcast. Only the allow-listed headers and no
+            // authorization are forwarded.
             params.web2Request.raw.headers = headersForReplay(
                 params.web2Request.raw.headers,
             )
@@ -535,6 +534,13 @@ export async function handleExecuteTransaction(
                     "Remove them from the script's web2 steps.",
                 )
             ) {
+                break
+            }
+            const message = demoScriptRefusal(demosWorkScript)
+            if (message) {
+                result.success = false
+                result.response = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
+                result.extra = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
                 break
             }
             if (await refusedBeforeOutbound(result, validatedData, queriedTx, outboundRun)) {

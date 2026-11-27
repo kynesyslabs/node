@@ -1,11 +1,11 @@
 /**
  * An XM script is checked before a fee is quoted and before any operation is
- * sent: operations is a plain object of at most XM_MAX_OPERATIONS entries,
+ * sent: operations is a plain object of at most MAX_XM_OPERATIONS entries,
  * each naming a known chain, a subchain and a known task.
  */
 
 import { describe, expect, it } from "bun:test"
-import { XM_MAX_OPERATIONS } from "src/utilities/constants"
+import { MAX_XM_OPERATIONS } from "src/utilities/constants"
 import { demoScriptXmRefusal, xmScriptRefusal } from "./xmScriptShape"
 
 function op(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -54,7 +54,8 @@ describe("xmScriptRefusal", () => {
     const bad: Array<[string, unknown, string]> = [
         ["a non-object script", "x", "not an object"],
         ["an array script", [], "not an object"],
-        ["operations as an array", { operations: [op()] }, "operations is not an object"],
+        ["operations as an array", { operations: [op()] }, "operations must be an object"],
+        ["operations as a class instance", { operations: Object.assign(new (class Ops {})(), { a: op() }) }, "operations must be an object"],
         ["no operations", script({}), "no operations"],
         ["an unknown chain", script({ a: op({ chain: "nowhere" }) }), "unknown chain"],
         ["an inherited chain name", script({ a: op({ chain: "constructor" }) }), "unknown chain"],
@@ -77,11 +78,11 @@ describe("xmScriptRefusal", () => {
 
     it("refuses more operations than the limit", () => {
         const ops: Record<string, unknown> = {}
-        for (let i = 0; i <= XM_MAX_OPERATIONS; i++) ops[`op${i}`] = op()
+        for (let i = 0; i <= MAX_XM_OPERATIONS; i++) ops[`op${i}`] = op()
         expect(xmScriptRefusal(script(ops, { operations_order: undefined }))).toContain(
-            `over the limit of ${XM_MAX_OPERATIONS}`,
+            `at most ${MAX_XM_OPERATIONS} entries`,
         )
-        delete ops[`op${XM_MAX_OPERATIONS}`]
+        delete ops[`op${MAX_XM_OPERATIONS}`]
         expect(xmScriptRefusal(script(ops))).toBeNull()
     })
 })

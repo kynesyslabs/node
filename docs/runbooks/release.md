@@ -675,6 +675,38 @@ this restart is a fallback there.
     first one that carries a transaction. Run from outside the validators'
     network, the old defaults timed a probe out and reported INCONCLUSIVE
     once the head was past block 20.
+  - The `peerlist` RPC call is served to validators (senders the mempool
+    merge accepts). Any other caller gets HTTP 200 with `response: false`
+    and `extra.peerlistState: "rejected"`. A hello reply contributes at
+    most 32 well-formed peer-list entries, the number a node sends, each a
+    `url` and a `publicKey`. For each key a hello reply or a `peerlist`
+    call names that is not online, the node says one hello: at the listed
+    address for a key it does not know, at its stored address for a peer in
+    its offline list, and at the `connection_url` committed with its stake
+    for a staked validator. A key the node does not know is left out when
+    its listed address is not a node URL (`http(s)://host[:port]`) or
+    points at the node itself, which on a node with `PROD=true` includes
+    every loopback address. A peer in the offline list or a staked
+    validator is left out the same way when its stored or committed address
+    points at the node itself. A key the node does not know is also left
+    out when its listed address is the address (the same scheme, host and
+    port) of a peer the node lists online. A node that changed its key is
+    reached at its old address through a list once the old key is in the
+    offline list, where the node moves it when its hello or its liveness
+    check to the old key is not answered. One list reaches at most 2 keys
+    the node does not know at one address (the same scheme, host and
+    port); stored and committed addresses do not count towards the 2. A
+    staked validator whose row in the validator table has no
+    `connection_url` (a genesis entry may leave it `null`) is not reached
+    through a list: the node logs its key in a `[PEERMANAGER]` warning, and
+    reaches it through the peer list file, gossip or that validator's own
+    hello. A validator that runs with `GOSSIP_ENABLED=false` therefore
+    needs a peer list file entry for every validator the genesis lists
+    without a `connection_url`. The node does not follow the list in the
+    reply of a peer it reached through a list (a hello reply's, a
+    `peerlist` call's, or one it merged from its peers' lists), so one
+    hello starts at most 32 more, and a peer list starts one hello for
+    each key it names.
   - A node with `TLSNOTARY_ENABLED=true` and no notary answering at
     `TLSNOTARY_HOST:TLSNOTARY_PORT` runs as a relay only: it logs a warning
     and keeps serving `requestTLSNproxy`, and `/health` no longer reports
@@ -847,6 +879,107 @@ this restart is a fallback there.
     cause is fixed. Ctrl-C still exits 0. `./run --docker` is unchanged.
     The block watchdog's exit code 42 now reaches the supervisor too; exempt
     it (systemd `RestartPreventExitStatus=42`), as `.env.example` says.
+  - The web2 (DAHR) proxy caps its sessions. A `web2ProxyRequest` create
+    keeps only the request's action, method and URL (when short), and the
+    create reply echoes only those. Of a start a session keeps only the
+    URL, once the start is admitted; a start whose URL is longer than 4096
+    characters once normalized (percent-encoded) gets result `400`. One
+    caller holds at most 16 sessions: its next create closes its least
+    recently used one. The node holds at most 1024: over it a create gets
+    result `429` `WEB2_FETCH_LIMITED` with reason `node-sessions` and
+    `retryAfterSeconds`. Set with `WEB2_MAX_SESSIONS_PER_CALLER` and
+    `WEB2_MAX_SESSIONS_TOTAL` (positive integers, or the node does not
+    start); local to the node, no effect on blocks or state. For an RPC
+    client the per-caller cap is counted per source address as the node
+    sees it: behind a reverse proxy that is not listed in
+    `TRUSTED_PROXIES` every client shares one cap (a proxy on the same
+    host is loopback and skips it).
+  - HTTP peer requests also sign the node they are sent to, as Omni
+    requests do: that node's public key is part of the signed message and
+    is sent in an `audience` header. `hello_peer`, `mempool` and
+    `consensus_routine` are refused without it (HTTP 401), and a node
+    refuses a request that names another node (`Invalid signature: Request
+    is for another node`). When that is all that is wrong with a request
+    (its signature verifies and its timestamp is in the accepted window),
+    the refusal does not count towards the limit on failed signature
+    checks, for its signer or for the address it came from; it counts as
+    one request from that address. A validator's request over
+    `RPC_MAX_BODY_BYTES` is taken, up to `RPC_PEER_MAX_BODY_BYTES`, only
+    when it names this node. Every node of a network must be upgraded
+    together: a node on this release refuses those three methods from an
+    older node, and an older node accepts this release's requests only
+    while they are dated no more than 5 s ahead of its clock. A peer-list
+    entry whose public key is not the key of the node at its URL no longer
+    connects; correct the key.
+  - A call that names this node and is signed by another key than the sudo
+    key may be dated up to 5 minutes ahead of this node's clock, like any
+    other signed call (was 5 s). Sudo calls keep the 5 s limit.
+  - A block that arrives over gossip and is already stored, or was applied
+    from gossip, is not verified again: the node remembers the last 2048
+    such hashes, and copies of one block that are already being checked
+    or applied are skipped. On a stored copy the node still checks only
+    its own key's signature against its signing record. The gossip sidecar
+    is told each such hash and drops later copies of it before relaying
+    them, so a node relays a block it holds once, not once per signature
+    set. The sidecar's IPC protocol is now version 2; a sidecar bundle
+    from an earlier release exits at startup with `protocol version
+    mismatch` and the node keeps restarting it. `./run` rebuilds the
+    bundle when any file in `sidecar/src` is newer than it (before, only
+    `index.js` was compared), and the Docker image always builds it.
+  - The `TRUSTED_PROXIES` default in `docker-compose.yml` is empty, so a
+    Compose node reads the client address from the socket only and honours
+    no forwarding header. `docker-compose.proxy.yml` sets it to the docker
+    bridge range (`172.16.0.0/12`) when `.env` leaves it unset. Operators who
+    run Caddy from the `proxy` profile set
+    `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` in `.env` next
+    to the profile (or start with `./run --docker --proxy`); with the profile
+    alone every client behind Caddy shares one rate-limit counter. Operators
+    with their own proxy in front of a Compose node's published RPC port
+    follow `docs/runbooks/proxy-setup.md`, Prerequisites item 4, and set
+    `TRUSTED_PROXIES` to that proxy's address. A `TRUSTED_PROXIES` value in
+    `.env` is still used as before; on a Compose node without
+    `docker-compose.proxy.yml`, remove the docker bridge range from it.
+    Before upgrading a Caddy-fronted node (the rehearsal validators, the
+    public RPC and relay node), check that it starts with
+    `./run --docker --proxy` or has that `COMPOSE_FILE` line; a node that
+    gets `X-Forwarded-For` from a private address with an empty list logs
+    `X-Forwarded-For from <address> ignored: TRUSTED_PROXIES is empty`.
+  - A `TRUSTED_PROXIES` entry with prefix length 0 (`0.0.0.0/0`, `::/0`)
+    stops the node at startup with an error naming the entry.
+  - The bundled Caddyfiles drop a client-sent `CF-Connecting-IP` header, as
+    they already did `X-Forwarded-For` and `X-Real-IP`.
+  - Docker Compose publishes the signaling port (`RPC_SIGNALING_PORT`,
+    3005) on `127.0.0.1` only (`RPC_SIGNALING_BIND`). Messaging clients
+    reach it through Caddy's `/signaling/`. A node whose clients dial
+    `ws://<host>:3005` directly sets `RPC_SIGNALING_BIND=0.0.0.0` and
+    recreates the node container; a restart keeps the old publication.
+    Bare metal still listens on every interface. A signaling frame over
+    1 MiB closes the connection (code 1009).
+  - Signaling registration takes `SIGNALING_REGISTER_MODE`: `transitional`
+    (default) or `strict`; any other value stops the node. A connection
+    registers one client ID. A proof without a challenge must sign exactly
+    the advertised key, a client ID longer than 256 characters must be the
+    hex of the signing key, and a `0x` hex ID of the signing key's length
+    must be that key. In `transitional` a message to an offline recipient
+    gets `PEER_NOT_FOUND` and nothing is stored or written to the chain.
+    `strict` requires a `register_challenge` and an ed25519 proof for the
+    client ID equal to that key; SDK 4.0.24 signs with ML-DSA and requests
+    no challenge, so keep `transitional` until an SDK release supports it.
+    Mainnet validators run with `SIGNALING_ENABLED=false`.
+  - `./run --docker` (`scripts/docker-run`) copies `.demos_identity` into
+    the state volume only when the volume has none. When the volume holds a
+    different identity, `up` stops before anything starts, `--clean` and
+    `--rebuild` included, and prints how to keep the volume's identity or
+    move it aside with its signing-state files. Before, the checkout's file
+    overwrote the volume copy on every `up`. Raw `docker compose` starts do
+    not run this check.
+  - The signing record (`<identity file>.signed.json`) stores the public key
+    it belongs to; a record without one is bound to the running key at the
+    first boot (older versions ignore the field). A record of another key
+    stops signing in that process (`SigningHalted`, marker 0) with
+    `[SIGNING] signing record ... belongs to key ...`; see
+    `docs/runbooks/validator-key.md`. Rerun the reset-node and
+    wipe-and-reboot drills on this release.
   - `launch-go-no-go` no longer limits beneficial owners or operators.
     Anyone may run as many validators as they hold seat NFTs for, so an
     owner or operator above `min(launch, shardSize) - quorum` validators, a
@@ -855,6 +988,20 @@ this restart is a fallback there.
     concentration" (`NOTE`, never `FAIL`). A mainnet entry without an
     `owner` is a warning too. Providers and regions keep their NO-GO
     limits. See `docs/mainnet/validator-concentration.md`.
+  - New fork `peerlistFloor`, at height 0 in the mainnet set. Under it an
+    identity enters a block's merged peerlist when `n - q + 1` voters
+    observed it at the parent (4 of 10; `m - q + 1` for a committee of `m`
+    short of 10) instead of `q` (7), and a member
+    refuses a dictated list that differs from that rule in its view. The
+    committee of every block at a multiple of 720 is drawn from the parent's
+    peerlist united with those of the 3 previous such blocks (the genesis
+    validator set while that window reaches back past block 1), so a
+    committee of colluders that committed coalition-only lists keeps the
+    chain for at most 720 blocks. It changes which committee signs a
+    block, so a running chain takes it only at a coordinated height; the
+    rehearsal restarts from a fresh genesis. A node that lacks one of the
+    sampled blocks refuses to draw that committee instead of guessing.
+    Design and numbers: `docs/design/peerlist-floor.md`.
 
 ## Known limits
 

@@ -8,10 +8,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
-import {
-    DAHRSessionLimitError,
-    WEB2_SESSIONS_LIMITED,
-} from "src/features/web2/dahr/sessionLimitError"
+import { Web2SessionLimitError } from "src/features/web2/dahr/sessionLimit"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
 import {
     allowsNonSuccessStatus,
@@ -21,7 +18,6 @@ import {
     Web2FetchLimiter,
     WEB2_FETCH_LIMITED,
     type Web2FetchCaller,
-    type Web2FetchRefusal,
 } from "src/features/web2/web2FetchLimiter"
 import type { Web2FetchMeter } from "src/features/web2/proxy/Proxy"
 import log from "src/utilities/logger"
@@ -35,9 +31,10 @@ type IHandleWeb2ProxyRequestStepParams = Pick<
 /**
  * Handles the web2 proxy request.
  *
- * `caller` is who the outbound fetch is counted against: the client address
- * for an RPC call, the sender for a tx. Without one the fetch still takes a
- * node-wide slot.
+ * `caller` is who the outbound fetch, or the session a create opens, is
+ * counted against: the client address for an RPC call, the sender for a tx.
+ * Without one the fetch still takes a node-wide slot and the session still
+ * counts toward the node-wide session cap.
  * @returns {Promise<RPCResponse>} The RPC response.
  */
 // eslint-disable-next-line no-redeclare
@@ -56,24 +53,7 @@ export async function handleWeb2ProxyRequest(
     try {
         switch (web2Request.raw.action) {
             case EnumWeb2Actions.CREATE: {
-                // Sessions are bounded by count in DAHRFactory, so creating
-                // one does not spend the caller's fetch budget.
-                let isDahrOrError: string | DAHR
-                try {
-                    isDahrOrError = await handleWeb2(web2Request, caller)
-                } catch (error) {
-                    if (error instanceof DAHRSessionLimitError) {
-                        return createRPCResponse(
-                            429,
-                            {
-                                error: WEB2_SESSIONS_LIMITED,
-                                reason: error.reason,
-                            },
-                            error.message,
-                        )
-                    }
-                    throw error
-                }
+                const isDahrOrError = await handleWeb2(web2Request, caller)
                 if (isDahrOrError instanceof DAHR) {
                     const dahr = isDahrOrError.toSerializable()
 
@@ -118,16 +98,19 @@ export async function handleWeb2ProxyRequest(
                     )
                 }
 
-                dahr.web2Request.raw = {
-                    ...dahr.web2Request.raw,
-                    url: validation.normalizedUrl,
-                }
-
+                // A start leaves the session's stored request as the create
+                // made it: its URL, of bounded length, goes to the relay.
                 const { method, headers } = web2Request.raw
 
                 const admission = Web2FetchLimiter.instance.acquire(caller)
                 if (!admission.lease) {
-                    return limitedResponse(admission.refusal)
+                    const { reason, retryAfterSeconds, message } =
+                        admission.refusal
+                    return createRPCResponse(
+                        429,
+                        { error: WEB2_FETCH_LIMITED, reason, retryAfterSeconds },
+                        message,
+                    )
                 }
 
                 const meter: Web2FetchMeter = { bytes: 0 }
@@ -174,19 +157,18 @@ export async function handleWeb2ProxyRequest(
             }
         }
     } catch (error) {
+        if (error instanceof Web2SessionLimitError) {
+            const { reason, retryAfterSeconds, message } = error
+            return createRPCResponse(
+                429,
+                { error: WEB2_FETCH_LIMITED, reason, retryAfterSeconds },
+                message,
+            )
+        }
         log.error("Error in handleWeb2ProxyRequest: " + error)
         const errorMsg = error instanceof Error ? error.message : String(error)
         return createRPCResponse(500, error, errorMsg)
     }
-}
-
-function limitedResponse(refusal: Web2FetchRefusal): RPCResponse {
-    const { reason, retryAfterSeconds, message } = refusal
-    return createRPCResponse(
-        429,
-        { error: WEB2_FETCH_LIMITED, reason, retryAfterSeconds },
-        message,
-    )
 }
 
 function getDAHRInstance(sessionId: string): DAHR | null {

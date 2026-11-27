@@ -113,33 +113,12 @@ export async function sendSignedEvmTransaction(
         }
     }
 
-    const evmInstance = await cachedEvmInstance(chainID, rpcUrl)
+    let evmInstance = EVM.getInstance(chainID)
+    if (!evmInstance) {
+        evmInstance = EVM.createInstance(chainID, rpcUrl)
+        await evmInstance.connect()
+    }
     return await evmInstance.sendSignedTransaction(
         operation.task.signedPayloads[0],
     )
-}
-
-/** The SDK's cached instance for `chainID`, created on `configuredUrl` if absent. */
-async function cachedEvmInstance(chainID: number, configuredUrl: string) {
-    let evmInstance = EVM.getInstance(chainID)
-    if (!evmInstance) {
-        evmInstance = EVM.createInstance(chainID, configuredUrl)
-        await evmInstance.connect()
-    }
-    return evmInstance
-}
-
-/**
- * The cached EVM instance for an operation's configured chain, or null when
- * the node has no RPC configured for it. Nothing is created or cached for an
- * unconfigured chain: a cached instance without a URL would also break every
- * later operation on that chain id.
- */
-export async function configuredEvmInstance(
-    operation: IOperation,
-    chainID: number,
-) {
-    const configuredUrl = configuredEvmUrl(operation.chain, operation.subchain)
-    if (!configuredUrl) return null
-    return await cachedEvmInstance(chainID, configuredUrl)
 }

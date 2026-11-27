@@ -138,7 +138,7 @@ export async function processPayload(
             return res
         }
         case "peerlist":
-            return await ServerHandlers.handlePeerlist(payload.params[0])
+            return await ServerHandlers.handlePeerlist(payload.params[0], sender)
         case "auth":
             return await manageAuth(payload.params[0] as AuthMessage)
         case "nodeCall": {

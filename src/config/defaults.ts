@@ -89,9 +89,11 @@ export const DEFAULT_CONFIG: AppConfig = {
         // Opt-in via MCP_ENABLED=true after reading docs/runbooks/mcp-security.md.
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
-        // On by default: compose publishes 3005 and the proxy routes
-        // /signaling/ to it, so existing deployments expect it running.
+        // On by default: Compose publishes signaling on 127.0.0.1 unless
+        // RPC_SIGNALING_BIND=0.0.0.0; the proxy routes /signaling/ to it.
+        // Existing deployments expect signaling to be running.
         signalingEnabled: true,
+        signalingRegisterMode: "transitional",
         restore: false,
         expectedGenesisHash: "",
         expectedGenesisBlockHash: "",
@@ -242,8 +244,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         web2MaxFetchesPerMinutePerCaller: 10,
         web2MaxBytesPerHourPerCaller: 100 * 1024 * 1024,
         web2MaxInflightTotal: 32,
-        web2MaxSessionsPerCaller: 160,
-        web2MaxSessionsTotal: 4096,
+        web2MaxSessionsPerCaller: 16,
+        web2MaxSessionsTotal: 1024,
         tlsnotaryAllowedPorts: [443],
         tlsnotaryAllowPrivateTargets: false,
     },

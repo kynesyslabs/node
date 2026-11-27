@@ -161,18 +161,21 @@ services:
       RPC_MAX_BODY_BYTES: ${RPC_MAX_BODY_BYTES:-}
       RPC_PEER_MAX_BODY_BYTES: ${RPC_PEER_MAX_BODY_BYTES:-}
       RATE_LIMIT_BLOCK_DURATION_MS: ${RATE_LIMIT_BLOCK_DURATION_MS:-}
-      # Proxy headers are only honoured from these networks. The default is
-      # the docker bridge range, where the caddy service connects from; without
-      # it the node sees every public client as caddy's address and gives them
-      # all one rate-limit counter. Caddy strips client-sent forwarding
-      # headers, so the value the node reads is the one Caddy set.
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
+      # Proxy headers are only honoured from these addresses; list proxies
+      # only. Empty by default: the RPC port is published below, and docker
+      # relays some clients (host loopback, IPv6 to this IPv4 network, a
+      # proxy on the host) from the bridge gateway, so keep the bridge range
+      # and its gateway out of the list here. docker-compose.proxy.yml
+      # unpublishes the RPC port and sets the bridge range, where caddy
+      # connects from.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       XFF_MODE: ${XFF_MODE:-}
       EXPOSED_URL: ${EXPOSED_URL:-http://localhost:53550}
       OMNI_ENABLED: ${OMNI_ENABLED:-true}
       OMNI_PORT: ${OMNI_PORT:-53551}
       OMNI_MODE: ${OMNI_MODE:-OMNI_PREFERRED}
       SIGNALING_ENABLED: ${SIGNALING_ENABLED:-true}
+      SIGNALING_REGISTER_MODE: ${SIGNALING_REGISTER_MODE:-transitional}
       MIN_DISK_SPACE: ${MIN_DISK_SPACE:-}
       # The data volume, not the container's root filesystem. Postgres keeps
       # its own volume, which node-exporter's filesystem metrics cover.
@@ -304,6 +307,8 @@ services:
       WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER: ${WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER:-}
       WEB2_MAX_BYTES_PER_HOUR_PER_CALLER: ${WEB2_MAX_BYTES_PER_HOUR_PER_CALLER:-}
       WEB2_MAX_INFLIGHT_TOTAL: ${WEB2_MAX_INFLIGHT_TOTAL:-}
+      WEB2_MAX_SESSIONS_PER_CALLER: ${WEB2_MAX_SESSIONS_PER_CALLER:-}
+      WEB2_MAX_SESSIONS_TOTAL: ${WEB2_MAX_SESSIONS_TOTAL:-}
       TLSNOTARY_ALLOWED_PORTS: ${TLSNOTARY_ALLOWED_PORTS:-}
       TLSNOTARY_ALLOW_PRIVATE_TARGETS: ${TLSNOTARY_ALLOW_PRIVATE_TARGETS:-}
       # Setup check at start and the `bun run setup` answers (empty = unset).
@@ -354,7 +359,9 @@ services:
       # port where nothing is listening.
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
-      - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      # SDK clients can use Caddy /signaling/ with the proxy profile. Direct
+      # public WebSocket access requires RPC_SIGNALING_BIND=0.0.0.0.
+      - "${RPC_SIGNALING_BIND:-127.0.0.1}:${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
       # Gossip sidecar (libp2p TCP). Peers dial EXPOSED_URL's host on this
       # port, so it is published 1:1 like RPC_PORT.
       - "${GOSSIP_PORT:-9095}:${GOSSIP_PORT:-9095}"
@@ -649,6 +656,12 @@ services:
   #   COMPOSE_PROFILES=monitoring,tlsnotary,proxy docker compose up -d
   # OR:
   #   docker compose --profile proxy up -d
+  #
+  # Either way, also add the override file docker-compose.proxy.yml, with
+  # COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml in .env or with
+  # ./run --docker --proxy: it unpublishes the node's RPC port and sets
+  # TRUSTED_PROXIES to the bridge range. With the profile alone the node
+  # trusts no proxy and counts every client behind Caddy as Caddy's address.
   #
   # Required env (set in .env):
   #   PROXY_DOMAIN              public DNS, must point at this host

@@ -212,7 +212,8 @@ describe("operator off switches", () => {
 
     it("all three stay on by default", async () => {
         expect((await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")).success).toBe(true)
-        expect((await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")).success).toBe(true)
+        const emptyScript = { operationOrder: [], operations: {}, steps: {} }
+        expect((await handleExecuteTransaction(tx("demoswork", emptyScript), "s")).success).toBe(true)
         expect((await handleExecuteTransaction(web2Tx({ Accept: "text/plain" }), "s")).success).toBe(true)
     })
 })

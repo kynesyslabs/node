@@ -55,7 +55,8 @@ async function attestedSession(): Promise<string> {
 
 beforeEach(() => {
     Config.resetInstance()
-    DAHRFactory.resetInstance()
+    // A fresh factory reads the config reset above.
+    ;(DAHRFactory as any)._instance = undefined
     __resetAttestedBudget()
     sendHTTPRequest = jest.fn(async () => ({ ...fetched }))
 })

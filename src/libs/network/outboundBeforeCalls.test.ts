@@ -87,7 +87,7 @@ function tx(type: string, payload: unknown, hash = "0x" + "11".repeat(32)): any 
 
 const OUTBOUND = [
     ["crosschainOperation", { operations: {} }, digest],
-    ["demoswork", { steps: {} }, handleDemosWorkRequest],
+    ["demoswork", { steps: {}, operations: {}, operationOrder: [] }, handleDemosWorkRequest],
 ] as const
 
 beforeEach(() => {
@@ -185,7 +185,7 @@ describe("XM verdict", () => {
     })
 
     it("a script that ran no operation is not submitted and can be broadcast again", async () => {
-        digestReply = { success: false, message: "invalid_script: no operations", results: {} }
+        digestReply = { success: false, message: "XM script has no operations", results: {} }
         const reply = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
         expect(reply.success).toBe(false)
         expect(submitValidatedTx).not.toHaveBeenCalled()
@@ -218,7 +218,7 @@ describe("an outbound call's result decides submission", () => {
             extra: "step failed",
             response: { operationsResults: [{ success: false, error: "step failed" }] },
         }))
-        const reply = await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")
+        const reply = await handleExecuteTransaction(tx("demoswork", { steps: {}, operations: {}, operationOrder: [] }), "s")
         expect(reply.success).toBe(true)
         expect(JSON.stringify(reply.response)).toContain("step failed")
         expect(submitValidatedTx).toHaveBeenCalledTimes(1)
@@ -226,7 +226,7 @@ describe("an outbound call's result decides submission", () => {
 
     it("demoswork: a script that could not run is not submitted", async () => {
         handleDemosWorkRequest.mockImplementation(async () => ({ result: 400, response: null }))
-        const reply = await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")
+        const reply = await handleExecuteTransaction(tx("demoswork", { steps: {}, operations: {}, operationOrder: [] }), "s")
         expect(reply.success).toBe(false)
         expect(submitValidatedTx).not.toHaveBeenCalled()
     })

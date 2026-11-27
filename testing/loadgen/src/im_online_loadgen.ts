@@ -199,11 +199,13 @@ export async function runImOnlineLoadgen() {
   // Register clients (2 per pair). Stagger slightly to avoid thundering herd.
   for (let i = 0; i < cfg.pairs; i++) {
     const wsUrl = pickTarget(cfg.wsTargets, i)
-    const senderId = generateClientId()
-    const receiverId = generateClientId()
+    let senderId = generateClientId()
+    let receiverId = generateClientId()
     const sender = await registerClient({ wsUrl, clientId: senderId, instanceId: `im:${senderId}` })
+    senderId = sender.clientId
     await busyWaitJitter(10, 50)
     const receiver = await registerClient({ wsUrl, clientId: receiverId, instanceId: `im:${receiverId}` })
+    receiverId = receiver.clientId
     await busyWaitJitter(10, 50)
     pairs.push({ senderId, receiverId, sender, receiver })
   }

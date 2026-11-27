@@ -1,10 +1,10 @@
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
+import { Web2SessionLimitError } from "src/features/web2/dahr/sessionLimit"
 import { DAHR } from "./dahr/DAHR"
 import { sanitizeWeb2RequestForLogging } from "src/features/web2/sanitizeWeb2Request"
-import log from "src/utilities/logger"
-import { DAHRSessionLimitError } from "src/features/web2/dahr/sessionLimitError"
 import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
+import log from "src/utilities/logger"
 
 /**
  * Handles a Web2 request.
@@ -13,10 +13,11 @@ import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
  * to handle the Web2 proxy functionality.
  *
  * @param {IWeb2Request} web2Request - The Web2 request to handle.
+ * @param {Web2FetchCaller} caller - Who the new session counts against.
  *
  * @returns {Promise<DAHR | string>} - Returns a DAHR instance or an error message.
  *
- * @throws Will throw an error if the operation fails.
+ * @throws {Web2SessionLimitError} When the node holds its maximum of sessions.
  */
 export async function handleWeb2(
     web2Request: IWeb2Request,
@@ -44,8 +45,8 @@ export async function handleWeb2(
 
         return dahr
     } catch (error) {
-        // The caller answers this one with a 429, not a generic 400.
-        if (error instanceof DAHRSessionLimitError) throw error
+        // A full node is answered with 429 by the RPC handler, not as a fault.
+        if (error instanceof Web2SessionLimitError) throw error
         log.error("Error in handleWeb2:", error)
         const errorMsg = error instanceof Error ? error.message : String(error)
         return errorMsg

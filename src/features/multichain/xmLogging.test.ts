@@ -60,7 +60,7 @@ describe("XM logging", () => {
         await XMDispatcher.digest(script())
         expect(lines.length).toBeGreaterThan(0)
         expect(lines.join("\n")).not.toContain(SECRET)
-        expect(lines.join("\n")).toContain("sendIt")
+        expect(lines.join("\n")).toContain("Operation 1")
     })
 })
 
@@ -81,7 +81,7 @@ describe("a malformed script", () => {
     it("is refused before any operation runs", async () => {
         const out = await XMDispatcher.digest({ operations: [script().operations.sendIt] } as any)
         expect(out.success).toBe(false)
-        expect(out.message).toContain("invalid_script")
+        expect(out.message).toContain("XM script refused")
         expect(out.results).toEqual({})
         expect(pay).not.toHaveBeenCalled()
     })
