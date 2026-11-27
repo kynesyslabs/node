@@ -70,12 +70,13 @@ export async function mergeMempools(
     // splitMergeBatches), and the receiver refuses an oversized request
     // before merging anything, so the pool goes out in bounded requests.
     const batches = splitMergeBatches(mempool)
+    const peerlist = await getLocalSyncObservations(blockRef)
     const buildRequest = (txs: Transaction[], after?: string): RPCRequest => ({
         method: "mempool",
         params: [
             {
                 txs,
-                peerlist: getLocalSyncObservations(blockRef),
+                peerlist,
                 blockRef,
                 ...(after === undefined ? {} : { after }),
             },
@@ -160,7 +161,7 @@ export async function mergeMempools(
 
         // The peerlist contribution feeds the secretary's merge only, so it
         // is recorded independently of what happens to the transactions.
-        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
+        await contributePeerlist(blockRef, peer.identity, payload?.peerlist)
 
         const rawTxs = payload?.txs
         if (!Array.isArray(rawTxs)) {

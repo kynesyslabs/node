@@ -80,6 +80,8 @@ export function mockCommitteeChain(sharedState: Record<string, unknown>, chain: 
         default: {
             getGCRValidatorsAtBlock: async () =>
                 (chain.staked ?? chain.peerlist).map(address => ({ address })),
+            getGCRValidatorsAtBlockOrThrow: async () =>
+                (chain.staked ?? chain.peerlist).map(address => ({ address })),
         },
     }))
 }

@@ -1,5 +1,6 @@
 import { getSharedState } from "src/utilities/sharedState"
 import Chain from "src/libs/blockchain/chain"
+import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Blocks } from "src/model/entities/Blocks"
 import {
     __resetPeerlistMerge,
@@ -8,6 +9,7 @@ import {
     freezeLocalSyncObservations,
     getLocalSyncObservations,
     MERGE_PEERLIST_MAX_ENTRIES_PER_PEER,
+    MERGE_PEERLIST_MAX_EXAMINED_PER_PEER,
     validateMergedPeerlist,
     type SyncObservation,
 } from "./peerlistMerge"
@@ -79,6 +81,9 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
         getGCRValidatorsAtBlock: jest.fn(async () =>
             validatorAddresses.map(address => ({ address })),
         ),
+        getGCRValidatorsAtBlockOrThrow: jest.fn(async () =>
+            validatorAddresses.map(address => ({ address })),
+        ),
     },
 }))
 
@@ -94,26 +99,128 @@ beforeEach(() => {
 })
 
 describe("getLocalSyncObservations", () => {
-    it("includes self and tip-synced peers with their sync data, sorted", () => {
-        expect(getLocalSyncObservations()).toEqual([
+    it("includes self and tip-synced peers with their sync data, sorted", async () => {
+        expect(await getLocalSyncObservations()).toEqual([
             obs(OUR_KEY),
             obs(SYNCED_PEER),
         ])
     })
 
-    it("returns the frozen snapshot for the round even after the view changes", () => {
+    it("returns the frozen snapshot for the round even after the view changes", async () => {
         freezeLocalSyncObservations(101)
         peers[1].sync = { block: 100, block_hash: "tiphash" }
-        expect(getLocalSyncObservations(101)).toEqual([
+        expect(await getLocalSyncObservations(101)).toEqual([
             obs(OUR_KEY),
             obs(SYNCED_PEER),
         ])
-        expect(getLocalSyncObservations(102)).toEqual([
+        expect(await getLocalSyncObservations(102)).toEqual([
             obs(OUR_KEY),
             obs(SYNCED_PEER),
             obs(STALE_PEER),
         ])
-        expect(getLocalSyncObservations()).toHaveLength(3)
+        expect(await getLocalSyncObservations()).toHaveLength(3)
+    })
+})
+
+describe("unstaked peers at the tip", () => {
+    // 1,200 unstaked identities that sort before every validator.
+    const flood = Array.from({ length: 1200 }, (_, i) => ({
+        identity: i.toString(16).padStart(64, "0"),
+        sync: { block: 100, block_hash: "tiphash" },
+    }))
+    const shard = [OUR_KEY, "c1", "c2", "c3"] // quorum 3
+
+    it("are left out of our report", async () => {
+        peers = [...flood, ...peers]
+        expect(await getLocalSyncObservations(101)).toEqual([
+            obs(OUR_KEY),
+            obs(SYNCED_PEER),
+        ])
+    })
+
+    it("do not push staked validators out of the merged list", async () => {
+        peers = [...flood, ...peers]
+        // Every member holds the same flooded table and sends its report.
+        const report = await getLocalSyncObservations(101)
+        await contributePeerlist(101, "c1", report)
+        await contributePeerlist(101, "c2", report)
+        expect(await computeMergedPeerlist(101, shard)).toEqual(
+            [OUR_KEY, SYNCED_PEER].sort(),
+        )
+    })
+
+    it("in a received report take no slot from the staked ones after them", async () => {
+        // An unfiltered report: 1,200 unstaked entries, then a validator.
+        const report = [...flood.map(p => obs(p.identity)), obs(REPORTED_PEER)]
+        await contributePeerlist(101, "c1", report)
+        expect(await computeMergedPeerlist(101, ["c1"])).toEqual([REPORTED_PEER])
+    })
+
+    it("past the first 2,000 entries hide the validator after them", async () => {
+        const padding = Array.from(
+            { length: MERGE_PEERLIST_MAX_EXAMINED_PER_PEER },
+            (_, i) => obs(i.toString(16).padStart(64, "0")),
+        )
+        await contributePeerlist(101, "c1", [...padding, obs(REPORTED_PEER)])
+        expect(await computeMergedPeerlist(101, ["c1"])).toEqual([])
+    })
+
+    it("are not let in by a failed validator read", async () => {
+        const read = GCR.getGCRValidatorsAtBlockOrThrow as jest.Mock
+        read.mockRejectedValue(new Error("db down"))
+        peers = [...flood, ...peers]
+        const report = flood.map(p => obs(p.identity))
+        await contributePeerlist(101, "c1", [...report, obs(REPORTED_PEER)])
+        expect(await getLocalSyncObservations(101)).toEqual([])
+        read.mockImplementation(async () =>
+            validatorAddresses.map(address => ({ address })),
+        )
+        expect(await computeMergedPeerlist(101, ["c1"])).toEqual([])
+    })
+
+    it("are filtered with one validator read per height", async () => {
+        const read = GCR.getGCRValidatorsAtBlockOrThrow as jest.Mock
+        read.mockClear()
+        for (const c of ["c1", "c2", "c3"]) {
+            await contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        expect(read).toHaveBeenCalledTimes(1)
+    })
+
+    it("share one validator read among reports that arrive together", async () => {
+        const read = GCR.getGCRValidatorsAtBlockOrThrow as jest.Mock
+        read.mockClear()
+        await Promise.all(
+            ["c1", "c2", "c3"].map(c =>
+                contributePeerlist(101, c, [obs(REPORTED_PEER)]),
+            ),
+        )
+        expect(read).toHaveBeenCalledTimes(1)
+    })
+
+    it("of an older round are dropped without a validator read", async () => {
+        const read = GCR.getGCRValidatorsAtBlockOrThrow as jest.Mock
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        read.mockClear()
+        for (let ref = 2; ref < 50; ref++) {
+            await contributePeerlist(ref, "c2", [])
+        }
+        expect(read).not.toHaveBeenCalled()
+    })
+
+    it("leave the cap counting staked entries only, raised to the staked count", async () => {
+        // 1,050 validators: every one is kept despite 900 unstaked entries.
+        const many = Array.from(
+            { length: MERGE_PEERLIST_MAX_ENTRIES_PER_PEER + 50 },
+            (_, i) => "f" + i.toString(16).padStart(63, "0"),
+        )
+        validatorAddresses = many
+        const unstaked = flood.slice(0, 900).map(p => obs(p.identity))
+        const report = [...unstaked, ...many.map(id => obs(id))]
+        await contributePeerlist(101, "c1", report)
+        const merged = await computeMergedPeerlist(101, ["c1"])
+        expect(merged).toEqual(many)
+        expect(await validateMergedPeerlist(101, merged)).toEqual(many)
     })
 })
 
@@ -152,11 +259,11 @@ describe("validateMergedPeerlist", () => {
 
     describe("held to our contributions when the shard is given", () => {
         const shard = [OUR_KEY, "c1", "c2", "c3"] // quorum 3
-        beforeEach(() => {
+        beforeEach(async () => {
             // us + c1 + c2 see OUR_KEY and SYNCED_PEER (quorum); only c1 + c2
             // see REPORTED_PEER (vouched, below quorum); nobody sees STALE_PEER.
-            contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
-            contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            await contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            await contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
         })
 
         it("accepts the list we would compute ourselves", async () => {
@@ -186,7 +293,7 @@ describe("validateMergedPeerlist", () => {
             })
 
             it("accepts the identity once it reaches quorum", async () => {
-                contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
+                await contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
                 const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
                 expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
             })
@@ -222,13 +329,13 @@ describe("validateMergedPeerlist", () => {
             const secretaryLive = committee.slice(0, 8) // 8 live: own-count bar would be 6
             const memberLive = committee // all 10 live: own-count bar would be 7
 
-            beforeEach(() => {
+            beforeEach(async () => {
                 __resetPeerlistMerge()
                 Object.assign(getSharedState, { shardSize: 10 })
                 getSharedState.forkConfig.committeeBinding.activationHeight = 0
                 // Seen by us + c1..c6 (7): at the bar. Seen by c1..c6 (6): below it.
                 for (const c of ["c1", "c2", "c3", "c4", "c5", "c6"]) {
-                    contributePeerlist(101, c, [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+                    await contributePeerlist(101, c, [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
                 }
                 peers = [{ identity: SYNCED_PEER, sync: { block: 100, block_hash: "tiphash" } }]
             })
@@ -262,9 +369,9 @@ describe("validateMergedPeerlist", () => {
 
         it("does not require an unstaked identity the shard observed at quorum", async () => {
             validatorAddresses = [OUR_KEY, SYNCED_PEER]
-            contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
-            contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
-            contributePeerlist(101, "c3", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            await contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            await contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            await contributePeerlist(101, "c3", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
             const list = [OUR_KEY, SYNCED_PEER].sort()
             expect(await computeMergedPeerlist(101, shard)).toEqual(list)
             expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
@@ -289,42 +396,42 @@ const merge = (shard: string[] = SHARD, ref = 101) =>
 describe("computeMergedPeerlist", () => {
     it("includes identities seen by 2/3 + 1 of the shard", async () => {
         // us + c1 + c2 see OUR_KEY and SYNCED_PEER; c1 + c2 + c3 see REPORTED_PEER
-        contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
-        contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
-        contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
         const merged = await merge()
         expect(merged).toEqual([OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort())
     })
 
     it("excludes identities below quorum, including ourselves", async () => {
-        contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
         const merged = await merge()
         expect(merged).toEqual([])
     })
 
     it("ignores contributions from non-members", async () => {
-        contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
-        contributePeerlist(101, "c2", [obs(REPORTED_PEER)])
-        contributePeerlist(101, "outsider", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c2", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "outsider", [obs(REPORTED_PEER)])
         expect(await merge()).toEqual([])
-        contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
         expect(await merge()).toEqual([REPORTED_PEER])
     })
 
     it("counts absent members against the quorum", async () => {
-        contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER)])
+        await contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER)])
         const merged = await merge()
         expect(merged).toEqual([])
     })
 
     it("is deterministic regardless of contribution order", async () => {
-        contributePeerlist(101, "c1", [obs(REPORTED_PEER), obs(SYNCED_PEER)])
-        contributePeerlist(101, "c2", [obs(SYNCED_PEER), obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER), obs(SYNCED_PEER)])
+        await contributePeerlist(101, "c2", [obs(SYNCED_PEER), obs(REPORTED_PEER)])
         const first = await merge()
 
         __resetPeerlistMerge()
-        contributePeerlist(101, "c2", [obs(REPORTED_PEER), obs(SYNCED_PEER)])
-        contributePeerlist(101, "c1", [obs(SYNCED_PEER), obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c2", [obs(REPORTED_PEER), obs(SYNCED_PEER)])
+        await contributePeerlist(101, "c1", [obs(SYNCED_PEER), obs(REPORTED_PEER)])
         const second = await merge()
 
         expect(first).toEqual(second)
@@ -333,7 +440,7 @@ describe("computeMergedPeerlist", () => {
 
     it("ignores observations that are not at the round's parent block", async () => {
         for (const c of ["c1", "c2", "c3"]) {
-            contributePeerlist(101, c, [
+            await contributePeerlist(101, c, [
                 obs(REPORTED_PEER, 99, "oldhash"),
                 obs(STALE_PEER, 101, "aheadhash"),
                 obs(NON_VALIDATOR, 100, "wronghash"),
@@ -344,16 +451,16 @@ describe("computeMergedPeerlist", () => {
     })
 
     it("treats one member's ahead claim as a missing vote, not a veto", async () => {
-        contributePeerlist(101, "c1", [obs(SYNCED_PEER, 105, "futurehash")])
-        contributePeerlist(101, "c2", [obs(SYNCED_PEER)])
-        contributePeerlist(101, "c3", [obs(SYNCED_PEER)])
+        await contributePeerlist(101, "c1", [obs(SYNCED_PEER, 105, "futurehash")])
+        await contributePeerlist(101, "c2", [obs(SYNCED_PEER)])
+        await contributePeerlist(101, "c3", [obs(SYNCED_PEER)])
         const merged = await merge()
         expect(merged).toContain(SYNCED_PEER)
     })
 
     it("filters out non-validators", async () => {
         for (const c of ["c1", "c2", "c3"]) {
-            contributePeerlist(101, c, [obs(NON_VALIDATOR), obs(REPORTED_PEER)])
+            await contributePeerlist(101, c, [obs(NON_VALIDATOR), obs(REPORTED_PEER)])
         }
         const merged = await merge()
         expect(merged).not.toContain(NON_VALIDATOR)
@@ -361,8 +468,8 @@ describe("computeMergedPeerlist", () => {
     })
 
     it("ignores contributions from other rounds", async () => {
-        contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
-        contributePeerlist(102, "c2", [obs(STALE_PEER, 101, "hash-101")])
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        await contributePeerlist(102, "c2", [obs(STALE_PEER, 101, "hash-101")])
         const merged = await merge()
         expect(merged).not.toContain(REPORTED_PEER)
         expect(merged).not.toContain(STALE_PEER)
@@ -370,7 +477,7 @@ describe("computeMergedPeerlist", () => {
 
     it("returns the unfiltered quorum set when no validators exist", async () => {
         validatorAddresses = []
-        contributePeerlist(101, "c1", [obs(NON_VALIDATOR)])
+        await contributePeerlist(101, "c1", [obs(NON_VALIDATOR)])
         const merged = await merge(SOLO)
         expect(merged).toContain(NON_VALIDATOR)
     })
@@ -380,7 +487,7 @@ describe("computeMergedPeerlist", () => {
         process.env.DEMOS_REQUIRE_VALIDATORS = "true"
         try {
             validatorAddresses = []
-            contributePeerlist(101, "c1", [obs(NON_VALIDATOR)])
+            await contributePeerlist(101, "c1", [obs(NON_VALIDATOR)])
             await expect(merge(SOLO)).rejects.toThrow(
                 /DEMOS_REQUIRE_VALIDATORS/,
             )
@@ -398,7 +505,7 @@ describe("contributePeerlist", () => {
     it("accepts 0x-prefixed identities", async () => {
         const prefixed = "0x" + REPORTED_PEER
         validatorAddresses = [OUR_KEY, SYNCED_PEER, prefixed]
-        contributePeerlist(101, "c1", [obs(prefixed)])
+        await contributePeerlist(101, "c1", [obs(prefixed)])
         const merged = await merge(SOLO)
         expect(merged).toContain(prefixed)
     })
@@ -406,7 +513,7 @@ describe("contributePeerlist", () => {
     it("normalises 0x-prefixed identity case", async () => {
         const prefixed = "0x" + REPORTED_PEER
         validatorAddresses = [OUR_KEY, SYNCED_PEER, prefixed]
-        contributePeerlist(101, "c1", [
+        await contributePeerlist(101, "c1", [
             obs("0X" + REPORTED_PEER.toUpperCase()),
         ])
         const merged = await merge(SOLO)
@@ -414,7 +521,7 @@ describe("contributePeerlist", () => {
     })
 
     it("drops malformed entries and normalises case", async () => {
-        contributePeerlist(101, "c1", [
+        await contributePeerlist(101, "c1", [
             obs(REPORTED_PEER.toUpperCase()),
             obs("not-hex!"),
             { identity: REPORTED_PEER } as unknown as SyncObservation,
@@ -437,7 +544,7 @@ describe("contributePeerlist", () => {
             { length: MERGE_PEERLIST_MAX_ENTRIES_PER_PEER + 50 },
             (_, i) => obs(i.toString(16).padStart(64, "0")),
         )
-        contributePeerlist(101, "c1", flood)
+        await contributePeerlist(101, "c1", flood)
         const merged = await merge(SOLO)
         expect(merged.length).toBeLessThanOrEqual(
             MERGE_PEERLIST_MAX_ENTRIES_PER_PEER,
@@ -445,8 +552,8 @@ describe("contributePeerlist", () => {
     })
 
     it("replaces a contributor's previous report instead of accumulating", async () => {
-        contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
-        contributePeerlist(101, "c1", [obs(STALE_PEER)])
+        await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        await contributePeerlist(101, "c1", [obs(STALE_PEER)])
         const merged = await merge(SOLO)
         expect(merged).not.toContain(REPORTED_PEER)
         expect(merged).toContain(STALE_PEER)
@@ -454,24 +561,24 @@ describe("contributePeerlist", () => {
 
     it("keeps the round's contributions when a peer names a far-future height", async () => {
         for (const c of ["c1", "c2", "c3"]) {
-            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+            await contributePeerlist(101, c, [obs(REPORTED_PEER)])
         }
-        contributePeerlist(1100, "c1", [obs(STALE_PEER)])
+        await contributePeerlist(1100, "c1", [obs(STALE_PEER)])
         expect(await merge()).toEqual([REPORTED_PEER])
     })
 
     it("records the round's contributions that arrive after a far-future one", async () => {
-        contributePeerlist(1100, "c1", [obs(STALE_PEER)])
+        await contributePeerlist(1100, "c1", [obs(STALE_PEER)])
         for (const c of ["c1", "c2", "c3"]) {
-            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+            await contributePeerlist(101, c, [obs(REPORTED_PEER)])
         }
         expect(await merge()).toEqual([REPORTED_PEER])
     })
 
     it("refuses a height two past our tip, the nearest one that would reset the round", async () => {
-        contributePeerlist(102, "c1", [obs(STALE_PEER, 101, "hash-101")])
+        await contributePeerlist(102, "c1", [obs(STALE_PEER, 101, "hash-101")])
         for (const c of ["c1", "c2", "c3"]) {
-            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+            await contributePeerlist(101, c, [obs(REPORTED_PEER)])
         }
         expect(await merge()).toEqual([REPORTED_PEER])
     })
@@ -499,16 +606,16 @@ describe("contributePeerlist", () => {
 
         it("records contributions for the round it opened", async () => {
             for (const c of ["c1", "c2", "c3"]) {
-                contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
+                await contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
             }
             expect(await merge(SHARD, ROUND)).toEqual([REPORTED_PEER])
         })
 
         it("still refuses a height past that round", async () => {
             for (const c of ["c1", "c2", "c3"]) {
-                contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
+                await contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
             }
-            contributePeerlist(ROUND + 1, "c1", [obs(STALE_PEER, 102, "hash-102")])
+            await contributePeerlist(ROUND + 1, "c1", [obs(STALE_PEER, 102, "hash-102")])
             expect(await merge(SHARD, ROUND)).toEqual([REPORTED_PEER])
         })
     })
@@ -517,7 +624,7 @@ describe("contributePeerlist", () => {
         const tip = getSharedState.lastBlockNumber
         getSharedState.lastBlockNumber = undefined as unknown as number
         try {
-            contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+            await contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
         } finally {
             getSharedState.lastBlockNumber = tip
         }
@@ -525,10 +632,10 @@ describe("contributePeerlist", () => {
     })
 
     it("rejects non-integer blockRefs", async () => {
-        contributePeerlist("101" as unknown as number, "c1", [
+        await contributePeerlist("101" as unknown as number, "c1", [
             obs(REPORTED_PEER),
         ])
-        contributePeerlist(101.5, "c1", [obs(REPORTED_PEER)])
+        await contributePeerlist(101.5, "c1", [obs(REPORTED_PEER)])
         const merged = await merge(SOLO)
         expect(merged).not.toContain(REPORTED_PEER)
     })
