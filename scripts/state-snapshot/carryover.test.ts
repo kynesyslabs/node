@@ -46,4 +46,12 @@ describe("launchValidatorRows", () => {
         expect(() => launchValidatorRows([entry(0, { nft_mint: "" })])).toThrow("nft_mint must be null")
         expect(() => launchValidatorRows([entry(0, { nft_proof_tx: 5 })])).toThrow("nft_proof_tx must be null")
     })
+
+    it("accepts the template's staked_amount \"0\" for an NFT seat and refuses it without one", () => {
+        const [row] = launchValidatorRows([entry(0, { staked_amount: "0", nft_mint: MINT, nft_owner: OWNER, nft_proof_tx: SIG })])
+        expect(row.staked_amount).toBe("0")
+        expect(() => launchValidatorRows([entry(1, { staked_amount: "0" })])).toThrow("needs nft_mint")
+        expect(() => launchValidatorRows([entry(2, { staked_amount: "-1" })])).toThrow("non-negative decimal string")
+        expect(() => launchValidatorRows([entry(3, { staked_amount: "01" })])).toThrow("non-negative decimal string")
+    })
 })
