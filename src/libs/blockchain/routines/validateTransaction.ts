@@ -31,6 +31,7 @@ import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
+import { decryptInnerTx } from "@/libs/l2ps/innerTxDecrypt"
 import { normalizePubkey, withDerivedFeeEdits } from "../gcr/handleGCR"
 import {
     derivedGasEdit,
@@ -600,7 +601,7 @@ async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
             return `[Tx Validation] [BALANCE ERROR] L2PS network ${l2psUid} is not loaded on this node — cannot verify sender balance\n`
         }
 
-        const decryptedTx = await l2psInstance.decryptTx(tx as any)
+        const decryptedTx = await decryptInnerTx(l2psInstance, tx as any, "admit")
         if (!decryptedTx?.content?.from) {
             return "[Tx Validation] [BALANCE ERROR] L2PS payload decryption produced no sender — cannot verify balance\n"
         }

@@ -1044,6 +1044,26 @@ this restart is a fallback there.
     session's life, up to 8 per session, so the broadcast is answered from
     it without a second fetch from the origin; the body is kept at most
     120 s within a 256 MiB node-wide budget. Nothing to do on upgrade.
+- From `v1.0.0-rc.16`:
+  - L2PS inner transactions are opened with the genesis chain id
+    (`properties.id`) and judged by the signature rule L1 applies to the
+    next block. Once `signatureDomain` is active (mainnet: block 0) an
+    inner transaction signed over `demos-tx:v1:<chainId>:<hash>`, as SDK
+    4.0.24 signs it, is admitted at confirm, by the L2PS submit handler and
+    when the settlement aggregator opens a queued row. Before this release
+    every such transfer was refused with `Decrypted transaction signature
+    does not verify`. At those points an inner transaction signed over the
+    legacy bare hash is refused after activation, and one signed for
+    another chain id is always refused. Rows the node already took (the
+    sender's queued transfers it counts against the balance, and account
+    history) open with either form, so a row admitted before activation
+    still shows and still counts. Before activation nothing changes. A
+    legacy-signed row still queued when the fork activates (testnets only;
+    mainnet activates at block 0) is not settled; its sender signs it
+    again. Validators never decrypt inner transactions when they check a
+    block, so nodes on mixed versions agree on blocks, but a subnet member
+    still on rc.15 refuses every transfer: upgrade every member of a
+    subnet. Nothing else to do on upgrade.
 
 ## Known limits
 

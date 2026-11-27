@@ -8,6 +8,7 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
+import { decryptInnerTx } from "@/libs/l2ps/innerTxDecrypt"
 import log from "@/utilities/logger"
 import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/executedBacklogGuard"
@@ -66,7 +67,7 @@ async function decryptAndValidate(
 ): Promise<{ decryptedTx: Transaction | null; error: string | null }> {
     let decryptedTx
     try {
-        decryptedTx = await l2psInstance.decryptTx(l2psTx)
+        decryptedTx = await decryptInnerTx(l2psInstance, l2psTx, "admit")
     } catch (error) {
         return {
             decryptedTx: null,
@@ -181,7 +182,10 @@ async function queuedTransfersOf(
         if (!instances.has(row.l2ps_uid)) instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid))
         const instance = instances.get(row.l2ps_uid)
         if (!instance) throw new Error(`subnet ${row.l2ps_uid} of a queued transfer is not loaded`)
-        const inner = await instance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
+        // Rows this node already took. One admitted with a legacy signature
+        // before signatureDomain activated still opens, so it keeps counting
+        // against the sender's balance instead of refusing the sender.
+        const inner = await decryptInnerTx(instance, row.encrypted_payload as unknown as L2PSTransaction, "stored")
         const opened = openSettlementTransfer(inner as never, row.encrypted_hash ?? "")
         if (opened.ok === false) throw new Error(`a queued transfer does not open: ${opened.reason}`)
         const { nonce, amount, fee } = opened.transfer
