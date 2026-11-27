@@ -2137,6 +2137,8 @@ swap_image() { # $1 node
     jq --arg s "node-$1" --arg img "${SWAP_IMAGE}" '.services[$s].image = $img' \
         "${RUN_DIR}/compose.yml" > "${tmp}" && mv -f "${tmp}" "${RUN_DIR}/compose.yml" || return 1
     dc stop -t 0 "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
+    # -v: the old container's anonymous volumes would outlive the run
+    dc rm -f -v "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
     dc up -d --no-deps "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
     cid=$(cid_of "$1") && [ -n "${cid}" ] || return 1
     [ "$(bdocker inspect -f '{{.Image}}' "${cid}" 2>/dev/null)" = "${SWAP_IMAGE_ID}" ] || return 1
