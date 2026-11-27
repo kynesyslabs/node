@@ -6,12 +6,34 @@ import { XMScript } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 
+/**
+ * Most operations one XM script may carry. digest refuses a script with
+ * more, or whose operations are not an ordinary object (prototype
+ * Object.prototype or null), before any of them runs.
+ */
+export const MAX_XM_OPERATIONS = 32
+
 export default class MultichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript) {
         const disabled = featureDisabledMessage("xm")
         if (disabled) {
             return { success: false, message: disabled, results: {} }
+        }
+        const operations: unknown = data?.operations
+        if (
+            typeof operations !== "object" ||
+            operations === null ||
+            Array.isArray(operations) ||
+            (Object.getPrototypeOf(operations) !== Object.prototype &&
+                Object.getPrototypeOf(operations) !== null) ||
+            Object.keys(operations).length > MAX_XM_OPERATIONS
+        ) {
+            return {
+                success: false,
+                message: `XM script refused: operations must be an object of at most ${MAX_XM_OPERATIONS} entries`,
+                results: {},
+            }
         }
         log.debug("\n\n")
         log.debug("[XM Script full digest]")

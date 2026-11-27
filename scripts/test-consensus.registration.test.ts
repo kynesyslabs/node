@@ -10,3 +10,11 @@ it("runs the RapidAPI configuration and Twitter request regressions in CI", () =
     expect(files).toContain("src/config/loader.rapidApi.test.ts")
     expect(files).toContain("src/libs/identity/tools/twitter.request.test.ts")
 })
+
+it("runs the cross-chain dispatcher tests in CI", () => {
+    const files = execFileSync("bash", [join(import.meta.dir, "test-consensus.sh"), "--list"], {
+        encoding: "utf8",
+    }).trim().split("\n")
+
+    expect(files).toContain("src/features/multichain/XMDispatcher.test.ts")
+})
