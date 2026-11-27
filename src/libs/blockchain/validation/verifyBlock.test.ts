@@ -1,4 +1,5 @@
 import {
+    checkKnownBlockOwnSignature,
     checkTimestampAgainstParent,
     checkTimestampNotAhead,
     verifyBlock,
@@ -369,6 +370,18 @@ describe("verifyBlock", () => {
     })
 
     describe("own-key self-check", () => {
+        it("checks a known block only when our certificate entry verifies", async () => {
+            const block = makeBlock()
+            await checkKnownBlockOwnSignature(block)
+            expect(checkOwnSignature).toHaveBeenCalledWith({
+                number: 10, hash: "valid-hash", timestamp: 1500,
+            })
+            checkOwnSignature.mockClear()
+            verifyingSigners.delete(A)
+            await checkKnownBlockOwnSignature(block)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
         it("checks an accepted block that carries our verified signature", async () => {
             await verifyBlock(makeBlock())
             expect(checkOwnSignature).toHaveBeenCalledWith({
@@ -547,6 +560,47 @@ describe("verifyBlock", () => {
             } finally {
                 state.publicKeyHex = A
             }
+        })
+
+        describe("on a known block", () => {
+            it("checks the spelling the quorum would count, verifying only our key", async () => {
+                const block = signed({ [A.toUpperCase()]: "01", [A]: FORGED, [B]: "02" })
+                await checkKnownBlockOwnSignature(block)
+                expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+                expect(verifiedKeys.every(key => key === A)).toBe(true)
+            })
+
+            it("checks the first of many spellings with one verify for the tally", async () => {
+                const block = signed(
+                    Object.fromEntries(
+                        spellingsOfA.map((key, i) => [key, i === 0 ? "01" : FORGED]),
+                    ),
+                )
+                await checkKnownBlockOwnSignature(block)
+                expect(checkOwnSignature).toHaveBeenCalledTimes(1)
+                expect(verifiesOfA()).toBe(2)
+            })
+
+            it("does not check a later spelling the quorum would not count", async () => {
+                const block = signed({ [A]: FORGED, [A.toUpperCase()]: "01" })
+                await checkKnownBlockOwnSignature(block)
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+            })
+
+            it("looks at the exact key only when we are outside the signer pool", async () => {
+                pool = [B, C, D]
+                await checkKnownBlockOwnSignature(signed({ [A.toUpperCase()]: "01" }))
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+                await checkKnownBlockOwnSignature(signed({ [A]: "01" }))
+                expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+            })
+
+            it("reads no signer pool for a copy without our key", async () => {
+                pool = new Error("pool read")
+                await checkKnownBlockOwnSignature(signed({ [B]: "02", [C]: "03" }))
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+                expect(verifiedKeys).toEqual([])
+            })
         })
 
         it("looks only at blocks from the activation height on", async () => {

@@ -49,3 +49,27 @@ export function sizeValidator(limits, onOversized) {
         return "reject"
     }
 }
+
+/**
+ * The gossipsub validator of each of `topics`: the size bound, then, where
+ * `after` names one, that topic's own check, which sees only messages within
+ * the bound. Gossipsub keeps one validator per topic and a second set would
+ * replace the first, so every check of a topic is chained here.
+ */
+export function topicValidatorsFor(topics, limits, onOversized, after = {}) {
+    const sized = sizeValidator(limits, onOversized)
+    const validators = new Map()
+    for (const topic of topics) {
+        const next = Object.hasOwn(after, topic) ? after[topic] : undefined
+        validators.set(
+            topic,
+            next
+                ? (peer, msg) => {
+                      const verdict = sized(peer, msg)
+                      return verdict === "accept" ? next(peer, msg) : verdict
+                  }
+                : sized,
+        )
+    }
+    return validators
+}
