@@ -40,7 +40,11 @@ interface Tx {
     reference_block: number
     blockNumber?: number
     status?: string
-    content: { nonce: number; gcr_edits: { type: string; account: string }[] }
+    content: {
+        nonce: number
+        gcr_edits: { type: string; account: string }[]
+        reference_block: number
+    }
 }
 
 const mempool = new Map<string, Tx>()
@@ -117,7 +121,7 @@ const reported = (hash: string, round: number, source: string, txs = [hash]) => 
 })
 
 function tx(hash: string, nonce: number, account = "acc", reference_block = 9): Tx {
-    return { hash, reference_block, content: { nonce, gcr_edits: [{ type: "nonce", account }] } }
+    return { hash, reference_block, content: { nonce, gcr_edits: [{ type: "nonce", account }], reference_block } }
 }
 
 let dir: string

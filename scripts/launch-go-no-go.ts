@@ -172,7 +172,7 @@ export interface GoNoGoDecision {
     /** Launch validators per beneficial owner, for the entries that name one. */
     ownerCounts: Record<string, number>
     regionCounts: Record<string, number>
-    /** Most validators any single operator or provider may hold: the committee seats q can spare. */
+    /** Most validators a single provider may hold, and the bound owner and operator warnings use: the committee seats q can spare. */
     groupCap: number
 }
 
@@ -216,6 +216,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "l2psSettlement",
     "tlsnVerified",
     "keylessWeb2Identity",
+    "peerlistFloor",
 ]
 
 /**
@@ -227,6 +228,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
  */
 export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
     "atomicWork",
+    "canonicalSigners",
     "networkGovernance",
     "l2psGate",
     "tlsnDisabled",
@@ -309,10 +311,10 @@ export interface ValidatorTable {
     reasons: string[]
     /** Launch validators whose entry has no region: a NO-GO only for the --plan check. */
     missingRegion: string[]
-    /** Launch validators whose entry names no owner: a NO-GO on the mainnet chain id (ownerReasons). */
+    /** Launch validators whose entry names no owner: a warning on the mainnet chain id (missingOwnerWarnings). */
     missingOwner: string[]
-    /** The owner cap and vote-share reasons, also listed in reasons. */
-    ownerReasons: string[]
+    /** Owner and operator counts above the committee cap or a third of the votes: warnings, never NO-GO. */
+    concentration: string[]
     /** The region share reasons, also listed in reasons. */
     regionReasons: string[]
     warnings: string[]
@@ -320,7 +322,7 @@ export interface ValidatorTable {
     providerCounts: Record<string, number>
     ownerCounts: Record<string, number>
     regionCounts: Record<string, number>
-    /** Most validators any single operator or provider may hold: the committee seats q can spare. */
+    /** Most validators a single provider may hold, and the bound owner and operator warnings use: the committee seats q can spare. */
     groupCap: number
     /** Seats of the first committee: min(launch validators, shardSize). */
     committeeSeats: number
@@ -328,9 +330,11 @@ export interface ValidatorTable {
 
 /**
  * The launch validator table rules: every launch validator has an operator
- * and a provider, no operator, provider or beneficial owner runs more than
- * the committee can lose with q still signing, none holds more than a third
- * of the votes, and no region holds a third of the launch validators.
+ * and a provider, no provider runs more than the committee can lose with q
+ * still signing or holds more than a third of the votes, and no region holds
+ * a third of the launch validators. Owners and operators may run as many
+ * validators as they hold seats for; above the same bounds they are
+ * reported in concentration and warnings, not refused.
  */
 export function validatorTable(
     launchIds: string[],
@@ -366,7 +370,7 @@ export function validatorTable(
     const unmapped = launch.filter(id => !entries.has(id) && !incomplete.has(id))
     const badEntries = launch.filter(id => incomplete.has(id))
     if (operatorsMap === null) {
-        reasons.push("no operator/provider map given; the operator cap cannot be checked")
+        reasons.push("no operator/provider map given; the provider cap cannot be checked")
     } else {
         if (unmapped.length > 0) {
             reasons.push(`${unmapped.length} launch validators have no operator/provider entry: ${unmapped.join(", ")}`)
@@ -386,25 +390,33 @@ export function validatorTable(
     const operatorCounts = countBy(launch, id => entries.get(id)?.operator ?? null)
     const providerCounts = countBy(launch, id => entries.get(id)?.provider ?? null)
     // An entry without an owner is left out rather than counted under its
-    // operator: the operator cap already covers it, and on mainnet the
-    // missing owner is a NO-GO of its own
+    // operator: its operator count is still reported, and on mainnet the
+    // missing owner is a warning of its own
     const ownerCounts = countBy(launch, id => entries.get(id)?.owner ?? null)
     const regionCounts = countBy(launch, id => {
         const region = entries.get(id)?.region
         return region === undefined ? null : groupName(region)
     })
-    const ownerReasons: string[] = []
+    // A provider is infrastructure many parties share, one outage from a stall,
+    // so it stays capped. Owners and operators are parties, and the network
+    // lets a party run as many validators as it holds seats for: a committee
+    // it fills can stall or censor while it holds the seats, and that is the
+    // accepted risk, so their counts are reported instead of refused
+    const concentration: string[] = []
     for (const [kind, counts] of [
         ["operator", operatorCounts],
         ["provider", providerCounts],
         ["owner", ownerCounts],
     ] as const) {
-        const out = kind === "owner" ? ownerReasons : reasons
+        const out = kind === "provider" ? reasons : concentration
         for (const [name, n] of Object.entries(counts)) {
             if (n > groupCap) {
                 out.push(
-                    `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
-                        `(shardSize ${shardSize} - quorum ${quorum})`,
+                    kind === "provider"
+                        ? `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
+                              `(shardSize ${shardSize} - quorum ${quorum})`
+                        : `${kind} ${name} runs ${n} of ${launch.length} launch validators, more than the ${groupCap} ` +
+                              `seats a committee can lose (shardSize ${shardSize} - quorum ${quorum})`,
                 )
             }
             // One validator, one vote (quorumThreshold counts signatures). The
@@ -427,13 +439,14 @@ export function validatorTable(
             regionReasons.push(`region ${name} hosts ${n} of ${launch.length} launch validators, a third or more of the set`)
         }
     }
-    reasons.push(...ownerReasons, ...regionReasons)
+    reasons.push(...regionReasons)
+    warnings.push(...concentration)
     return {
         entries,
         reasons,
         missingRegion,
         missingOwner,
-        ownerReasons,
+        concentration,
         regionReasons,
         warnings,
         operatorCounts,
@@ -453,26 +466,32 @@ function onMainnetChainId(genesis: { properties?: unknown } | null): boolean {
 }
 
 /**
- * NO-GO reasons for launch validators whose table entry names no
- * beneficial owner, on the mainnet chain id. The operator column alone
- * cannot show one buyer behind several operators.
+ * Warnings for launch validators whose table entry names no beneficial
+ * owner, on the mainnet chain id. The operator column alone cannot show one
+ * buyer behind several operators, so their concentration goes unreported.
  */
-export function ownerRequiredReasons(genesis: { properties?: unknown } | null, table: ValidatorTable): string[] {
+export function missingOwnerWarnings(genesis: { properties?: unknown } | null, table: ValidatorTable): string[] {
     if (!onMainnetChainId(genesis) || table.missingOwner.length === 0) return []
     return [
-        `${table.missingOwner.length} launch validators have no owner in the operator map, which the mainnet ` +
-            `chain id requires: ${table.missingOwner.join(", ")}`,
+        `${table.missingOwner.length} launch validators have no owner in the operator map, so their owner ` +
+            `concentration cannot be reported: ${table.missingOwner.join(", ")}`,
     ]
 }
 
 /**
- * NO-GO reasons for one owner, operator, provider or region holding a
- * third or more of block 0's stake. Stake weighs no consensus vote, but it
- * weighs the governance tally once networkGovernance is on, where more
- * than a third is a veto and two thirds pass a proposal alone.
+ * One owner, operator, provider or region holding a third or more of block
+ * 0's stake. Stake weighs no consensus vote, but it weighs the governance
+ * tally once networkGovernance is on, where more than a third is a veto and
+ * two thirds pass a proposal alone. A provider or region share is a NO-GO
+ * reason; an owner or operator share is concentration, reported as a
+ * warning, since a party may hold as many seats as it buys.
  */
-export function stakeShareReasons(rows: ValidatorRow[], entries: Map<string, OperatorEntry>): string[] {
+export function stakeShare(
+    rows: ValidatorRow[],
+    entries: Map<string, OperatorEntry>,
+): { reasons: string[]; concentration: string[] } {
     const reasons: string[] = []
+    const concentration: string[] = []
     const stakeOf = new Map<string, bigint>()
     for (const row of activeAtBlockZero(rows)) {
         const id = norm(String(row.address))
@@ -485,9 +504,9 @@ export function stakeShareReasons(rows: ValidatorRow[], entries: Map<string, Ope
             reasons.push(`launch validator ${id} has staked_amount ${JSON.stringify(raw)}, not a decimal integer`)
         }
     }
-    if (reasons.length > 0) return reasons
+    if (reasons.length > 0) return { reasons, concentration }
     const total = [...stakeOf.values()].reduce((a, b) => a + b, 0n)
-    if (total === 0n) return []
+    if (total === 0n) return { reasons, concentration }
     const dimensions: Array<[string, (e: OperatorEntry) => string | undefined]> = [
         ["owner", e => e.owner],
         ["operator", e => e.operator],
@@ -505,11 +524,12 @@ export function stakeShareReasons(rows: ValidatorRow[], entries: Map<string, Ope
         for (const [name, sum] of sums) {
             if (sum * 3n >= total) {
                 const percent = Number((sum * 10000n) / total) / 100
-                reasons.push(`${kind} ${name} holds ${sum} of the ${total} block 0 stake (${percent}%), a third or more`)
+                const out = kind === "owner" || kind === "operator" ? concentration : reasons
+                out.push(`${kind} ${name} holds ${sum} of the ${total} block 0 stake (${percent}%), a third or more`)
             }
         }
     }
-    return reasons
+    return { reasons, concentration }
 }
 
 /**
@@ -1311,9 +1331,10 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize, firstCommitteePins(genesis)) : null
     const decision = decideGoNoGo({ ...base, committee })
     const table = validatorTable(base.launchValidators, input.operators, input.shardSize)
+    const share = rows ? stakeShare(rows, table.entries) : { reasons: [], concentration: [] }
+    decision.warnings.push(...missingOwnerWarnings(genesis, table), ...share.concentration)
     decision.reasons.push(
-        ...ownerRequiredReasons(genesis, table),
-        ...(rows ? stakeShareReasons(rows, table.entries) : []),
+        ...share.reasons,
         ...(blockZero?.reasons ?? []),
         ...blockZeroNftReasons(genesis, blockZero),
         ...mainnetGenesisReasons(genesis),
@@ -1344,6 +1365,8 @@ export interface PlanCheck {
     name: string
     ok: boolean
     details: string[]
+    /** Reported for the owners to read; never fails the plan. */
+    advisory?: boolean
 }
 
 export interface LaunchPlanInput {
@@ -1373,14 +1396,17 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
     const quorum = quorumThreshold(input.shardSize)
     const genesisReasons = mainnetGenesisReasons(input.genesis)
     const forkReasons = mainnetForkReasons(input.genesis)
-    const ownedOrRegional = new Set([...table.ownerReasons, ...table.regionReasons])
-    const groupReasons = table.reasons.filter(r => !ownedOrRegional.has(r))
+    const regional = new Set(table.regionReasons)
+    const groupReasons = table.reasons.filter(r => !regional.has(r))
     const capReasons = groupReasons.filter(r => / runs \d+ of \d+ launch validators; the cap is /.test(r))
     const powerReasons = groupReasons.filter(r => r.includes("of the voting power"))
     const entryReasons = groupReasons.filter(r => !capReasons.includes(r) && !powerReasons.includes(r))
     if (table.missingRegion.length > 0) {
         entryReasons.push(`${table.missingRegion.length} launch validators have no region: ${table.missingRegion.join(", ")}`)
     }
+    const share = input.blockZero
+        ? stakeShare(input.blockZero.rows, table.entries)
+        : { reasons: [], concentration: [] }
     const pinned = new Set(PINNED_SHARD_IDENTITIES.map(norm))
     return [
         check("genesis forks", forkReasons),
@@ -1417,11 +1443,16 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
                 : [],
         ),
         check("validator table", entryReasons),
-        check("operator and provider cap", capReasons),
-        check("voting power per operator and provider", powerReasons),
-        check("beneficial owner cap", [...ownerRequiredReasons(input.genesis, table), ...table.ownerReasons]),
+        check("provider cap", capReasons),
+        check("voting power per provider", powerReasons),
+        {
+            name: "owner and operator concentration",
+            ok: true,
+            advisory: true,
+            details: [...missingOwnerWarnings(input.genesis, table), ...table.concentration, ...share.concentration],
+        },
         check("region share", table.regionReasons),
-        check("stake share", input.blockZero ? stakeShareReasons(input.blockZero.rows, table.entries) : []),
+        check("stake share", share.reasons),
         check(
             "pinned identities",
             launch.filter(v => pinned.has(v)).map(v => `launch validator is a pinned committee identity: ${v}`),
@@ -1797,12 +1828,13 @@ async function runPlan(
         )
     } else {
         for (const c of checks) {
-            console.log(`${c.ok ? "PASS" : "FAIL"} ${c.name}${c.ok ? "" : `: ${c.details.join("; ")}`}`)
+            const status = !c.ok ? "FAIL" : c.advisory && c.details.length > 0 ? "NOTE" : "PASS"
+            console.log(`${status} ${c.name}${status === "PASS" ? "" : `: ${c.details.join("; ")}`}`)
         }
         console.log(
             `operators: ${JSON.stringify(table.operatorCounts)} providers: ${JSON.stringify(table.providerCounts)} ` +
                 `owners: ${JSON.stringify(table.ownerCounts)} regions: ${JSON.stringify(table.regionCounts)} ` +
-                `cap ${table.groupCap} of ${table.committeeSeats} first-committee seats`,
+                `provider cap ${table.groupCap} of ${table.committeeSeats} first-committee seats`,
         )
     }
     return checks.every(c => c.ok) ? 0 : 1
@@ -2000,7 +2032,7 @@ async function main(): Promise<number> {
         }
         console.log(
             `operators: ${JSON.stringify(decision.operatorCounts)} providers: ${JSON.stringify(decision.providerCounts)} ` +
-                `owners: ${JSON.stringify(decision.ownerCounts)} regions: ${JSON.stringify(decision.regionCounts)} cap ${decision.groupCap}`,
+                `owners: ${JSON.stringify(decision.ownerCounts)} regions: ${JSON.stringify(decision.regionCounts)} provider cap ${decision.groupCap}`,
         )
         for (const w of decision.warnings) console.log(`warning: ${w}`)
         if (decision.go) {

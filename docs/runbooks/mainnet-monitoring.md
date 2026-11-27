@@ -139,7 +139,7 @@ The node-specific alerts fire per validator (`instance` label). `DeadMansSwitch`
 | BlockHashMismatch | 4 or more peer disagreements on the candidate block hash within 10 min, held 5 min (3 does not fire: `increase()` extrapolates, so 3 events read slightly above 3 and the threshold is 3.5). The count is per disagreeing peer, not per round: one round where 4 peers refuse this node's candidate counts 4. Not latched: it resolves once the 10 min window has passed | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. |
 | ConflictingBlock | a peer holds a different block with a verified quorum at a height where this node has one, **latched 7 days** | critical | A fork. The node does not switch chains on its own. Search the log for `[FORK]` for the height and both hashes, decide which chain to keep. See "Clearing a latched alert". |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, **latched 7 days** | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
-| SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block that committed but whose follow-up failed, or whose commit could not be confirmed; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting. The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting. For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. |
+| SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block that committed but whose follow-up failed, or whose commit could not be confirmed; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting. The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting. If it is 0 and the log says the signing record belongs to another key, run that key's identity, or, after confirming the key now configured runs nowhere else, move that key's signing-state files away together with its identity. For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. |
 | PrecommitEquivocation | a committee member precommitted two different blocks at one height and round, **latched 7 days** | critical | That member's key runs twice or its signing state was rolled back. The log line `[commitLock] Equivocation` names it. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
 | MissedSignatures | 3 or more blocks in 15 min where the node was drawn into the shard and did not sign | info, no notification | A trend signal, not an alarm. On the 4-node soak it was higher when healthy than during real faults, so it is visible in Prometheus and Grafana only and notifies nobody. No mainnet data yet: revisit after launch week. Read it next to `NodeDown` and `HeightStalled`, never alone. |
 | ForkScheduleMismatch | at least one validator reports a different fork schedule, held 5 min | critical | Genesis fork schedules differ; see `fork-schedule-policy.md`. |
@@ -159,6 +159,7 @@ loaded from the same directory and use the same routing. Among them:
 | PeersZero | `demos_peer_online_count <= 1` for 5 min; keeps firing 5 min after it clears | warning | The validator sees no other peer. The gauge counts the node itself (`PeerManager.isPeerFresh`), so 1 means every real peer is gone and the rule cannot test for 0. Check network egress, the bootstrap peer list and the peers' own state. |
 | DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
 | DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
+| DbDown | `demos_db_up == 0` for 1 min: the node's own `SELECT 1` (every 15 s, 5 s timeout) fails or gets no answer | critical | The validator cannot reach its Postgres. It keeps running and serving RPC but cannot store or sync blocks, and `HeightStalled` does not see it. See [Postgres down](#postgres-down-dbdown). A node that stops exporting metrics is `NodeDown` instead. |
 | DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. It proves only that Prometheus, Alertmanager and the path to the dead-man receiver work. If the external watchdog stops receiving it, one of those is down: check the monitoring host first. It does **not** prove that the `paging` or `slack` webhooks work: a wrong or forgotten URL there fails silently while the heartbeat stays healthy (see the test alert in setup step 4). |
 
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
@@ -319,6 +320,60 @@ least two servers, and only if no other group is as large).
 When `ClockOffset` fires, on the validator: `chronyc tracking` (or
 `timedatectl timesync-status`) shows the source and the offset. Fix the time
 service; the node needs no restart, the next probe clears the alert.
+
+## Postgres down (DbDown)
+
+Every 15 s the node runs `SELECT 1` through its own connection pool with a 5 s
+timeout, on a timer of its own, never on the consensus path:
+
+- `demos_db_up`: 1 when the last probe answered, 0 when it failed or got no
+  answer within 5 s. While an unanswered probe is still pending, the next ones
+  report 0 without sending another query.
+- `demos_db_probe_duration_seconds`: how long the last successful probe took,
+  including getting a pool connection, so a busy node pool also raises it.
+  It is not updated by failed probes, so it is stale while `demos_db_up` is 0.
+
+The log has `[DB] Postgres probe failed (demos_db_up=0): <error>` when the
+probe starts failing and again each time the error changes while it keeps
+failing, and `[DB] Postgres answers the probe again` once when it recovers.
+
+When Postgres goes away after boot the node does not exit. Its queries fail
+(`[SCHEDULER] Task "consensus_trigger" tick failed: ...` in the log), `/health`
+answers 503 with `status: failing` and `mempool_size: null`, and the main loop
+heartbeat stays fresh, so `NodeFailing` and `HeightStalled` stay quiet. If
+Postgres drops while the node is storing a block, the node cannot tell
+whether the block committed and stops (`[SIGNING] stopped until this process
+exits:`), which is `NodeDown`.
+
+`DbDown` fires once `demos_db_up` has been 0 for 1 min. An outage with at
+least one good probe each minute, for example Postgres crash-looping and
+restarting, does not fire it; it is seen only through `HeightStalled`, if
+blocks stop (the node's own queries succeed between restarts).
+
+When `DbDown` fires, on the validator:
+
+1. Read the error in the latest `[DB] Postgres probe failed` log line (a new
+   line is logged when the error changes). `ECONNREFUSED`,
+   `ENOTFOUND` or `EAI_AGAIN`: Postgres is not running, or `PG_HOST` /
+   `PG_PORT` are wrong.
+   `no answer within 5000 ms`: Postgres, or the network path to it, hangs, or
+   the node's own connection pool is fully in use. Check the node's connections
+   in `pg_stat_activity` before you restart Postgres.
+2. Docker: `docker compose ps postgres` and `docker compose logs --tail 50
+   postgres`, then `docker compose up -d postgres`. Bare-metal `./run`: the
+   container is `postgres_<PG_PORT>` (`docker ps -a --filter name=postgres_`,
+   `docker logs --tail 50 postgres_<PG_PORT>`). External database: the database
+   host and the network path to it.
+3. A full disk stops Postgres. Check free space where Postgres keeps its data:
+   Docker, the `demos_pgdata` volume; `./run`, `postgres_<PG_PORT>/data_<PG_PORT>`
+   in the repository; external, the database host. `DiskSpaceLow` and
+   `DiskSpaceCritical` see that disk only when it is the filesystem of
+   `DISK_SPACE_PATH`.
+4. The pool opens new connections once Postgres answers, so the alert clears
+   with the next probe once the node's pool has a free connection; if it keeps
+   firing while Postgres answers (`psql` works), or the height still does not
+   advance a few minutes later, restart the node. If it stopped meanwhile
+   (`NodeDown`), start it once Postgres is healthy.
 
 ## Block watchdog stays off
 

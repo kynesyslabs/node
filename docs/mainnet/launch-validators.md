@@ -20,7 +20,7 @@ the table; go/no-go reads it as a JSON file. Start from
 | Column | Meaning |
 |---|---|
 | identity (the key) | the validator's public key, lowercase `0x` + 64 hex, as listed in the genesis or the snapshot's `validators.jsonl` |
-| `owner` | the beneficial owner: the person or company that holds the node (bought it, or holds its NFT or licence) and can direct its key, whoever operates it. One name per owner across all their nodes, after KYC. Required on the mainnet chain id |
+| `owner` | the beneficial owner: the person or company that holds the node (bought it, or holds its NFT or licence) and can direct its key, whoever operates it. One name per owner across all their nodes, after KYC. On the mainnet chain id an entry without one is reported, since its owner concentration cannot be counted |
 | `operator` | the organisation that controls the host and the key |
 | `provider` | the cloud or data-centre company the host runs on (`self-hosted` plus the site for own hardware) |
 | `region` | the provider's region or data-centre location |
@@ -34,29 +34,32 @@ With `shardSize` 10 a block needs 7 signatures, so the chain survives 3
 missing committee members and stops at the 4th.
 
 1. `properties.shardSize` is 10.
-2. At least 7 launch validators; every one has an entry with all four
-   columns.
-3. No operator and no provider runs more launch validators than the
-   committee can lose: `min(launch validators, 10) - 7`. That is 3 with 10
-   or more launch validators, 2 with 9, 1 with 8 and 0 with 7: with 9 no
-   operator or provider runs more than 2, with 8 every one is at a
-   different operator and provider, and 7 cannot pass at all.
-4. No operator and no provider holds more than a third of the first
-   committee's votes (more than 3 of 10). One validator is one vote: stake
-   does not weigh votes. Rule 3 implies it at 10 to 13 validators; the
-   check is kept separate so a change of rule 3 cannot loosen it.
+2. At least 7 launch validators; every one has an entry with the
+   operator, provider and region columns.
+3. No provider runs more launch validators than the committee can lose:
+   `min(launch validators, 10) - 7`. That is 3 with 10 or more launch
+   validators, 2 with 9, 1 with 8 and 0 with 7: with 9 no provider runs
+   more than 2, with 8 every one is at a different provider, and 7 cannot
+   pass at all.
+4. No provider holds more than a third of the first committee's votes
+   (more than 3 of 10). One validator is one vote: stake does not weigh
+   votes. Rule 3 implies it at 10 to 13 validators; the check is kept
+   separate so a change of rule 3 cannot loosen it.
 5. No launch validator is one of the pinned committee identities.
-6. On the mainnet chain id every entry names an `owner`, and no owner runs
-   more launch validators than rule 3 allows any operator (3 with 10 or
-   more launch validators) nor more than a third of the first committee's
-   votes. One buyer behind several operators and providers is one party:
-   [validator-concentration.md](validator-concentration.md) shows why the
-   cap is a count of validators, not a share of the set.
+6. There is no limit per owner or operator: anyone runs as many
+   validators as they hold seat NFTs for. An owner or operator above the
+   rule 3 bound (3 with 10 or more launch validators) or a third of the
+   first committee's votes is listed as an advisory note, never a failure,
+   so the counts are known before launch. One buyer behind several
+   operators is one party, so the `owner` column should name them:
+   [validator-concentration.md](validator-concentration.md) shows what a
+   party with 4 or 7 seats of a committee can do.
 7. No region hosts a third or more of the launch validators. A region is
    not one party, so it is not held to the committee cap, but a third of
    the set in one region is one outage away from a stall.
-8. No owner, operator, provider or region holds a third or more of block
-   0's stake (`staked_amount`). Stake weighs no block vote; it weighs the
+8. No provider or region holds a third or more of block 0's stake
+   (`staked_amount`); an owner or operator at a third or more is listed
+   with the rule 6 notes. Stake weighs no block vote; it weighs the
    governance tally once `networkGovernance` is scheduled, where more than
    a third is a veto and two thirds pass a proposal alone.
 
@@ -73,7 +76,9 @@ bun scripts/launch-go-no-go.ts --plan \
 ```
 
 The bot inventory and allocation rule are in [genesis.md](genesis.md#bot-authorization-launch-decision-and-gate).
-Each rule prints one `PASS` or `FAIL` line, followed by the counts per
+Each rule prints one `PASS` or `FAIL` line (the advisory owner and
+operator line prints `NOTE` when it lists anyone, and never fails),
+followed by the counts per
 operator, provider, owner and region. Exit 0 when every check passes, 1 otherwise,
 2 on bad input. `--json` prints the same as JSON. At T-0 the same file is
 passed to the full go/no-go check (`docs/runbooks/launch-go-no-go.md`),

@@ -78,7 +78,12 @@ in Docker's `DOCKER-USER` chain: ufw does not see traffic to published
 container ports, so without it the node ports would be open to anyone. The
 chain lets through established traffic, Docker's own bridges and the allowed
 addresses, and drops the rest of the node port range; it is not persisted
-across a reboot (run the script again). It is idempotent; run it as root on
+across a reboot (run the script again). ufw also opens the node ports to
+Docker's address pools (`default-address-pools` in daemon.json, else the
+defaults 172.16.0.0/12 and 192.168.0.0/16): a container
+reaching a node by its own host's address goes through docker-proxy on
+INPUT, where ufw would drop it, so nodes on one host could not pair. Every
+peer host must be in `--allow-from`, or its nodes cannot reach this one. It is idempotent; run it as root on
 the host (`cloud-drill.sh --prepare` does it over ssh with `sudo -n`):
 
 ```

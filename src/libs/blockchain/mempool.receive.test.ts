@@ -147,7 +147,13 @@ const tx = (hash: string, referenceBlock: number, status = "pending") =>
         status,
         reference_block: referenceBlock,
         blockNumber: 100,
-        content: { type: "demoswork", gcr_edits: [], timestamp: 1_700_000_000_000, nonce: 7 },
+        content: {
+            type: "demoswork",
+            gcr_edits: [],
+            timestamp: 1_700_000_000_000,
+            nonce: 7,
+            reference_block: referenceBlock,
+        },
     }) as any
 
 function resetReceiveState() {
@@ -236,6 +242,27 @@ describe("Mempool.receive admission", () => {
         await Mempool.receive([tx("0xpoisoned", 100, "failed")])
         expect(insertedRows).toHaveLength(1)
         expect(insertedRows[0].status).toBe(TRANSACTION_STATUS.PENDING)
+    })
+
+    it("stores the signed reference block, not the one the peer put beside it", async () => {
+        const relayed = { ...tx("0xa", 100), reference_block: 42 }
+        await Mempool.receive([relayed])
+        expect(insertedRows).toHaveLength(1)
+        expect(insertedRows[0].reference_block).toBe(100)
+    })
+
+    it("judges the window on the signed reference block", async () => {
+        // In the window by the peer's own column, far outside it by content.
+        const stale = { ...tx("0xstale", 1), reference_block: 100 }
+        await Mempool.receive([stale, tx("0xb", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xb"])
+    })
+
+    it("drops a tx whose content carries no reference block", async () => {
+        const bare = tx("0xbare", 100)
+        delete bare.content.reference_block
+        await Mempool.receive([bare, tx("0xb", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xb"])
     })
 
     it("stores the signed timestamp and nonce, not the ones the peer put beside them", async () => {

@@ -313,6 +313,15 @@ class CloudInputs(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.run_dir, "hosts", "1", "inputs", "load", "load-client.ts")))
         self.assertFalse(os.path.exists(os.path.join(self.run_dir, "hosts", "2", "inputs", "load")))
 
+    def test_carryover_seats_not_exempt(self):
+        # carryover.ts refuses nft_exempt; the snapshot's rows without NFT
+        # fields are exempt on a test chain id instead (fromChain)
+        g = self.load("inputs", "genesis.json")
+        self.assertEqual(g["forks"]["nftValidatorGating"]["activationHeight"], 0)
+        self.assertTrue(g["validators"])
+        for v in g["validators"]:
+            self.assertNotIn("nft_exempt", v)
+
     def test_carryover_mounts_and_bind(self):
         g = self.load("inputs", "genesis.json")
         self.assertEqual(g["forks"][CARRYOVER_FORK]["activationHeight"], 0)

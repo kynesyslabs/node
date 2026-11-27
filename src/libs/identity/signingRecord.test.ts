@@ -16,6 +16,7 @@ jest.mock("src/utilities/logger", () => ({
 
 import {
     __resetSigningHalt,
+    bindSigningRecordKey,
     cachedSigningRecord,
     checkBlockSignature,
     currentSigningRecord,
@@ -29,6 +30,7 @@ import {
     signingHaltReason,
     recordBlockSignature,
     loadSigningRecord,
+    SigningKeyMismatchError,
     SigningRecordError,
     signingRecordPath,
 } from "./signingRecord"
@@ -226,6 +228,199 @@ describe("signingRecord", () => {
             expect(() =>
                 checkBlockSignature(identity, round(11, 1010, "bb"), production),
             ).not.toThrow()
+        })
+    })
+
+    describe("record bound to its key", () => {
+        afterEach(() => __resetSigningHalt())
+
+        const KEY_A = "0xaaaa"
+        const KEY_B = "0xbbbb"
+        const readRecord = () =>
+            JSON.parse(fs.readFileSync(signingRecordPath(identity), "utf8"))
+
+        it("writes the node's key into every record", () => {
+            bindSigningRecordKey(identity, KEY_A)
+            expect(fs.existsSync(signingRecordPath(identity))).toBe(false)
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            expect(readRecord().publicKey).toBe(KEY_A)
+            guardBlockSignature(identity, round(11, 1010, "bb"))
+            expect(readRecord().publicKey).toBe(KEY_A)
+        })
+
+        it("refuses a record of another key, at boot and at every signature, and leaves it as it was", () => {
+            bindSigningRecordKey(identity, KEY_A)
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            const before = fs.readFileSync(signingRecordPath(identity), "utf8")
+            __resetSigningHalt()
+
+            let message = ""
+            try {
+                bindSigningRecordKey(identity, KEY_B)
+            } catch (e) {
+                expect(e).toBeInstanceOf(SigningRecordError)
+                message = (e as Error).message
+            }
+            expect(message).toContain(KEY_A)
+            expect(message).toContain(KEY_B)
+            expect(message).toContain(signingRecordPath(identity))
+            expect(message).toContain(
+                `the other ${identity}.* signing-state files away together with the identity they belong to`,
+            )
+
+            expect(() => loadSigningRecord(identity)).toThrow(SigningRecordError)
+            expect(() => currentSigningRecord(identity)).toThrow(SigningRecordError)
+            expect(() =>
+                checkBlockSignature(identity, round(11, 1010, "bb")),
+            ).toThrow(SigningRecordError)
+            expect(() =>
+                recordBlockSignature(identity, round(11, 1010, "bb")),
+            ).toThrow(SigningRecordError)
+            expect(fs.readFileSync(signingRecordPath(identity), "utf8")).toBe(
+                before,
+            )
+            expect(fs.existsSync(`${signingRecordPath(identity)}.lock`)).toBe(
+                false,
+            )
+        })
+
+        // src/index.ts calls haltSigning(message), with no identity file, for
+        // a SigningKeyMismatchError from the boot-time bind, and only for it
+        it("a record of another key at boot stops signing in this process, with no marker", () => {
+            bindSigningRecordKey(identity, KEY_A)
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            __resetSigningHalt()
+            expect(signingStopState(identity).stopped).toBe(false)
+
+            let error: unknown
+            try {
+                bindSigningRecordKey(identity, KEY_B)
+            } catch (e) {
+                error = e
+            }
+            expect(error).toBeInstanceOf(SigningKeyMismatchError)
+            expect(error).toBeInstanceOf(SigningRecordError)
+            haltSigning((error as Error).message)
+
+            expect(signingStopState(identity)).toEqual({
+                stopped: true,
+                markerPresent: false,
+            })
+            expect(signingHaltReason()).toContain(KEY_A)
+            expect(fs.existsSync(signingHaltMarkerPath(identity))).toBe(false)
+            expect(reportSigningHaltMarker(identity)).toBe(false)
+
+            // A restart with the record's key signs again
+            __resetSigningHalt()
+            bindSigningRecordKey(identity, KEY_A)
+            expect(signingStopState(identity).stopped).toBe(false)
+            expect(() =>
+                guardBlockSignature(identity, round(11, 1010, "bb")),
+            ).not.toThrow()
+        })
+
+        it("a damaged record at boot is not a key mismatch", () => {
+            fs.writeFileSync(signingRecordPath(identity), "{not json")
+            let error: unknown
+            try {
+                bindSigningRecordKey(identity, KEY_A)
+            } catch (e) {
+                error = e
+            }
+            expect(error).toBeInstanceOf(SigningRecordError)
+            expect(error).not.toBeInstanceOf(SigningKeyMismatchError)
+        })
+
+        it("a record of another key at boot stops signing even while the record lock is held", () => {
+            bindSigningRecordKey(identity, KEY_A)
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            __resetSigningHalt()
+            // A container recreated soon after a crash mid-write: the lock is
+            // fresh and names another hostname, so it is judged live
+            const lock = `${signingRecordPath(identity)}.lock`
+            fs.writeFileSync(
+                lock,
+                JSON.stringify({ pid: 1, hostname: "elsewhere", at: Date.now() }),
+            )
+
+            // The boot steps of src/index.ts
+            try {
+                bindSigningRecordKey(identity, KEY_B)
+            } catch (error) {
+                if (error instanceof SigningKeyMismatchError) {
+                    haltSigning(error.message)
+                }
+            }
+
+            expect(signingStopState(identity)).toEqual({
+                stopped: true,
+                markerPresent: false,
+            })
+            expect(signingHaltReason()).toContain(KEY_A)
+            expect(fs.existsSync(signingHaltMarkerPath(identity))).toBe(false)
+            expect(fs.existsSync(lock)).toBe(true)
+        })
+
+        it("gives a record without a key the node's key once, keeping the rest", () => {
+            const legacy = {
+                genesisHash: GENESIS,
+                height: 10,
+                timestamp: 1000,
+                hash: "aa",
+                signedAt: 123,
+            }
+            fs.writeFileSync(signingRecordPath(identity), JSON.stringify(legacy))
+            bindSigningRecordKey(identity, KEY_A)
+            expect(readRecord()).toEqual({ ...legacy, publicKey: KEY_A })
+
+            // Bound now: the same record is refused to another key
+            __resetSigningHalt()
+            expect(() => bindSigningRecordKey(identity, KEY_B)).toThrow(
+                SigningRecordError,
+            )
+            // and its history still holds for its own key
+            __resetSigningHalt()
+            bindSigningRecordKey(identity, KEY_A)
+            expect(() =>
+                checkBlockSignature(identity, round(9, 2000, "zz")),
+            ).toThrow(DoubleSignError)
+        })
+
+        it("binds the record behind a symlink in place", () => {
+            const state = path.join(dir, "state")
+            fs.mkdirSync(state)
+            const real = path.join(state, ".demos_identity.signed.json")
+            fs.writeFileSync(
+                real,
+                JSON.stringify({
+                    genesisHash: GENESIS,
+                    height: 10,
+                    timestamp: 1000,
+                    hash: "aa",
+                    signedAt: 123,
+                }),
+            )
+            fs.symlinkSync(real, signingRecordPath(identity))
+            bindSigningRecordKey(identity, KEY_A)
+            expect(fs.lstatSync(signingRecordPath(identity)).isSymbolicLink()).toBe(
+                true,
+            )
+            expect(JSON.parse(fs.readFileSync(real, "utf8")).publicKey).toBe(KEY_A)
+        })
+
+        it("refuses a record whose key is not a non-empty string", () => {
+            fs.writeFileSync(
+                signingRecordPath(identity),
+                JSON.stringify({
+                    genesisHash: GENESIS,
+                    height: 10,
+                    timestamp: 1000,
+                    hash: "aa",
+                    signedAt: 123,
+                    publicKey: "",
+                }),
+            )
+            expect(() => loadSigningRecord(identity)).toThrow(SigningRecordError)
         })
     })
 

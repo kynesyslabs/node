@@ -46,6 +46,7 @@ function tx(from: number, nonce: number) {
             from_ed25519_address: account(from),
             nonce,
             gcr_edits: [{ type: "nonce", account: account(from) }],
+            reference_block: 100,
         },
     } as any
 }

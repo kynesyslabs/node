@@ -6,7 +6,7 @@ export interface ImPeer {
     ws: WebSocket
     publicKey: Uint8Array
     signingPublicKey: Uint8Array
+    deliverQueued: boolean
 }
-
 
 

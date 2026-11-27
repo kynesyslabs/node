@@ -740,7 +740,7 @@ if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
 		exit 1
 	fi
 	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
-	if [[ ! -f "$SIDECAR_BUNDLE" || "sidecar/src/index.js" -nt "$SIDECAR_BUNDLE" ]]; then
+	if [[ ! -f "$SIDECAR_BUNDLE" ]] || find sidecar/src -maxdepth 1 -name '*.js' -newer "$SIDECAR_BUNDLE" -print -quit | grep -q .; then
 		echo "🔧 Building gossip sidecar..."
 		(cd sidecar && bun install --frozen-lockfile --silent && node build.mjs) || {
 			echo "❌ Gossip sidecar build failed"
@@ -1064,13 +1064,20 @@ fi
 # Starting the node managing errors
 log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT:-(from .env)} IDENTITY_FILE=${IDENTITY_FILE}"
 log_verbose "Command: ${FINAL_COMMAND}"
-if ! RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
+# The node's status, read before anything else runs. The launcher exits with it
+# after the clean-up below, so a supervisor sees a crash or a refusal (exit 1).
+# Only a Ctrl-C while the node runs counts as a stop, not one during setup.
+HAS_BEEN_INTERRUPTED=false
+RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND
+exit_code=$?
+if [[ "$exit_code" -ne 0 ]]; then
 	if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
 		echo ""
 		echo "✅ Demos Network node stopped successfully"
+		# Ctrl-C is a requested stop: exit 0, as the launcher always has
+		exit_code=0
 	else
-		echo "❌ Error: RPC failed to start or crashed"
-		exit_code=$?
+		echo "❌ Error: RPC failed to start or crashed (exit code ${exit_code})"
 		# Logging memory usage (cross-platform)
 		echo "💾 Memory usage at crash:"
 		if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
@@ -1087,7 +1094,6 @@ if ! RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
 else
 	echo ""
 	echo "✅ Demos Network node exited successfully"
-	exit_code=0
 fi
 
 # Only stop PostgreSQL if we started it
@@ -1142,3 +1148,4 @@ echo "📚 For support: https://demos.network/support"
 echo ""
 
 log_verbose "Final exit code: ${exit_code}"
+exit "$exit_code"

@@ -23,6 +23,7 @@ import type {
     CanonicalAddressesConfig,
     FeeBindingConfig,
     BlockCapsConfig,
+    CanonicalSignersConfig,
     TokenStakingGateConfig,
     TokenStakingConfig,
     NftValidatorGatingConfig,
@@ -35,6 +36,7 @@ import type {
     StorageFeeSettlementConfig,
     ReferenceBlockRoom10Config,
     KeylessWeb2IdentityConfig,
+    PeerlistFloorConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -421,6 +423,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "blockCaps":
             getSharedState.forkConfig.blockCaps = config as BlockCapsConfig
             return
+        case "canonicalSigners":
+            getSharedState.forkConfig.canonicalSigners =
+                config as CanonicalSignersConfig
+            return
         case "tokenStakingGate":
             getSharedState.forkConfig.tokenStakingGate =
                 config as TokenStakingGateConfig
@@ -468,6 +474,9 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "keylessWeb2Identity":
             getSharedState.forkConfig.keylessWeb2Identity =
                 config as KeylessWeb2IdentityConfig
+            return
+        case "peerlistFloor":
+            getSharedState.forkConfig.peerlistFloor = config as PeerlistFloorConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -622,6 +631,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FeeBindingConfig
         case "blockCaps":
             return base as BlockCapsConfig
+        case "canonicalSigners":
+            return base as CanonicalSignersConfig
         case "tokenStakingGate":
             return base as TokenStakingGateConfig
         case "tokenStaking":
@@ -648,6 +659,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return validateTlsnVerifiedEntry(base, entry)
         case "keylessWeb2Identity":
             return base as KeylessWeb2IdentityConfig
+        case "peerlistFloor":
+            return base as PeerlistFloorConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

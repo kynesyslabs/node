@@ -16,7 +16,7 @@ of 10 drawn from the whole validator set, so a party that holds 4 seats of
 one committee can stall the chain, and 7 seats can sign any block it
 likes. A party that runs 13 of 40 validators (under a third) draws 7 or
 more seats of a committee about once every 150 blocks. The launch rule
-therefore caps every beneficial owner, operator and provider at **3
+originally capped every beneficial owner, operator and provider at **3
 validators**, the seats a committee of 10 can lose, whatever the size of
 the set. `scripts/launch-go-no-go.ts` enforces it (see
 [Enforced in tooling](#enforced-in-tooling)).
@@ -113,7 +113,13 @@ with 7 valid signatures carries whatever peerlist those 7 signed.
 *Reading:* 7 colluders in one committee can commit a peerlist of only
 colluders, and while it holds at least 7 entries every later pool, and so
 every later committee, is drawn from it alone (`getShard.ts:313-315`). One
-captured committee becomes a captured chain.
+captured committee becomes a captured chain. Before `peerlistFloor`, 4
+members were enough: an identity needed 7 reports, so 4 that left an
+honest validator out dropped it. Under `peerlistFloor` (height 0 on
+mainnet) an identity needs 4 reports, so dropping one takes 7, and every
+720th block draws its committee from the recent refresh blocks' peerlists
+too, which ends a capture within 720 blocks
+([peerlist-floor.md](../design/peerlist-floor.md)).
 
 ### Stake and joining
 
@@ -196,22 +202,28 @@ What it can abuse in Demos-specific state:
 
 ### Launch-blocking (before genesis)
 
-1. **Cap every beneficial owner at 3 launch validators** (the same cap as
-   operators and providers), and require the owner column on mainnet. One
-   buyer behind several operators and providers is one party. Enforced:
-   `--plan` check "beneficial owner cap" and the T-0 go/no-go.
+1. **Report every beneficial owner and operator above 3 launch validators**
+   (decided 2026-11-25, replacing the cap). Seats are NFT-gated and anyone
+   may run as many validators as they hold NFTs for, so a per-owner cap
+   cannot be enforced and is not a launch rule. A party that fills 4 seats
+   of one committee can stall it, and one that fills 7 can censor its
+   blocks while it holds them; that is the accepted risk. The one it must
+   not reach is a lasting takeover through the committed peerlist, which
+   is a consensus rule of its own. `--plan` prints the counts as the
+   advisory line "owner and operator concentration" (NOTE, never FAIL), and
+   the T-0 go/no-go lists them as warnings. Providers stay capped at 3:
+   a provider is infrastructure many parties share, one outage from a
+   stall.
 2. **Know the owners (KYC of node buyers)** and make the owner column true:
    the tooling counts names, it cannot see two names that are one person.
-   The sale terms should state the cap and that hidden common ownership is a
-   breach, with the right to exclude the node from the launch set. This is
-   the part of the cap only the business side can enforce.
+   The concentration report is only as true as this column.
 3. **Widen the set**: more independent owners make each sampled committee
-   more diverse, and the cap of 3 means a buyer of more nodes runs at most 3
-   at launch. The rest wait for post-launch admission under the same rule.
+   more diverse.
 4. **Region share under a third** and **stake share under a third** per
-   owner, operator, provider and region: enforced as the checks "region
-   share" and "stake share". Stake share matters only once governance is on,
-   but genesis stakes cannot be changed later without the staking fork.
+   provider and region: enforced as the checks "region share" and "stake
+   share". An owner's or operator's stake share is reported with their
+   counts. Stake share matters only once governance is on, but genesis
+   stakes cannot be changed later without the staking fork.
 5. **Equivocation and committee-share monitoring from block 1**: alert on
    precommit equivocation (the existing double-sign alert), on any block
    whose signers share one owner for 4 or more seats (needs the owner table
@@ -231,9 +243,9 @@ What it can abuse in Demos-specific state:
 8. **Re-run the owner cap at every set change**: any new validator goes
    into the same table, and `launch-go-no-go.ts --plan` is re-run on the new
    set before the change.
-9. **Fix the peerlist capture** (*reading*): bound how far a committed
-   peerlist may shrink the pool against the staked set per block, so one
-   captured committee cannot keep the chain. Needs a fork.
+9. **Fix the peerlist capture**: done by the `peerlistFloor` fork
+   ([peerlist-floor.md](../design/peerlist-floor.md)), at height 0 in the
+   mainnet set.
 10. **Slashing or ejection for equivocation**: today a proven double-sign
     is only logged. Needs a fork and a governance path.
 11. **Bigger committees** reduce the sampling risk (seats track the set
@@ -248,13 +260,13 @@ What it can abuse in Demos-specific state:
 
 | Check (`--plan` line) | Rule | Code |
 |---|---|---|
-| operator and provider cap | no operator or provider runs more than `min(launch, 10) − 7` | `scripts/launch-go-no-go.ts:356`, `:395` |
-| voting power per operator and provider | none holds more than a third of the first committee | `:405` |
-| beneficial owner cap | on the mainnet chain id every entry names an owner; no owner over the same cap or third | `:382`, `:451` |
-| region share | no region hosts a third or more of the launch validators | `:418` |
-| stake share | no owner, operator, provider or region holds a third or more of block 0's `staked_amount` | `:465` |
+| provider cap | no provider runs more than `min(launch, 10) − 7` | `validatorTable` in `scripts/launch-go-no-go.ts` |
+| voting power per provider | no provider holds more than a third of the first committee | `validatorTable` |
+| owner and operator concentration (advisory) | lists owners and operators over the same bounds or a third of block 0's stake, and, on the mainnet chain id, entries without an owner; never fails | `validatorTable`, `stakeShare`, `missingOwnerWarnings` |
+| region share | no region hosts a third or more of the launch validators | `validatorTable` |
+| stake share | no provider or region holds a third or more of block 0's `staked_amount` | `stakeShare` |
 
 The T-0 go/no-go (`checkLaunch`) applies the same rules, so a table that
-was edited after `--plan` is caught on launch day. On the testnet and
-devnet chain ids the owner column is optional, so rehearsal tables keep
-working.
+was edited after `--plan` is caught on launch day; the concentration
+lines come out as warnings there. On the testnet and devnet chain ids a
+missing owner is not reported, so rehearsal tables stay quiet.

@@ -651,6 +651,16 @@ export class GCRStorageProgramRoutines {
             }
         }
 
+        // A deleted program keeps its address and its proven record. Readers
+        // trust an address through its owner, so a stranger creating it again
+        // would speak for that owner from then on.
+        if (program && program.owner !== sender) {
+            return {
+                success: false,
+                message: `Storage program ${storageAddress} was deleted by its owner; only that owner can create it again`,
+            }
+        }
+
         // Calculate size and fee (validate before simulate to catch invalid payloads early)
         const encoding = variables.encoding || "json"
         const sizeBytes = variables.data

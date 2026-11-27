@@ -4,6 +4,10 @@ import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk"
 import axios, { AxiosError } from "axios"
 import log from "@/utilities/logger"
+import errorKind from "../errorKind"
+
+// NOTE args may parse to a non-array (e.g. "null"): a log line must not throw
+const count = (value: unknown) => (Array.isArray(value) ? value.length : 0)
 
 /**
  * This function is used to read from a smart contract using the Aptos REST API
@@ -22,8 +26,8 @@ export async function handleAptosContractReadRest(operation: IOperation) {
             }
         }
 
+        // NOTE Params, call arguments, results and full errors are not logged
         const params = operation.task.params
-        log.debug("parsed params: " + JSON.stringify(params))
 
         // Validate required parameters for Aptos contract reads
         if (!params.moduleAddress) {
@@ -81,11 +85,7 @@ export async function handleAptosContractReadRest(operation: IOperation) {
         }
 
         log.debug(
-            `calling Move view function: ${params.moduleAddress}::${params.moduleName}::${params.functionName}`,
-        )
-        log.debug("calling with args: " + JSON.stringify(functionArgs))
-        log.debug(
-            "calling with type arguments: " + JSON.stringify(typeArguments),
+            `calling Move view function with ${count(functionArgs)} argument(s) and ${count(typeArguments)} type argument(s)`,
         )
 
         const functionInfo =
@@ -101,14 +101,14 @@ export async function handleAptosContractReadRest(operation: IOperation) {
             arguments: params.args || [],
         })
 
-        log.debug("response", response.data)
+        log.debug("response from Aptos view call received")
 
         return {
             result: response.data,
             status: "success",
         }
     } catch (error) {
-        log.error("Aptos contract read error:", error)
+        log.error(`Aptos contract read error: ${errorKind(error)}`)
         if (error instanceof AxiosError) {
             return {
                 status: "failed",
@@ -159,12 +159,8 @@ export default async function handleAptosContractRead(operation: IOperation) {
         const aptosInstance = new multichain.APTOS(providerUrl, network)
         await aptosInstance.connect()
 
-        log.debug("params: \n")
-        log.debug(operation.task.params)
-        log.debug("\n end params: \n")
-
+        // NOTE Params, call arguments, results and full errors are not logged
         const params = operation.task.params
-        log.debug("parsed params: " + JSON.stringify(params))
 
         // Validate required parameters for Aptos contract reads
         if (!params.moduleAddress) {
@@ -224,11 +220,7 @@ export default async function handleAptosContractRead(operation: IOperation) {
         }
 
         log.debug(
-            `calling Move view function: ${params.moduleAddress}::${params.moduleName}::${params.functionName}`,
-        )
-        log.debug("calling with args: " + JSON.stringify(functionArgs))
-        log.debug(
-            "calling with type arguments: " + JSON.stringify(typeArguments),
+            `calling Move view function with ${count(functionArgs)} argument(s) and ${count(typeArguments)} type argument(s)`,
         )
 
         // Call the readFromContract method with enhanced Move support
@@ -241,14 +233,13 @@ export default async function handleAptosContractRead(operation: IOperation) {
         )
 
         log.debug("result from Aptos view call received")
-        log.debug("result:", JSON.stringify(result))
 
         return {
             result: result,
             status: true,
         }
     } catch (error) {
-        log.error("Aptos contract read error:", error)
+        log.error(`Aptos contract read error: ${errorKind(error)}`)
         return {
             result: "error",
             error: error.toString(),

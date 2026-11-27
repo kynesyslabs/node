@@ -38,6 +38,9 @@ async function makeDemos() {
     // Short-circuit the nodeCall the builders make before signing.
     ;(demos as unknown as { getAddressNonce: unknown }).getAddressNonce =
         async () => 0
+    // sign() reads the chain height for the reference block.
+    ;(demos as unknown as { getLastBlockNumber: unknown }).getLastBlockNumber =
+        async () => 100
     return demos
 }
 

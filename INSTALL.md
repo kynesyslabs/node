@@ -190,6 +190,7 @@ TLSNOTARY_ENABLED=false
 
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
 - **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. On mainnet the notary is a Demos-operated service whose keys the genesis pins (`tlsnVerified`), and every node verifies presentations itself, so a mainnet validator runs no notary and keeps `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false` as above. The exception is the TLSNotary relay role: the public RPC node or nodes the network designates as relay serve `requestTLSNproxy` (the per-session proxies a prover's browser reaches the attested site through) and set `TLSNOTARY_ENABLED=true`, still with `COMPOSE_PROFILES=` and no notary sidecar; provers notarize at the network's notary, the URL the SDK pins. Such a node logs a warning at start (`[TLSNotary] Relay only: no notary answers at ...`), its `/health` shows `tlsnotary` ready with `mode: relay-only`, and `tlsnotary.getInfo` answers 503; that is the expected state, not a failure. It also needs the `/tlsn/<port>/` reverse proxy below. Which nodes take the relay role is an owner decision ([docs/runbooks/tlsn-notary.md](docs/runbooks/tlsn-notary.md), section 10); every other validator keeps `TLSNOTARY_ENABLED=false`. On a devnet or test network, `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses, paired with `TLSNOTARY_ENABLED=true`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
+- **Behind the bundled Caddy (`proxy` profile).** Also set `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` in `.env` (on a source build, `./run --docker --proxy` does the same for one run), and leave `TRUSTED_PROXIES` unset. The override file unpublishes the node's RPC port and trusts Caddy's forwarding header from the docker bridge range (`172.16.0.0/12`). With the profile alone the node trusts no proxy: every client behind Caddy shares Caddy's rate-limit counter and is throttled together, and the node logs `X-Forwarded-For from <address> ignored: TRUSTED_PROXIES is empty` at most every 10 minutes. Behind your own proxy, list that proxy's address in `TRUSTED_PROXIES` ([docs/runbooks/proxy-setup.md](docs/runbooks/proxy-setup.md)); an entry of `0.0.0.0/0` or `::/0` stops the node at startup.
 - **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised static proxy port (`TLSNOTARY_PROXY_PORT`, on which nothing listens) and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). The node opens a proxy session only for a `requestTLSNproxy` signed over its body for this node by the sender of a confirmed `tlsn_request`, and only with `TLSNOTARY_ENABLED=true`; each session admits one websocket carrying its secret session id, and ends at 5 minutes or at its byte caps. A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
 - **`SUDO_PUBKEY`** (optional) is the ed25519 public key (`0x` + 64 hex) this node answers its admin RPC to (`rate-limit/unblock`, `getCampaignData`, `awardPoints`). Empty, nobody may call them. It only authorises calls on this node: whether an award transaction is valid is decided by the genesis `properties.sudoPubkey`, the same on every node.
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
@@ -358,6 +359,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `L2PS_MESSAGING_SEND_BURST` | `30` | Messages a sender key may send at once before the rate applies. |
 | `L2PS_MESSAGING_BACKLOG_SHARE` | `0.5` | Largest fraction of `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` that messaging may hold, so RPC transactions keep the rest. `1` gives messaging all of it. |
 | `WEB2_MAX_INFLIGHT_PER_CALLER` / `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER` / `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` / `WEB2_MAX_INFLIGHT_TOTAL` | `2` / `10` / `104857600` (100 MiB) / `32` | Caps on the outbound fetches of the web2 (DAHR) proxy: running at once per caller, started per minute per caller, origin response bytes per hour per caller, and running at once on the node. A caller is the client address for a `web2ProxyRequest` RPC (one IPv6 /64 counts as one address; behind a reverse proxy this needs `TRUSTED_PROXIES`: otherwise every client counts as the proxy, which shares one cap, or, for a proxy on the same host, is loopback and skips the per-caller caps) and the sender for a `web2Request` or DemosWork tx. Over a cap the caller gets result `429` `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and `WHITELISTED_IPS` skip the per-caller caps; every fetch counts toward the node-wide one. Every loopback source address (all of `127.0.0.0/8` and `::1`) skips the HTTP RPC's per-address limits (HTTP rate limiter, identity confirm cap, web2 per-caller caps); it still counts toward the web2 node-wide cap and the per-caller Human Passport claim limit, and OmniProtocol's per-IP limits still apply. A reverse proxy or sidecar on the same host must therefore be listed in `TRUSTED_PROXIES`, and must set `X-Forwarded-For` or `X-Real-IP` to the client's address; a forwarder that sets neither makes every client it relays local. Positive integers only, or the node does not start. Local to the node: no effect on blocks or state. |
+| `WEB2_MAX_SESSIONS_PER_CALLER` / `WEB2_MAX_SESSIONS_TOTAL` | `16` / `1024` | Caps on the web2 (DAHR) sessions the node holds; a session lives for `WEB2_SESSION_TTL_MS` after its last use. A caller (as for the fetch caps) holds at most the first; its next create closes its least recently used session. For a `web2ProxyRequest` RPC the per-caller cap is counted per source address as the node sees it: behind a reverse proxy that is not listed in `TRUSTED_PROXIES` every client shares one cap (a proxy on the same host is loopback and skips it). The node holds at most the second; over it a create gets result `429` `WEB2_FETCH_LIMITED` with reason `node-sessions` and `retryAfterSeconds`. Of its requests a session keeps only the create request's action, method and URL (when short) and the URL of its last admitted start; a start whose URL is longer than 4096 characters once normalized gets result `400`. Loopback and `WHITELISTED_IPS` skip the per-caller cap; every session counts toward the node-wide one. Positive integers only, or the node does not start. Local to the node: no effect on blocks or state. |
 | `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. A mainnet validator sets nothing at launch (TLSNotary is off, see step 3 of [Run a released image](#run-a-released-image-validators)); `monitoring` needs `GRAFANA_ADMIN_PASSWORD`. See [Profiles](#profiles). |
 | `INSTANCE_SUFFIX` / `COMPOSE_PROJECT_NAME` | _(empty)_ / _(directory name)_ | Set both on every install but one when a host runs more than one; see [More than one install on a host](#more-than-one-install-on-a-host). |
 
@@ -481,7 +483,7 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 53550 | `RPC_PORT` | TCP | Node RPC (HTTP); the port in `EXPOSED_URL` |
 | 53551 | `OMNI_PORT` | TCP | OmniProtocol (peer-to-peer binary RPC; peers dial the port the node advertises, so publish it on the same number) |
 | 9095 | `GOSSIP_PORT` | TCP | Gossip; peers dial `EXPOSED_URL`'s host on this port |
-| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Published on every interface |
+| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Docker Compose publishes it on `RPC_SIGNALING_BIND` (loopback by default; clients use Caddy's `/signaling/`) |
 | 7047 | `TLSNOTARY_PORT` | TCP | TLSNotary notary, published on every interface whenever the `tlsnotary` profile is on |
 | 123 | | UDP, outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
@@ -544,6 +546,49 @@ COMPOSE_PROFILES=tlsnotary
 ```
 
 Every command in this guide that names a volume or a container uses the names compose reports for the install it runs in (`$STATE_VOLUME`, `$SUFFIX`, step 3 of [Run a released image](#run-a-released-image-validators)), and each install keeps its signer list, release files, key copy and peer list in its own place. `docker compose down -v` removes only the volumes of the install it runs in. Each node also needs its own CPU and memory headroom ([System Requirements](#system-requirements)); a compose override can cap one (`mem_limit`, `cpus` under `services: node:`).
+
+#### Instant messaging signaling
+
+The SDK's `MessagingPeer` connects directly to a signaling WebSocket from wallets
+and browsers. Signaling is enabled by default (`SIGNALING_ENABLED=true`) and is
+independent of consensus. Each connection accepts payloads up to 1 MiB. Larger
+payloads close the connection with code 1009. Clients that send large encrypted
+messages must allow for JSON and encryption overhead within the payload limit.
+
+**Docker Compose:** the host port defaults to `127.0.0.1:3005:3005`. With the
+`proxy` profile, external SDK clients can use
+`wss://<PROXY_DOMAIN>/signaling/`; Caddy reaches the node over the container
+network. To opt in to direct public IPv4 WebSocket access, set
+`RPC_SIGNALING_BIND=0.0.0.0` in the host `.env` and allow inbound TCP on
+`RPC_SIGNALING_PORT` (default 3005). This publishes on IPv4 only; IPv6 clients
+need an additional `[::]` port mapping. A private host interface can be used
+instead. The same port variable controls both sides of the mapping and Caddy's
+upstream.
+`RPC_SIGNALING_BIND` controls Docker publication only; it is not a node setting.
+Docker Engine before 28.0 does not drop traffic that other hosts on the same
+local network segment send to a port published on `127.0.0.1`; on such a host
+with untrusted neighbours, upgrade Docker or block the loopback-published
+ports (signaling, L2PS messaging, TLSNotary per-session proxies) in the host
+firewall.
+
+**Bare metal and Bun:** signaling continues listening on all interfaces; use a
+host firewall or a TLS reverse proxy to control external access. `./run` and
+`bun run start:bun` use `RPC_SIGNALING_PORT` when configured, otherwise
+`SIGNALING_SERVER_PORT` (default 3005), or the next free port if it is taken;
+check the `[PORT] signaling drifted` log line. Running
+`bun src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts`
+directly always uses port 3005. The same payload limit applies to all these
+entry points. Set `SIGNALING_ENABLED=false` to disable signaling when running
+the full node; the standalone server starts unconditionally.
+
+**Fresh installs and upgrades:** fresh Compose installs publish signaling on
+loopback. Before upgrading a node whose SDK clients use a direct public port,
+choose the Caddy route or explicitly set `RPC_SIGNALING_BIND=0.0.0.0`, then
+recreate the node container with `docker compose up -d --force-recreate node`
+using the updated image and compose file. Restarting an existing container
+alone retains its old port publication. Bare-metal and Bun deployments need a
+process restart to activate the payload limit; their listener address is
+unchanged.
 
 ### Profiles
 
@@ -1190,7 +1235,7 @@ Either way the subnet files land in the `demos_node_data` volume. Put the `.env`
 | 53551       | OmniProtocol | P2P communication (TCP)                 |
 | 9095        | Gossip       | Gossip sidecar (TCP)                    |
 | 7047        | TLSNotary    | TLSNotary server                        |
-| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it |
+| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it. Open only with `RPC_SIGNALING_BIND=0.0.0.0` (Docker publishes it on loopback otherwise, and Caddy serves `/signaling/`) or on bare metal |
 | 55000-55063 | WS Proxy     | Per-session TLSNotary proxies (TCP), on loopback for a reverse proxy on this host; bare metal uses 55000-57000. Not opened in the firewall ([Network Exposure](#network-exposure)) |
 | 123 (out)   | NTP          | Outbound UDP; host time sync and the node's clock offset check |
 

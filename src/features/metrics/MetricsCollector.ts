@@ -14,6 +14,7 @@ import { MetricsService } from "./MetricsService"
 import log from "@/utilities/logger"
 import { diskSpacePath, freeDiskBytes } from "@/utilities/diskSpace"
 import { Config } from "src/config"
+import { DbProbe } from "./dbProbe"
 import type { MetricsCollectorConfig } from "./types"
 import {
     DEFAULT_COLLECTOR_CONFIG,
@@ -27,6 +28,47 @@ export type { MetricsCollectorConfig } from "./types"
 const execAsync = promisify(exec)
 
 /**
+ * The DbProbe query: SELECT 1 on a query runner of its own from the node's
+ * DataSource, so it fails exactly when the node's own queries cannot reach
+ * Postgres. Never initializes the DataSource (that retries for half a
+ * minute): boot has done it before the collector starts.
+ *
+ * When `signal` aborts after SELECT 1 was sent, the pg client is ended before
+ * the runner is released: pg destroys the socket of a client with a query in
+ * flight, so that query rejects, and pg-pool drops an ending client instead of
+ * reusing it. The returned promise then settles without waiting for the query,
+ * which on a half-open connection would never answer. A client that arrives
+ * from the pool only after the abort carries no query: it is released as usual.
+ */
+export async function pingDatabase(signal: AbortSignal): Promise<void> {
+    // Lazy import to avoid circular dependencies
+    const { dataSource } = await import("@/model/datasource")
+    if (!dataSource.isInitialized) {
+        throw new Error("the DataSource is not initialized")
+    }
+    const runner = dataSource.createQueryRunner()
+    let client: { end(): Promise<void> } | undefined
+    let sent = false
+    try {
+        client = await runner.connect()
+        signal.throwIfAborted()
+        const aborted = new Promise<never>((_, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason), {
+                once: true,
+            }),
+        )
+        sent = true
+        await Promise.race([runner.query("SELECT 1"), aborted])
+    } catch (error) {
+        // An aborted query never gives its client back to the pool.
+        if (signal.aborted && sent) client?.end().catch(() => undefined)
+        throw error
+    } finally {
+        await runner.release()
+    }
+}
+
+/**
  * MetricsCollector - Actively collects metrics from node subsystems
  *
  * This service runs on a timer and updates the MetricsService
@@ -37,6 +79,7 @@ export class MetricsCollector {
     private metricsService: MetricsService
     private config: MetricsCollectorConfig
     private collectionInterval: Timer | null = null
+    private dbProbe: DbProbe | null = null
     private running = false
 
     // CPU usage tracking
@@ -84,6 +127,32 @@ export class MetricsCollector {
         // Register additional metrics
         this.registerAdditionalMetrics()
 
+        // Own timer, not collectAll, and started before the first collectAll,
+        // which has unbounded steps: the DbDown alert needs a steady probe
+        // period, and a tick ends within its timeout even on a hung database.
+        // A start() whose first collectAll threw left running false and its
+        // probe ticking: stop that one so a retry does not add a second timer.
+        this.dbProbe?.stop()
+        this.dbProbe = new DbProbe({
+            probe: pingDatabase,
+            report: (up, seconds) => {
+                this.metricsService.setGauge("db_up", up)
+                if (seconds !== null) {
+                    this.metricsService.setGauge(
+                        "db_probe_duration_seconds",
+                        seconds,
+                    )
+                }
+            },
+            onChange: (up, reason) =>
+                up
+                    ? log.info("[DB] Postgres answers the probe again")
+                    : log.warning(
+                          `[DB] Postgres probe failed (demos_db_up=0): ${reason}`,
+                      ),
+        })
+        this.dbProbe.start()
+
         // Initial collection
         await this.collectAll()
 
@@ -104,6 +173,8 @@ export class MetricsCollector {
             clearInterval(this.collectionInterval)
             this.collectionInterval = null
         }
+        this.dbProbe?.stop()
+        this.dbProbe = null
         this.running = false
         log.info("[METRICS COLLECTOR] Stopped")
     }
@@ -143,6 +214,21 @@ export class MetricsCollector {
         ms.createGauge("system_load_average_1m", "1-minute load average", [])
         ms.createGauge("system_load_average_5m", "5-minute load average", [])
         ms.createGauge("system_load_average_15m", "15-minute load average", [])
+
+        // === Database (DbProbe, every 15 s; the DbDown alert reads db_up) ===
+        // Registered here, not in the core set: a gauge without labels reads
+        // 0 from registration, so a node whose collector never started must
+        // not export it.
+        ms.createGauge(
+            "db_up",
+            "1 when the last SELECT 1 through the node's Postgres pool answered within 5 s, else 0",
+            [],
+        )
+        ms.createGauge(
+            "db_probe_duration_seconds",
+            "Seconds the last successful Postgres probe took, including getting a pool connection and SELECT 1; stale while demos_db_up is 0",
+            [],
+        )
 
         // === Network I/O Metrics ===
         ms.createGauge(

@@ -617,6 +617,24 @@ export type ReferenceBlockRoom10Config = BaseForkConfig
 export type KeylessWeb2IdentityConfig = BaseForkConfig
 
 /**
+ * `peerlistFloor` fork: an identity enters a block's merged peerlist when
+ * `n - q + 1` voters observed it at the parent (4 of 10) instead of `q`, and
+ * the committee of every block at a multiple of `POOL_REFRESH_INTERVAL` is
+ * drawn from the parent's peerlist united with the peerlists of the
+ * previous `POOL_REFRESH_DEPTH` refresh blocks.
+ *
+ * With the quorum bar, `n - q + 1` colluding members dropped any honest
+ * validator by leaving it out of their reports, and a coalition-only pool
+ * of `q` or more kept every later committee. The floor needs `q` colluders
+ * to drop anyone; the refresh bounds how long a committee of `q` colluders
+ * keeps the chain. Applies to the block at the activation height and
+ * later. Dormant by default: it changes who is drawn, and a missing genesis
+ * entry hydrates from here. A mainnet genesis sets 0. No payload beyond the
+ * base. Design: docs/design/peerlist-floor.md.
+ */
+export type PeerlistFloorConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -689,6 +707,24 @@ export type InstantMessagingBindingConfig = BaseForkConfig
 export type BlockCapsConfig = BaseForkConfig
 
 /**
+ * `canonicalSigners` fork: a block's signatures are matched to its signer
+ * set by lowercase identity, and a key written in two cases is one signer
+ * that counts once.
+ *
+ * Before it, identities compared as written: a signature keyed in another
+ * case than its pool entry did not count, and a key the validator set
+ * listed in two cases could count twice. Sync stores only the counted
+ * signatures either way; this fork changes which ones count.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code counts exactly
+ * as one without it. A new chain may schedule it at height 0 explicitly;
+ * the mainnet genesis template leaves it dormant until it is scheduled.
+ * No payload beyond the base.
+ */
+export type CanonicalSignersConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -737,6 +773,7 @@ export type ForkConfig =
     | CanonicalAddressesConfig
     | FeeBindingConfig
     | BlockCapsConfig
+    | CanonicalSignersConfig
     | TokenStakingGateConfig
     | TokenStakingConfig
     | NftValidatorGatingConfig
@@ -777,6 +814,7 @@ export type ForkName =
     | "canonicalAddresses"
     | "feeBinding"
     | "blockCaps"
+    | "canonicalSigners"
     | "tokenStakingGate"
     | "tokenStaking"
     | "telegramSenderBinding"
@@ -789,6 +827,7 @@ export type ForkName =
     | "nftValidatorGating"
     | "tlsnVerified"
     | "keylessWeb2Identity"
+    | "peerlistFloor"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -819,6 +858,7 @@ export interface ForkConfigByName {
     canonicalAddresses: CanonicalAddressesConfig
     feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
+    canonicalSigners: CanonicalSignersConfig
     tokenStakingGate: TokenStakingGateConfig
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
@@ -831,6 +871,7 @@ export interface ForkConfigByName {
     nftValidatorGating: NftValidatorGatingConfig
     tlsnVerified: TlsnVerifiedConfig
     keylessWeb2Identity: KeylessWeb2IdentityConfig
+    peerlistFloor: PeerlistFloorConfig
 }
 
 /**
@@ -1091,6 +1132,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block takes a bounded, deterministic share of the pool by tx count and " +
             "content bytes, and the mempool merge holds each sender to the admission cap.",
     },
+    canonicalSigners: {
+        // Dormant by default: it changes which signatures count toward a
+        // block's quorum, and a missing genesis entry hydrates from here. A
+        // new chain may schedule it at height 0 explicitly; the mainnet
+        // genesis template leaves it dormant until it is scheduled.
+        activationHeight: null,
+        description:
+            "A block's signatures match its signer set by lowercase identity, and a key " +
+            "written in two cases counts once.",
+    },
     tokenStakingGate: {
         // Dormant by default: it refuses stakes a running chain accepts, and a
         // missing genesis entry hydrates from here, so a running chain keeps
@@ -1206,6 +1257,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "GitHub, Discord and Twitter accounts link only through TLSNotary; the web2 " +
             "proof path that needed validator API keys refuses them.",
     },
+    peerlistFloor: {
+        // Dormant by default: it changes which committee signs a block, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An identity enters the merged peerlist with n - q + 1 observations instead of q, " +
+            "and every refresh height draws its committee from the recent refresh blocks' peerlists too.",
+    },
 }
 
 /**
@@ -1240,6 +1299,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
+        canonicalSigners: { ...DEFAULT_FORK_CONFIG.canonicalSigners },
         tokenStakingGate: { ...DEFAULT_FORK_CONFIG.tokenStakingGate },
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
@@ -1252,5 +1312,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         nftValidatorGating: { ...DEFAULT_FORK_CONFIG.nftValidatorGating },
         tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
         keylessWeb2Identity: { ...DEFAULT_FORK_CONFIG.keylessWeb2Identity },
+        peerlistFloor: { ...DEFAULT_FORK_CONFIG.peerlistFloor },
     }
 }

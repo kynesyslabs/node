@@ -43,13 +43,16 @@ chain still makes blocks; a 4th stops it until one comes back.
    `./scripts/node-doctor --production --env-from compose` (exit 0, no FAIL
    line) and the INSTALL.md step 10 check that prints `parameters match`,
    both run against the container it will launch with.
-2. **Operator and provider cap:** no single operator and no single cloud
-   provider runs more than `min(launch validators, shardSize) − q` launch
-   validators: at most 3 with `shardSize` 10 and 10 or more validators, 2
-   with 9, 1 with 8 and none with 7. Those are the
-   committee seats the chain can lose and still sign; one party holding
-   more can stop it alone. Names are compared case-insensitively and
-   without surrounding spaces, so `AWS` and `aws` are one provider.
+2. **Provider cap:** no single cloud provider runs more than
+   `min(launch validators, shardSize) − q` launch validators: at most 3
+   with `shardSize` 10 and 10 or more validators, 2 with 9, 1 with 8 and
+   none with 7. Those are the committee seats the chain can lose and still
+   sign; one provider outage beyond that stops it. Names are compared
+   case-insensitively and without surrounding spaces, so `AWS` and `aws`
+   are one provider. Operators and beneficial owners have no limit: anyone
+   runs as many validators as they hold seat NFTs for. One above the same
+   bound is reported as a warning, never a NO-GO
+   (`docs/mainnet/validator-concentration.md`).
 3. **T-0:** GO when at least 7 members of the first committee (block 1's
    bound committee; `q` of `shardSize` 10) are online on the agreed genesis
    block and release commit, each proven to hold its identity key, and the
@@ -74,9 +77,10 @@ chain still makes blocks; a 4th stops it until one comes back.
    in `.env`; recreate the Docker node container to apply the changed
    environment, or restart the bare-metal/Bun process.
 
-6. Before T-0 no operator or provider holds more than a third of the first
+6. Before T-0 no provider holds more than a third of the first
    committee's votes (one validator, one vote), and every launch validator's
-   region is recorded. `--plan` (below) checks this with the cap.
+   region is recorded. `--plan` (below) checks this with the cap; an
+   operator or owner above a third is an advisory note.
 
 Exit 0 from `scripts/launch-go-no-go.ts` is the T-0 check of rules 2, 3 and
 the one-third part of rule 6 (a missing region is only a warning there), plus
@@ -124,8 +128,10 @@ bun scripts/launch-go-no-go.ts --plan \
 One `PASS`/`FAIL` line per check: genesis forks, treasury, notary keys, chain id, shard size,
 genesis values (no template `FILL` left), genesis file (a node would load it), bot allowlist, block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
-provider and region for each), operator and provider cap, voting power per
-operator and provider, pinned identities. Exit 0 when all pass, 1
+provider and region for each), provider cap, voting power per provider,
+region share, stake share, pinned identities, plus the advisory line "owner
+and operator concentration" (`NOTE` when it lists anyone, never `FAIL`).
+Exit 0 when all pass, 1
 otherwise, 2 when any of the genesis, snapshot and operators inputs is
 missing. Filling the genesis is in `docs/mainnet/genesis.md`, the table in
 `docs/mainnet/launch-validators.md`.
@@ -240,15 +246,16 @@ exposed by the node, so it comes from the T-24h posts). Then:
   members of the first committee
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
-  entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
-  third of the first committee's votes; on the mainnet chain id every entry
-  names its beneficial `owner`, and no owner runs more than that same cap; no
-  region hosts a third or more of the launch validators, and no owner,
-  operator, provider or region holds a third or more of block 0's stake
+  entry with no provider above `min(launch validators, shardSize) − q` and none holding more than a
+  third of the first committee's votes, counted per provider (owners and
+  operators above the same bounds, or at a third of block 0's stake, and
+  mainnet entries without an `owner` are warnings: there is no limit per
+  party); no region hosts a third or more of the launch validators, and no
+  provider or region holds a third or more of block 0's stake
   (`docs/mainnet/validator-concentration.md`); the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `tokenStaking`, `nftValidatorGating`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement`, `tlsnVerified` and `keylessWeb2Identity` at
-  `activationHeight` 0, leaves `atomicWork`, `networkGovernance` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `tokenStaking`, `nftValidatorGating`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding`, `storageFeeSettlement`, `referenceBlockRoom10`, `l2psSettlement`, `tlsnVerified`, `keylessWeb2Identity` and `peerlistFloor` at
+  `activationHeight` 0, leaves `atomicWork`, `canonicalSigners`, `networkGovernance` and the kill switches `l2psGate` and `tlsnDisabled` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
   (`--expected-treasury`), gives `tlsnVerified` exactly the notary keys from
   the notary key ceremony (`--expected-notary-keys`; NO-GO on the template's placeholder keys, on no keys,
@@ -319,7 +326,8 @@ validators that might not be in the committee.
 **Operator entries.** Every launch validator needs an entry with a
 non-empty string `operator` and `provider`. A missing field, an empty
 string or a non-string value is NO-GO and names the validator, because a
-validator without a group would escape the cap. A missing `region` is a warning here and a failure under
+validator without a provider would escape the cap and one without an
+operator could not be counted. A missing `region` is a warning here and a failure under
 `--plan`.
 
 Without `--genesis-hash` the result is NO-GO. The hash most validators

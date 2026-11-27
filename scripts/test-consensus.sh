@@ -26,7 +26,9 @@ SUITE_FILES=(
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
     src/config/loader.logsDir.test.ts
+    src/config/loader.outbound.test.ts
     src/config/loader.rapidApi.test.ts
+    src/config/loader.signalingRegisterMode.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/crypto/keyErrorLogging.test.ts
@@ -36,6 +38,11 @@ SUITE_FILES=(
     src/features/tlsnotary/notaryUnreachable.test.ts
     src/features/tlsnotary/tokenCreate.test.ts
     src/features/web2/proxy/Proxy.contentType.test.ts
+    src/features/metrics/dbProbe.test.ts
+    src/features/metrics/MetricsCollector.dbProbe.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.limits.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.register.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -51,6 +58,7 @@ SUITE_FILES=(
     src/libs/blockchain/finality/verify.test.ts
     src/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines.test.ts
     src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.granular.test.ts
+    src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.recreate.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/zkRoutines.test.ts
     src/libs/blockchain/gcr/handleGCR.atomic.test.ts
@@ -71,9 +79,14 @@ SUITE_FILES=(
     src/libs/blockchain/mempool.editBinding.test.ts
     src/libs/blockchain/mempool.nextBlockRef.test.ts
     src/libs/blockchain/mempool.receive.test.ts
+    src/libs/blockchain/mempool.rowLimits.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/Sync.signerBoundary.test.ts
+    src/libs/blockchain/validation/verifyBlock.test.ts
+    src/libs/blockchain/validation/verifyBlock.crypto.test.ts
+    src/libs/blockchain/validation/signerRule.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/blockchain/routines/validateTransaction.feeBalance.test.ts
     src/libs/blockchain/routines/validateTransaction.fees.test.ts
@@ -83,10 +96,14 @@ SUITE_FILES=(
     src/libs/blockchain/sdkTypes.typecheck.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
+    src/libs/consensus/v2/types/secretaryManager.silentSecretary.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
+    src/libs/gossip/blockValidator.test.ts
+    sidecar/src/blockPolicy.test.js
     src/libs/gossip/sidecarHealth.test.ts
+    src/libs/gossip/sidecarLimits.test.ts
     src/libs/gossip/txPublishPeers.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
@@ -96,6 +113,7 @@ SUITE_FILES=(
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
     src/libs/network/broadcastReferenceWindow.test.ts
+    src/libs/network/demosWorkScript.execute.test.ts
     src/libs/network/endpointValidation.admissionReason.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
@@ -106,6 +124,9 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/outboundEntryGate.test.ts
+    src/features/multichain/XMDispatcher.test.ts
+    src/features/multichain/XMDispatcher.logs.test.ts
+    src/libs/network/peerlistAnonymous.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/network/rateLimiter.loopback.test.ts
     src/libs/network/rpcGossipSize.test.ts
@@ -114,7 +135,9 @@ SUITE_FILES=(
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.head.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.status.test.ts
+    src/libs/network/routines/transactions/demosWork/scriptLimits.test.ts
     src/libs/network/rpcEditBinding.test.ts
+    src/libs/network/web2BroadcastReplay.test.ts
     src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
@@ -123,6 +146,7 @@ SUITE_FILES=(
     src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
     src/libs/omniprotocol/transport/ConnectionPool.perPeerCap.test.ts
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
+    src/libs/peer/helloReplyPeerlist.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
@@ -141,6 +165,7 @@ SUITE_FILES=(
     testing/monitoring/metricsExposure.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
+    testing/forks/governanceTxHash.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
@@ -159,6 +184,7 @@ SUITE_FILES=(
     testing/genesis/restoreSnapshot.manifestPin.test.ts
     testing/state-snapshot/verify-snapshot.test.ts
     tests/web2/proxy.test.ts
+    tests/web2/dahrSessionCap.test.ts
     src/libs/abstraction/web2/githubToken.test.ts
     scripts/test-consensus.registration.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
@@ -190,6 +216,7 @@ SUITE_FILES=(
     src/libs/network/sudoReplayFloor.test.ts
     src/libs/network/tlsnotaryRoutesGate.test.ts
     scripts/sudo-call.test.ts
+    testing/loadgen/src/features/gcr/gcr_identity_loadgen.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
     # Loadgen error logging (#708), including the guard against silent catches
     testing/loadgen/src/features/omni/close_log.test.ts
@@ -199,6 +226,7 @@ SUITE_FILES=(
     testing/loadgen/src/framework/common.test.ts
     testing/loadgen/src/framework/rpc_json_log.test.ts
     testing/loadgen/src/framework/silent_catch.test.ts
+    testing/loadgen/src/im_shared.test.ts
     testing/loadgen/src/rpc_ready_log.test.ts
     testing/loadgen/src/token_holders_export.test.ts
     testing/loadgen/src/token_names_from_runs.test.ts
@@ -206,6 +234,11 @@ SUITE_FILES=(
     testing/loadgen/src/token_script_complex_policy_object_amounts.test.ts
     testing/loadgen/src/token_settle_check_balance_log.test.ts
     testing/loadgen/src/token_total_supply_log.test.ts
+    # XM contract reads, XM results and XM/DemosWork request logs
+    src/features/multichain/routines/errorKind.test.ts
+    src/features/multichain/routines/executors/contract_read.test.ts
+    src/features/multichain/routines/executors/executorLogs.test.ts
+    src/libs/network/routines/transactions/demosWork/handleDemosWorkRequest.test.ts
 )
 
 list_suite_files() {

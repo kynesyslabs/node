@@ -88,7 +88,7 @@ function tx(type: string, payload: unknown): any {
             valid: true,
             reference_block: 100,
             message: "",
-            transaction: { hash: HASH, blockNumber: 101, content: { type, from: "0xaa", data: [type, payload] } },
+            transaction: { hash: HASH, blockNumber: 101, content: { type, from: "0xaa", data: [type, payload], reference_block: 100 } },
         },
         signature: { type: "ed25519", data: "bb".repeat(64) },
         rpc_public_key: { type: "ed25519", data: OUR_KEY },
@@ -206,7 +206,8 @@ describe("operator off switches", () => {
 
     it("all three stay on by default", async () => {
         expect((await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")).success).toBe(true)
-        expect((await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")).success).toBe(true)
+        const emptyScript = { operationOrder: [], operations: {}, steps: {} }
+        expect((await handleExecuteTransaction(tx("demoswork", emptyScript), "s")).success).toBe(true)
         expect((await handleExecuteTransaction(web2Tx({ Accept: "text/plain" }), "s")).success).toBe(true)
     })
 })

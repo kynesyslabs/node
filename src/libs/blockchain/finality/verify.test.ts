@@ -577,3 +577,38 @@ describe("verifyStorageProof", () => {
         expect(verifyStorageProof(storageProof(["stor-1"]), { validators: validators.slice(1) }, rules).verdict).toBe("indeterminate")
     })
 })
+
+describe("signer pool at a peerlistFloor refresh height", () => {
+    // Block 720 draws its committee from earlier refresh blocks' peerlists
+    // too, which the proof does not carry.
+    const BEFORE_REFRESH = 719
+    const refreshProof = (options: ChainOptions = {}) =>
+        buildTxProof({ ...spec(options), number: BEFORE_REFRESH }, 0)
+
+    it("verifies against a staked set no larger than the shard", () => {
+        expect(verifyTransactionProof(refreshProof(), trusted, rules).verdict).toBe("final-executed")
+    })
+
+    it("is indeterminate without a committee when more validators are staked than the shard holds", () => {
+        const extra = Array.from({ length: 3 }, newKey)
+        const wide = {
+            validators: [...members, ...extra].map(k => ({
+                identity: k.identity,
+                stake: "1000000000000000000000",
+                status: "2",
+                validAt: 0,
+            })),
+        }
+        const proof = refreshProof({ setHash: validatorSetHash(wide.validators) })
+        const trustedBlockHash = (height: number) =>
+            height === BEFORE_REFRESH ? proof.inclusionBlock.hash : undefined
+        const verdict = verifyTransactionProof(proof, wide, { ...rules, trustedBlockHash })
+        expect(verdict.verdict).toBe("indeterminate")
+        expect(verdict.reason).toMatch(/earlier blocks' peerlists/)
+        const committee = members.map(k => k.identity)
+        expect(verifyTransactionProof(proof, wide, { ...rules, committee }).verdict).toBe("final-executed")
+        expect(
+            verifyTransactionProof(proof, wide, { ...rules, trustedBlockHash, peerlistFloor: false }).verdict,
+        ).toBe("final-executed")
+    })
+})

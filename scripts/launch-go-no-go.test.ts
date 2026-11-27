@@ -301,14 +301,17 @@ describe("decideGoNoGo", () => {
         })
     })
 
-    it("is NO-GO when an operator runs more than a third of the launch set", () => {
+    it("warns, without a NO-GO, when an operator runs more than the committee can lose", () => {
         const launch = launchSet(10)
         const operators = spread(launch)
         for (const v of launch.slice(0, 4)) operators[v] = { operator: "big-op", provider: `cloud-${v.slice(-1)}` }
         const d = decideGoNoGo(input({ operators }))
         expect(d.groupCap).toBe(3)
-        expect(d.go).toBe(false)
-        expect(d.reasons.join("\n")).toContain("operator big-op runs 4 of 10")
+        expect(d.reasons.join("\n")).not.toContain("big-op")
+        expect(d.warnings.join("\n")).toContain(
+            "operator big-op runs 4 of 10 launch validators, more than the 3 seats a committee can lose",
+        )
+        expect(d.warnings.join("\n")).toContain("operator big-op can hold 4 of the 10 first-committee votes")
     })
 
     it("is NO-GO when a cloud provider holds more than a third", () => {
@@ -343,7 +346,8 @@ describe("decideGoNoGo", () => {
             expect(d.quorum).toBe(7)
             expect(d.groupCap).toBe(2)
             expect(d.go).toBe(false)
-            expect(d.reasons.join("\n")).toContain("operator op-0 runs 3 of 9")
+            expect(d.reasons.join("\n")).toContain("provider cloud-0 runs 3 of 9")
+            expect(d.warnings.join("\n")).toContain("operator op-0 runs 3 of 9")
         }
     })
 
@@ -356,8 +360,8 @@ describe("decideGoNoGo", () => {
             )
             const d = decideGoNoGo({ shardSize: 10, launchValidators: launch, probes: launch.map(v => online(v)), operators, committee: launch.slice(0, 10) })
             expect(d.groupCap).toBe(3)
-            expect(d.go).toBe(false)
-            expect(d.reasons.join("\n")).toContain(`operator big-op runs 4 of ${n}`)
+            expect(d.reasons.join("\n")).not.toContain("big-op")
+            expect(d.warnings.join("\n")).toContain(`operator big-op runs 4 of ${n}`)
         }
     })
 
@@ -373,7 +377,7 @@ describe("decideGoNoGo", () => {
 
         const ops = spread(launch)
         launch.slice(0, 4).forEach((v, i) => (ops[v] = { operator: ["Acme", "acme ", "ACME", "acme"][i], provider: `c-${i}` }))
-        expect(decideGoNoGo(input({ operators: ops })).reasons.join("\n")).toContain("operator acme runs 4 of 10")
+        expect(decideGoNoGo(input({ operators: ops })).warnings.join("\n")).toContain("operator acme runs 4 of 10")
     })
 
     it("is NO-GO when a launch validator holds a pinned committee identity", () => {
@@ -389,14 +393,15 @@ describe("decideGoNoGo", () => {
         expect(d.reasons.join("\n")).toContain(`pinned committee identity: ${pinned}`)
     })
 
-    it("applies the cap to the launch set even when the big operator is offline", () => {
+    it("applies the provider cap to the launch set even when the big provider is offline", () => {
         const launch = launchSet(10)
         const operators = spread(launch)
-        for (const v of launch.slice(6)) operators[v] = { operator: "big-op", provider: `cloud-${v.slice(-1)}` }
+        for (const v of launch.slice(6)) operators[v] = { operator: `op-${v.slice(-1)}`, provider: "big-cloud" }
         const probes = launch.map((v, i) => (i < 7 ? online(v) : online(v, { reachable: false })))
         const d = decideGoNoGo(input({ probes, operators }))
         expect(d.counted).toHaveLength(7)
         expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("provider big-cloud runs 4 of 10")
     })
 
     it("is NO-GO without an operator map or with an unmapped validator", () => {
@@ -658,6 +663,15 @@ describe("checkLaunch", () => {
         expect(d.reasons.join("\n")).toContain("fork atomicWork is scheduled at 1000000")
     })
 
+    it("keeps canonicalSigners off at launch, as docs/mainnet/genesis.md states", () => {
+        expect(LAUNCH_DORMANT_FORKS).toContain("canonicalSigners")
+        expect(MAINNET_FORKS).not.toContain("canonicalSigners")
+        const forks = { ...mainnetForks(), canonicalSigners: { activationHeight: 1000000 } }
+        const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("fork canonicalSigners is scheduled at 1000000")
+    })
+
     it("launches with seats open by NFT only: the gate, tokenStaking and nftValidatorGating at block 0", () => {
         expect(MAINNET_FORKS).toContain("tokenStakingGate")
         expect(MAINNET_FORKS).toContain("tokenStaking")
@@ -818,31 +832,35 @@ describe("checkLaunch", () => {
     })
 
     describe("validator concentration", () => {
-        it("is NO-GO on the mainnet chain id when a launch validator names no owner", () => {
+        it("warns on the mainnet chain id when a launch validator names no owner", () => {
             const operators = spread(launch)
             delete (operators[launch[2]] as Record<string, string>).owner
             const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
-            expect(d.go).toBe(false)
-            expect(d.reasons).toEqual([
-                `1 launch validators have no owner in the operator map, which the mainnet chain id requires: ${launch[2]}`,
-            ])
+            expect(d.reasons).toEqual([])
+            expect(d.go).toBe(true)
+            expect(d.warnings).toContain(
+                `1 launch validators have no owner in the operator map, so their owner concentration cannot be reported: ${launch[2]}`,
+            )
         })
 
         it("does not need owners on the testnet chain id", () => {
             const operators = Object.fromEntries(launch.map((v, i) => [v, { operator: `op-${i % 4}`, provider: `cloud-${i % 4}` }]))
             const genesis = { ...genesisFile(rows), properties: { id: NON_MAINNET_CHAIN_IDS[0], shardSize: 10 } }
             const d = checkLaunch({ ...base, operators, genesis, blockZero: blockZero(rows) })
-            expect(d.reasons.join("\n")).not.toContain("no owner")
+            expect([...d.reasons, ...d.warnings].join("\n")).not.toContain("no owner")
         })
 
-        it("is NO-GO when one owner runs four validators through four operators", () => {
+        it("lets one owner run four validators through four operators, with a warning", () => {
             const operators = Object.fromEntries(
                 launch.map((v, i) => [v, { owner: i < 4 ? "buyer" : `owner-${i}`, operator: `op-${i}`, provider: `cloud-${i}` }]),
             )
             const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
-            expect(d.go).toBe(false)
+            expect(d.reasons).toEqual([])
+            expect(d.go).toBe(true)
             expect(d.ownerCounts.buyer).toBe(4)
-            expect(d.reasons.join("\n")).toContain("owner buyer runs 4 of 10 launch validators; the cap is 3")
+            expect(d.warnings.join("\n")).toContain(
+                "owner buyer runs 4 of 10 launch validators, more than the 3 seats a committee can lose",
+            )
         })
 
         it("counts owners named like Object members", () => {
@@ -851,16 +869,16 @@ describe("checkLaunch", () => {
                     launch.map((v, i) => [v, { owner: i < 4 ? name : `owner-${i}`, operator: `op-${i}`, provider: `cloud-${i}` }]),
                 )
                 const d = checkLaunch({ ...base, operators, genesis: genesisFile(rows), blockZero: blockZero(rows) })
-                expect(d.go).toBe(false)
-                expect(d.reasons.join("\n")).toContain(`owner ${name} runs 4 of 10 launch validators; the cap is 3`)
+                expect(d.reasons).toEqual([])
+                expect(d.warnings.join("\n")).toContain(`owner ${name} runs 4 of 10 launch validators, more than the 3 seats`)
             }
         })
 
-        it("is NO-GO when one owner holds a third of block 0's stake", () => {
+        it("warns when one owner holds a third of block 0's stake", () => {
             const staked = rows.map((r, i) => ({ ...r, staked_amount: i === 0 ? "5000" : "1000" }))
             const d = checkLaunch({ ...base, genesis: genesisFile(staked), blockZero: blockZero(staked) })
-            expect(d.go).toBe(false)
-            expect(d.reasons.join("\n")).toContain("owner owner-0 holds 7000 of the 14000 block 0 stake (50%), a third or more")
+            expect(d.reasons.join("\n")).not.toContain("owner owner-0")
+            expect(d.warnings.join("\n")).toContain("owner owner-0 holds 7000 of the 14000 block 0 stake (50%), a third or more")
         })
     })
 
@@ -953,7 +971,7 @@ describe("checkLaunch", () => {
         expect(MAINNET_FORKS).toContain("tlsnVerified")
         expect(MAINNET_FORKS).not.toContain("tlsnDisabled")
         expect(LAUNCH_DORMANT_FORKS).toContain("tlsnDisabled")
-        expect(MAINNET_FORKS).toHaveLength(32)
+        expect(MAINNET_FORKS).toHaveLength(33)
     })
 
     describe("validators seated by NFT at block 0", () => {
@@ -1147,6 +1165,10 @@ describe("checkLaunch", () => {
 
     it("launches with identity links that need no validator API keys", () => {
         expect(MAINNET_FORKS).toContain("keylessWeb2Identity")
+    })
+
+    it("launches with the peerlist floor and pool refresh", () => {
+        expect(MAINNET_FORKS).toContain("peerlistFloor")
     })
 
     it("is NO-GO on chain ids 0, 1, 1337 and 31337", () => {

@@ -11,6 +11,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
+import { demoScriptRefusal } from "./routines/transactions/demosWork/scriptLimits"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
@@ -44,6 +45,7 @@ import handleL2PS from "./routines/transactions/handleL2PS"
 import {
     isReferenceBlockAllowed,
     isReferenceBlockAllowedAt,
+    signedReferenceBlock,
 } from "@/libs/blockchain/referenceBlockWindow"
 import Mempool from "src/libs/blockchain/mempool"
 import { ErrorCode } from "@/errors"
@@ -122,7 +124,7 @@ function refusedForReferenceBlock(
 ): boolean {
     if (!isReferenceBlockAllowed(referenceBlock, head)) {
         log.error(
-            "[handleExecuteTransaction] Invalid validityData block reference: " +
+            "[handleExecuteTransaction] Invalid transaction reference block: " +
                 referenceBlock +
                 " - " +
                 head,
@@ -141,7 +143,7 @@ function refusedForReferenceBlock(
     const message =
         `Reference block ${referenceBlock} is outside the window of block ` +
         `${targetBlock}, the block this transaction would be included in. ` +
-        "Confirm the transaction again and broadcast the new validity data."
+        "The reference block is signed: sign the transaction again, then confirm and broadcast it."
     log.error("[handleExecuteTransaction] " + message)
     result.success = false
     result.response = { error, message }
@@ -209,7 +211,9 @@ export async function handleExecuteTransaction(
         return result
     }
 
-    const blockNumber = validatedData.data.reference_block
+    // The signed value, not the envelope's copy; -1 fails the window check.
+    const blockNumber =
+        signedReferenceBlock(validatedData.data.transaction) ?? -1
     const handleBlockNumberStart = Date.now()
     const lastBlockNumber = await Chain.getLastBlockNumber()
     const handleBlockNumberEnd = Date.now()
@@ -354,10 +358,8 @@ export async function handleExecuteTransaction(
                 break
             }
             const params = parseWeb2ProxyRequest(payload)
-            // This re-runs the request when the tx is broadcast. Drop the
-            // credential headers on the sensitive-key list and the tx's own
-            // authorization so the replay does not carry them; other
-            // credentials are not covered.
+            // This re-runs the request when the tx is broadcast. Only the
+            // allow-listed headers and no authorization are forwarded.
             params.web2Request.raw.headers = headersForReplay(
                 params.web2Request.raw.headers,
             )
@@ -386,6 +388,13 @@ export async function handleExecuteTransaction(
                     "Remove them from the script's web2 steps.",
                 )
             ) {
+                break
+            }
+            const message = demoScriptRefusal(demosWorkScript)
+            if (message) {
+                result.success = false
+                result.response = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
+                result.extra = { error: "DEMOSWORK_SCRIPT_REFUSED", message }
                 break
             }
             try {

@@ -109,6 +109,9 @@
     },
     "keylessWeb2Identity": {
       "activationHeight": 0
+    },
+    "peerlistFloor": {
+      "activationHeight": 0
     }
   },
   "balances": [
