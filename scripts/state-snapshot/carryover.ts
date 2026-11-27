@@ -363,7 +363,7 @@ export async function buildCarryoverSnapshot(opts: {
     const outDir = resolve(opts.outDir)
     if (inDir === outDir) throw new Error("--in and --out must differ")
 
-    const source = await verifySnapshot(inDir)
+    const { manifest: source } = await verifySnapshot(inDir)
     if (!osDenominationApplied(source)) {
         throw new Error(
             "source snapshot fork_state does not record osDenomination as applied: " +
@@ -493,7 +493,7 @@ export async function buildCarryoverSnapshot(opts: {
     const manifestText = JSON.stringify(manifest, null, 2) + "\n"
     await writeFile(resolve(outDir, "manifest.json"), manifestText)
 
-    const verified = await verifySnapshot(outDir)
+    const { manifest: verified } = await verifySnapshot(outDir)
     if (verified.files["gcr_main.jsonl"].balance_sum !== "0") {
         throw new Error("self-check: balance_sum of the written snapshot is not 0")
     }

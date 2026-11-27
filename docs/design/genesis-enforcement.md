@@ -79,6 +79,10 @@ All checks run before anything is written to the database.
    be present: it would be loaded without being bound by the pin.
 5. With `EXPECTED_GENESIS_BLOCK_HASH` set, block 0 is built and its hash
    compared before anything is written.
+6. The snapshot restore reads `manifest.json` once and hashes those bytes. If
+   the file declares `snapshot.manifestSha256` and the hash differs, or no
+   manifest is found, the restore refuses before its transaction opens. The
+   per-file sha256 values it checks while streaming come from that same read.
 
 ### Restart (block 0 exists)
 

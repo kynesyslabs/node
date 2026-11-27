@@ -126,7 +126,7 @@ export async function verifiedSnapshot(
     snapshotDir: string,
 ): Promise<{ forkState: ForkStateEntry[] | null; problems: string[] }> {
     try {
-        const manifest = await verifySnapshot(path.resolve(snapshotDir))
+        const { manifest } = await verifySnapshot(path.resolve(snapshotDir))
         return { forkState: manifest.fork_state ?? [], problems: [] }
     } catch (e) {
         return {
