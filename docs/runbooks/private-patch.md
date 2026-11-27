@@ -40,8 +40,14 @@ builds privately has the same digest the public release publishes later.
    digest matches the maintainers' digest. They load the image from that
    same `image.tar` (`docker load -i image.tar`), tag the loaded image, set
    `IMAGE_NAME` and `IMAGE_TAG` in `.env` to that tag (`docker-compose.yml`
-   reads them), and restart one validator at a time, never two at once. Each operator posts
-   the running digest and its validator addresses in the thread.
+   reads them), and moves one validator at a time, never two at once, with
+   the sequence of `INSTALL.md`, "Update the node": `migration:show` with the
+   patched image; if it lists a pending migration, back up the database first
+   (`docs/runbooks/database-migrations.md`, step 1); then
+   `docker compose stop reaper node`, `migration:run` with the patched image
+   and `docker compose up -d --no-build`. The node does not migrate at boot
+   and refuses to start while a migration is pending. Each operator posts the
+   running digest and its validator addresses in the thread.
 5. **Coverage.** When the confirmed validators are more than two thirds of
    the active set, the maintainers merge the fix into `stabilisation` with a
    merge commit (never squash or rebase: the tagged commit must stay the same

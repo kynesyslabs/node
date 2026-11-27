@@ -30,8 +30,7 @@ copy taken while the node is stopped (`INSTALL.md`, Track 1 backup step;
 Take a dump on a compose install:
 
 ```bash
-docker compose exec -T postgres \
-  pg_dump -Fc -U "${PG_USER:-demosuser}" "${PG_DATABASE:-demos}" \
+docker compose exec -T postgres sh -c 'exec pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' \
   > "demos-$(date -u +%Y%m%dT%H%M%SZ).dump"
 ```
 

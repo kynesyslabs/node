@@ -32,8 +32,10 @@ transactions pay no gas.
 | Launch + 90 days | 25 | no single provider or region near a third of the set |
 
 These are what the launch coordinator tracks, not protocol limits. The
-coordinator reviews them at each date and posts the count and the provider
-and region split from `getValidators` to the team.
+coordinator reviews them at each date and posts to the team the count of
+active seats from `getValidators` and the provider and region split from the
+operator inventory (the RPC carries neither: each operator gives its provider
+and region when it is listed, item 4 below).
 
 ## Approval
 
@@ -47,8 +49,10 @@ monitoring, war-room channel), the operator posts:
 
 1. `./scripts/node-doctor --production` PASS against `docs/mainnet/parameters.env`,
    with the image digest of the signed release it runs.
-2. `getValidatorInfo` for its address showing `active` with its NFT mint.
+2. `getValidatorInfo` for its address with `status` `"2"` (active) and its
+   `nftMint`.
 3. A signed block from its production host, read from the chain.
+4. Its hosting provider and region, for the operator inventory.
 
 ## Revoke at every change
 

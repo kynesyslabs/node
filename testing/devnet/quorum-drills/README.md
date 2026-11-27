@@ -251,8 +251,12 @@ state file and the restart signing floor comes from the clock alone, not
 from the rounds recorded there.
 
 With `SWAP_IMAGE=<local image>`, each restarted validator comes back on that
-image instead (stopped at once, its container recreated, its database kept):
-a rolling upgrade, as in a private patch (`docs/runbooks/private-patch.md`).
+image instead (stopped at once, its container recreated, its database kept,
+and on the image path `migration:run` run with the new image before it
+starts): a rolling upgrade, as in a private patch
+(`docs/runbooks/private-patch.md`). The replaced container's log is kept as
+`node-<i>.preswap-<n>.log` and checked with the others for connection-limit
+errors.
 The image must have the same entrypoint, command and user as `--image`, and
 the verdict records it. `restart-n4s4` swaps 3 of 4 validators (node-1 is
 never restarted), which is the over-2/3 step of the runbook:

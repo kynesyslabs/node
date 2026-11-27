@@ -25,8 +25,13 @@ free (`docs/mainnet/exchange-integration.md`, "Fee on a failed transaction").
 A transaction that waits too long expires instead of executing late: 11 to
 50 blocks past its reference block it is included as `failed` with no fee;
 more than 50 blocks past it, or 10 minutes after its signed timestamp, nodes
-drop it without a record (`docs/mainnet/exchange-integration.md`). Clients
-resubmit with a fresh reference block.
+drop it without a record (`docs/mainnet/exchange-integration.md`). A missing
+result does not mean the send failed: it may have executed while the client
+missed the reply. A client sends again only once the transaction is dead by
+the checks in `docs/mainnet/exchange-integration.md` ("Never re-sign after a
+timeout"), and then signs it with the same nonce and a fresh reference block.
+The node holds one pending transaction per nonce, so at most one of the two
+executes; a new nonce can pay twice.
 
 Why not a surge fee: it changes what every validator charges, so it is a fork,
 and it has not run on any network. Why not a throttle: the caps above already
@@ -41,7 +46,8 @@ fork to lift it.
 - During a spike, operators change nothing: no fee, cap or pool edit on a
   running node. The war room posts that the network is congested, that
   pending transactions either land or expire, and that a transaction with no
-  result after 10 minutes is resubmitted.
+  result is checked with `getTransactionStatus` and, only once it is dead,
+  sent again with the same nonce, never a new one.
 - Watch `MempoolBacklog` and block times on the monitoring dashboards. A
   growing backlog with blocks still coming is load; no blocks for 5 minutes is
   a halt (`docs/runbooks/chain-halt-recovery.md`).
