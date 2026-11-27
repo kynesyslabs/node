@@ -966,6 +966,14 @@ this restart is a fallback there.
     client ID equal to that key; SDK 4.0.24 signs with ML-DSA and requests
     no challenge, so keep `transitional` until an SDK release supports it.
     Mainnet validators run with `SIGNALING_ENABLED=false`.
+  - `launch-go-no-go` no longer limits beneficial owners or operators.
+    Anyone may run as many validators as they hold seat NFTs for, so an
+    owner or operator above `min(launch, shardSize) - quorum` validators, a
+    third of the first committee's votes or a third of block 0's stake is a
+    warning at T-0 and the advisory `--plan` line "owner and operator
+    concentration" (`NOTE`, never `FAIL`). A mainnet entry without an
+    `owner` is a warning too. Providers and regions keep their NO-GO
+    limits. See `docs/mainnet/validator-concentration.md`.
 
 ## Known limits
 
