@@ -120,7 +120,11 @@ export default async function handleDemosWorkRequest(
             content,
             web2Caller,
         )
-        response.result = 200
+        const failed = operationsResults.filter(op => !op.success)
+        response.result = failed.length === 0 ? 200 : 400
+        if (failed.length > 0) {
+            response.extra = failed.map(op => op.error).join("\n").trim()
+        }
         response.response = {
             compiledScript: compiledScript,
             operationsResults: operationsResults,

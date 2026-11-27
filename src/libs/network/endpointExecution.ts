@@ -492,6 +492,8 @@ export async function handleExecuteTransaction(
                 web2CallerForAddress(tx.content.from),
             )
             result.response = web2Result
+            // A refused or failed fetch has no response to record on chain.
+            result.success = web2Result?.result === 200
             const handleWeb2RequestEnd = Date.now()
             log.only(
                 `[SERVER] Web2 request processed in ${handleWeb2RequestEnd - handleWeb2RequestStart}ms`,
@@ -522,6 +524,9 @@ export async function handleExecuteTransaction(
                     web2CallerForAddress(tx.content.from),
                 )
                 result.response = demosWorkResult
+                // Any failed step keeps the script out of the mempool; the
+                // reply still shows what ran.
+                result.success = demosWorkResult?.result === 200
             } catch (e) {
                 log.error("[handleExecuteTransaction] Error in demosWork: " + e)
                 result.success = false

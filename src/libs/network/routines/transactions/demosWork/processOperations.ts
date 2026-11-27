@@ -58,6 +58,9 @@ export async function processOperations(
         }
         /* NOTE Append the operation result to the operations results */
         operationsResults.push(operationResult)
+        // A failed operation keeps the tx out of the mempool, so later
+        // operations would make outbound calls that nothing records.
+        if (!operationResult.success) break
     }
     // NOTE Return the script compiled
     return [script, operationsResults]

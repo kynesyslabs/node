@@ -57,6 +57,12 @@ mock.module("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({
 let digestReply: any = { success: true, message: "all_ops_ok", results: {} }
 const digest = jest.fn(async (..._args: unknown[]) => digestReply)
 mock.module("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: { digest } }))
+let web2Status = 200
+const handleWeb2ProxyRequest = jest.fn(async (..._args: unknown[]) => ({ result: web2Status, response: {} }))
+mock.module("./routines/transactions/handleWeb2ProxyRequest", () => ({ handleWeb2ProxyRequest }))
+mock.module("../utils/web2RequestUtils", () => ({
+    parseWeb2ProxyRequest: () => ({ web2Request: { raw: { headers: {} } } }),
+}))
 mock.module("./routines/transactions/handleIdentityRequest", () => ({ __esModule: true, default: jest.fn() }))
 mock.module("./routines/transactions/handleNativeBridgeTx", () => ({ __esModule: true, default: jest.fn() }))
 mock.module("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
@@ -91,6 +97,9 @@ beforeEach(() => {
     submitValidatedTx.mockClear()
     digest.mockClear()
     handleDemosWorkRequest.mockClear()
+    handleDemosWorkRequest.mockImplementation(async () => ({ result: 200, response: {} }))
+    handleWeb2ProxyRequest.mockClear()
+    web2Status = 200
 })
 
 describe("refusals run before outbound calls", () => {
@@ -157,6 +166,33 @@ describe("XM verdict", () => {
         const reply = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
         expect(reply.success).toBe(false)
         expect(JSON.stringify(reply.response)).toContain("0xabc")
+        expect(submitValidatedTx).not.toHaveBeenCalled()
+    })
+})
+
+describe("an outbound call that failed keeps the tx out of the mempool", () => {
+    it("web2Request: a non-200 fetch is not submitted", async () => {
+        web2Status = 502
+        const reply = await handleExecuteTransaction(tx("web2Request", { message: {} }), "s")
+        expect(reply.success).toBe(false)
+        expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
+        expect(submitValidatedTx).not.toHaveBeenCalled()
+    })
+
+    it("web2Request: a 200 fetch is submitted", async () => {
+        const reply = await handleExecuteTransaction(tx("web2Request", { message: {} }), "s")
+        expect(reply.success).toBe(true)
+        expect(submitValidatedTx).toHaveBeenCalledTimes(1)
+    })
+
+    it("demoswork: a failed step is not submitted, and the reply keeps the results", async () => {
+        handleDemosWorkRequest.mockImplementation(async () => ({
+            result: 400,
+            response: { operationsResults: [{ success: false, error: "step failed" }] },
+        }))
+        const reply = await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")
+        expect(reply.success).toBe(false)
+        expect(JSON.stringify(reply.response)).toContain("step failed")
         expect(submitValidatedTx).not.toHaveBeenCalled()
     })
 })
