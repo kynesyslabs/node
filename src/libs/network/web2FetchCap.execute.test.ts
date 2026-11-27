@@ -50,6 +50,7 @@ mock.module("./txSubmission", () => ({
 mock.module("./outboundAdmission", () => ({
     outboundAdmissionRefusal: async () => null,
     claimOutboundRun: () => true,
+    releaseOutboundRun: () => undefined,
 }))
 // Reusing an attested response is covered in web2AttestedResponse tests.
 mock.module("./routines/transactions/web2AttestedResponse", () => ({

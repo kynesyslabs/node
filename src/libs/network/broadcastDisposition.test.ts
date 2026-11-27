@@ -48,6 +48,7 @@ jest.mock("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal: () =>
 jest.mock("./outboundAdmission", () => ({
     outboundAdmissionRefusal: async () => null,
     claimOutboundRun: () => true,
+    releaseOutboundRun: () => undefined,
 }))
 // Reusing an attested response is covered in web2AttestedResponse tests.
 jest.mock("./routines/transactions/web2AttestedResponse", () => ({

@@ -77,6 +77,14 @@ export function claimOutboundRun(
     return true
 }
 
+/**
+ * Drops the claim of a run that sent nothing, so the same signed tx can be
+ * broadcast again once the other chain or origin is reachable.
+ */
+export function releaseOutboundRun(hash: string): void {
+    claims.delete(hash)
+}
+
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetOutboundClaims(): void {
     claims.clear()

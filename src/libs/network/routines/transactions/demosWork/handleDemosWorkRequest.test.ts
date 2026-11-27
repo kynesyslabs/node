@@ -1,7 +1,6 @@
 /**
- * A DemosWork script is reported as done only when every operation and step
- * succeeded; a failed step fails the request, and the operations after it do
- * not run.
+ * A DemosWork script runs every operation and its tx records the run; a
+ * failed step is reported in its operation's result and in `extra`.
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -54,38 +53,48 @@ describe("handleDemosWorkRequest", () => {
         expect(reply.response.operationsResults.every((o: any) => o.success)).toBe(true)
     })
 
-    it("fails on a partly executed XM step and does not run later operations", async () => {
-        xmReply = { success: false, message: "partial_ops_ok", results: { a: { result: "success", hash: "0x1" } } }
+    it("runs every operation after a failed one and reports the failure", async () => {
+        xmReply = { success: false, message: "all_ops_failed", results: {} }
         const reply = await handleDemosWorkRequest(script(["xm"], ["web2"]))
-        expect(reply.result).not.toBe(200)
-        expect(String(reply.extra)).toContain("partial_ops_ok")
-        expect(reply.response.operationsResults).toHaveLength(1)
-        expect(handleWeb2ProxyRequest).not.toHaveBeenCalled()
+        expect(reply.result).toBe(200)
+        expect(String(reply.extra)).toContain("all_ops_failed")
+        expect(reply.response.operationsResults).toHaveLength(2)
+        expect(reply.response.operationsResults.map((o: any) => o.success)).toEqual([false, true])
+        expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
     })
 
-    it("fails on a non-200 web2 step and skips the rest of its operation", async () => {
+    it("treats a partly executed XM step as done", async () => {
+        xmReply = { success: true, message: "partial_success", results: { a: { result: "success", hash: "0x1" } } }
+        const reply = await handleDemosWorkRequest(script(["xm"]))
+        expect(reply.result).toBe(200)
+        expect(reply.response.operationsResults[0].success).toBe(true)
+    })
+
+    it("reports a non-200 web2 step as failed", async () => {
         web2Status = 502
         const reply = await handleDemosWorkRequest(script(["web2", "native"]))
-        expect(reply.result).not.toBe(200)
-        expect(handleNativeRequest).not.toHaveBeenCalled()
+        expect(reply.result).toBe(200)
+        expect(reply.response.operationsResults[0].success).toBe(false)
     })
 
     for (const [context, set] of [
         ["native", () => (nativeStatus = 400)],
         ["l2ps", () => (l2psStatus = 400)],
     ] as const) {
-        it(`fails on a non-200 ${context} step`, async () => {
+        it(`reports a non-200 ${context} step as failed`, async () => {
             set()
             const reply = await handleDemosWorkRequest(script([context]))
-            expect(reply.result).not.toBe(200)
+            expect(reply.result).toBe(200)
+            expect(reply.response.operationsResults[0].success).toBe(false)
             expect(String(reply.extra)).toContain(`${context} step failed`)
         })
     }
 
-    it("fails on an unimplemented conditional operation", async () => {
+    it("reports an unimplemented conditional operation without refusing the run", async () => {
         const s = script(["native"])
         s.operations.op0.operationType = "conditional"
         const reply = await handleDemosWorkRequest(s)
-        expect(reply.result).not.toBe(200)
+        expect(reply.result).toBe(200)
+        expect(reply.response.operationsResults[0].success).toBe(false)
     })
 })

@@ -148,4 +148,40 @@ describe("XRPL submit deadline", () => {
         fakeXrpl(async () => ({ result: { meta: { TransactionResult: "tecPATH_DRY" }, hash: signed.hash, validated: true } }))
         expect(await handlePayOperation(xrplOp(signed.tx_blob), 0)).toMatchObject({ result: "error" })
     })
+
+    it("reports a connection lost after the submit as unknown with the hash", async () => {
+        const signed = signedXrplTx()
+        const disconnect = fakeXrpl(async () => {
+            throw new Error("websocket was closed")
+        })
+        const reply = await handlePayOperation(xrplOp(signed.tx_blob), 0)
+        expect(reply).toMatchObject({ result: "unknown", hash: signed.hash })
+        expect(disconnect).toHaveBeenCalledTimes(1)
+    })
+
+    it("submits when connect() reports false but the client did connect", async () => {
+        const signed = signedXrplTx()
+        const submitAndWait = jest.fn(async () => ({
+            result: { meta: { TransactionResult: "tesSUCCESS" }, hash: signed.hash, validated: true },
+        }))
+        const disconnect = jest.fn(async () => undefined)
+        spyOn(multichain.XRPL.prototype, "connect").mockImplementation(async function (this: any) {
+            this.connected = true
+            this.provider = { submitAndWait, disconnect }
+            return false
+        })
+        expect(await handlePayOperation(xrplOp(signed.tx_blob), 0)).toEqual({ result: "success", hash: signed.hash })
+        expect(disconnect).toHaveBeenCalledTimes(1)
+    })
+
+    it("closes the client when it never connected", async () => {
+        const disconnect = jest.fn(async () => undefined)
+        spyOn(multichain.XRPL.prototype, "connect").mockImplementation(async function (this: any) {
+            this.connected = false
+            this.provider = { disconnect }
+            return false
+        })
+        expect(await handlePayOperation(xrplOp(signedXrplTx().tx_blob), 0)).toMatchObject({ result: "error" })
+        expect(disconnect).toHaveBeenCalledTimes(1)
+    })
 })

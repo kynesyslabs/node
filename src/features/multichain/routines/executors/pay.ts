@@ -222,33 +222,36 @@ async function handleXRPLPay(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
     const xrplInstance = new multichain.XRPL(rpcUrl)
-    // No auto-reconnect: the client is closed once this one submit settles.
-    const connected = await xrplInstance.connect(false)
-    log.debug("CONNECT RETURNED: ", connected)
+    // Set once submitAndWait starts: past it the tx may have landed.
+    let submitHash: string | null = null
+    try {
+        // No auto-reconnect: the client is closed once this one submit
+        // settles. connect() can report false after a retry that did
+        // connect, so the client's own flag decides.
+        const connected = await xrplInstance.connect(false)
+        log.debug("CONNECT RETURNED: ", connected)
 
-    if (!connected) {
-        return {
-            result: "error",
-            error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
-        }
-    }
-
-    // REVIEW 10 seconds timeout for connection
-    let timer = 0
-    while (!xrplInstance.connected) {
-        await new Promise(resolve => setTimeout(resolve, 300))
-        timer += 300
-        if (timer > 10000) {
-            log.debug("[XMScript Parser] Ripple Pay: timeout")
-            return {
-                result: "error",
-                error: "Timeout in connecting to the XRP network",
+        // REVIEW 10 seconds timeout for connection
+        let timer = 0
+        while (!xrplInstance.connected) {
+            if (!connected) {
+                return {
+                    result: "error",
+                    error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, 300))
+            timer += 300
+            if (timer > 10000) {
+                log.debug("[XMScript Parser] Ripple Pay: timeout")
+                return {
+                    result: "error",
+                    error: "Timeout in connecting to the XRP network",
+                }
             }
         }
-    }
-    log.debug("[XMScript Parser] Ripple Pay: connected to the XRP network")
+        log.debug("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
-    try {
         // Validate signedPayloads exists and has at least one element
         if (
             !operation.task.signedPayloads ||
@@ -289,6 +292,7 @@ async function handleXRPLPay(
         // submitAndWait has no deadline of its own. Past ours the tx may
         // still be validated, so the outcome is unknown, not failed.
         const hash = xrplSignedTxHash(txBlob)
+        submitHash = hash
         const wait = deadline(XM_XRPL_SUBMIT_DEADLINE_MS)
         let res: Awaited<ReturnType<typeof xrplInstance.provider.submitAndWait>>
         try {
@@ -364,10 +368,15 @@ async function handleXRPLPay(
         }
     } catch (error) {
         log.error("[XMScript Parser] Ripple Pay error: " + error)
-        return {
-            result: "error",
-            error: error instanceof Error ? error.message : String(error),
+        const message = error instanceof Error ? error.message : String(error)
+        if (submitHash) {
+            return {
+                result: "unknown",
+                hash: submitHash,
+                error: `${message}; the transaction may still be included. Look up its hash before retrying.`,
+            }
         }
+        return { result: "error", error: message }
     } finally {
         await Promise.resolve(xrplInstance.provider?.disconnect?.()).catch(
             () => undefined,

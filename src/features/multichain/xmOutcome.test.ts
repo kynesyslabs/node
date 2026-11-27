@@ -72,32 +72,34 @@ function payOp(): any {
 describe("XMDispatcher.digest", () => {
     const script = { operations: { first: payOp(), second: payOp() }, operations_order: ["first", "second"] }
 
-    it("admits only an all-ok script", async () => {
+    it("admits an all-ok script", async () => {
         payReplies.push({ result: "success", hash: "0x01" }, { result: "success", hash: "0x02" })
         const out = await XMDispatcher.digest(script as any)
         expect(out).toMatchObject({ success: true, message: "all_ops_ok" })
     })
 
-    it("refuses a partial run and reports what was sent", async () => {
+    it("admits a partial run so the tx records what was sent", async () => {
         payReplies.push({ result: "success", hash: "0x01" }, { result: "error", error: "nonce too low" })
         const out = await XMDispatcher.digest(script as any)
-        expect(out.success).toBe(false)
+        expect(out.success).toBe(true)
         expect(out.message).toBe("partial_success")
         expect(out.results.first).toMatchObject({ result: "success", hash: "0x01" })
         expect((out as any).outcomes).toEqual({ first: "ok", second: "failed" })
     })
 
-    it("refuses a run with an unknown outcome and keeps its hash", async () => {
+    it("admits a run with an unknown outcome and keeps its hash", async () => {
         payReplies.push({ result: "success", hash: "0x01" }, { result: "unknown", hash: "0x02" })
         const out = await XMDispatcher.digest(script as any)
-        expect(out.success).toBe(false)
+        expect(out).toMatchObject({ success: true, message: "partial_success" })
+        expect((out as any).outcomes).toEqual({ first: "ok", second: "unknown" })
         expect(out.results.second).toMatchObject({ result: "unknown", hash: "0x02" })
     })
 
-    it("refuses a run whose executor claimed success without a hash", async () => {
+    it("counts a success without a hash as failed", async () => {
         payReplies.push({ result: "success", hash: "0x01" }, { result: "success" })
         const out = await XMDispatcher.digest(script as any)
-        expect(out).toMatchObject({ success: false, message: "partial_success" })
+        expect(out).toMatchObject({ success: true, message: "partial_success" })
+        expect((out as any).outcomes).toEqual({ first: "ok", second: "failed" })
     })
 
     it("refuses an all-failed run", async () => {

@@ -55,6 +55,7 @@ mock.module("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal }))
 mock.module("./outboundAdmission", () => ({
     outboundAdmissionRefusal: async () => null,
     claimOutboundRun: () => true,
+    releaseOutboundRun: () => undefined,
 }))
 mock.module("src/libs/gossip/GossipManager", () => ({
     __esModule: true,

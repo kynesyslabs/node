@@ -38,7 +38,11 @@ import {
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { gossipSizeRefusal, submitValidatedTx } from "./txSubmission"
-import { claimOutboundRun, outboundAdmissionRefusal } from "./outboundAdmission"
+import {
+    claimOutboundRun,
+    outboundAdmissionRefusal,
+    releaseOutboundRun,
+} from "./outboundAdmission"
 import GossipManager from "src/libs/gossip/GossipManager"
 import { isSelfStaked } from "src/libs/consensus/stakedSet"
 import handleL2PS from "./routines/transactions/handleL2PS"
@@ -389,9 +393,10 @@ export async function handleExecuteTransaction(
             const xmResult = await multichainDispatcher.digest(
                 payload[1] as XMScript,
             )
-            // Only an all-ok script is admitted; on any other verdict the
-            // reply still lists which external transactions were sent.
+            // A partial run is admitted: the tx records what reached other
+            // chains. Only a run where nothing was sent is refused.
             result.success = xmResult.success === true
+            if (!result.success) releaseOutboundRun(queriedTx.hash)
             result.response = {
                 message: xmResult.message,
                 results: xmResult.results,
@@ -537,8 +542,8 @@ export async function handleExecuteTransaction(
                     web2CallerForAddress(tx.content.from),
                 )
                 result.response = demosWorkResult
-                // Any failed step keeps the script out of the mempool; the
-                // reply still shows what ran.
+                // Failed steps are listed in the reply; the tx records the
+                // run either way.
                 result.success = demosWorkResult?.result === 200
             } catch (e) {
                 log.error("[handleExecuteTransaction] Error in demosWork: " + e)

@@ -41,13 +41,13 @@ export default class MultichainDispatcher {
     }
 
     /**
-     * Runs every operation and admits the Demos tx only when all of them
-     * succeeded. Operations go to independent chains one after another, so
-     * the script cannot be atomic: when one fails, the ones before it may
-     * already be final on their chains and nothing here can undo them.
-     * Refusing the Demos tx after a partial run is the honest answer; the
-     * reply lists each operation's result (and hash, when one was sent) so
-     * the caller sees what reached other chains.
+     * Runs every operation and admits the Demos tx unless every one of them
+     * failed. Operations go to independent chains one after another, so the
+     * script cannot be atomic: when one fails, the ones before it may already
+     * be final on their chains and nothing here can undo them. The Demos tx
+     * is then the only record of what was sent, so a partial run is admitted
+     * with its verdict, and each operation's outcome (and hash, when one was
+     * sent) travels in the reply.
      */
     static async execute(script: XMScript) {
         const results = await XMParser.execute(script)
@@ -60,7 +60,7 @@ export default class MultichainDispatcher {
         }
         const message = xmScriptVerdict(Object.values(outcomes))
         return {
-            success: message === "all_ops_ok",
+            success: message !== "all_ops_failed",
             message,
             results,
             outcomes,

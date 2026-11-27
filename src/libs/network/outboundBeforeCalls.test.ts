@@ -162,21 +162,33 @@ describe("refusals run before outbound calls", () => {
 })
 
 describe("XM verdict", () => {
-    it("a partly executed script is not submitted, and the reply lists what was sent", async () => {
+    it("a partly executed script is submitted, and the reply lists what was sent", async () => {
         digestReply = {
-            success: false,
-            message: "partial_ops_ok",
+            success: true,
+            message: "partial_success",
             results: { a: { result: "success", hash: "0xabc" }, b: { result: "error" } },
         }
         const reply = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
-        expect(reply.success).toBe(false)
+        expect(reply.success).toBe(true)
         expect(JSON.stringify(reply.response)).toContain("0xabc")
+        expect(submitValidatedTx).toHaveBeenCalledTimes(1)
+    })
+
+    it("a script that sent nothing is not submitted and can be broadcast again", async () => {
+        digestReply = { success: false, message: "all_ops_failed", results: { a: { result: "error" } } }
+        const reply = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
+        expect(reply.success).toBe(false)
         expect(submitValidatedTx).not.toHaveBeenCalled()
+
+        digestReply = { success: true, message: "all_ops_ok", results: { a: { result: "success", hash: "0x1" } } }
+        const again = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
+        expect(again.success).toBe(true)
+        expect(digest).toHaveBeenCalledTimes(2)
     })
 })
 
-describe("an outbound call that failed keeps the tx out of the mempool", () => {
-    it("web2Request: a non-200 fetch is not submitted", async () => {
+describe("an outbound call's result decides submission", () => {
+    it("web2Request: a fetch with no response to record is not submitted", async () => {
         web2Status = 502
         const reply = await handleExecuteTransaction(tx("web2Request", { message: {} }), "s")
         expect(reply.success).toBe(false)
@@ -190,14 +202,22 @@ describe("an outbound call that failed keeps the tx out of the mempool", () => {
         expect(submitValidatedTx).toHaveBeenCalledTimes(1)
     })
 
-    it("demoswork: a failed step is not submitted, and the reply keeps the results", async () => {
+    it("demoswork: a run with a failed step is submitted, and the reply keeps the results", async () => {
         handleDemosWorkRequest.mockImplementation(async () => ({
-            result: 400,
+            result: 200,
+            extra: "step failed",
             response: { operationsResults: [{ success: false, error: "step failed" }] },
         }))
         const reply = await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")
-        expect(reply.success).toBe(false)
+        expect(reply.success).toBe(true)
         expect(JSON.stringify(reply.response)).toContain("step failed")
+        expect(submitValidatedTx).toHaveBeenCalledTimes(1)
+    })
+
+    it("demoswork: a script that could not run is not submitted", async () => {
+        handleDemosWorkRequest.mockImplementation(async () => ({ result: 400, response: null }))
+        const reply = await handleExecuteTransaction(tx("demoswork", { steps: {} }), "s")
+        expect(reply.success).toBe(false)
         expect(submitValidatedTx).not.toHaveBeenCalled()
     })
 })
