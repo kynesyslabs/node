@@ -13,6 +13,7 @@ import _ from "lodash"
 import handleNativeRequest from "../handleNativeRequest"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
+import { logField } from "src/features/multichain/routines/errorKind"
 // ? Remove this proxy if possible
 const handleXMRequest = multichainDispatcher
 
@@ -34,9 +35,9 @@ export default async function handleStep(
     const task = step.content
     log.info(
         "[demosWork] [handleStep] Handling a step with context: " +
-            context +
+            logField(context) +
             " and description: " +
-            step.description,
+            logField(step.description),
     )
     // A step the operator switched off must fail the operation, not be
     // recorded as done with the refusal as its output.

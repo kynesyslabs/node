@@ -44,7 +44,7 @@ import {
     getMempoolLimits,
 } from "src/libs/blockchain/mempoolLimits"
 
-// Bounds the hellos one unauthenticated call can start.
+// Bounds the hellos one call can start.
 const MAX_ANNOUNCED_PEERS = 200
 
 /**
@@ -209,15 +209,17 @@ export default class ServerHandlers {
     }
 
     /**
-     * Unauthenticated discovery: the submitted list contributes addresses of
+     * Discovery from a validator: the submitted list contributes addresses of
      * peers we do not know yet, each of which is verified with a hello before
      * it is listed. Nothing else in the list (sync, status, verification) is
-     * read.
+     * read. `peerlist` is served to validators, the senders the mempool merge
+     * admits; a node that is not a validator announces itself with its own
+     * hello.
      */
-    static async handlePeerlist(content: unknown): Promise<any> {
+    static async handlePeerlist(content: unknown, sender = ""): Promise<any> {
         const requireReply = false
 
-        if (!Array.isArray(content)) {
+        if (!Array.isArray(content) || !(await isMergePeerEligible(sender))) {
             return {
                 extra: { peerlistState: "rejected" },
                 requireReply,
@@ -241,7 +243,7 @@ export default class ServerHandlers {
             announced.push(new Peer(url, identity))
         }
 
-        PeerManager.getInstance().setPeers(announced)
+        await PeerManager.getInstance().setPeers(announced)
         return { extra: { peerlistState: "merged" }, requireReply, response: true }
     }
 }

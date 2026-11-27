@@ -5,7 +5,7 @@ import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import type { Validators } from "src/model/entities/Validators"
 import { isForkActive } from "@/forks/forkGates"
-import { quorumThreshold } from "../quorum"
+import { peerlistFloorThreshold, quorumThreshold } from "../quorum"
 import { compareIdentities } from "./poolRules"
 
 export const MERGE_PEERLIST_MAX_ENTRIES_PER_PEER = 1000
@@ -231,31 +231,21 @@ export async function contributePeerlist(
 }
 
 /**
- * Union of our own observations and all contributions for the round,
- * where an observation only counts if it places its peer exactly at the
- * round's parent block (number AND hash, pinned from our chain rather
- * than the moving tip). Observations claiming any other position —
- * behind, ahead, or a different hash — are ignored: they can neither
- * include nor exclude. Result is filtered to active validators,
- * deduplicated and sorted ascending. Deterministic given the same set
- * of contributions.
- */
-/**
- * Identities observed at the round's parent block by a quorum of the
- * shard. Each shard member is one voter: our own table is our vote, and a
- * contribution counts only when its contributor is a member. Absent
- * members still count towards the quorum; collectParentVotes says which
- * quorum applies.
+ * Identities observed at the round's parent block by enough of the shard:
+ * a quorum, or under peerlistFloor the floor of n - q + 1. Each shard
+ * member is one voter: our own table is our vote, and a contribution
+ * counts only when its contributor is a member. Absent members still count
+ * towards the bar; collectParentVotes says which bar applies.
  */
 export async function computeMergedPeerlist(
     blockRef: number,
     shardMembers: string[],
 ): Promise<string[]> {
-    const { votes, quorum } = await collectParentVotes(blockRef, shardMembers)
+    const { votes, threshold } = await collectParentVotes(blockRef, shardMembers)
 
     const merged = new Set<string>()
     for (const [identity, seenBy] of votes) {
-        if (seenBy.size >= quorum) {
+        if (seenBy.size >= threshold) {
             merged.add(identity)
         }
     }
@@ -300,7 +290,10 @@ export async function computeMergedPeerlist(
 /**
  * Who observed which identity at the round's parent block, one vote per
  * member of `shardMembers`: our own table is our vote, and a contribution
- * counts only when its contributor is a member.
+ * counts only when its contributor is a member. `threshold` is the votes an
+ * identity needs to be listed: the quorum, or under peerlistFloor
+ * n - q + 1 of the same n, since at the quorum n - q + 1 colluders could
+ * drop any honest validator by leaving it out of their reports.
  *
  * Before committeeBinding the members are the caller's shard and the
  * quorum is 2/3 + 1 of them, absent members included. Under it the
@@ -312,7 +305,7 @@ export async function computeMergedPeerlist(
 async function collectParentVotes(
     blockRef: number,
     shardMembers: string[],
-): Promise<{ votes: Map<string, Set<string>>; quorum: number }> {
+): Promise<{ votes: Map<string, Set<string>>; threshold: number }> {
     const parentNumber = blockRef - 1
     const parentBlock = await Chain.getBlockByNumber(parentNumber)
     const parentHash = parentBlock?.hash ?? null
@@ -323,9 +316,12 @@ async function collectParentVotes(
         observation.block_hash === parentHash
 
     const voters = new Set(shardMembers.map(m => m.toLowerCase()))
-    const quorum = isForkActive("committeeBinding", blockRef)
-        ? quorumThreshold(getSharedState.shardSize)
-        : quorumThreshold(voters.size)
+    const n = isForkActive("committeeBinding", blockRef)
+        ? getSharedState.shardSize
+        : voters.size
+    const threshold = isForkActive("peerlistFloor", blockRef)
+        ? peerlistFloorThreshold(voters.size, quorumThreshold(n))
+        : quorumThreshold(n)
     const votes = new Map<string, Set<string>>()
     const vote = (voter: string, observation: SyncObservation) => {
         if (!isAtParent(observation)) return
@@ -355,7 +351,7 @@ async function collectParentVotes(
         }
     }
 
-    return { votes, quorum }
+    return { votes, threshold }
 }
 
 /**
@@ -363,14 +359,14 @@ async function collectParentVotes(
  * unique, and staked at the round's parent height when a validator set
  * exists. With `shardMembers`, it is also held to our own contributions:
  * every entry must have been observed at the parent block by some member,
- * and every staked identity that reaches quorum in our view must be
- * present. The secretary can then neither invent a validator nor drop one
+ * and every staked identity that reaches the bar (collectParentVotes) in
+ * our view must be present. The secretary can then neither invent a validator nor drop one
  * the shard agreed on.
  *
  * Under committeeBinding `shardMembers` is the round's bound committee, and
- * every entry must itself reach quorum in our view, the rule
+ * every entry must itself reach the bar in our view, the rule
  * computeMergedPeerlist applies. The list is the pool the next
- * committee is drawn from, so an identity below quorum would be an optional
+ * committee is drawn from, so an identity below the bar would be an optional
  * entry: with k of them the secretary could pick among 2^k pools, hence
  * committees. Without them the list is fixed by the shard's observations.
  * Returns the list or null when it fails.
@@ -421,7 +417,7 @@ export async function validateMergedPeerlist(
         activeValidators.length === 0 || validatorAddresses.has(id)
 
     if (shardMembers) {
-        const { votes, quorum } = await collectParentVotes(blockRef, shardMembers)
+        const { votes, threshold } = await collectParentVotes(blockRef, shardMembers)
         const listed = new Set(list)
         const invented = list.filter(id => !votes.has(id))
         if (invented.length > 0) {
@@ -431,12 +427,12 @@ export async function validateMergedPeerlist(
             return null
         }
         if (isForkActive("committeeBinding", blockRef)) {
-            const belowQuorum = list.filter(
-                id => (votes.get(id)?.size ?? 0) < quorum,
+            const belowBar = list.filter(
+                id => (votes.get(id)?.size ?? 0) < threshold,
             )
-            if (belowQuorum.length > 0) {
+            if (belowBar.length > 0) {
                 log.error(
-                    `[peerlistMerge] dictated peerlist for block ${blockRef} names ${belowQuorum.length} identit(ies) below quorum (${quorum}) in our view: ${belowQuorum.join(", ")}`,
+                    `[peerlistMerge] dictated peerlist for block ${blockRef} names ${belowBar.length} identit(ies) below ${threshold} observations in our view: ${belowBar.join(", ")}`,
                 )
                 return null
             }
@@ -444,12 +440,12 @@ export async function validateMergedPeerlist(
         const dropped = [...votes]
             .filter(
                 ([id, seenBy]) =>
-                    seenBy.size >= quorum && isStaked(id) && !listed.has(id),
+                    seenBy.size >= threshold && isStaked(id) && !listed.has(id),
             )
             .map(([id]) => id)
         if (dropped.length > 0) {
             log.error(
-                `[peerlistMerge] dictated peerlist for block ${blockRef} omits ${dropped.length} staked identit(ies) at quorum in our view: ${dropped.join(", ")}`,
+                `[peerlistMerge] dictated peerlist for block ${blockRef} omits ${dropped.length} staked identit(ies) with ${threshold} or more observations in our view: ${dropped.join(", ")}`,
             )
             return null
         }

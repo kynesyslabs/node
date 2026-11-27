@@ -21,9 +21,11 @@ import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import {
     helloOmniAdvertMessage,
     helloResponseMessage,
+    replyPeerlist,
     standbyKeepsKnownUrl,
     URL_BOUND_TO_OTHER,
 } from "./helloAuth"
+import { audienceKey } from "../network/peerHttpAuth"
 import { isSelfProof, noteCallerKnownAt } from "./identityLiveness"
 import { signingStopState } from "../identity/signingRecord"
 import { corroborateSyncData } from "./syncClaims"
@@ -46,6 +48,13 @@ export type HelloVerdict =
     | "other-genesis"
     | "unreachable"
     | "skipped"
+
+/**
+ * How many keys this node does not know one list places at one address (a URL
+ * origin: scheme, host and port). A node answers at its address under one
+ * key, and under a second while it changes its key.
+ */
+const LISTED_KEYS_PER_ADDRESS = 2
 
 export default class PeerManager {
     private static dualStackProbe: Promise<boolean> | undefined
@@ -570,10 +579,21 @@ export default class PeerManager {
      * a hello. A list is only a pointer: for a peer we already track, its
      * sync and status are never taken from the list, because any sender could
      * write them. They come from that peer's own verified hello or from
-     * corroborated gossip.
+     * corroborated gossip. A peer in the offline list and a staked validator
+     * get their hello at the address this node holds for them, as
+     * `listedPeersToGreet` places it. The list in the reply to such a hello
+     * is not followed, as for a peer reached through a reply's list: a peer
+     * list starts one hello for each key it names, one level deep.
      */
-    setPeers(peerlist: Peer[]) {
-        for (const peer of peerlist) {
+    async setPeers(peerlist: Peer[]): Promise<void> {
+        const listed = await PeerManager.listedPeersToGreet(
+            peerlist.map(peer => ({
+                url: peer.connection.string,
+                publicKey: peer.identity,
+            })),
+        )
+        for (const { url, publicKey } of listed) {
+            const peer = new Peer(url, publicKey)
             if (this.peerList[peer.identity]) {
                 continue
             }
@@ -587,9 +607,7 @@ export default class PeerManager {
             if (!acceptable) {
                 continue
             }
-            void PeerManager.sayHelloToPeer(
-                new Peer(peer.connection.string, peer.identity),
-            ).catch(error =>
+            void PeerManager.sayHelloToPeer(peer, false, false).catch(error =>
                 log.debug(
                     `[PEERMANAGER] Verification hello to ${peer.identity} failed: ${
                         error instanceof Error ? error.message : String(error)
@@ -602,8 +620,12 @@ export default class PeerManager {
     /**
      * Static checks a candidate must pass before we spend a handshake on it:
      * valid URL, not pointing at us, not colliding with a verified binding.
+     * `urlMayBeHeldOffline` leaves a binding in the offline list to the
+     * handshake: a reply proven at the address is what moves a URL from one
+     * identity to another. A binding to a peer that is online stands either
+     * way: that peer answers there, and a hello for another key is not for it.
      */
-    canAddPeer(peer: Peer): [boolean, string] {
+    canAddPeer(peer: Peer, urlMayBeHeldOffline = false): [boolean, string] {
         if (this.isRefusedAnchor(peer.identity)) {
             return [false, "Anchor refused this node; kept out until restart"]
         }
@@ -617,15 +639,25 @@ export default class PeerManager {
         ) {
             return [false, "Connection string points at us"]
         }
-        if (this.findPeersByUrl(parsedUrl.origin, peer.identity).length > 0) {
+        const bindings = urlMayBeHeldOffline
+            ? [this.peerList]
+            : [this.peerList, this.offlinePeers]
+        if (
+            this.findPeersByUrl(parsedUrl.origin, peer.identity, bindings)
+                .length > 0
+        ) {
             return [false, "URL already bound to another identity"]
         }
         return [true, ""]
     }
 
-    private findPeersByUrl(origin: string, exceptIdentity: string): Peer[] {
+    private findPeersByUrl(
+        origin: string,
+        exceptIdentity: string,
+        lists = [this.peerList, this.offlinePeers],
+    ): Peer[] {
         const matches: Peer[] = []
-        for (const list of [this.peerList, this.offlinePeers]) {
+        for (const list of lists) {
             for (const candidate of Object.values(list)) {
                 if (candidate.identity === exceptIdentity) continue
                 const url = parseNodeUrl(candidate.connection.string)
@@ -676,9 +708,17 @@ export default class PeerManager {
     /** Identities with a hello in flight; breaks hello/hello-back cycles. */
     static verifying = new Set<string>()
 
+    /**
+     * Says hello to `peer` and, when `followReplyList` is set, to the peers
+     * its reply names that are not online, each where `listedPeersToGreet`
+     * places it. Those are greeted with `followReplyList` off, so one call
+     * starts one level of further hellos: the list of a peer reached through
+     * a reply's list is not followed.
+     */
     static async sayHelloToPeer(
         peer: Peer,
         waitForDiscovery = false,
+        followReplyList = true,
     ): Promise<HelloVerdict> {
         if (
             PeerManager.verifying.has(peer.identity) ||
@@ -692,6 +732,7 @@ export default class PeerManager {
             return await PeerManager.sayHelloToPeerUnguarded(
                 peer,
                 waitForDiscovery,
+                followReplyList,
             )
         } finally {
             PeerManager.verifying.delete(peer.identity)
@@ -735,6 +776,7 @@ export default class PeerManager {
     private static async sayHelloToPeerUnguarded(
         peer: Peer,
         waitForDiscovery = false,
+        followReplyList = true,
     ): Promise<HelloVerdict> {
         const { request: helloRequest, nonce } =
             await PeerManager.buildHelloRequest()
@@ -756,24 +798,127 @@ export default class PeerManager {
         const { peers: newPeersUnfiltered, verdict } =
             await PeerManager.helloPeerCallback(response, peer, nonce)
 
-        if (newPeersUnfiltered.length === 0) {
+        if (!followReplyList || newPeersUnfiltered.length === 0) {
             return verdict
         }
 
-        // INFO: Recursively say hello to the new peers
-        const peerManager = PeerManager.getInstance()
-        const newPeers = newPeersUnfiltered.filter(
-            ({ publicKey }) => !peerManager.getPeer(publicKey),
-        )
+        // INFO: Say hello to the peers the reply names, without following their lists
+        const newPeers = await PeerManager.listedPeersToGreet(newPeersUnfiltered)
 
         const promise = newPeers.map(peer =>
-            PeerManager.sayHelloToPeer(new Peer(peer.url, peer.publicKey)),
+            PeerManager.sayHelloToPeer(
+                new Peer(peer.url, peer.publicKey),
+                false,
+                false,
+            ),
         )
 
         if (waitForDiscovery) {
             await Promise.all(promise)
         }
         return verdict
+    }
+
+    /**
+     * Where the peers a list names get their hello: one entry for each key
+     * that is not online. A key this node knows by other means is reached at
+     * the address this node holds for it, never at the listed one: a peer in
+     * the offline list at its stored address, a staked validator at the
+     * `connection_url` committed with its stake, and a staked validator
+     * without one not at all. A held address that points at this node is
+     * left out, as `setPeers` leaves it out. A key this node does not know
+     * is reached at the listed address when that address passes
+     * `canAddPeer`, and is left out otherwise. One list places at most
+     * LISTED_KEYS_PER_ADDRESS such keys at one address; held addresses do
+     * not count towards that. The address of a peer that is online is left
+     * out: that peer answers there, and a hello for another key is not for
+     * it. An address held for a peer in the offline list passes here, and
+     * `setPeers` goes on to refuse it: from a reply's list, a node that
+     * changed its key is found at its old address once the old key no
+     * longer answers there, and its proven reply there is what replaces
+     * the old entry. Keys compare as a request names its recipient, so a key
+     * written another way is the same key. No entry is followed while the
+     * validator table cannot be read: which keys are staked is then an
+     * unknown, not a network without validators.
+     */
+    private static async listedPeersToGreet(
+        listed: { url: string; publicKey: string }[],
+    ): Promise<{ url: string; publicKey: string }[]> {
+        const peerManager = PeerManager.getInstance()
+        const online = new Set(
+            Object.keys(peerManager.peerList).map(audienceKey),
+        )
+        const notOnline = listed.filter(
+            ({ publicKey }) => !online.has(audienceKey(publicKey)),
+        )
+        if (notOnline.length === 0) {
+            return []
+        }
+
+        const held = new Map<string, { url: string; publicKey: string }>()
+        try {
+            const { default: GCR } = await import("src/libs/blockchain/gcr/gcr")
+            const validators = await GCR.getGCRValidatorsAtBlockOrThrow(
+                getSharedState.lastBlockNumber ?? 0,
+            )
+            for (const { address, connection_url: url } of validators) {
+                if (address) {
+                    held.set(audienceKey(address), {
+                        url: url ?? "",
+                        publicKey: address,
+                    })
+                }
+            }
+        } catch (e) {
+            log.warning(
+                `[PEERMANAGER] cannot read the validator set (${
+                    e instanceof Error ? e.message : String(e)
+                }): not following a peer list`,
+            )
+            return []
+        }
+        for (const peer of Object.values(peerManager.offlinePeers)) {
+            held.set(audienceKey(peer.identity), {
+                url: peer.connection.string,
+                publicKey: peer.identity,
+            })
+        }
+
+        const greeted: { url: string; publicKey: string }[] = []
+        const withoutAddress = new Set<string>()
+        const listedAt = new Map<string, number>()
+        for (const entry of notOnline) {
+            const known = held.get(audienceKey(entry.publicKey))
+            if (!known) {
+                const [acceptable] = peerManager.canAddPeer(
+                    new Peer(entry.url, entry.publicKey),
+                    true,
+                )
+                const origin = parseNodeUrl(entry.url)?.origin
+                if (!acceptable || !origin) {
+                    continue
+                }
+                const listedThere = listedAt.get(origin) ?? 0
+                if (listedThere < LISTED_KEYS_PER_ADDRESS) {
+                    listedAt.set(origin, listedThere + 1)
+                    greeted.push(entry)
+                }
+                continue
+            }
+            const heldUrl = parseNodeUrl(known.url)
+            if (!heldUrl) {
+                withoutAddress.add(known.publicKey)
+            } else if (!PeerManager.urlPointsAtUs(heldUrl)) {
+                greeted.push(known)
+            }
+        }
+        if (withoutAddress.size > 0) {
+            const keys = [...withoutAddress].join(", ")
+            log.warning(
+                `[PEERMANAGER] a peer list names ${withoutAddress.size} staked validator(s) the validator table holds no connection_url for (${keys}): not reached through the list. Add them to the peer list file to reach them`,
+            )
+        }
+        return greeted
     }
 
     // Callback for the hello peer
@@ -875,7 +1020,7 @@ export default class PeerManager {
                 log.info(
                     `[PEERMANAGER] ${peer.identity} @ ${peer.connection.string} has stopped signing: keeping its URL ${knownUrl}`,
                 )
-                return { peers: response.extra.peerlist || [], verdict }
+                return { peers: replyPeerlist(response.extra.peerlist), verdict }
             }
             peerman.addPeer(peer, verdict === "verified", verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
@@ -883,7 +1028,7 @@ export default class PeerManager {
                 await PeerManager.noteOmniAdvert(peer, response.extra, nonce)
             }
 
-            return { peers: response.extra.peerlist || [], verdict }
+            return { peers: replyPeerlist(response.extra.peerlist), verdict }
         } else if (response.result === 409) {
             log.warning(
                 `[PEERMANAGER] ${peer.connection.string} refused our hello: ${peer.identity} is on another network (genesis ${response.extra?.genesisHash ?? "unknown"}): dropping`,

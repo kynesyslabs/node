@@ -1589,6 +1589,12 @@ async function updateValidatorPhase(
     const retries = phase === 1 ? 5 : 2
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
+    // A replaced secretary may be abstaining on its own fork schedule:
+    // start the comparison that leaves it out of the next shard.
+    if (manager.passedOverSecretaries?.size) {
+        void onShardMemberUnresponsive()
+    }
+
     preventForgingEnded(blockRef)
     log.debug(
         `[updateValidatorStatus 🎉] Validator phase ${phase} resolved with value: ${JSON.stringify(

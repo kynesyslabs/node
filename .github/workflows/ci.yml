@@ -39,6 +39,9 @@ jobs:
       - run: bash scripts/launcher-external-db.test.sh
       # ./run exits with the node's status (a crash or refusal is non-zero)
       - run: bash scripts/launcher-run-exit.test.sh
+      # Stub-based: docker-run seeds the state volume's identity only when it
+      # has none and stops on a different one
+      - run: bash scripts/docker-run-identity.test.sh
       - run: bun run test:consensus
 
   rehearsal-drill:

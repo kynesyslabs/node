@@ -123,7 +123,7 @@ describe("Proxy outbound Authorization header", () => {
 })
 
 describe("headersForReplay (broadcast-time replay of a web2Request tx)", () => {
-    it("drops credential headers, keeps the rest", () => {
+    it("drops credential headers", () => {
         const out = headersForReplay({
             Authorization: "Bearer tok",
             "X-Api-Key": "k",
@@ -131,6 +131,22 @@ describe("headersForReplay (broadcast-time replay of a web2Request tx)", () => {
         } as any)
 
         expect(out).toEqual({ "content-type": "application/json" })
+    })
+
+    it("keeps only allow-listed headers, in any casing", () => {
+        const out = headersForReplay({
+            ACCEPT: "application/json",
+            "User-Agent": "demos",
+            "Accept-Language": "en",
+            "X-Extra": "1",
+            Referer: "https://example.org/",
+        } as any)
+
+        expect(out).toEqual({
+            ACCEPT: "application/json",
+            "User-Agent": "demos",
+            "Accept-Language": "en",
+        })
     })
 
     it("returns an object, not undefined, when nothing is left", () => {

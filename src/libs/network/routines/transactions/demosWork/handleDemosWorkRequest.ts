@@ -10,11 +10,16 @@ import _ from "lodash"
 import log from "src/utilities/logger"
 import { emptyResponse } from "../../../server_rpc"
 import { processOperations } from "./processOperations"
+import { demoScriptRefusal } from "./scriptLimits"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
 // SECTION Operation types
 // SECTION Handlers
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
+import errorKind, {
+    logEntries,
+    logField,
+} from "src/features/multichain/routines/errorKind"
 // ? Remove this proxy if possible
 const handleXMRequest = multichainDispatcher
 
@@ -110,7 +115,23 @@ export default async function handleDemosWorkRequest(
     }
 
     log.info("[demosWork] [handleDemosWorkRequest] Received a DemoScript: ")
-    log.debug(JSON.stringify(content))
+    // NOTE Steps carry signed XM payloads and web2 requests: only their count
+    // and contexts are logged
+    log.debug(
+        logEntries(content?.steps, "step(s)", step => logField(step?.context)),
+    )
+
+    // Refused before any step runs, with the same reply as a failed run.
+    const refusal = demoScriptRefusal(content)
+    if (refusal) {
+        response.result = 400
+        response.extra = refusal
+        response.response = {
+            compiledScript: compiledScript,
+            operationsResults: operationsResults,
+        }
+        return response
+    }
 
     /* TODO As this fails if any step fails, we need to ensure that if not
     explicitly specified otherwise, the steps are executed even if one fails with a
@@ -128,7 +149,7 @@ export default async function handleDemosWorkRequest(
     } catch (error) {
         log.error(
             "[demosWork] [handleDemosWorkRequest] Error processing DemoScript: " +
-                error,
+                errorKind(error),
         )
         response.result = 400
         response.extra =

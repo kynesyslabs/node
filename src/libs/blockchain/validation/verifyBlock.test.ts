@@ -1,4 +1,5 @@
 import {
+    checkKnownBlockOwnSignature,
     checkTimestampAgainstParent,
     checkTimestampNotAhead,
     verifyBlock,
@@ -20,6 +21,7 @@ let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
 // The key of every signature verify, in call order
 let verifiedKeys: string[] = []
+let storedGenesisHash: string | null = null
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -63,6 +65,7 @@ jest.mock("src/libs/crypto/hashing", () => ({
 jest.mock("../chain", () => ({
     __esModule: true,
     default: {
+        getGenesisBlockHash: jest.fn(async () => storedGenesisHash),
         getBlockByNumber: jest.fn(async (n: number) => ({
             number: n,
             hash: `hash-${n}`,
@@ -155,6 +158,7 @@ beforeEach(() => {
     checkOwnSignature.mockClear()
     verifyBlockTxSignatures.mockClear()
     verifyBlockTxSignatures.mockImplementation(async () => ({ valid: true }))
+    storedGenesisHash = null
     pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
@@ -285,9 +289,44 @@ describe("verifyBlock", () => {
         expect(result.reason).toContain("before finalityProofs")
     })
 
-    it("accepts genesis without signatures", async () => {
+    it("accepts genesis without signatures when no genesis is stored yet", async () => {
         const result = await verifyBlock(makeBlock({ number: 0 }))
         expect(result.valid).toBe(true)
+    })
+
+    it("accepts block 0 when it matches the stored genesis", async () => {
+        storedGenesisHash = "valid-hash"
+        const result = await verifyBlock(makeBlock({ number: 0 }))
+        expect(result.valid).toBe(true)
+    })
+
+    it("rejects a block 0 that differs from the stored genesis", async () => {
+        storedGenesisHash = "stored-genesis-hash"
+        const result = await verifyBlock(makeBlock({ number: 0 }))
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("stored genesis")
+    })
+
+    // The content of every block here hashes to "valid-hash" (see the mocks).
+    it("rejects a block 0 that claims the stored genesis hash over other content", async () => {
+        storedGenesisHash = "stored-genesis-hash"
+        const result = await verifyBlock(
+            makeBlock({ number: 0, hash: "stored-genesis-hash" }),
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toBe(
+            "block hash mismatch: claimed stored-genesis-hash, recomputed valid-hash",
+        )
+    })
+
+    it("rejects a block 0 whose content does not hash to its hash when no genesis is stored yet", async () => {
+        const result = await verifyBlock(
+            makeBlock({ number: 0, hash: "forged-hash" }),
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toBe(
+            "block hash mismatch: claimed forged-hash, recomputed valid-hash",
+        )
     })
 
     it("does not re-check transactions when none are supplied", async () => {
@@ -331,6 +370,18 @@ describe("verifyBlock", () => {
     })
 
     describe("own-key self-check", () => {
+        it("checks a known block only when our certificate entry verifies", async () => {
+            const block = makeBlock()
+            await checkKnownBlockOwnSignature(block)
+            expect(checkOwnSignature).toHaveBeenCalledWith({
+                number: 10, hash: "valid-hash", timestamp: 1500,
+            })
+            checkOwnSignature.mockClear()
+            verifyingSigners.delete(A)
+            await checkKnownBlockOwnSignature(block)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
         it("checks an accepted block that carries our verified signature", async () => {
             await verifyBlock(makeBlock())
             expect(checkOwnSignature).toHaveBeenCalledWith({
@@ -509,6 +560,47 @@ describe("verifyBlock", () => {
             } finally {
                 state.publicKeyHex = A
             }
+        })
+
+        describe("on a known block", () => {
+            it("checks the spelling the quorum would count, verifying only our key", async () => {
+                const block = signed({ [A.toUpperCase()]: "01", [A]: FORGED, [B]: "02" })
+                await checkKnownBlockOwnSignature(block)
+                expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+                expect(verifiedKeys.every(key => key === A)).toBe(true)
+            })
+
+            it("checks the first of many spellings with one verify for the tally", async () => {
+                const block = signed(
+                    Object.fromEntries(
+                        spellingsOfA.map((key, i) => [key, i === 0 ? "01" : FORGED]),
+                    ),
+                )
+                await checkKnownBlockOwnSignature(block)
+                expect(checkOwnSignature).toHaveBeenCalledTimes(1)
+                expect(verifiesOfA()).toBe(2)
+            })
+
+            it("does not check a later spelling the quorum would not count", async () => {
+                const block = signed({ [A]: FORGED, [A.toUpperCase()]: "01" })
+                await checkKnownBlockOwnSignature(block)
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+            })
+
+            it("looks at the exact key only when we are outside the signer pool", async () => {
+                pool = [B, C, D]
+                await checkKnownBlockOwnSignature(signed({ [A.toUpperCase()]: "01" }))
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+                await checkKnownBlockOwnSignature(signed({ [A]: "01" }))
+                expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+            })
+
+            it("reads no signer pool for a copy without our key", async () => {
+                pool = new Error("pool read")
+                await checkKnownBlockOwnSignature(signed({ [B]: "02", [C]: "03" }))
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+                expect(verifiedKeys).toEqual([])
+            })
         })
 
         it("looks only at blocks from the activation height on", async () => {

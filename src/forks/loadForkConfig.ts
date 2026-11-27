@@ -36,6 +36,7 @@ import type {
     StorageFeeSettlementConfig,
     ReferenceBlockRoom10Config,
     KeylessWeb2IdentityConfig,
+    PeerlistFloorConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -474,6 +475,9 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.keylessWeb2Identity =
                 config as KeylessWeb2IdentityConfig
             return
+        case "peerlistFloor":
+            getSharedState.forkConfig.peerlistFloor = config as PeerlistFloorConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -655,6 +659,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return validateTlsnVerifiedEntry(base, entry)
         case "keylessWeb2Identity":
             return base as KeylessWeb2IdentityConfig
+        case "peerlistFloor":
+            return base as PeerlistFloorConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

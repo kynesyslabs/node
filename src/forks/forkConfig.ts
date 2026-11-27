@@ -617,6 +617,24 @@ export type ReferenceBlockRoom10Config = BaseForkConfig
 export type KeylessWeb2IdentityConfig = BaseForkConfig
 
 /**
+ * `peerlistFloor` fork: an identity enters a block's merged peerlist when
+ * `n - q + 1` voters observed it at the parent (4 of 10) instead of `q`, and
+ * the committee of every block at a multiple of `POOL_REFRESH_INTERVAL` is
+ * drawn from the parent's peerlist united with the peerlists of the
+ * previous `POOL_REFRESH_DEPTH` refresh blocks.
+ *
+ * With the quorum bar, `n - q + 1` colluding members dropped any honest
+ * validator by leaving it out of their reports, and a coalition-only pool
+ * of `q` or more kept every later committee. The floor needs `q` colluders
+ * to drop anyone; the refresh bounds how long a committee of `q` colluders
+ * keeps the chain. Applies to the block at the activation height and
+ * later. Dormant by default: it changes who is drawn, and a missing genesis
+ * entry hydrates from here. A mainnet genesis sets 0. No payload beyond the
+ * base. Design: docs/design/peerlist-floor.md.
+ */
+export type PeerlistFloorConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -809,6 +827,7 @@ export type ForkName =
     | "nftValidatorGating"
     | "tlsnVerified"
     | "keylessWeb2Identity"
+    | "peerlistFloor"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -852,6 +871,7 @@ export interface ForkConfigByName {
     nftValidatorGating: NftValidatorGatingConfig
     tlsnVerified: TlsnVerifiedConfig
     keylessWeb2Identity: KeylessWeb2IdentityConfig
+    peerlistFloor: PeerlistFloorConfig
 }
 
 /**
@@ -1237,6 +1257,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "GitHub, Discord and Twitter accounts link only through TLSNotary; the web2 " +
             "proof path that needed validator API keys refuses them.",
     },
+    peerlistFloor: {
+        // Dormant by default: it changes which committee signs a block, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An identity enters the merged peerlist with n - q + 1 observations instead of q, " +
+            "and every refresh height draws its committee from the recent refresh blocks' peerlists too.",
+    },
 }
 
 /**
@@ -1284,5 +1312,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         nftValidatorGating: { ...DEFAULT_FORK_CONFIG.nftValidatorGating },
         tlsnVerified: { ...DEFAULT_FORK_CONFIG.tlsnVerified },
         keylessWeb2Identity: { ...DEFAULT_FORK_CONFIG.keylessWeb2Identity },
+        peerlistFloor: { ...DEFAULT_FORK_CONFIG.peerlistFloor },
     }
 }

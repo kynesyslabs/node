@@ -13,6 +13,21 @@ setDefaultTimeout(60_000)
 const repo = path.resolve(import.meta.dir, "../../..")
 const hasCompose = DOCKER !== undefined && spawnSync(DOCKER, ["compose", "version"], { encoding: "utf8" }).status === 0
 
+describe("signaling operator guidance", () => {
+    const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+
+    it("keeps the Docker minimum and names the pre-28 loopback exposure instead", () => {
+        expect(install).toMatch(/\*\*Docker\*\* 20\.10 or newer/)
+        expect(install).toContain("Docker Engine before 28.0 does not drop traffic")
+    })
+
+    it("documents signaling port drift and its log line for bare-metal operators", () => {
+        const bareMetal = install.split("**Bare metal and Bun:**")[1]?.split("\n\n")[0] ?? ""
+        expect(bareMetal).toContain("next free port if it is taken")
+        expect(bareMetal).toContain("[PORT] signaling drifted")
+    })
+})
+
 interface Port {
     target: number
     published: string
@@ -25,7 +40,7 @@ interface Compose {
 let work: string
 beforeAll(() => {
     work = fs.mkdtempSync(path.join(os.tmpdir(), "demos-compose-"))
-    for (const f of ["docker-compose.yml", "docker-compose.devnet.yml"]) fs.copyFileSync(path.join(repo, f), path.join(work, f))
+    for (const f of ["docker-compose.yml", "docker-compose.devnet.yml", "docker-compose.proxy.yml"]) fs.copyFileSync(path.join(repo, f), path.join(work, f))
 })
 afterAll(() => fs.rmSync(work, { recursive: true, force: true }))
 
@@ -62,6 +77,22 @@ describe.skipIf(!hasCompose)("compose files", () => {
         expect(messagingPorts(dflt)).toEqual([expect.objectContaining({ target: 3006, published: "3006" })])
         const custom = compose(BASE, { L2PS_MESSAGING_PORT: "3100" }).json as Compose
         expect(messagingPorts(custom)).toEqual([expect.objectContaining({ target: 3100, published: "3100" })])
+    })
+
+    it("binds signaling to loopback by default and accepts an explicit host bind", () => {
+        for (const [env, host_ip, port] of [
+            [{}, "127.0.0.1", 3005],
+            [{ RPC_SIGNALING_BIND: "" }, "127.0.0.1", 3005],
+            [{ RPC_SIGNALING_BIND: "0.0.0.0", RPC_SIGNALING_PORT: "3205" }, "0.0.0.0", 3205],
+        ] as const) {
+            for (const [files, published] of [[BASE, port], [DEVNET, 3105]] as const) {
+                const c = compose(files, env)
+                expect([c.status, c.stderr.slice(0, 200)]).toEqual([0, ""])
+                expect(c.json?.services.node.ports?.filter(p => p.target === port)).toEqual([
+                    expect.objectContaining({ host_ip, target: port, published: String(published) }),
+                ])
+            }
+        }
     })
 
     it("devnet moves only the host side, +100, and never keeps the base mapping next to it", () => {
@@ -140,6 +171,16 @@ describe.skipIf(!hasCompose)("compose files", () => {
     })
 })
 
+it("documents the signaling host bind after removing the proxy profile", () => {
+    const defaults = fs.readFileSync(path.join(repo, "src/config/defaults.ts"), "utf8")
+    const runbook = fs.readFileSync(path.join(repo, "docs/runbooks/proxy-setup.md"), "utf8")
+
+    expect(defaults).toMatch(/Compose publishes signaling on 127\.0\.0\.1/)
+    expect(defaults).toContain("RPC_SIGNALING_BIND=0.0.0.0")
+    expect(runbook).toMatch(/Signaling port 3005 stays on 127\.0\.0\.1/)
+    expect(runbook).toContain("RPC_SIGNALING_BIND=0.0.0.0")
+})
+
 describe.skipIf(!hasCompose)("the reverse proxy follows the node's ports", () => {
     const FILES = [["docker-compose.yml"], ["docker-compose.yml", "docker-compose.devnet.yml"]]
 
@@ -162,6 +203,20 @@ describe.skipIf(!hasCompose)("the reverse proxy follows the node's ports", () =>
         const c = compose(["docker-compose.yml"], { PROXY_DOMAIN: "node.example.org" }, "L2PS_MESSAGING_PORT=3100\n", ["proxy"])
         expect(c.json?.services.caddy.environment?.L2PS_MESSAGING_PORT).toBe("3100")
     })
+
+    it("trusts the bridge range only with the override that unpublishes the RPC port", () => {
+        const rpcPublished = (c: Compose) => (c.services.node.ports ?? []).some(p => p.target === 53550)
+        for (const files of [["docker-compose.yml"], ["docker-compose.yml", "docker-compose.devnet.yml"]]) {
+            const direct = compose(files, { PROXY_DOMAIN: "node.example.org" }, undefined, ["proxy"]).json as Compose
+            expect([files.length, direct.services.node.environment?.TRUSTED_PROXIES ?? ""]).toEqual([files.length, ""])
+            expect(rpcPublished(direct)).toBe(true)
+        }
+        const proxied = compose(["docker-compose.yml", "docker-compose.proxy.yml"], { PROXY_DOMAIN: "node.example.org" }, undefined, ["proxy"]).json as Compose
+        expect(proxied.services.node.environment?.TRUSTED_PROXIES).toBe("172.16.0.0/12")
+        expect(rpcPublished(proxied)).toBe(false)
+        const custom = compose(["docker-compose.yml", "docker-compose.proxy.yml"], { PROXY_DOMAIN: "node.example.org" }, "TRUSTED_PROXIES=192.168.16.0/20\n", ["proxy"]).json as Compose
+        expect(custom.services.node.environment?.TRUSTED_PROXIES).toBe("192.168.16.0/20")
+    })
 })
 
 describe("the Caddyfile", () => {
@@ -171,6 +226,15 @@ describe("the Caddyfile", () => {
         expect(caddyfile).toMatch(/handle_path \/messaging\/\*\s*\{\s*reverse_proxy node:\{\$L2PS_MESSAGING_PORT:3006\}/)
         expect(caddyfile).toMatch(/handle_path \/signaling\/\*\s*\{\s*reverse_proxy node:\{\$RPC_SIGNALING_PORT:3005\}/)
         expect(caddyfile).not.toMatch(/reverse_proxy node:300[56]\b/)
+    })
+
+    it("drops the client's X-Forwarded-For, X-Real-IP and CF-Connecting-IP in every bundled Caddyfile", () => {
+        for (const file of ["Caddyfile", "Caddyfile.devnet"]) {
+            const text = fs.readFileSync(path.join(repo, "monitoring/caddy", file), "utf8")
+            for (const header of ["X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP"]) {
+                expect([file, text.includes(`request_header -${header}\n`)]).toEqual([file, true])
+            }
+        }
     })
 
     it("uses only variables the compose file gives the caddy service", () => {
