@@ -1,6 +1,5 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
-import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { configuredEvmInstance } from "./rpcUrl"
 // import handleAptosContractRead from "./aptos_contract_read"
 import { handleAptosContractReadRest } from "./aptos_contract_read"
 import log from "@/utilities/logger"
@@ -14,14 +13,14 @@ export default async function handleContractRead(
     // Workflow: loading the provider url in our configuration, creating an instance, parsing the request
     // and sending back the chain response as it is
     if (operation.is_evm) {
-        // log.debug(evmProviders)
-        const providerUrl = evmProviders[operation.chain][operation.subchain] // REVIEW Error handling
-        const evmInstance = multichain.EVM.createInstance(chainID, providerUrl) // REVIEW We should be connected
-        log.debug(
-            `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
-        )
-        log.debug(`[XM Method]: providerUrl: ${providerUrl}`)
-        await evmInstance.connect()
+        // Reads use the node's configured RPC only, like pay and contract_write.
+        const evmInstance = await configuredEvmInstance(operation, chainID)
+        if (!evmInstance) {
+            return {
+                result: "error",
+                error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
+            }
+        }
         log.debug("params: \n")
         log.debug(operation.task.params)
         log.debug("\n end params: \n")
