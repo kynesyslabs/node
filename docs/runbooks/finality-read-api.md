@@ -77,10 +77,42 @@ pins the same network. `503 state_not_ready` while block 0 is not loaded,
 
 ### `getTransactionStatus {hash}`
 
-`{ state: "pending" | "included" | "failed" | "unknown", blockNumber?, code?, message?, checkedThroughBlock, resultCommittedInBlock? }`.
+`{ state: "pending" | "included" | "failed" | "dropped" | "unknown", blockNumber?, code?, message?, reason?, droppedAtBlock?, droppedAt?, checkedThroughBlock, resultCommittedInBlock? }`.
 `included` means in a block and executed; a transaction a block keeps but
 does not execute is `failed`, never `included`. An unknown hash is `404`
-(`503 node_not_synced` while the node is behind).
+(`503 node_not_synced` while the node is behind). The 503 is returned only in
+place of `unknown`: a node that is behind still answers `pending`,
+`included`, `failed` or `dropped` from what it holds, and `dropped` stays
+non-terminal.
+
+`dropped` (`200`) means this node no longer holds the transaction in its
+mempool, and no block has taken it. `droppedAtBlock` is the node's head and
+`droppedAt` the time (ms) when it removed it. `droppedAtBlock` may be above
+`checkedThroughBlock` in the same reply when a block is inserted during the
+lookup. `reason` says why:
+
+| `reason` | Removed because |
+|---|---|
+| `reference_block_expired` | its reference block fell behind the deep window |
+| `expired` | its signed timestamp is older than the pool lifetime (10 minutes), or unusable |
+| `evicted_fee` | a higher-paying transaction took its place in a full pool |
+| `evicted_sender_cap` | its sender holds more pending transactions than the per-sender cap |
+| `seat_refused` | the staking re-judge refused this seat transaction |
+| `refused_for_block` | the block this node forged failed it and did not keep it |
+
+`dropped` is not a terminal state, whatever the reason. It does not mean the
+transaction cannot execute: another node may still hold and include it, and
+it can come back to this node's pool. Keep checking; only a block is final.
+Never re-sign it with a new nonce, or both may execute. A block wins once
+this node has inserted it, and the pool once the transaction is back in it:
+the transaction then reads `included` or `failed`, or `pending`. For a moment
+while such a block is being inserted, or the transaction admitted again, a
+reply can still read `dropped`; it is not terminal, so keep polling and the
+next reply reads `included`, `failed` or `pending`.
+
+The record is per node, in memory and bounded (the 50,000 most recent
+drops). A node that never held the transaction, has restarted since, or has
+forgotten it answers `unknown` as before.
 
 ### `getTransactionProof {hash}`
 

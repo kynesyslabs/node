@@ -55,6 +55,7 @@ mock.module("src/libs/blockchain/gcr/gcr", () => ({
 
 const { default: Mempool } = await import("./mempool")
 const { txStoredBytes, txTotalFee, __resetMempoolLimits } = await import("./mempoolLimits")
+const { __clearDroppedTxs: clearDroppedTxs, getDroppedTx } = await import("./droppedTransactions")
 
 function row(hash: string, over: { from?: string; type?: string; ts?: unknown; fee?: unknown; extra?: unknown; ed?: string } = {}) {
     return {
@@ -216,6 +217,37 @@ describe.skipIf(!PG_URL)("mempool admission queries on Postgres", () => {
         await ds.getRepository(MempoolTx).insert([row("0xold", { ts: NOW - 20 * 60 * 1000 })])
         expect(await Mempool.pruneExpiredByAge(NOW + 500)).toBe(0)
         expect(await Mempool.pruneExpiredByAge(NOW + 500, true)).toBe(1)
+    })
+
+    it("records as dropped exactly the rows the sweeps delete, read back from RETURNING (#973)", async () => {
+        clearDroppedTxs()
+        // pruneAfterBlock sweeps by the real clock.
+        const now = Date.now()
+        const at = (hash: string, referenceBlock: number, ts: number) =>
+            ({ ...(row(hash, { ts }) as object), reference_block: referenceBlock }) as never
+        await ds.getRepository(MempoolTx).insert([
+            at("0xold-ref", 1, now),
+            at("0xin-window", 100, now),
+            at("0xincluded", 100, now),
+            at("0xold", 100, now - 11 * 60 * 1000),
+        ])
+        // lastBlock 100, room 1: the deep window starts at block 95.
+        expect(await Mempool.pruneAfterBlock(100, ["0xincluded"])).toEqual({ included: 1, expired: 2 })
+        expect(getDroppedTx("0xold-ref")).toMatchObject({ reason: "reference_block_expired", droppedAtBlock: 100 })
+        expect(getDroppedTx("0xold")).toMatchObject({ reason: "expired" })
+        expect(getDroppedTx("0xincluded")).toBeNull()
+        expect(getDroppedTx("0xin-window")).toBeNull()
+        const left = (await ds.getRepository(MempoolTx).find()).map(r => r.hash)
+        expect(left).toEqual(["0xin-window"])
+    })
+
+    it("returns from a by-hash delete only the rows it removed, in and out of a transaction (#973)", async () => {
+        await ds.getRepository(MempoolTx).insert([row("0xa", { ts: NOW }), row("0xb", { ts: NOW })])
+        expect(await Mempool.removeTransactionsByHashes(["0xa", "0xgone"])).toEqual(["0xa"])
+        const inTx = await ds.manager.transaction(em => Mempool.removeTransactionsByHashes(["0xa", "0xb"], em))
+        expect(inTx).toEqual(["0xb"])
+        expect(await Mempool.removeTransactionsByHashes([])).toEqual([])
+        expect(await ds.getRepository(MempoolTx).count()).toBe(0)
     })
 
     it("plans eviction against the real pool for an RPC tx and leaves the pool untouched", async () => {
