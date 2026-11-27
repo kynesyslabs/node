@@ -360,7 +360,7 @@ describe("validator table", () => {
         expect(details).toContain("genesis.properties.currency")
     })
 
-    it("fails four validators of one operator: over the cap and over a third of the votes", () => {
+    it("reports, without failing, four validators of one operator: over the spare seats and a third of the votes", () => {
         const checks = launchPlanChecks({
             botAllowlist: [],
             genesis: filledTemplate(),
@@ -371,10 +371,13 @@ describe("validator table", () => {
             expectedTreasury: TREASURY,
             expectedNotaryKeys: NOTARY_KEYS,
         })
-        expect(failing(checks)).toEqual(["operator and provider cap", "voting power per operator and provider"])
-        expect(checks.find(c => c.name === "voting power per operator and provider").details.join("\n")).toContain(
-            "operator big-op can hold 4 of the 10 first-committee votes",
+        expect(failing(checks)).toEqual([])
+        const note = checks.find(c => c.name === "owner and operator concentration")
+        expect(note.advisory).toBe(true)
+        expect(note.details.join("\n")).toContain(
+            "operator big-op runs 4 of 10 launch validators, more than the 3 seats a committee can lose",
         )
+        expect(note.details.join("\n")).toContain("operator big-op can hold 4 of the 10 first-committee votes")
     })
 
     it("fails four validators on one provider, whatever the spelling", () => {
@@ -389,8 +392,8 @@ describe("validator table", () => {
             expectedTreasury: TREASURY,
             expectedNotaryKeys: NOTARY_KEYS,
         })
-        expect(failing(checks)).toContain("operator and provider cap")
-        expect(checks.find(c => c.name === "operator and provider cap").details.join("\n")).toContain("provider aws runs 4 of 10")
+        expect(failing(checks)).toEqual(["provider cap", "voting power per provider"])
+        expect(checks.find(c => c.name === "provider cap").details.join("\n")).toContain("provider aws runs 4 of 10")
     })
 
     it("fails a row without a region or without an entry", () => {
@@ -478,20 +481,26 @@ describe("validator concentration", () => {
             ...overrides,
         })
 
-    it("fails one owner behind four validators run by four operators on four providers", () => {
+    const concentration = (checks: ReturnType<typeof launchPlanChecks>) =>
+        checks.find(c => c.name === "owner and operator concentration").details.join("\n")
+
+    it("reports one owner behind four validators run by four operators on four providers, and passes", () => {
         // Every operator and provider is under its cap: only the owner shows the four seats
         const checks = plan(table(10, i => (i < 4 ? { owner: "buyer", operator: `hired-${i}`, provider: `host-${i}` } : { owner: `owner-${i}` })))
-        expect(failing(checks)).toEqual(["beneficial owner cap"])
-        const details = checks.find(c => c.name === "beneficial owner cap").details.join("\n")
-        expect(details).toContain("owner buyer runs 4 of 10 launch validators; the cap is 3")
-        expect(details).toContain("owner buyer can hold 4 of the 10 first-committee votes")
+        expect(failing(checks)).toEqual([])
+        expect(concentration(checks)).toContain(
+            "owner buyer runs 4 of 10 launch validators, more than the 3 seats a committee can lose",
+        )
+        expect(concentration(checks)).toContain("owner buyer can hold 4 of the 10 first-committee votes")
     })
 
-    it("allows three validators per owner, the seats a committee of ten can lose", () => {
-        expect(failing(plan(table(10, i => (i < 3 ? { owner: "buyer", operator: `hired-${i}` } : {}))))).toEqual([])
+    it("reports nothing for three validators per owner, the seats a committee of ten can lose", () => {
+        const checks = plan(table(10, i => (i < 3 ? { owner: "buyer", operator: `hired-${i}` } : {})))
+        expect(failing(checks)).toEqual([])
+        expect(concentration(checks)).toBe("")
     })
 
-    it("caps the owner over the whole launch set, since any of its validators may be drawn", () => {
+    it("counts the owner over the whole launch set, since any of its validators may be drawn", () => {
         const g = filledTemplate(40)
         const ops = Object.fromEntries(
             Array.from({ length: 40 }, (_, i) => [
@@ -500,23 +509,23 @@ describe("validator concentration", () => {
             ]),
         )
         const checks = plan(ops, { genesis: g, blockZero: blockZero(40) })
-        expect(failing(checks)).toEqual(["beneficial owner cap"])
-        expect(checks.find(c => c.name === "beneficial owner cap").details.join("\n")).toContain("owner buyer runs 4 of 40")
+        expect(failing(checks)).toEqual([])
+        expect(concentration(checks)).toContain("owner buyer runs 4 of 40")
     })
 
     it("compares owner names without regard to case or surrounding spaces", () => {
         const spellings = ["Buyer", "buyer", " BUYER ", "buyer"]
         const checks = plan(table(10, i => (i < 4 ? { owner: spellings[i], operator: `hired-${i}`, provider: `host-${i}` } : { owner: `owner-${i}` })))
-        expect(failing(checks)).toEqual(["beneficial owner cap"])
+        expect(concentration(checks)).toContain("owner buyer runs 4 of 10")
     })
 
-    it("requires an owner for every launch validator on the mainnet chain id", () => {
+    it("notes a launch validator without an owner on the mainnet chain id, without failing", () => {
         const ops = table(10)
         delete (ops[id(5)] as Record<string, string>).owner
         const checks = plan(ops)
-        expect(failing(checks)).toEqual(["beneficial owner cap"])
-        expect(checks.find(c => c.name === "beneficial owner cap").details.join("\n")).toContain(
-            `1 launch validators have no owner in the operator map, which the mainnet chain id requires: ${id(5)}`,
+        expect(failing(checks)).toEqual([])
+        expect(concentration(checks)).toContain(
+            `1 launch validators have no owner in the operator map, so their owner concentration cannot be reported: ${id(5)}`,
         )
     })
 
@@ -524,7 +533,7 @@ describe("validator concentration", () => {
         const g = filledTemplate()
         g.properties.id = NON_MAINNET_CHAIN_IDS[0]
         const ops = Object.fromEntries(Object.entries(table(10)).map(([k, v]) => [k, { ...v, owner: undefined }]))
-        expect(failing(plan(ops, { genesis: g }))).not.toContain("beneficial owner cap")
+        expect(concentration(plan(ops, { genesis: g }))).not.toContain("no owner")
     })
 
     it("fails a region hosting a third of the launch validators, and passes one below a third", () => {
@@ -545,18 +554,16 @@ describe("validator concentration", () => {
         expect(failing(plan(nine, { genesis: g, blockZero: blockZero(9) }))).toEqual(["region share"])
     })
 
-    it("fails an owner holding a third of block 0's stake with fewer validators than the cap", () => {
+    it("reports, without failing, an owner holding a third of block 0's stake", () => {
         // Three validators pass the seat cap; their stake is what governance would weigh
         const stakes = Array.from({ length: 10 }, (_, i) => (i < 3 ? "3000" : "1000"))
         const ops = table(10, i => (i < 3 ? { owner: "whale", operator: `hired-${i}`, provider: `host-${i}` } : { owner: `owner-${i}` }))
         const checks = plan(ops, { blockZero: stakedBlockZero(stakes) })
-        expect(failing(checks)).toEqual(["stake share"])
-        expect(checks.find(c => c.name === "stake share").details.join("\n")).toContain(
-            "owner whale holds 9000 of the 16000 block 0 stake (56.25%), a third or more",
-        )
+        expect(failing(checks)).toEqual([])
+        expect(concentration(checks)).toContain("owner whale holds 9000 of the 16000 block 0 stake (56.25%), a third or more")
     })
 
-    it("weighs stake for operators, providers and regions too, at exactly a third", () => {
+    it("fails a provider or region at exactly a third of the stake", () => {
         const stakes = ["1000", "1000", ...Array.from({ length: 8 }, () => "500")]
         const checks = plan(table(10, i => (i < 2 ? { region: "us-east" } : { region: `region-${i}` })), {
             blockZero: stakedBlockZero(stakes),
