@@ -57,6 +57,8 @@ Build command (the same inputs as `release.yml`):
 
 ```bash
 TAG=vX.Y.Z
+# file modes enter the image: clone with the CI runner's umask
+umask 022
 # a fresh clone: untracked files in an old one would enter the build
 git clone --branch "$TAG" <fork url> node-patch && cd node-patch
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
@@ -75,7 +77,10 @@ tar -xOf image.tar index.json | jq -r '.manifests[0].digest'
 ```
 
 `GIT_BRANCH` is the tag name, as in the workflow; any other value changes
-the digest. Use a current Docker with buildx; if two builders get different
+the digest. So does the umask: a clone made under umask 0002 has
+group-writable files and a different digest from the CI build. With
+`umask 022`, a local build of v1.0.0-rc.14 matched the CI digest
+(`sha256:fe43fec1...`). Use a current Docker with buildx; if two builders get different
 digests from the same tag, compare `docker buildx version` first.
 
 ## Rules
