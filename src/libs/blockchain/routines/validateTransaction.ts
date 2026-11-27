@@ -54,6 +54,7 @@ import {
     seatRateRefusal,
 } from "src/features/staking/seatAdmission"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
+import { txFeatureDisabledMessage } from "src/libs/network/outboundSwitches"
 import {
     demoScriptXmRefusal,
     xmScriptRefusal,
@@ -250,6 +251,20 @@ async function checkAdmissionAndStructure(
     if (featureRefusal) {
         validityData.data.message =
             "[Tx Validation] [TYPE ERROR] " + featureRefusal + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // This node would refuse the broadcast anyway; say so before a fee is
+    // quoted and the client signs.
+    const switchedOff = txFeatureDisabledMessage(
+        tx.content?.type,
+        (tx.content?.data as unknown[] | undefined)?.[1],
+    )
+    if (switchedOff) {
+        validityData.data.message =
+            "[Tx Validation] [FEATURE DISABLED] " + switchedOff + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
