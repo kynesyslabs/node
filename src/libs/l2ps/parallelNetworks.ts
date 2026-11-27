@@ -15,6 +15,7 @@ import { L2PS_UID_MAX_LENGTH } from "@/libs/l2ps/settlement/encoding"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { L2PSNotConfiguredError } from "./l2psErrors"
+import { decryptInnerTx } from "./innerTxDecrypt"
 
 /**
  * Configuration interface for an L2PS node.
@@ -344,7 +345,7 @@ export default class ParallelNetworks {
             log.warning(`[L2PS] No signature found on encrypted transaction for ${uid}`)
         }
 
-        return l2ps.decryptTx(encryptedTx)
+        return decryptInnerTx(l2ps, encryptedTx, "admit")
     }
 
     /**

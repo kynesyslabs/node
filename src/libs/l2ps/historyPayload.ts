@@ -14,6 +14,7 @@
 import log from "@/utilities/logger"
 import { sanitizeForLog } from "@/utilities/logSafe"
 import { isNotConfigured } from "./l2psErrors"
+import { decryptInnerTx } from "./innerTxDecrypt"
 
 export interface HistoryRow {
     encrypted_payload?: Record<string, any> | null
@@ -152,8 +153,10 @@ export async function subnetDecryptor(
         return Object.assign(() => Promise.resolve(null), { unavailable: true })
     }
 
+    // History shows rows this node already took, including ones signed with
+    // the legacy preimage before signatureDomain activated.
     return async envelope =>
-        (await instance.decryptTx(envelope as any)) as unknown as Record<
+        (await decryptInnerTx(instance, envelope as any, "stored")) as unknown as Record<
             string,
             any
         > | null

@@ -18,6 +18,7 @@ import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import ParallelNetworks from "./parallelNetworks"
+import { decryptInnerTx } from "./innerTxDecrypt"
 import {
     EXPIRED_TX_DEEP_WINDOW_MULTIPLIER,
     REFERENCE_BLOCK_ROOM,
@@ -942,7 +943,9 @@ export class L2PSBatchAggregator {
                 const l2ps = await ParallelNetworks.getInstance().loadL2PS(l2psUid)
                 let inner: unknown
                 try {
-                    inner = await l2ps.decryptTx(row.encrypted_tx as any)
+                    // A row synced from a peer was never admitted here, so
+                    // this is where its signature is first judged.
+                    inner = await decryptInnerTx(l2ps, row.encrypted_tx as any, "admit")
                 } catch (error) {
                     return { ok: false, reason: `cannot decrypt: ${getErrorMessage(error)}` }
                 }
