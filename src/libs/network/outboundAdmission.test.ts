@@ -39,6 +39,10 @@ spyOn(Mempool, "checkTransactionByHash").mockImplementation(
     async (h: string) => inMempool.has(h) as any,
 )
 spyOn(GossipManager, "isEnabled").mockImplementation(() => gossipOn)
+let nonceRefusal: string | null = null
+const pendingNonceRefusal = spyOn(Mempool, "pendingNonceRefusal").mockImplementation(
+    async () => nonceRefusal,
+)
 
 const {
     outboundAdmissionRefusal,
@@ -59,7 +63,9 @@ beforeEach(() => {
     editsVerdict = { ok: true }
     typeRefusal = null
     sizeRefusal = null
+    nonceRefusal = null
     gossipSizeRefusal.mockClear()
+    pendingNonceRefusal.mockClear()
     __resetOutboundClaims()
 })
 
@@ -92,6 +98,19 @@ describe("outboundAdmissionRefusal", () => {
         onChain.clear()
         inMempool.add(HASH)
         expect(await outboundAdmissionRefusal(envelope, tx)).toContain("in mempool")
+    })
+
+    it("refuses a nonce the mempool insert would refuse, such as one another pending tx holds", async () => {
+        nonceRefusal = "A transaction with nonce 8 from this sender is already pending"
+        expect(await outboundAdmissionRefusal(envelope, tx)).toBe(nonceRefusal)
+        expect(pendingNonceRefusal).toHaveBeenCalledWith(tx)
+    })
+
+    it("refuses when the nonce read fails", async () => {
+        pendingNonceRefusal.mockImplementationOnce(async () => {
+            throw new Error("gcr down")
+        })
+        expect(await outboundAdmissionRefusal(envelope, tx)).toContain("gcr down")
     })
 
     it("refuses when a read fails", async () => {

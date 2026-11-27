@@ -146,6 +146,7 @@ function installPool() {
     m.repo = {
         ...store,
         manager: {
+            getRepository: () => store,
             transaction: async (a: unknown, b?: unknown) => {
                 const fn = (typeof a === "function" ? a : b) as (e: unknown) => Promise<unknown>
                 return await fn(em)
@@ -247,6 +248,45 @@ describe("nonce admission under nonceIntegrity", () => {
         const { MEMPOOL_MAX_PENDING_PER_SENDER } = await import("@/utilities/constants")
         expect(MEMPOOL_MAX_NONCE_AHEAD).toBeGreaterThan(0)
         expect(MEMPOOL_MAX_NONCE_AHEAD).toBeLessThan(MEMPOOL_MAX_PENDING_PER_SENDER)
+    })
+})
+
+// A cross-chain, DemosWork or web2 tx asks before its outbound calls, which
+// cannot be taken back if the insert then refuses the nonce.
+describe("the nonce check before outbound calls", () => {
+    it("passes the next nonce without inserting or locking", async () => {
+        expect(await Mempool.pendingNonceRefusal(await signed(8))).toBeNull()
+        expect(pool).toHaveLength(0)
+        expect(lockedOn).toEqual([])
+    })
+
+    it("refuses a nonce another pending tx of the sender holds, as the insert would", async () => {
+        expect((await rpc(await signed(8, 3n))).error).toBe("")
+        const second = await signed(8, 4n)
+        expect(await Mempool.pendingNonceRefusal(second)).toMatch(
+            /nonce 8 from this sender is already pending/,
+        )
+        expect((await rpc(second)).error).toMatch(/already pending/)
+    })
+
+    it("ignores a pending tx whose reference block has left the window", async () => {
+        const expired = await signed(8, 3n)
+        expired.reference_block = 98
+        pool.push({ hash: expired.hash, tx: { ...expired, nonce: 8 } })
+        expect(await Mempool.pendingNonceRefusal(await signed(8, 4n))).toBeNull()
+    })
+
+    it("refuses a nonce past the window and one at or below the confirmed nonce", async () => {
+        const past = await signed(confirmedNonce + MEMPOOL_MAX_NONCE_AHEAD + 1)
+        expect(await Mempool.pendingNonceRefusal(past)).toMatch(/too far ahead/)
+        expect(await Mempool.pendingNonceRefusal(await signed(7))).toMatch(/Invalid nonce/)
+    })
+
+    it("before nonceIntegrity refuses only a confirmed nonce", async () => {
+        nonceIntegrity = false
+        expect((await rpc(await signed(8, 3n))).error).toBe("")
+        expect(await Mempool.pendingNonceRefusal(await signed(8, 4n))).toBeNull()
+        expect(await Mempool.pendingNonceRefusal(await signed(7))).toMatch(/Invalid nonce/)
     })
 })
 

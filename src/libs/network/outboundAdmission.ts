@@ -11,9 +11,10 @@ import { gossipSizeRefusal } from "./txSubmission"
 /**
  * Why `submitValidatedTx` would refuse `transaction` for reasons known before
  * any outbound call runs, or null: the client type gate, the gossip size, the
- * edit binding, and the tx already on chain or in our mempool. The mempool's
- * own capacity and per-sender rules are judged at submission only. A failed
- * read refuses: the outbound call it guards cannot be taken back.
+ * edit binding, the tx already on chain or in our mempool, and a nonce that is
+ * already confirmed or that another pending tx of the sender holds. The
+ * mempool's capacity and per-sender count are judged at submission only. A
+ * failed read refuses: the outbound call it guards cannot be taken back.
  */
 export async function outboundAdmissionRefusal(
     validityData: ValidityData,
@@ -36,6 +37,8 @@ export async function outboundAdmissionRefusal(
         if (await Mempool.checkTransactionByHash(transaction.hash)) {
             return "Transaction already in mempool"
         }
+        const nonceRefusal = await Mempool.pendingNonceRefusal(transaction)
+        if (nonceRefusal) return nonceRefusal
     } catch (e) {
         return `Could not check admission before running the transaction: ${
             e instanceof Error ? e.message : String(e)
