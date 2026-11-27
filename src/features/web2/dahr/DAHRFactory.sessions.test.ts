@@ -100,15 +100,12 @@ describe("web2ProxyRequest create", () => {
         expect(reply.response).toMatchObject({ error: WEB2_SESSIONS_LIMITED, reason: "caller-sessions" })
     })
 
-    it("counts a create toward the caller's fetch rate", async () => {
+    it("does not spend the caller's fetch rate on a create", async () => {
         configure({ WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER: "2" })
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < 3; i++) {
             expect((await handleWeb2ProxyRequest({ web2Request: request } as any, alice)).result).toBe(200)
         }
-        const reply = await handleWeb2ProxyRequest({ web2Request: request } as any, alice)
-        expect(reply.result).toBe(429)
-        expect(reply.response).toMatchObject({ error: WEB2_FETCH_LIMITED, reason: "caller-rate" })
         expect(Web2FetchLimiter.instance.stats().inflightTotal).toBe(0)
-        expect(DAHRFactory.instance.sessionCount()).toBe(2)
+        expect(DAHRFactory.instance.sessionCount()).toBe(3)
     })
 })

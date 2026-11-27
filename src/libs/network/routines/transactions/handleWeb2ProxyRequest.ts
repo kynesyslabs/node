@@ -56,12 +56,8 @@ export async function handleWeb2ProxyRequest(
     try {
         switch (web2Request.raw.action) {
             case EnumWeb2Actions.CREATE: {
-                // Creating a session is metered like a fetch: it needs no
-                // signature or fee either.
-                const admission = Web2FetchLimiter.instance.acquire(caller)
-                if (!admission.lease) {
-                    return limitedResponse(admission.refusal)
-                }
+                // Sessions are bounded by count in DAHRFactory, so creating
+                // one does not spend the caller's fetch budget.
                 let isDahrOrError: string | DAHR
                 try {
                     isDahrOrError = await handleWeb2(web2Request, caller)
@@ -77,8 +73,6 @@ export async function handleWeb2ProxyRequest(
                         )
                     }
                     throw error
-                } finally {
-                    admission.lease.release(0)
                 }
                 if (isDahrOrError instanceof DAHR) {
                     const dahr = isDahrOrError.toSerializable()
