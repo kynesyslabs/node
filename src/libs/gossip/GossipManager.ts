@@ -23,7 +23,7 @@ import {
     validateHeightsMessage,
     validateTxMessage,
 } from "./validators"
-import { BLOCKS_TOPIC, HEIGHTS_TOPIC, TXS_TOPIC } from "./topics"
+import { BLOCKS_TOPIC, HEIGHTS_TOPIC, TOPIC_MAX_BYTES, TXS_TOPIC } from "./topics"
 import {
     countHeightsRecord,
     countPublishSkipped,
@@ -259,6 +259,7 @@ export class GossipManager {
                 GOSSIP_PORT: String(cfg.port),
                 GOSSIP_KEY_FILE: cfg.keyFile,
                 GOSSIP_IPC_PATH: this.ipcPath(),
+                GOSSIP_TOPIC_MAX_BYTES: JSON.stringify(TOPIC_MAX_BYTES),
             },
             stdio: ["pipe", "ignore", "pipe"],
         })
