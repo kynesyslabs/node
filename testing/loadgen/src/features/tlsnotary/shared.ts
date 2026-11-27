@@ -1,4 +1,4 @@
-import { envInt, normalizeRpcUrl, splitCsv } from "../../framework/common"
+import { envInt, normalizeRpcUrl, splitCsv, logNonCriticalErrorOnce } from "../../framework/common"
 
 export type TlsNotaryJsonResponse = {
   status: number
@@ -44,7 +44,9 @@ export async function fetchTlsNotaryJson(
     let json: any = null
     try {
       json = text.length > 0 ? JSON.parse(text) : null
-    } catch {
+    } catch (error) {
+      // Once per target and route: the targets are configured and the routes fixed, so the keys are bounded.
+      logNonCriticalErrorOnce(`tlsnotary.requestJson:${rpcUrl}${route}`, "tlsnotary.requestJson", error, { rpcUrl, route, status: response.status })
       json = null
     }
     return {

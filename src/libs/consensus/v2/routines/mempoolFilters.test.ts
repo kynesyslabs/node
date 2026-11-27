@@ -12,11 +12,9 @@ jest.mock("src/utilities/logger", () => ({
     },
 }))
 
+const sharedState: Record<string, any> = { lastBlockNumber: 100, forkConfig: {} }
 jest.mock("src/utilities/sharedState", () => ({
-    getSharedState: {
-        lastBlockNumber: 100,
-        referenceBlockRoom: 1,
-    },
+    getSharedState: sharedState,
 }))
 
 let accountNonces: Record<string, number> = {}
@@ -36,7 +34,7 @@ import {
 import { ErrorCode } from "@/errors"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 
-// lastBlockNumber=100, referenceBlockRoom=1:
+// lastBlockNumber=100, room 1 (referenceBlockRoom10 not scheduled):
 // inclusion window [99, 100], deep window cutoff 100 - 5*1 = 95.
 const LAST_BLOCK = 100
 const DEEP_CUTOFF = 95
@@ -58,6 +56,7 @@ const tx = (
         content: {
             nonce: overrides.nonce ?? 0,
             gcr_edits: overrides.gcr_edits ?? [],
+            reference_block: referenceBlock,
         },
     }) as unknown as MempoolTransaction
 
@@ -69,6 +68,23 @@ describe("filterMempoolByRefBlock", () => {
         expect(res.validTxs).toEqual([a, b])
         expect(res.failedTxs).toEqual([])
         expect(a.status).toBe(TRANSACTION_STATUS.PENDING)
+    })
+
+    it("judges the signed reference block, not the pool row's", () => {
+        const expired = tx("0xexp", LAST_BLOCK - 3)
+        expired.reference_block = LAST_BLOCK
+        const res = filterMempoolByRefBlock([expired], true)
+        expect(expired.status).toBe(TRANSACTION_STATUS.FAILED)
+        expect(expired.attrs.reference_block).toBe(LAST_BLOCK - 3)
+        expect(res.validTxs).toEqual([expired])
+    })
+
+    it("leaves out a tx whose content carries no reference block", () => {
+        const bare = tx("0xbare", LAST_BLOCK)
+        delete (bare.content as { reference_block?: number }).reference_block
+        const res = filterMempoolByRefBlock([bare], true)
+        expect(res.validTxs).toEqual([])
+        expect(res.failedTxs.map(f => f.txhash)).toEqual(["0xbare"])
     })
 
     it("includes expired-in-deep-window txs as failed with attrs", () => {
@@ -185,5 +201,62 @@ describe("filterMempoolByNonce", () => {
         const res = await filterMempoolByNonce([plain])
         expect(res.validTxs).toEqual([plain])
         expect(res.failedTxs).toEqual([])
+    })
+
+    it("passes a tx that carries no gcr_edits field, as an l2psBatch does", async () => {
+        // Admission reads a missing field as no edits; a throw here would
+        // abort the round on every member holding the tx.
+        const batch = tx("0xbatch", LAST_BLOCK)
+        delete (batch.content as { gcr_edits?: unknown }).gcr_edits
+        const valid = nonceTx("0xvalid", 6)
+        const res = await filterMempoolByNonce([batch, valid])
+        expect(res.validTxs).toEqual([batch, valid])
+        expect(res.failedTxs).toEqual([])
+    })
+})
+
+describe("filterMempoolByRefBlock and referenceBlockRoom10", () => {
+    const roomFrom = (height: number | null) => {
+        sharedState.forkConfig = { referenceBlockRoom10: { activationHeight: height } }
+    }
+    beforeEach(() => roomFrom(null))
+
+    it("includes a tx 5 blocks behind as failed before the fork, and as a normal tx after it", () => {
+        const before = tx("0xbefore", LAST_BLOCK - 5)
+        const early = filterMempoolByRefBlock([before], true)
+        expect(early.validTxs).toEqual([before])
+        expect(before.status).toBe(TRANSACTION_STATUS.FAILED)
+        expect(before.attrs.code).toBe(ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE)
+
+        roomFrom(0)
+        const after = tx("0xafter", LAST_BLOCK - 5)
+        const late = filterMempoolByRefBlock([after], true)
+        expect(late.validTxs).toEqual([after])
+        expect(late.failedTxs).toEqual([])
+        expect(after.status).toBe(TRANSACTION_STATUS.PENDING)
+        expect(after.attrs).toEqual({})
+    })
+
+    it("keeps room 1 while the tip is below the activation height", () => {
+        roomFrom(LAST_BLOCK + 1)
+        const behind = tx("0xbehind", LAST_BLOCK - 5)
+        filterMempoolByRefBlock([behind], true)
+        expect(behind.status).toBe(TRANSACTION_STATUS.FAILED)
+    })
+
+    it("widens the inclusion window to 10 and the deep window to 50 blocks", () => {
+        roomFrom(0)
+        const edge = tx("0xedge", LAST_BLOCK - 10)
+        const expired = tx("0xexpired", LAST_BLOCK - 11)
+        const deep = tx("0xdeep", LAST_BLOCK - 50)
+        const ancient = tx("0xancient", LAST_BLOCK - 51)
+
+        const res = filterMempoolByRefBlock([edge, expired, deep, ancient], true)
+
+        expect(res.validTxs.map(t => t.hash)).toEqual(["0xedge", "0xexpired", "0xdeep"])
+        expect(edge.status).toBe(TRANSACTION_STATUS.PENDING)
+        expect(expired.status).toBe(TRANSACTION_STATUS.FAILED)
+        expect(deep.status).toBe(TRANSACTION_STATUS.FAILED)
+        expect(res.failedTxs.map(f => f.txhash)).toEqual(["0xancient"])
     })
 })

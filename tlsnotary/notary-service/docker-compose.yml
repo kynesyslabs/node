@@ -1,0 +1,97 @@
+# One production Demos TLSNotary notary: the stock alpha.12 notary-server,
+# pinned by digest, signing with the key from the notary key ceremony.
+# Operators run two of these, on separate hosts. Runbook:
+# docs/runbooks/tlsn-notary.md.
+#
+# Started only through tlsn-notary.service, which runs
+# `notary-guard.sh preflight` (key file, NTP) before every start. The
+# container's own entrypoint is the same guard in `exec` mode, so a start
+# that skipped the preflight, or a key file that changed since, never
+# reaches notary-server. Docker never restarts the container by itself
+# (restart "no"); systemd does, through the preflight again.
+#
+# Every setting comes from the env file (notary.env.example).
+
+name: ${NOTARY_PROJECT:-tlsn-notary}
+
+services:
+  notary:
+    image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12@sha256:a0c3b6196a39b0fecb0b0296fe4359bf6a1e95cd9fff617cabe4009ed749d378
+    entrypoint: ["/bin/sh", "/opt/notary-service/notary-guard.sh", "exec", "--", "notary-server"]
+    user: "${NOTARY_UID:-10001}:${NOTARY_GID:-10001}"
+    # The image's working dir is under /root, which the notary user cannot enter
+    working_dir: /tmp
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # MPC preprocessing for a 16 KiB session peaks near 1 GiB and the server
+    # keeps a few hundred MiB after each session: at 1.5 GiB the third session
+    # of a run was OOM-killed (testing/tlsn-e2e). NS_CONCURRENCY keeps the
+    # sessions in flight within the cap.
+    mem_limit: 3g
+    memswap_limit: 3g
+    pids_limit: 512
+    restart: "no"
+    stop_grace_period: 30s
+    environment:
+      NOTARY_EXPECTED_PUBKEY: ${NOTARY_EXPECTED_PUBKEY:?set NOTARY_EXPECTED_PUBKEY to the key's compressed public key}
+      NOTARY_STAMP_FILE: /run/notary-preflight/clock.ok
+      NOTARY_STAMP_MAX_AGE_SEC: ${NOTARY_STAMP_MAX_AGE_SEC:-300}
+      NOTARY_ALLOW_UNSYNCED_CLOCK: ${NOTARY_ALLOW_UNSYNCED_CLOCK:-0}
+      NS_NOTARIZATION__PRIVATE_KEY_PATH: /run/secrets/notary.key
+      # The SDK prover asks for 16 KiB sent / 16 KiB received; the server's
+      # 4 KiB default refuses every SDK session. Same values as the e2e.
+      NS_NOTARIZATION__MAX_SENT_DATA: "32768"
+      NS_NOTARIZATION__MAX_RECV_DATA: "65536"
+      # A node's relay session lives at most 5 minutes, so a longer
+      # notarization can only be one whose prover is gone.
+      NS_NOTARIZATION__TIMEOUT: "300"
+      NS_NOTARIZATION__ALLOW_EXTENSIONS: "false"
+      NS_CONCURRENCY: ${NOTARY_CONCURRENCY:-2}
+      # TLS ends at the reverse proxy in front of the published port
+      NS_TLS__ENABLED: "false"
+      NS_LOG__LEVEL: ${NOTARY_LOG_LEVEL:-INFO}
+    ports:
+      - "${NOTARY_BIND:-127.0.0.1}:${NOTARY_HOST_PORT:-7047}:7047"
+    volumes:
+      # create_host_path false: a missing key file must fail the start, not
+      # become an empty directory the guard then refuses with a vaguer error
+      - type: bind
+        source: ${NOTARY_KEY_FILE:?set NOTARY_KEY_FILE to the key file on the host}
+        target: /run/secrets/notary.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NOTARY_STAMP_DIR:-/run/tlsn-notary}
+        target: /run/notary-preflight
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./notary-guard.sh
+        target: /opt/notary-service/notary-guard.sh
+        read_only: true
+      - type: bind
+        source: ./lib.sh
+        target: /opt/notary-service/lib.sh
+        read_only: true
+    healthcheck:
+      # The image has bash but no curl or wget
+      test:
+        - CMD
+        - bash
+        - -c
+        - exec 3<>/dev/tcp/127.0.0.1/7047 && printf 'GET /healthcheck HTTP/1.0\r\n\r\n' >&3 && head -n1 <&3 | grep -q ' 200'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"

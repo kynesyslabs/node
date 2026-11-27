@@ -19,7 +19,7 @@ jest.mock("src/utilities/logger", () => ({
 }))
 
 jest.mock("src/utilities/sharedState", () => ({
-    getSharedState: { lastBlockNumber: 100, referenceBlockRoom: 1 },
+    getSharedState: { lastBlockNumber: 100 },
 }))
 
 let accountNonces: Record<string, number> = {}
@@ -46,6 +46,7 @@ function tx(from: number, nonce: number) {
             from_ed25519_address: account(from),
             nonce,
             gcr_edits: [{ type: "nonce", account: account(from) }],
+            reference_block: 100,
         },
     } as any
 }

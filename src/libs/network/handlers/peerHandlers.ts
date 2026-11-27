@@ -1,7 +1,8 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import getPeerInfo from "../routines/nodecalls/getPeerInfo"
 import getPeerlist from "../routines/nodecalls/getPeerlist"
-import Hashing from "../../crypto/hashing"
+import PeerManager from "src/libs/peer/PeerManager"
+import { peerlistDigest } from "src/libs/peer/routines/peerGossip"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 
@@ -17,8 +18,7 @@ export const peerHandlers: Record<string, NodeCallHandler> = {
     },
 
     getPeerlistHash: async (_data, response) => {
-        const peerlist = await getPeerlist()
-        response.response = Hashing.sha256(JSON.stringify(peerlist))
+        response.response = peerlistDigest(PeerManager.getInstance().getPeers())
         log.custom(
             "manageNodeCall",
             "Peerlist hash: " + response.response,

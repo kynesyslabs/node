@@ -2,9 +2,10 @@
  * The admission caps on the paths that take txs from outside the validator
  * set (RPC submit, gossip ingest): pool count, pool bytes, per-sender pending
  * count and signed-timestamp lifetime, with eviction only for a funded RPC
- * submit. The consensus merge is deliberately not capped. The pool is an
- * in-memory model behind the same data-access methods the SQL backs, so the
- * policy is tested here and the SQL in mempool.capsPg.test.ts.
+ * submit or gossiped tx, gossip at most one try a second. The consensus
+ * merge is deliberately not capped. The pool is an in-memory model behind
+ * the same data-access methods the SQL backs, so the policy is tested here
+ * and the SQL in mempool.capsPg.test.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -24,11 +25,11 @@ const quietLog = {
 }
 const sharedState = {
     lastBlockNumber: 100,
-    referenceBlockRoom: 1,
     publicKeyHex: OWN_KEY,
     inConsensusLoop: false,
 }
 let nonceEnforced = false
+let nftGated = false
 const balances = new Map<string, bigint>()
 const getAccountBalance = jest.fn(async (addr: string) => balances.get(addr) ?? 0n)
 
@@ -65,7 +66,10 @@ mock.module("src/libs/network/manageBridge", () => ({
 const realForks = await import("@/forks")
 mock.module("@/forks", () => ({
     ...realForks,
-    isForkActive: jest.fn((name: string) => name === "nonceEnforcement" && nonceEnforced),
+    isForkActive: jest.fn(
+        (name: string) =>
+            (name === "nonceEnforcement" && nonceEnforced) || (name === "nftValidatorGating" && nftGated),
+    ),
     pendingTxSignatureContext: jest.fn(() => ({})),
 }))
 mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
@@ -111,7 +115,7 @@ mock.module("@/forks/blockCapsGate", () => ({
 }))
 
 const { default: Mempool } = await import("./mempool")
-const { __resetMempoolLimits, __setMempoolLimits, txStoredBytes, txTotalFee } =
+const { __resetMempoolLimits, __setMempoolLimits, chooseVictims, txStoredBytes, txTotalFee } =
     await import("./mempoolLimits")
 
 interface Held {
@@ -123,6 +127,7 @@ let pool: Held[] = []
 let sweeps: Array<{ now: number; force: boolean }> = []
 let calls: string[] = []
 let nonceOfAccount = 0
+let clock = NOW
 
 const senderOf = (h: Held) => String(h.tx.content.from).toLowerCase()
 const tsOf = (h: Held) => Number(h.tx.content.timestamp)
@@ -142,6 +147,10 @@ function installPool() {
         }
         return counts
     }
+    m.listPendingBySenders = async (addresses: string[]) =>
+        pool
+            .filter(h => addresses.map(a => a.toLowerCase()).includes(senderOf(h)))
+            .map(h => ({ hash: h.hash, sender: senderOf(h), nonce: h.tx.content.nonce, type: h.tx.content.type }))
     m.listEvictionCandidates = async () =>
         pool.map(h => ({
             hash: h.hash,
@@ -213,6 +222,8 @@ function makeTx(over: {
         content: {
             type: over.type ?? "native",
             from: over.from ?? `0xsender${seq}`,
+            to: "0x" + "cd".repeat(32),
+            amount: 0,
             timestamp: "ts" in over ? over.ts : NOW,
             nonce: over.nonce,
             transaction_fee: {
@@ -221,6 +232,7 @@ function makeTx(over: {
                 additional_fee: 0,
             },
             pad: "x".repeat(over.pad ?? 0),
+            reference_block: 100,
         },
     } as any
 }
@@ -237,9 +249,12 @@ beforeEach(() => {
     blockCapsOn = false
     nonceOfAccount = 0
     sharedState.inConsensusLoop = false
+    nftGated = false
     balances.clear()
     getAccountBalance.mockClear()
-    jest.spyOn(Date, "now").mockImplementation(() => NOW)
+    clock = NOW
+    jest.spyOn(Date, "now").mockImplementation(() => clock)
+    ;(Mempool as any).lastGossipEvictAttempt = 0
     installPool()
 })
 
@@ -365,13 +380,175 @@ describe("eviction", () => {
         expect(calls).not.toContain("delete")
     })
 
-    it("never evicts for a gossiped or internal tx, whatever it pays", async () => {
+    // A peer that refused what the RPC node admitted would leave the tx to
+    // land only while that node sits in the committee.
+    it("makes room for a funded higher-paying gossiped tx as it does for RPC", async () => {
+        fund("0xpayer", 10)
+        expect((await gossip(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))).error).toBe("")
+        expect(pool.map(h => h.hash).sort()).toEqual(["0xhigh", "0xlow-new", "0xpays"])
+    })
+
+    it("deletes a gossiped tx's victims inside the database transaction that inserts", async () => {
+        fund("0xpayer", 10)
+        calls = []
+        expect((await gossip(makeTx({ hash: "0xpays", fee: 5, from: "0xpayer" }))).error).toBe("")
+        expect(calls).toEqual(["tx:begin", "delete", "save", "tx:end"])
+    })
+
+    it("holds a gossiped tx to the same refusals at a full pool as an RPC one", async () => {
+        fund("0xbroke", 1)
+        expect((await gossip(makeTx({ fee: 50, from: "0xbroke" }))).error).toMatch(
+            /sender balance does not cover the transaction fee/,
+        )
         fund("0xpayer", 100)
+        clock = NOW + 1000
+        expect((await gossip(makeTx({ fee: 1, from: "0xpayer" }))).error).toMatch(/Mempool full/)
+        clock = NOW + 2000
+        sharedState.inConsensusLoop = true
         expect((await gossip(makeTx({ fee: 50, from: "0xpayer" }))).error).toMatch(/Mempool full/)
+        expect(pool.map(h => h.hash).sort()).toEqual(["0xhigh", "0xlow-new", "0xlow-old"])
+        expect(calls).not.toContain("delete")
+    })
+
+    it("never evicts for an internal tx, whatever it pays", async () => {
+        fund("0xpayer", 100)
         expect((await internal(makeTx({ fee: 50, from: "0xpayer" }))).error).toMatch(/Mempool full/)
         expect(pool).toHaveLength(3)
         expect(getAccountBalance).not.toHaveBeenCalled()
     })
+
+    // A try reads every held tx under the mempool lock, and gossip brings
+    // every peer's submissions, so it gets one try a second.
+    describe("gossip eviction interval", () => {
+        it("refuses a second gossiped tx inside the interval as full, without reading the pool", async () => {
+            const scans = jest.spyOn(Mempool as any, "listEvictionCandidates")
+            fund("0xpayer", 100)
+            expect((await gossip(makeTx({ hash: "0xfirst", fee: 5, from: "0xpayer" }))).error).toBe("")
+            expect(scans).toHaveBeenCalledTimes(1)
+
+            clock = NOW + 999
+            getAccountBalance.mockClear()
+            const refused = await gossip(makeTx({ hash: "0xsecond", fee: 50, from: "0xpayer" }))
+            expect(refused.error).toMatch(/Mempool full \(3 transactions\)/)
+            expect(scans).toHaveBeenCalledTimes(1)
+            expect(getAccountBalance).not.toHaveBeenCalled()
+            expect(pool.map(h => h.hash).sort()).toEqual(["0xfirst", "0xhigh", "0xlow-new"])
+        })
+
+        it("counts a try refused at the balance read, and lets the next one try after the interval", async () => {
+            const scans = jest.spyOn(Mempool as any, "listEvictionCandidates")
+            fund("0xbroke", 1)
+            fund("0xpayer", 100)
+            expect((await gossip(makeTx({ fee: 50, from: "0xbroke" }))).error).toMatch(
+                /sender balance does not cover the transaction fee/,
+            )
+            expect(scans).not.toHaveBeenCalled()
+
+            clock = NOW + 500
+            getAccountBalance.mockClear()
+            expect((await gossip(makeTx({ fee: 50, from: "0xpayer" }))).error).toMatch(
+                /Mempool full \(3 transactions\)/,
+            )
+            expect(getAccountBalance).not.toHaveBeenCalled()
+            expect(scans).not.toHaveBeenCalled()
+
+            clock = NOW + 1000
+            expect((await gossip(makeTx({ hash: "0xlater", fee: 50, from: "0xpayer" }))).error).toBe("")
+            expect(scans).toHaveBeenCalledTimes(1)
+            expect(pool.map(h => h.hash).sort()).toEqual(["0xhigh", "0xlater", "0xlow-new"])
+        })
+
+        // NTP or an operator can step the host clock back past the last try;
+        // gossip eviction must not stop until the clock catches up.
+        it("lets a gossiped tx try when the clock has stepped back behind the last try", async () => {
+            const scans = jest.spyOn(Mempool as any, "listEvictionCandidates")
+            fund("0xpayer", 100)
+            expect((await gossip(makeTx({ hash: "0xfirst", fee: 5, from: "0xpayer" }))).error).toBe("")
+            expect(scans).toHaveBeenCalledTimes(1)
+
+            clock = NOW - 30_000
+            expect((await gossip(makeTx({ hash: "0xback", fee: 50, from: "0xpayer" }))).error).toBe("")
+            expect(scans).toHaveBeenCalledTimes(2)
+            expect(pool.map(h => h.hash).sort()).toEqual(["0xback", "0xfirst", "0xhigh"])
+        })
+
+        // On a slow database the queries before the gate take a while; the
+        // slot is stamped when a try reaches the gate, so two scans cannot
+        // start less than the interval apart.
+        it("stamps the try when it reaches the gate, not when admission started", async () => {
+            const scans = jest.spyOn(Mempool as any, "listEvictionCandidates")
+            const m = Mempool as any
+            const usage = m.getUsage
+            let dbDelay = 1200
+            m.getUsage = async () => {
+                const u = await usage()
+                clock += dbDelay
+                return u
+            }
+            fund("0xpayer", 100)
+            expect((await gossip(makeTx({ hash: "0xslow", fee: 5, from: "0xpayer" }))).error).toBe("")
+            expect(m.lastGossipEvictAttempt).toBe(NOW + 1200)
+            expect(scans).toHaveBeenCalledTimes(1)
+
+            clock = NOW + 1500
+            dbDelay = 100
+            getAccountBalance.mockClear()
+            const refused = await gossip(makeTx({ hash: "0xclose", fee: 50, from: "0xpayer" }))
+            expect(refused.error).toMatch(/Mempool full \(3 transactions\)/)
+            expect(scans).toHaveBeenCalledTimes(1)
+            expect(getAccountBalance).not.toHaveBeenCalled()
+            expect(m.lastGossipEvictAttempt).toBe(NOW + 1200)
+            expect(pool.map(h => h.hash).sort()).toEqual(["0xhigh", "0xlow-new", "0xslow"])
+        })
+
+        it("neither limits RPC submits nor counts them against gossip", async () => {
+            const scans = jest.spyOn(Mempool as any, "listEvictionCandidates")
+            fund("0xpayer", 100)
+            expect((await rpc(makeTx({ hash: "0xrpc1", fee: 5, from: "0xpayer" }))).error).toBe("")
+            expect((await gossip(makeTx({ hash: "0xgossip", fee: 6, from: "0xpayer" }))).error).toBe("")
+            expect((await rpc(makeTx({ hash: "0xrpc2", fee: 7, from: "0xpayer" }))).error).toBe("")
+            expect(scans).toHaveBeenCalledTimes(3)
+            expect(pool.map(h => h.hash).sort()).toEqual(["0xgossip", "0xhigh", "0xrpc2"])
+        })
+    })
+})
+
+// Past 2^53 a JSON number fee is no longer exact in JS, while Postgres keeps
+// its stored digits: 300000000000000500 DEM reads as 300000000000000512 DEM
+// here and stays 300000000000000500 DEM there. Admission must rank held txs
+// the one way chooseVictims does, or it turns away a tx that outbids the
+// cheapest of them.
+describe("eviction among fees past 2^53", () => {
+    const withFee = (tx: any, networkFee: unknown) => {
+        tx.content.transaction_fee = { network_fee: networkFee, rpc_fee: 0, additional_fee: 0 }
+        return tx
+    }
+
+    beforeEach(async () => {
+        __setMempoolLimits({ maxTxs: 2 })
+        await rpc(withFee(makeTx({ hash: "0xnumber" }), Number("300000000000000500")))
+        await rpc(withFee(makeTx({ hash: "0xstring" }), "300000000000000500000000001"))
+        expect(pool).toHaveLength(2)
+    })
+
+    for (const [name, submit] of [
+        ["gossiped", gossip],
+        ["RPC", rpc],
+    ] as const) {
+        it(`admits a funded ${name} tx by evicting the tx chooseVictims ranks cheapest`, async () => {
+            balances.set("0xpayer", 10n ** 30n)
+            const incoming = withFee(makeTx({ hash: "0xpays", from: "0xpayer" }), "300000000000000500000000002")
+            const victims = chooseVictims(
+                await (Mempool as any).listEvictionCandidates(),
+                { fee: txTotalFee(incoming.content.transaction_fee), bytes: txStoredBytes(incoming) },
+                await (Mempool as any).getUsage(),
+            )
+            expect(victims?.map(v => v.hash)).toEqual(["0xstring"])
+
+            expect((await submit(incoming)).error).toBe("")
+            expect(pool.map(h => h.hash).sort()).toEqual(["0xnumber", "0xpays"])
+        })
+    }
 })
 
 describe("pool byte cap", () => {
@@ -430,7 +607,13 @@ describe("lifetime", () => {
     })
 
     it("refuses a missing, fractional or non-numeric timestamp with a clear reason", async () => {
-        for (const ts of [undefined, 1.5, "1800000000000", 0, -5]) {
+        // One the `transactions` row cannot hold is refused first by the
+        // row check, with the reason the merge gives.
+        for (const ts of [undefined, 1.5]) {
+            const refused = await gossip(makeTx({ ts }))
+            expect(refused.error).toBe("Transaction timestamp is not an int8 Postgres reads")
+        }
+        for (const ts of ["1800000000000", 0, -5]) {
             const refused = await gossip(makeTx({ ts }))
             expect(refused.error).toMatch(/positive whole number of milliseconds/)
         }
@@ -535,5 +718,37 @@ describe("block caps", () => {
     it("admits the oversize tx before the fork", async () => {
         __setMempoolLimits({ maxBytes: 64 * 1024 * 1024 })
         expect((await rpc(oversize())).error).toBe("")
+    })
+})
+
+describe("seat transactions per sender under nftValidatorGating", () => {
+    const gate = () => {
+        nftGated = true
+    }
+    const seatTx = (type: string) => makeTx({ from: "0xSeat", type, fee: 0 })
+
+    it("holds at most two stakes and challenges of one sender, on every intake path", async () => {
+        gate()
+        expect((await rpc(seatTx("validatorStake"))).error).toBe("")
+        expect((await gossip(seatTx("validatorChallenge"))).error).toBe("")
+        for (const add of [rpc, gossip, internal]) {
+            const out = await add(seatTx("validatorChallenge"))
+            expect(out.error).toBe("Sender already holds 2 seat transactions in the pool (at most 2)")
+        }
+        expect(pool).toHaveLength(2)
+    })
+
+    it("does not count other transactions of the sender, nor limit their own types", async () => {
+        gate()
+        fund("0xseat", 100)
+        await rpc(seatTx("validatorStake"))
+        expect((await rpc(makeTx({ from: "0xseat" }))).error).toBe("")
+        expect((await rpc(seatTx("validatorUnstake"))).error).toBe("")
+        expect((await rpc(seatTx("validatorChallenge"))).error).toBe("")
+        expect((await rpc(makeTx({ from: "0xseat" }))).error).toBe("")
+    })
+
+    it("leaves the pool alone before the fork", async () => {
+        for (let i = 0; i < 3; i++) expect((await rpc(seatTx("validatorStake"))).error).toBe("")
     })
 })

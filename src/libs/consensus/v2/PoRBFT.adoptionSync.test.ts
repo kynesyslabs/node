@@ -19,6 +19,8 @@ mock.module("src/libs/blockchain/validation/verifyBlock", () => ({
         Object.keys(b?.validation_data?.signatures ?? {}).length >= quorumSignatures
             ? { valid: true }
             : { valid: false, reason: "signatures short of a quorum" },
+    // Every stub signature counts, so the block is stored with all of them
+    withCountedSignatures: async (b: any) => b,
 }))
 
 const NATIVE_HASHES = { native_subnets_txs: "subnets", native_tlsnotary: "tls" }
@@ -141,6 +143,8 @@ beforeEach(() => {
         Object.values(stored).find(b => b.hash === hash) ?? null) as any)
     spyOn(chain, "getLastBlockNumber").mockImplementation((async () =>
         getSharedState.lastBlockNumber) as any)
+    spyOn(chain, "getLastStoredBlockNumber").mockImplementation((async () =>
+        Math.max(getSharedState.lastBlockNumber, ...Object.keys(stored).map(Number))) as any)
     spyOn(chain, "getExistingTransactionHashes").mockResolvedValue(new Set())
     spyOn(chain, "checkTxExists").mockResolvedValue(true)
     spyOn(gcr, "getAccountNonces").mockImplementation((async (
@@ -171,7 +175,6 @@ beforeEach(() => {
 
     getSharedState.lastBlockNumber = HEIGHT - 1
     getSharedState.lastBlockHash = PARENT_HASH
-    getSharedState.referenceBlockRoom = 1
     getSharedState.isInitialized = true
     getSharedState.inSyncLoop = false
     getSharedState.fastSyncCount = 1

@@ -1,5 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import { asGenesisBlockContent } from "src/libs/blockchain/genesis/genesisBlockContent"
 import { parseStoredGenesisData } from "src/libs/blockchain/genesis/genesisPin"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { getSharedState } from "src/utilities/sharedState"
@@ -33,7 +34,8 @@ export default async function getChainIdentity(): Promise<RPCResponse> {
             )
         }
         const genesisData = parseStoredGenesisData(
-            (genesisBlock.content as { extra?: { genesisData?: unknown } }).extra?.genesisData ?? null,
+            asGenesisBlockContent(genesisBlock.content).extra?.genesisData ??
+                null,
         )
         return answer({
             chainId: getSharedState.chainId ?? null,

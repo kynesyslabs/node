@@ -16,6 +16,19 @@ import {
     jest,
 } from "@jest/globals"
 
+// NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
+jest.mock("@/features/staking/nftAllowlist", () => ({
+    __esModule: true,
+    isAllowlistedMint: jest.fn(() => true),
+}))
+
+jest.mock("@/features/staking/solanaProof", () => ({
+    __esModule: true,
+    verifyNftProof: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyCurrentOwner: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyChallengeEvidence: jest.fn(async () => ({ status: "valid", slot: 2 })),
+}))
+
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
     default: {
@@ -39,13 +52,17 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorStatus: jest.fn(), getAccountBalance: jest.fn() },
+    default: {
+        getGCRValidatorStatus: jest.fn(),
+        getGCRValidatorByMint: jest.fn(async () => null),
+        getGCRValidatorsAtBlock: jest.fn(async () => Array.from({ length: 10 }, (_, i) => ({ address: `v${i}` }))),
+    },
 }))
 
 // sharedState pulls in the whole framework — substitute a minimal stand-in.
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null },
+    getSharedState: { shardSize: 10, networkParameters: null, forkConfig: { nftValidatorGating: { activationHeight: 0 } } },
 }))
 
 // Pin the flat fee breakdown (prod: networkFee + rpcFee + additionalFee =
@@ -64,8 +81,7 @@ jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import {
-    DEFAULT_MIN_VALIDATOR_STAKE,
-    UNSTAKE_LOCK_BLOCKS,
+    NFT_UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
@@ -96,6 +112,7 @@ interface Row {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint?: string | null
 }
 
 function createRepo() {
@@ -105,6 +122,14 @@ function createRepo() {
         findOneBy: jest.fn(async ({ address }: { address: string }) =>
             rows.get(address) ?? null,
         ),
+        findBy: jest.fn(async ({ nft_mint }: { nft_mint: string }) =>
+            [...rows.values()].filter(row => row.nft_mint === nft_mint),
+        ),
+        // The rest of the active set, which keeps the committee floor when this validator leaves
+        find: jest.fn(async ({ where }: { where: { status: string } }) => [
+            ...[...rows.values()].filter(row => row.status === where.status),
+            ...Array.from({ length: 10 }, (_, i) => ({ address: `v${i}`, status: "2" })).filter(row => row.status === where.status),
+        ]),
         save: jest.fn(async (row: Row) => {
             rows.set(row.address, { ...row })
             return rows.get(row.address)!
@@ -116,12 +141,13 @@ function createRepo() {
 // ---------- tx factories ----------
 
 const SENDER = "aabbcc"
+const NFT = { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) }
 
 // Payload amounts ride as bigint-encoded strings; the constant itself is a
 // bigint (demToOs result).
-const MIN_STAKE = DEFAULT_MIN_VALIDATOR_STAKE.toString()
+const MIN_STAKE = "0"
 
-function stakeTx(amount: string, hash = "0xhash_stake") {
+function stakeTx(amount: string, hash = "0xhash_stake", nft: object | null = NFT) {
     return {
         hash,
         content: {
@@ -130,7 +156,7 @@ function stakeTx(amount: string, hash = "0xhash_stake") {
             from_ed25519_address: SENDER,
             data: [
                 "validatorStake",
-                { amount, connectionUrl: "https://v.example" },
+                { amount, connectionUrl: "https://v.example", ...(nft && { nft }) },
             ],
             gcr_edits: [],
         },
@@ -179,6 +205,7 @@ function attachStakingEdit(tx: any) {
             operation: "stake",
             amount: payload?.amount ?? "0",
             connectionUrl: payload?.connectionUrl ?? "",
+            nft: payload?.nft,
             txhash: tx.hash,
         })
     } else if (tx.content.type === "validatorUnstake") {
@@ -212,10 +239,6 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         jest.clearAllMocks()
         repo = createRepo()
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(100 as never)
-        // Default: balance comfortably covers stake + gas.
-        ;(GCR.getAccountBalance as jest.Mock).mockResolvedValue(
-            (DEFAULT_MIN_VALIDATOR_STAKE * 2n) as never,
-        )
     })
 
     async function apply(tx: any, currentBlock: number) {
@@ -284,13 +307,11 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
             status: VALIDATOR_STATUS_ACTIVE,
             staked_amount: MIN_STAKE,
         } as never)
-        const t2 = stakeTx("500", "0xtx2")
+        const t2 = stakeTx("0", "0xtx2", null) // a re-stake carries no proof
         await handleStakingTx(t2)
         attachStakingEdit(t2)
         row = await apply(t2, 200)
-        expect(row?.staked_amount).toBe(
-            (BigInt(DEFAULT_MIN_VALIDATOR_STAKE) + 500n).toString(),
-        )
+        expect(row?.staked_amount).toBe("0")
 
         // 3. Unstake request at block 300.
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
@@ -304,16 +325,16 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         row = await apply(t3, 300)
         expect(row?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
         expect(row?.unstake_requested_at).toBe(300)
-        expect(row?.unstake_available_at).toBe(300 + UNSTAKE_LOCK_BLOCKS)
+        expect(row?.unstake_available_at).toBe(300 + NFT_UNSTAKE_LOCK_BLOCKS)
 
         // 4. Exit attempt BEFORE lock elapses is rejected at the validation layer.
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_UNSTAKING,
             unstake_requested_at: 300,
-            unstake_available_at: 300 + UNSTAKE_LOCK_BLOCKS,
+            unstake_available_at: 300 + NFT_UNSTAKE_LOCK_BLOCKS,
         } as never)
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(500 as never)
+        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue((300 + NFT_UNSTAKE_LOCK_BLOCKS - 1) as never)
         const earlyExit = exitTx("0xtx4_early")
         const earlyHandled = await handleStakingTx(earlyExit)
         expect(earlyHandled.success).toBe(false)
@@ -321,7 +342,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         expect(earlyExit.content.gcr_edits).toHaveLength(0)
 
         // 5. Exit at exactly the unlock block succeeds.
-        const unlockBlock = 300 + UNSTAKE_LOCK_BLOCKS
+        const unlockBlock = 300 + NFT_UNSTAKE_LOCK_BLOCKS
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             unlockBlock as never,
         )
@@ -338,7 +359,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
-        const tx = stakeTx("1") // below minimum
+        const tx = stakeTx("1")
         const handled = await handleStakingTx(tx)
         expect(handled.success).toBe(false)
     })
@@ -376,6 +397,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
                     {
                         amount: MIN_STAKE,
                         connectionUrl: "https://v.example",
+                        nft: NFT,
                     },
                 ],
                 gcr_edits: [],

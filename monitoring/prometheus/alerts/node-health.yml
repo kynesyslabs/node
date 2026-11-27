@@ -22,8 +22,13 @@ groups:
         # NodeDormant warning instead (Greptile P1). Without this gate,
         # every dormant boot fires NodeFailing as critical at 2m, which
         # arrives ~8m before the matching NodeDormant warning.
+        # Also wait for the boot-time fast sync: src/index.ts awaits it before it
+        # marks main_loop running, so a validator catching up after downtime has
+        # main_loop at 0 for as long as the sync takes. The fast_sync boot step is
+        # registered when the sync starts and is 2 (ready) once it has finished.
         expr: demos_subsystem_up{subsystem="main_loop"} == 0
               and demos_subsystem_skipped{subsystem="main_loop"} == 0
+              and on (instance) demos_boot_step_status{step="fast_sync"} == 2
         for: 2m
         labels:
           severity: critical
@@ -61,7 +66,9 @@ groups:
           description: "demos_mempool_size > 0 on {{ $labels.instance }} yet no transaction has been included in a stored block for over 10m. Block production may be stalled."
 
       - alert: PeersZero
-        expr: demos_peer_online_count == 0
+        # The node counts itself as online (PeerManager.isPeerFresh), so the
+        # gauge is 1 when every real peer is gone and `== 0` could never fire.
+        expr: demos_peer_online_count <= 1
         for: 5m
         # One peer reconnecting for a scrape or two must not resolve and
         # re-page the alert.
@@ -69,8 +76,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: No connected peers
-          description: "demos_peer_online_count has been 0 for >5m on {{ $labels.instance }}. Check network egress + bootstrap peer list."
+          summary: No connected peers (only the node itself is online)
+          description: "demos_peer_online_count has been 1 or less for >5m on {{ $labels.instance }}. The count includes the node itself, so 1 means no other peer is online. Check network egress + bootstrap peer list."
 
       - alert: MainLoopHeartbeatStale
         expr: demos_main_loop_heartbeat_seconds > 120
@@ -105,3 +112,37 @@ groups:
         annotations:
           summary: Validator disk is nearly full
           description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B free on its data disk (DISK_SPACE_PATH), under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."
+
+      # The node probes its own Postgres pool every 15 s (SELECT 1, 5 s timeout;
+      # src/features/metrics/dbProbe.ts). The node keeps running when Postgres
+      # goes away after boot, and HeightStalled cannot see it: the collector
+      # stops updating demos_seconds_since_last_block when its query fails.
+      # `for: 1m` is four failed probes in a row, so a Postgres restart of a few
+      # seconds does not page. An outage with at least one good probe each
+      # minute (for example Postgres crash-looping and restarting) does not fire
+      # DbDown either; it is seen only through HeightStalled, if blocks stop.
+      # A node that stops exporting metrics is NodeDown; a node too old to
+      # export demos_db_up never fires this rule.
+      - alert: DbDown
+        expr: demos_db_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Validator cannot reach its Postgres
+          description: "demos_db_up has been 0 for >1m on {{ $labels.instance }}: SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted. The node keeps serving RPC but cannot store or sync blocks. Check the Postgres container or service, its disk, and PG_HOST / PG_PORT; the node log has a `[DB] Postgres probe failed` line with the error."
+
+  # Dead-man's switch: always firing on purpose. Alertmanager routes it to the
+  # `deadman` receiver, which should be an external watchdog that pages when the
+  # heartbeat STOPS, so a dead Prometheus, Alertmanager or dead-man receiver path is
+  # noticed. It does NOT test the `paging` or `slack` webhooks: send a test alert to each
+  # after filling in the secrets (docs/runbooks/mainnet-monitoring.md, setup step 4).
+  - name: demos-meta
+    rules:
+      - alert: DeadMansSwitch
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: Alerting pipeline heartbeat
+          description: This alert is always firing. If the external watchdog stops receiving it, Prometheus, Alertmanager or the dead-man receiver path is broken. It does not prove that the paging or Slack webhooks work.

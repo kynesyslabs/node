@@ -1,12 +1,13 @@
 import * as fs from "fs"
-import axios, { AxiosResponse } from "axios"
 import {
     Tweet,
     TwitterTimelineResponse,
     TwitterFollowersResponse,
 } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
+import { IDENTITY_ADMISSION_TIMEOUT_MS } from "@/libs/blockchain/validation/identityAdmission"
 import { Config } from "src/config"
+import { boundedFetch, web2Limits, type Web2Limits } from "@/libs/abstraction/web2/boundedFetch"
 import {
     TWITTER_BOT_SCORE_THRESHOLD,
     TWITTER_VERIFICATION_SCORE,
@@ -39,6 +40,10 @@ import {
     TWITTER_QUOTA_BOT_SCORE,
     TWITTER_MS_PER_MONTH,
 } from "./constants"
+
+const TWITTER_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+// This bounds each provider read; one verification can make multiple reads.
+const TWITTER_REQUEST_TIMEOUT_MS = IDENTITY_ADMISSION_TIMEOUT_MS - 500
 
 class TwitterBotDetector {
     constructor(
@@ -442,6 +447,14 @@ export class Twitter {
     api_key = Config.getInstance().identity.rapidApiKey
     api_host = Config.getInstance().identity.rapidApiHost
     api_url = "https://" + this.api_host
+    // Identity verification waits on these lookups, so a slow or oversized
+    // RapidAPI response is cut at limits no greater than the web2 proxy's.
+    private limits: Web2Limits = web2Limits()
+
+    /** Replaces the request limits (tests). */
+    setLimits(limits: Web2Limits = web2Limits()): void {
+        this.limits = limits
+    }
 
     /**
      * Extracts tweet details from a Twitter/X URL
@@ -499,18 +512,32 @@ export class Twitter {
      * @param data - The data to send with the request (optional)
      * @returns The response from the request
      */
-    async makeRequest<T>(url: string, delay = 0): Promise<AxiosResponse<T>> {
+    async makeRequest<T>(
+        url: string,
+        delay = 0,
+        timeoutMs = TWITTER_REQUEST_TIMEOUT_MS,
+    ): Promise<{ status: number; data: T }> {
+        if (!this.api_key) throw new Error("RAPID_API_KEY is not set")
         if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay))
             log.debug(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
         }
 
-        return await axios.get<T>(url, {
+        const fetch = boundedFetch({
+            timeoutMs: Math.min(timeoutMs, this.limits.timeoutMs),
+            maxBytes: Math.min(TWITTER_MAX_RESPONSE_BYTES, this.limits.maxBytes),
+        })
+        const res = await fetch(url, {
             headers: {
                 "x-rapidapi-key": this.api_key,
                 "x-rapidapi-host": this.api_host,
             },
         })
+        // Callers treat a non-2xx answer as a failed request.
+        if (res.status < 200 || res.status >= 300) {
+            throw new Error(`Request failed with status code ${res.status}`)
+        }
+        return { status: res.status, data: (await res.json()) as T }
     }
 
     async getTweetById(tweetId: string): Promise<Tweet> {

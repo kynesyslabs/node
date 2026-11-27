@@ -10,7 +10,8 @@
  * block is left for a resync instead.
  */
 
-import { beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { QueryFailedError } from "typeorm"
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -31,7 +32,13 @@ const { default: Datasource } = await import("@/model/datasource")
 const { default: Mempool } = await import("../mempool")
 const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
 const { getSharedState } = await import("@/utilities/sharedState")
-const { assertNoUnreconciledGcrState, rollbackOrphanedGcrState } = await import("./Sync")
+const { default: logger } = await import("src/utilities/logger")
+const {
+    assertNoUnreconciledGcrState,
+    GcrDriftProbeError,
+    rollbackOrphanedGcrState,
+    unreconciledGcrBlockNumber,
+} = await import("./Sync")
 
 const TIP = 20
 const ORPHAN = TIP + 1
@@ -91,7 +98,9 @@ beforeEach(() => {
     log = []
     stamped = ORPHANS
     nonceIntegrity(null)
+    getSharedState.runMainLoop = true
     spyOn(Chain, "getLastBlockNumber").mockResolvedValue(TIP)
+    spyOn(Chain, "getLastStoredBlockNumber").mockResolvedValue(TIP)
     spyOn(Datasource, "getInstance").mockResolvedValue(fakeDatasource as any)
     spyOn(Mempool, "getTransactionsByHashes").mockImplementation(async () => bodies())
     applyTransactions.mockReset()
@@ -105,6 +114,15 @@ beforeEach(() => {
 })
 
 describe("rolling back orphaned GCR state", () => {
+    it("does not write an undo or delete stamps once shutdown starts", async () => {
+        getSharedState.runMainLoop = false
+
+        expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(deleteAssigned).not.toHaveBeenCalled()
+        expect(log).toEqual([])
+    })
+
     it("writes the undos and drops the stamps in one transaction when every rollback applies", async () => {
         applyTransactions.mockResolvedValue({
             successfulTxs: ORPHANS.map(o => o.hash),
@@ -136,12 +154,114 @@ describe("rolling back orphaned GCR state", () => {
         expect(pending.afterCommit).not.toHaveBeenCalled()
     })
 
+    it("keeps everything when a settlement batch would be undone under l2psSettlement", async () => {
+        getSharedState.forkConfig.l2psSettlement.activationHeight = ORPHAN - 1
+        spyOn(Mempool, "getTransactionsByHashes").mockImplementation(async () =>
+            bodies().map((tx: any, i: number) => (i === 1 ? { ...tx, content: { ...tx.content, type: "l2psBatch" } } : tx)),
+        )
+        applyTransactions.mockResolvedValue({
+            successfulTxs: ORPHANS.map(o => o.hash),
+            failedTxs: [],
+            skippedTxs: [],
+            pending,
+        } as any)
+
+        // Its fee credits are rebuilt from the live fee split, which may not
+        // be the one the block applied under.
+        expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(log).toEqual([])
+
+        // Before the fork an l2psBatch moves no balance and rolls back as before.
+        getSharedState.forkConfig.l2psSettlement.activationHeight = null
+        expect(await rollbackOrphanedGcrState(TIP)).toBe(true)
+    })
+
     it("keeps everything when a body is missing from the mempool", async () => {
         spyOn(Mempool, "getTransactionsByHashes").mockResolvedValue([{ hash: "tx-a" }] as any)
 
         expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
         expect(applyTransactions).not.toHaveBeenCalled()
         expect(log).toEqual([])
+    })
+})
+
+/** The drift probe's query failing the way TypeORM reports a Postgres error. */
+function queryFailed(code: string, message: string) {
+    const driverError = Object.assign(new Error(message), { code })
+    return new QueryFailedError("SELECT MAX(\"a\".\"block_number\") AS \"max\"", [], driverError)
+}
+
+// Before the suite below, which latches the node. Orphaned state is stamped
+// throughout, so a probe read as "no drift" would let the caller apply.
+describe("a drift probe that cannot run", () => {
+    let getRawOne: any
+
+    beforeEach(() => {
+        getRawOne = spyOn(queryBuilder, "getRawOne")
+        ;(logger.warning as any).mockClear()
+        applyTransactions.mockResolvedValue({
+            successfulTxs: ORPHANS.map(o => o.hash),
+            failedTxs: [],
+            skippedTxs: [],
+            pending,
+        } as any)
+    })
+
+    afterEach(() => {
+        getRawOne.mockRestore()
+    })
+
+    it("reads a missing table as no drift", async () => {
+        getRawOne.mockRejectedValueOnce(
+            queryFailed("42P01", "relation \"gcr_assigned_txs\" does not exist"),
+        )
+
+        await assertNoUnreconciledGcrState()
+
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(logger.warning).not.toHaveBeenCalled()
+    })
+
+    it.each([
+        ["a statement timeout", queryFailed("57014", "canceling statement due to statement timeout")],
+        ["a lost connection", new Error("Connection terminated unexpectedly")],
+        ["an exhausted pool", new Error("timeout exceeded when trying to connect")],
+    ])("refuses to apply after %s, and probes again on the next call", async (_, error) => {
+        getRawOne.mockRejectedValueOnce(error)
+
+        const rejection = await assertNoUnreconciledGcrState().then(
+            () => null,
+            (e: unknown) => e,
+        )
+        // Batch sync stops on this class without cooling the peer down.
+        expect(rejection).toBeInstanceOf(GcrDriftProbeError)
+        expect((rejection as Error).name).toBe("GcrDriftProbeError")
+        expect((rejection as Error).message).toMatch(/orphaned GCR state/)
+        expect((rejection as Error).cause).toBe(error)
+        expect(logger.warning).toHaveBeenCalledWith(expect.stringContaining(`: ${error.message}`))
+        expect(applyTransactions).not.toHaveBeenCalled()
+        // The drift is unknown, not proven: nothing is latched.
+        expect(unreconciledGcrBlockNumber()).toBeNull()
+
+        await assertNoUnreconciledGcrState()
+
+        expect(getRawOne).toHaveBeenCalledTimes(2)
+        expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(log).toEqual(["begin", "write", "delete 21", "delete 22", "commit", "afterCommit"])
+    })
+
+    it("says what failed when the rejection is not an Error", async () => {
+        getRawOne.mockRejectedValueOnce({ code: "ECONNRESET", syscall: "read" })
+
+        const contents = "{\"code\":\"ECONNRESET\",\"syscall\":\"read\"}"
+        const rejection = assertNoUnreconciledGcrState()
+        await expect(rejection).rejects.toThrow(contents)
+        await expect(rejection).rejects.toBeInstanceOf(GcrDriftProbeError)
+        const warning = String((logger.warning as any).mock.calls[0][0])
+        expect(warning).toContain(contents)
+        expect(warning).not.toContain("[object Object]")
+        expect(unreconciledGcrBlockNumber()).toBeNull()
     })
 })
 

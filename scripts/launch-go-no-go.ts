@@ -7,8 +7,12 @@
  * commit, no operator or cloud provider holds more launch validators than
  * the committee can lose (shardSize - q) or more than a third of the votes,
  * the genesis schedules the mainnet forks at block 0 and declares every fork
- * this build knows, its chain id is no other network's, its shardSize is
+ * this build knows, its chain id is no other network's and not a reserved
+ * one (REFUSED_MAINNET_CHAIN_IDS), its shardSize is
  * the launch one, and no launch validator is a pinned committee identity.
+ * Validators are seated by NFT from block 0 (nftValidatorGating): every
+ * genesis validator names an allowlisted mint, its wallet and a proof that
+ * checks out on Solana, and the build pins its allowlist digest.
  * With a genesis file, every validator must also report that file's genesis
  * data hash and fork schedule digest, and the mainnet forks as active, and
  * the agreed block hash must be the block 0 that file builds. A validator
@@ -17,16 +21,22 @@
  * See docs/runbooks/launch-go-no-go.md.
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
- *       --operators operators.json --snapshot data/snapshot \
- *       --genesis-hash BLOCK_HASH --commit SHA \
+ *       --operators operators.json --snapshot data/snapshot --bots mainnet/bots.json \
+ *       --genesis-hash BLOCK_HASH --commit SHA --expected-treasury ADDRESS \
+ *       --expected-notary-keys ID:HEX[,ID:HEX...] \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
- * operators.json maps each validator identity to { operator, provider,
- * region }. Before any validator is up, --plan checks the genesis file and
- * that table alone, with no network:
+ * operators.json maps each validator identity to { owner, operator,
+ * provider, region }; owner is required on the mainnet chain id. Before any
+ * validator is up, --plan checks the genesis file, that table and the
+ * reviewed bot inventory. It contacts no node; its one network read is
+ * Solana, for the NFT proofs of the block 0 seats, which nothing reads again
+ * once the genesis is sealed:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
- *       --snapshot mainnet/snapshot --operators operators.json
+ *       --snapshot mainnet/snapshot --operators operators.json \
+ *       --bots mainnet/bots.json --expected-treasury ADDRESS \
+ *       --expected-notary-keys ID:HEX[,ID:HEX...]
  *
  * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
@@ -44,8 +54,12 @@ import {
     type ForkName,
 } from "src/forks/forkConfig"
 import { treasuryAddressProblem } from "src/forks/treasuryAddress"
+import { notaryKeyProblems, tlsnVerifiedProblems } from "src/forks/tlsnVerifiedPayload"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import { botAllowlistReasons } from "./launch-bot-allowlist"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
+import { seededNftReasons, verifySeededNfts, type SeededValidatorNft } from "src/features/staking/seedNft"
+import { NFT_ALLOWLIST_PATH, NFT_ALLOWLIST_SHA256, parseAllowlist } from "src/features/staking/nftAllowlist"
 import {
     type BlockZeroValidators,
     type ValidatorRow,
@@ -57,6 +71,12 @@ import {
 export interface OperatorEntry {
     operator: string
     provider: string
+    /**
+     * The beneficial owner: whoever holds the node and can direct its key,
+     * whichever operator runs it. Required on the mainnet chain id, since
+     * one buyer can spread its nodes over several operators and providers.
+     */
+    owner?: string
     /** Cloud region or data centre; required by the launch table check (--plan). */
     region?: string
 }
@@ -149,7 +169,10 @@ export interface GoNoGoDecision {
     }>
     operatorCounts: Record<string, number>
     providerCounts: Record<string, number>
-    /** Most validators any single operator or provider may hold: the committee seats q can spare. */
+    /** Launch validators per beneficial owner, for the entries that name one. */
+    ownerCounts: Record<string, number>
+    regionCounts: Record<string, number>
+    /** Most validators a single provider may hold, and the bound owner and operator warnings use: the committee seats q can spare. */
     groupCap: number
 }
 
@@ -182,14 +205,34 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "telegramSenderBinding",
     "xmRemoveCanonical",
     "tokenStakingGate",
+    "tokenStaking",
+    "nftValidatorGating",
     "gasFeeSeparation",
+    "web2ProofBinding",
+    "tlsnProofEnforcement",
+    "xmProofBinding",
+    "storageFeeSettlement",
+    "referenceBlockRoom10",
+    "l2psSettlement",
+    "tlsnVerified",
+    "keylessWeb2Identity",
+    "peerlistFloor",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
+ * l2psGate and tlsnDisabled are the L2PS and TLSNotary kill switches: both
+ * features run from block 0 and a switch is scheduled only if its feature
+ * has to be stopped.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance", "tokenStaking"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = [
+    "atomicWork",
+    "canonicalSigners",
+    "networkGovernance",
+    "l2psGate",
+    "tlsnDisabled",
+]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a
@@ -202,6 +245,23 @@ export const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG) as ForkName[]
 export const LAUNCH_SHARD_SIZE = 10
 
 export { NON_MAINNET_CHAIN_IDS }
+
+/** The chain id the owners decided for mainnet; the template carries it. */
+export const MAINNET_CHAIN_ID = 8587492
+
+/**
+ * Chain ids a mainnet genesis may not use, besides the testnet's and the
+ * devnets'. Signatures bind to the chain id, so a transaction signed on a
+ * network with one of these ids would be valid on mainnet. The node does not
+ * treat them as test networks, so they are not in NON_MAINNET_CHAIN_IDS.
+ */
+export const RESERVED_CHAIN_IDS: Readonly<Record<number, string>> = {
+    0: "the id an unset or zeroed field reads as",
+    31337: "the default of the fork rehearsal networks and of local EVM development chains",
+}
+
+/** Every chain id go/no-go and the plan check refuse for a mainnet genesis. */
+export const REFUSED_MAINNET_CHAIN_IDS: readonly number[] = [0, ...NON_MAINNET_CHAIN_IDS, 31337]
 
 const norm = (id: string) => id.trim().toLowerCase()
 /** Operator and provider names are free text typed by people. */
@@ -251,10 +311,18 @@ export interface ValidatorTable {
     reasons: string[]
     /** Launch validators whose entry has no region: a NO-GO only for the --plan check. */
     missingRegion: string[]
+    /** Launch validators whose entry names no owner: a warning on the mainnet chain id (missingOwnerWarnings). */
+    missingOwner: string[]
+    /** Owner and operator counts above the committee cap or a third of the votes: warnings, never NO-GO. */
+    concentration: string[]
+    /** The region share reasons, also listed in reasons. */
+    regionReasons: string[]
     warnings: string[]
     operatorCounts: Record<string, number>
     providerCounts: Record<string, number>
-    /** Most validators any single operator or provider may hold: the committee seats q can spare. */
+    ownerCounts: Record<string, number>
+    regionCounts: Record<string, number>
+    /** Most validators a single provider may hold, and the bound owner and operator warnings use: the committee seats q can spare. */
     groupCap: number
     /** Seats of the first committee: min(launch validators, shardSize). */
     committeeSeats: number
@@ -262,8 +330,11 @@ export interface ValidatorTable {
 
 /**
  * The launch validator table rules: every launch validator has an operator
- * and a provider, no operator or provider runs more than the committee can
- * lose with q still signing, and none holds more than a third of the votes.
+ * and a provider, no provider runs more than the committee can lose with q
+ * still signing or holds more than a third of the votes, and no region holds
+ * a third of the launch validators. Owners and operators may run as many
+ * validators as they hold seats for; above the same bounds they are
+ * reported in concentration and warnings, not refused.
  */
 export function validatorTable(
     launchIds: string[],
@@ -279,7 +350,13 @@ export function validatorTable(
     for (const [id, entry] of Object.entries(operatorsMap ?? {})) {
         if (isOperatorEntry(entry)) {
             const region = typeof entry.region === "string" && entry.region.trim() ? entry.region.trim() : undefined
-            entries.set(norm(id), { operator: groupName(entry.operator), provider: groupName(entry.provider), region })
+            const owner = typeof entry.owner === "string" && entry.owner.trim() ? groupName(entry.owner) : undefined
+            entries.set(norm(id), {
+                operator: groupName(entry.operator),
+                provider: groupName(entry.provider),
+                region,
+                ...(owner === undefined ? {} : { owner }),
+            })
         } else {
             incomplete.add(norm(id))
         }
@@ -293,7 +370,7 @@ export function validatorTable(
     const unmapped = launch.filter(id => !entries.has(id) && !incomplete.has(id))
     const badEntries = launch.filter(id => incomplete.has(id))
     if (operatorsMap === null) {
-        reasons.push("no operator/provider map given; the operator cap cannot be checked")
+        reasons.push("no operator/provider map given; the provider cap cannot be checked")
     } else {
         if (unmapped.length > 0) {
             reasons.push(`${unmapped.length} launch validators have no operator/provider entry: ${unmapped.join(", ")}`)
@@ -309,17 +386,37 @@ export function validatorTable(
     if (operatorsMap !== null && missingRegion.length > 0) {
         warnings.push(`${missingRegion.length} launch validators have no region in the operator map: ${missingRegion.join(", ")}`)
     }
+    const missingOwner = launch.filter(id => entries.has(id) && entries.get(id).owner === undefined)
     const operatorCounts = countBy(launch, id => entries.get(id)?.operator ?? null)
     const providerCounts = countBy(launch, id => entries.get(id)?.provider ?? null)
+    // An entry without an owner is left out rather than counted under its
+    // operator: its operator count is still reported, and on mainnet the
+    // missing owner is a warning of its own
+    const ownerCounts = countBy(launch, id => entries.get(id)?.owner ?? null)
+    const regionCounts = countBy(launch, id => {
+        const region = entries.get(id)?.region
+        return region === undefined ? null : groupName(region)
+    })
+    // A provider is infrastructure many parties share, one outage from a stall,
+    // so it stays capped. Owners and operators are parties, and the network
+    // lets a party run as many validators as it holds seats for: a committee
+    // it fills can stall or censor while it holds the seats, and that is the
+    // accepted risk, so their counts are reported instead of refused
+    const concentration: string[] = []
     for (const [kind, counts] of [
         ["operator", operatorCounts],
         ["provider", providerCounts],
+        ["owner", ownerCounts],
     ] as const) {
+        const out = kind === "provider" ? reasons : concentration
         for (const [name, n] of Object.entries(counts)) {
             if (n > groupCap) {
-                reasons.push(
-                    `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
-                        `(shardSize ${shardSize} - quorum ${quorum})`,
+                out.push(
+                    kind === "provider"
+                        ? `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
+                              `(shardSize ${shardSize} - quorum ${quorum})`
+                        : `${kind} ${name} runs ${n} of ${launch.length} launch validators, more than the ${groupCap} ` +
+                              `seats a committee can lose (shardSize ${shardSize} - quorum ${quorum})`,
                 )
             }
             // One validator, one vote (quorumThreshold counts signatures). The
@@ -327,14 +424,112 @@ export function validatorTable(
             // change to either rule cannot loosen the other
             const seats = Math.min(n, committeeSeats)
             if (committeeSeats > 0 && seats * 3 > committeeSeats) {
-                reasons.push(
+                out.push(
                     `${kind} ${name} can hold ${seats} of the ${committeeSeats} first-committee votes, ` +
                         "more than a third of the voting power",
                 )
             }
         }
     }
-    return { entries, reasons, missingRegion, warnings, operatorCounts, providerCounts, groupCap, committeeSeats }
+    // A region is not one party, so it is not held to the committee cap; a
+    // third of the set in one region is still one outage from a stall
+    const regionReasons: string[] = []
+    for (const [name, n] of Object.entries(regionCounts)) {
+        if (launch.length > 0 && n * 3 >= launch.length) {
+            regionReasons.push(`region ${name} hosts ${n} of ${launch.length} launch validators, a third or more of the set`)
+        }
+    }
+    reasons.push(...regionReasons)
+    warnings.push(...concentration)
+    return {
+        entries,
+        reasons,
+        missingRegion,
+        missingOwner,
+        concentration,
+        regionReasons,
+        warnings,
+        operatorCounts,
+        providerCounts,
+        ownerCounts,
+        regionCounts,
+        groupCap,
+        committeeSeats,
+    }
+}
+
+/** Whether a genesis is held to the mainnet rules: any chain id but the testnet's and the devnets'. */
+function onMainnetChainId(genesis: { properties?: unknown } | null): boolean {
+    if (!genesis) return false
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    return !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+}
+
+/**
+ * Warnings for launch validators whose table entry names no beneficial
+ * owner, on the mainnet chain id. The operator column alone cannot show one
+ * buyer behind several operators, so their concentration goes unreported.
+ */
+export function missingOwnerWarnings(genesis: { properties?: unknown } | null, table: ValidatorTable): string[] {
+    if (!onMainnetChainId(genesis) || table.missingOwner.length === 0) return []
+    return [
+        `${table.missingOwner.length} launch validators have no owner in the operator map, so their owner ` +
+            `concentration cannot be reported: ${table.missingOwner.join(", ")}`,
+    ]
+}
+
+/**
+ * One owner, operator, provider or region holding a third or more of block
+ * 0's stake. Stake weighs no consensus vote, but it weighs the governance
+ * tally once networkGovernance is on, where more than a third is a veto and
+ * two thirds pass a proposal alone. A provider or region share is a NO-GO
+ * reason; an owner or operator share is concentration, reported as a
+ * warning, since a party may hold as many seats as it buys.
+ */
+export function stakeShare(
+    rows: ValidatorRow[],
+    entries: Map<string, OperatorEntry>,
+): { reasons: string[]; concentration: string[] } {
+    const reasons: string[] = []
+    const concentration: string[] = []
+    const stakeOf = new Map<string, bigint>()
+    for (const row of activeAtBlockZero(rows)) {
+        const id = norm(String(row.address))
+        const raw = (row as Record<string, unknown>).staked_amount
+        if (raw === undefined || raw === null) {
+            stakeOf.set(id, 0n)
+        } else if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+            stakeOf.set(id, BigInt(raw.trim()))
+        } else {
+            reasons.push(`launch validator ${id} has staked_amount ${JSON.stringify(raw)}, not a decimal integer`)
+        }
+    }
+    if (reasons.length > 0) return { reasons, concentration }
+    const total = [...stakeOf.values()].reduce((a, b) => a + b, 0n)
+    if (total === 0n) return { reasons, concentration }
+    const dimensions: Array<[string, (e: OperatorEntry) => string | undefined]> = [
+        ["owner", e => e.owner],
+        ["operator", e => e.operator],
+        ["provider", e => e.provider],
+        ["region", e => (e.region === undefined ? undefined : groupName(e.region))],
+    ]
+    for (const [kind, key] of dimensions) {
+        const sums = new Map<string, bigint>()
+        for (const [id, stake] of stakeOf) {
+            const entry = entries.get(id)
+            const name = entry ? key(entry) : undefined
+            if (name === undefined) continue
+            sums.set(name, (sums.get(name) ?? 0n) + stake)
+        }
+        for (const [name, sum] of sums) {
+            if (sum * 3n >= total) {
+                const percent = Number((sum * 10000n) / total) / 100
+                const out = kind === "owner" || kind === "operator" ? concentration : reasons
+                out.push(`${kind} ${name} holds ${sum} of the ${total} block 0 stake (${percent}%), a third or more`)
+            }
+        }
+    }
+    return { reasons, concentration }
 }
 
 /**
@@ -373,7 +568,9 @@ export function firstCommitteePins(genesis: { forks?: unknown } | null): readonl
 }
 
 function countBy(ids: string[], key: (id: string) => string | null): Record<string, number> {
-    const counts: Record<string, number> = {}
+    // Names come from operator input: a plain object would read "constructor"
+    // or "__proto__" as inherited members and miscount them
+    const counts: Record<string, number> = Object.create(null)
     for (const id of ids) {
         const k = key(id)
         if (k === null) continue
@@ -573,7 +770,7 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 
     reasons.push(...table.reasons)
     warnings.push(...table.warnings)
-    const { operatorCounts, providerCounts, groupCap } = table
+    const { operatorCounts, providerCounts, ownerCounts, regionCounts, groupCap } = table
 
     // A pinned identity takes a committee seat on any network whose pool
     // holds it, ahead of the draw
@@ -595,6 +792,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         validators,
         operatorCounts,
         providerCounts,
+        ownerCounts,
+        regionCounts,
         groupCap,
     }
 }
@@ -602,8 +801,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 /**
  * NO-GO reasons for a genesis whose fork block is not mainnet's: a mainnet
  * fork not at block 0, a launch-dormant fork scheduled, a fork this build
- * knows left undeclared, or a scheduled gasFeeSeparation without its own
- * treasury.
+ * knows left undeclared, a scheduled gasFeeSeparation without its own
+ * treasury, or a scheduled tlsnVerified without real notary keys.
  */
 export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
     if (!genesis) {
@@ -634,6 +833,7 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
                 "or null, or it takes the code default (see docs/mainnet/genesis.md)",
         )
     }
+    reasons.push(...tlsnNotaryReasons(forks.tlsnVerified))
     const gas = forks.gasFeeSeparation
     if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
         if (typeof gas.treasuryAddress !== "string") {
@@ -647,13 +847,115 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
 }
 
 /**
+ * Notary keys of the devnet genesis and of the TLSNotary spike and its test
+ * vectors (testing/tlsn-vectors). None comes from the notary key ceremony: their
+ * private halves are test material nobody guards, so whoever holds one could
+ * attest anything on mainnet.
+ */
+export const KNOWN_TEST_NOTARY_KEYS: readonly string[] = [
+    // testing/devnet/genesis.devnet.json
+    "024a6fdca826ecf9f2e89584bdc4cae0d865019aefb625040fe55174507693c15e",
+    "030a8177a685c7f3c5aac81689a2e8011284b53843d91dda3113bfac99b9195870",
+    // spike-notary-k and the stock notary's ephemeral key in the test vectors
+    "031b38ff37bef18876d8196c53461c59f7ac587b239fb88380b4c2af2d3f0feb8e",
+    "03371c811e56a2b3472038341ab5a7f4c447504c05003ac0536db236c0c731b9e0",
+    // the same two keys from the W1a spike run, which earlier vectors carried
+    "03d60e95452b0bef1253df2dc6bbc3c955b0e1511d0ce37a0543d888a6430b580c",
+    "0297a6f938678de7b1ed4d1b8b9ce5bdded7e6e5dfe6ef42a08a4d0a6d1a188596",
+]
+
+/** The committed sha256 file of the verifier wasm this build ships. */
+export const TLSN_VERIFIER_SHA256_FILE = path.join(
+    import.meta.dir,
+    "../native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256",
+)
+
+/** The sha256 the committed file names, or null when it cannot be read. */
+export function committedVerifierSha256(file = TLSN_VERIFIER_SHA256_FILE): string | null {
+    try {
+        const first = fs.readFileSync(file, "utf8").trim().split(/\s+/)[0]
+        return /^[0-9a-f]{64}$/.test(first) ? first : null
+    } catch {
+        return null
+    }
+}
+
+/**
+ * NO-GO reasons for the tlsnVerified entry of a mainnet genesis: unset
+ * (template FILL) or malformed notary keys and verifier pin, as the node
+ * would refuse them, keys whose private half is test material, and a
+ * verifier pin other than the wasm this build ships: every node would then
+ * refuse to judge any TLSNotary presentation. The keys come from the notary
+ * key ceremony, never from this repository.
+ */
+export function tlsnNotaryReasons(
+    entry: Record<string, unknown> | undefined,
+    shippedVerifierSha256: string | null = committedVerifierSha256(),
+): string[] {
+    if (!entry || entry.activationHeight === null || entry.activationHeight === undefined) return []
+    const reasons: string[] = []
+    const keys = Array.isArray(entry.notaryKeys) ? entry.notaryKeys : []
+    const unset = keys.filter(k => {
+        const hex = (k as { hex?: unknown } | null)?.hex
+        return typeof hex !== "string" || hex.startsWith("FILL")
+    })
+    if (keys.length === 0 || unset.length > 0) {
+        reasons.push(
+            "fork tlsnVerified is scheduled with placeholder or unset notary keys; " +
+                "fill notaryKeys with the public keys from the notary key ceremony",
+        )
+    }
+    const problems = tlsnVerifiedProblems(entry, true)
+    if (problems.length > 0) {
+        reasons.push(`fork tlsnVerified is scheduled with a payload the node refuses: ${problems.join("; ")}`)
+    }
+    const pin = entry.verifierWasmSha256
+    if (typeof pin === "string" && !pin.startsWith("FILL")) {
+        if (shippedVerifierSha256 === null) {
+            reasons.push(
+                "the TLSNotary verifier pin cannot be checked: native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256 is missing or malformed",
+            )
+        } else if (pin !== shippedVerifierSha256) {
+            reasons.push(
+                `fork tlsnVerified pins verifier ${pin}, but this build ships ${shippedVerifierSha256} ` +
+                    "(native/tlsn-verify/dist/demos_tlsn_verify.wasm.sha256); no node could judge a TLSNotary presentation",
+            )
+        }
+    }
+    const test = keys
+        .map(k => (k as { hex?: unknown } | null)?.hex)
+        .filter((hex): hex is string => typeof hex === "string" && KNOWN_TEST_NOTARY_KEYS.includes(hex.toLowerCase()))
+    if (test.length > 0) {
+        reasons.push(
+            `fork tlsnVerified lists the test notary key ${test.join(", ")}; ` +
+                "it is test material of this repository, so mainnet needs keys from the notary key ceremony",
+        )
+    }
+    return reasons
+}
+
+/**
  * NO-GO reasons for a genesis that is not a mainnet launch genesis: its
  * fork block (mainnetForkReasons), a chain id another Demos network uses,
- * or a committee size other than the one the launch was drilled with.
+ * a committee size other than the one the launch was drilled with, or,
+ * with validators seated by NFT, a seat without a valid NFT field set or a
+ * build without its allowlist pin.
  */
-export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: unknown } | null): string[] {
+export function mainnetGenesisReasons(
+    genesis: { forks?: unknown; properties?: unknown; validators?: unknown } | null,
+): string[] {
     const reasons = mainnetForkReasons(genesis)
     if (!genesis) return reasons
+    const exempt = genesisSeatsNfts(genesis) ? nftExemptEntries(genesis.validators) : []
+    if (exempt.length > 0) {
+        reasons.push(
+            `${exempt.length} genesis validators are nft_exempt (${exempt.join(", ")}); ` +
+                "every mainnet seat needs its NFT",
+        )
+    }
+    if (genesisSeatsNfts(genesis)) {
+        reasons.push(...nftAllowlistPinReasons(), ...genesisNftFieldReasons(genesis.validators))
+    }
     const properties = (genesis.properties ?? {}) as Record<string, unknown>
     const chainId = properties.id
     if (typeof chainId !== "number" || !Number.isInteger(chainId)) {
@@ -661,6 +963,11 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
     } else if (NON_MAINNET_CHAIN_IDS.includes(chainId)) {
         reasons.push(
             `genesis properties.id ${chainId} is the chain id of the testnet or a devnet; ` +
+                "transactions signed there would be valid on this chain",
+        )
+    } else if (RESERVED_CHAIN_IDS[chainId] !== undefined) {
+        reasons.push(
+            `genesis properties.id ${chainId} is reserved, ${RESERVED_CHAIN_IDS[chainId]}; ` +
                 "transactions signed there would be valid on this chain",
         )
     }
@@ -677,6 +984,262 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
         reasons.push(`genesis still holds template FILL values at ${markers.join(", ")}`)
     }
     return reasons
+}
+
+/** Whether the genesis seats its validators under `nftValidatorGating` (scheduled at block 0). */
+function genesisSeatsNfts(genesis: { forks?: unknown } | null): boolean {
+    const forks = (genesis?.forks ?? {}) as Record<string, { activationHeight?: unknown } | undefined>
+    return forks.nftValidatorGating?.activationHeight === 0
+}
+
+/**
+ * NO-GO reasons for the allowlist this build ships: every node judges every
+ * seat against it at apply, and a node checks the file against the pinned
+ * digest only when a pin is set, so a release without one would let each
+ * node seat by whatever file it holds.
+ */
+export function nftAllowlistPinReasons(
+    file: string = NFT_ALLOWLIST_PATH,
+    pin: string = NFT_ALLOWLIST_SHA256,
+): string[] {
+    if (!/^[0-9a-f]{64}$/.test(pin)) {
+        return [
+            `this build pins no NFT allowlist digest (NFT_ALLOWLIST_SHA256 is ${JSON.stringify(pin)}); ` +
+                "nodes would seat validators by unpinned allowlist files",
+        ]
+    }
+    try {
+        const raw = fs.readFileSync(file, "utf8")
+        const own = (JSON.parse(raw) as { sha256?: unknown }).sha256
+        parseAllowlist(raw, pin)
+        if (own !== pin) {
+            return [`the NFT allowlist ${file} names sha256 ${JSON.stringify(own ?? null)}, not the pinned ${pin}`]
+        }
+    } catch (e) {
+        return [`the NFT allowlist ${file} does not load as pinned: ${(e as Error).message}`]
+    }
+    return []
+}
+
+/**
+ * NO-GO reasons for genesis validators whose NFT fields a node refuses
+ * before it reads Solana: every seat names an allowlisted mint, its owner
+ * wallet and a proof transaction, and no mint backs two seats.
+ */
+export function genesisNftFieldReasons(validators: unknown, label = "genesis.validators"): string[] {
+    // A non-list is reported as a FILL value or by the block 0 checks
+    if (!Array.isArray(validators)) return []
+    try {
+        return seededNftReasons(validators as SeededValidatorNft[], label)
+    } catch (e) {
+        return [`${label} NFTs cannot be checked: ${(e as Error).message}`]
+    }
+}
+
+/**
+ * NO-GO reasons for block 0 seats taken from the snapshot's validators.jsonl
+ * without a valid NFT field set, reported before the genesis is sealed. A
+ * node refuses the same rows offline on a mainnet chain id; this check also
+ * covers a genesis whose chain id would let the node read a row without NFT
+ * fields as a seat already judged. Rows from genesis.validators are checked
+ * by mainnetGenesisReasons.
+ */
+export function blockZeroNftReasons(
+    genesis: { forks?: unknown } | null,
+    blockZero: BlockZeroValidators | null,
+): string[] {
+    if (!genesisSeatsNfts(genesis) || blockZero?.source !== "snapshot") return []
+    return genesisNftFieldReasons(blockZero.rows, "validators.jsonl")
+}
+
+/** The rows block 0 seats and the label they are reported under. */
+function seededRows(
+    genesis: { validators?: unknown },
+    blockZero: BlockZeroValidators | null,
+): { rows: unknown; label: string } {
+    return blockZero?.source === "snapshot"
+        ? { rows: blockZero.rows, label: "validators.jsonl" }
+        : { rows: genesis.validators, label: "genesis.validators" }
+}
+
+/**
+ * What a Solana check of the proofs block 0 seats would refuse; nothing
+ * when the genesis does not seat its validators under `nftValidatorGating`,
+ * or when the offline checks already refuse them without a read.
+ */
+async function genesisNftProblems(
+    genesis: { forks?: unknown; validators?: unknown },
+    blockZero: BlockZeroValidators | null,
+): Promise<string[]> {
+    if (!genesisSeatsNfts(genesis)) return []
+    const { rows, label } = seededRows(genesis, blockZero)
+    if (!Array.isArray(rows) || genesisNftFieldReasons(rows, label).length > 0) return []
+    return verifySeededNfts(rows as SeededValidatorNft[], label)
+}
+
+/** The addresses of genesis validator entries seated without an NFT. */
+function nftExemptEntries(validators: unknown): string[] {
+    if (!Array.isArray(validators)) return []
+    return validators
+        .filter(v => v && typeof v === "object" && (v as { nft_exempt?: unknown }).nft_exempt === true)
+        .map(v => String((v as { address?: unknown }).address ?? "?"))
+}
+
+/**
+ * NO-GO reasons for a genesis whose treasury is not the one the owners
+ * agreed: the treasury shape check accepts any well-formed address, and a
+ * wrong one would receive every fee from block 0. On the mainnet chain id the
+ * agreed treasury must be given; on the testnet and devnets it is checked
+ * only when given.
+ */
+export function treasuryReasons(
+    genesis: { forks?: unknown; properties?: unknown } | null,
+    expectedTreasury: string | null | undefined,
+): string[] {
+    if (!genesis) return []
+    const expected = typeof expectedTreasury === "string" && expectedTreasury.trim() ? normTreasury(expectedTreasury) : null
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (mainnet) {
+        const named = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+            ?.treasuryAddress
+        const test = [named, expected]
+            .filter((a): a is string => typeof a === "string")
+            .map(normTreasury)
+            .filter(a => KNOWN_TEST_TREASURIES.includes(a))
+        if (test.length > 0) {
+            return [
+                `the treasury ${test[0]} is the treasury of a test genesis in this repository; ` +
+                    "its key is not held by the owners alone, so the mainnet treasury needs a key generated for it",
+            ]
+        }
+    }
+    if (expected === null) {
+        return mainnet
+            ? [
+                  "no --expected-treasury given: pass the agreed gasFeeSeparation treasury address " +
+                      "(or DEMOS_EXPECTED_TREASURY) so the genesis treasury can be checked against it",
+              ]
+            : []
+    }
+    const gas = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+    const actual = gas?.treasuryAddress
+    if (typeof actual !== "string") {
+        return [`the genesis gasFeeSeparation has no treasuryAddress; the agreed treasury is ${expected}`]
+    }
+    if (normTreasury(actual) !== expected) {
+        return [`the genesis gasFeeSeparation treasuryAddress ${actual} is not the agreed treasury ${expected}`]
+    }
+    return []
+}
+
+/** One agreed TLSNotary notary key, as --expected-notary-keys names it. */
+export interface ExpectedNotaryKey {
+    id: string
+    hex: string
+}
+
+/**
+ * The agreed notary keys of --expected-notary-keys: comma-separated `id:hex`
+ * entries, each held to the rules the node applies to a genesis notary key.
+ * Throws on an entry that breaks them, or on a repeated id or key.
+ */
+export function parseExpectedNotaryKeys(raw: string): ExpectedNotaryKey[] {
+    const entries = raw.split(",").map(e => e.trim()).filter(Boolean)
+    if (entries.length === 0) throw new Error("--expected-notary-keys names no key")
+    const keys = entries.map((entry, i) => {
+        const at = entry.indexOf(":")
+        if (at <= 0) throw new Error(`--expected-notary-keys entry ${i + 1} is not id:hex, got ${JSON.stringify(entry)}`)
+        const key = { id: entry.slice(0, at).trim(), hex: entry.slice(at + 1).trim().toLowerCase() }
+        const problems = notaryKeyProblems({ ...key, alg: "k256" }, `--expected-notary-keys entry ${i + 1}`)
+        if (problems.length > 0) throw new Error(problems.join("; "))
+        return key
+    })
+    for (const field of ["id", "hex"] as const) {
+        const seen = keys.map(k => k[field])
+        const repeated = seen.filter((v, i) => seen.indexOf(v) !== i)
+        if (repeated.length > 0) throw new Error(`--expected-notary-keys repeats ${field} ${[...new Set(repeated)].join(", ")}`)
+    }
+    return keys
+}
+
+/**
+ * NO-GO reasons for a genesis whose notary keys are not the ones the notary
+ * key ceremony produced: the payload checks accept any well-formed key, and a
+ * wrong one lets whoever holds its private half attest anything from block 0.
+ * Also NO-GO, on every chain id and whether or not the agreed keys are given,
+ * when a genesis notary key carries a validFrom / validUntil range.
+ * On the mainnet chain id the agreed keys must be given; on the testnet and
+ * devnets they are checked only when given.
+ */
+export function notaryKeysReasons(
+    genesis: { forks?: unknown; properties?: unknown } | null,
+    expectedNotaryKeys: string | null | undefined,
+): string[] {
+    if (!genesis) return []
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    const entry = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).tlsnVerified
+    const ranged = (Array.isArray(entry?.notaryKeys) ? (entry.notaryKeys as unknown[]) : []).filter(
+        k => typeof k === "object" && k !== null && ("validFrom" in k || "validUntil" in k),
+    )
+    const rangedIds = ranged.map(k => {
+        const id = (k as { id?: unknown }).id
+        return typeof id === "string" ? id : String(JSON.stringify(id))
+    })
+    const rangeReasons =
+        ranged.length === 0
+            ? []
+            : [
+                  `the genesis tlsnVerified notaryKeys ${rangedIds.join(", ")} ` +
+                      "carry validFrom or validUntil: launch notary keys must not carry a range",
+              ]
+    if (typeof expectedNotaryKeys !== "string" || !expectedNotaryKeys.trim()) {
+        return [
+            ...(mainnet
+                ? [
+                      "no --expected-notary-keys given: pass the agreed tlsnVerified notary keys as id:hex " +
+                          "(or DEMOS_EXPECTED_NOTARY_KEYS) so the genesis notary keys can be checked against them",
+                  ]
+                : []),
+            ...rangeReasons,
+        ]
+    }
+    let expected: string[]
+    try {
+        expected = parseExpectedNotaryKeys(expectedNotaryKeys).map(k => `${k.id}:${k.hex}`)
+    } catch (e) {
+        return [(e as Error).message, ...rangeReasons]
+    }
+    if (!Array.isArray(entry?.notaryKeys) || entry.notaryKeys.length === 0) {
+        return [`the genesis tlsnVerified has no notaryKeys; the agreed notary keys are ${expected.join(", ")}`]
+    }
+    const actual = (entry.notaryKeys as unknown[]).map(k => {
+        const { id, hex } = (k ?? {}) as { id?: unknown; hex?: unknown }
+        return `${String(id)}:${typeof hex === "string" ? hex.toLowerCase() : String(hex)}`
+    })
+    const same =
+        actual.length === expected.length &&
+        actual.every(k => expected.includes(k)) &&
+        expected.every(k => actual.includes(k))
+    const reasons = same
+        ? []
+        : [`the genesis tlsnVerified notaryKeys ${actual.join(", ")} are not the agreed notary keys ${expected.join(", ")}`]
+    return [...reasons, ...rangeReasons]
+}
+
+/**
+ * Treasuries of the devnet, rehearsal and fixture genesis files in this
+ * repository. Their keys come from shared test mnemonics, so one copied into
+ * the mainnet genesis would hand the fees to anyone holding those.
+ */
+export const KNOWN_TEST_TREASURIES: readonly string[] = [
+    "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23",
+    "0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface",
+]
+
+function normTreasury(address: string): string {
+    return address.trim().toLowerCase()
 }
 
 function templateMarkers(value: unknown, at = "genesis"): string[] {
@@ -722,7 +1285,11 @@ export async function launchGenesisExpectations(
 
 export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" | "committee"> {
     /** The parsed genesis file, or null when only endpoints were given. */
-    genesis: { forks?: unknown; validators?: unknown } | null
+    genesis: { forks?: unknown; validators?: unknown; properties?: unknown; balances?: unknown } | null
+    /** Reviewed bot addresses from --bots, including [] for a launch without bots. */
+    botAllowlist?: unknown
+    /** The genesis file holds a JSON string, which the node's bot loader does not parse again. */
+    genesisIsJsonString?: boolean
     /** Block 0's validators as the node seeds them; required with a genesis. */
     blockZero: BlockZeroValidators | null
     /** The launch set when there is no genesis (peerlist or --rpc). */
@@ -731,6 +1298,10 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
     genesisFileBlockHash?: string | null
     /** What a node would refuse in the genesis file at its first boot. */
     genesisFileProblems?: string[]
+    /** The agreed gasFeeSeparation treasury (--expected-treasury). */
+    expectedTreasury?: string | null
+    /** The agreed tlsnVerified notary keys (--expected-notary-keys), id:hex comma-separated. */
+    expectedNotaryKeys?: string | null
 }
 
 /**
@@ -739,7 +1310,18 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
  * the genesis hash the probes agree on (or the expected one).
  */
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
-    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, ...rest } = input
+    const {
+        genesis,
+        botAllowlist,
+        genesisIsJsonString,
+        blockZero,
+        launchValidators,
+        genesisFileBlockHash,
+        genesisFileProblems,
+        expectedTreasury,
+        expectedNotaryKeys,
+        ...rest
+    } = input
     const rows = genesis && blockZero ? blockZero.rows : null
     const base: GoNoGoInput = {
         ...rest,
@@ -748,7 +1330,18 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const agreedHash = decideGoNoGo(base).genesisHash
     const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize, firstCommitteePins(genesis)) : null
     const decision = decideGoNoGo({ ...base, committee })
-    decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetGenesisReasons(genesis))
+    const table = validatorTable(base.launchValidators, input.operators, input.shardSize)
+    const share = rows ? stakeShare(rows, table.entries) : { reasons: [], concentration: [] }
+    decision.warnings.push(...missingOwnerWarnings(genesis, table), ...share.concentration)
+    decision.reasons.push(
+        ...share.reasons,
+        ...(blockZero?.reasons ?? []),
+        ...blockZeroNftReasons(genesis, blockZero),
+        ...mainnetGenesisReasons(genesis),
+        ...treasuryReasons(genesis, expectedTreasury),
+        ...notaryKeysReasons(genesis, expectedNotaryKeys),
+        ...botAllowlistReasons(genesis, botAllowlist, genesisIsJsonString),
+    )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
     }
@@ -772,15 +1365,23 @@ export interface PlanCheck {
     name: string
     ok: boolean
     details: string[]
+    /** Reported for the owners to read; never fails the plan. */
+    advisory?: boolean
 }
 
 export interface LaunchPlanInput {
-    genesis: { forks?: unknown; properties?: unknown } | null
+    genesis: { forks?: unknown; properties?: unknown; balances?: unknown } | null
+    botAllowlist?: unknown
+    genesisIsJsonString?: boolean
     blockZero: BlockZeroValidators | null
     shardSize: number
     operators: Record<string, unknown> | null
     /** What a node would refuse in the genesis file at its first boot. */
     genesisFileProblems?: string[]
+    /** The agreed gasFeeSeparation treasury (--expected-treasury). */
+    expectedTreasury?: string | null
+    /** The agreed tlsnVerified notary keys (--expected-notary-keys), id:hex comma-separated. */
+    expectedNotaryKeys?: string | null
 }
 
 /**
@@ -795,15 +1396,22 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
     const quorum = quorumThreshold(input.shardSize)
     const genesisReasons = mainnetGenesisReasons(input.genesis)
     const forkReasons = mainnetForkReasons(input.genesis)
-    const capReasons = table.reasons.filter(r => / runs \d+ of \d+ launch validators; the cap is /.test(r))
-    const powerReasons = table.reasons.filter(r => r.includes("of the voting power"))
-    const entryReasons = table.reasons.filter(r => !capReasons.includes(r) && !powerReasons.includes(r))
+    const regional = new Set(table.regionReasons)
+    const groupReasons = table.reasons.filter(r => !regional.has(r))
+    const capReasons = groupReasons.filter(r => / runs \d+ of \d+ launch validators; the cap is /.test(r))
+    const powerReasons = groupReasons.filter(r => r.includes("of the voting power"))
+    const entryReasons = groupReasons.filter(r => !capReasons.includes(r) && !powerReasons.includes(r))
     if (table.missingRegion.length > 0) {
         entryReasons.push(`${table.missingRegion.length} launch validators have no region: ${table.missingRegion.join(", ")}`)
     }
+    const share = input.blockZero
+        ? stakeShare(input.blockZero.rows, table.entries)
+        : { reasons: [], concentration: [] }
     const pinned = new Set(PINNED_SHARD_IDENTITIES.map(norm))
     return [
         check("genesis forks", forkReasons),
+        check("treasury", treasuryReasons(input.genesis, input.expectedTreasury)),
+        check("notary keys", notaryKeysReasons(input.genesis, input.expectedNotaryKeys)),
         check("chain id", genesisReasons.filter(r => r.startsWith("genesis properties.id"))),
         check("shard size", genesisReasons.filter(r => r.startsWith("genesis properties.shardSize"))),
         // Whatever mainnetGenesisReasons adds beyond the checks above, so a
@@ -821,7 +1429,13 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
             "genesis file",
             (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),
         ),
-        check("block 0 validator set", input.blockZero ? input.blockZero.reasons : ["no block 0 validator set"]),
+        check("bot allowlist", botAllowlistReasons(input.genesis, input.botAllowlist, input.genesisIsJsonString)),
+        check(
+            "block 0 validator set",
+            input.blockZero
+                ? [...input.blockZero.reasons, ...blockZeroNftReasons(input.genesis, input.blockZero)]
+                : ["no block 0 validator set"],
+        ),
         check(
             "launch validators",
             launch.length < quorum
@@ -829,8 +1443,16 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
                 : [],
         ),
         check("validator table", entryReasons),
-        check("operator and provider cap", capReasons),
-        check("voting power per operator and provider", powerReasons),
+        check("provider cap", capReasons),
+        check("voting power per provider", powerReasons),
+        {
+            name: "owner and operator concentration",
+            ok: true,
+            advisory: true,
+            details: [...missingOwnerWarnings(input.genesis, table), ...table.concentration, ...share.concentration],
+        },
+        check("region share", table.regionReasons),
+        check("stake share", share.reasons),
         check(
             "pinned identities",
             launch.filter(v => pinned.has(v)).map(v => `launch validator is a pinned committee identity: ${v}`),
@@ -845,10 +1467,13 @@ interface CliArgs {
     snapshot: string | null
     peerlist: string | null
     operators: string | null
+    bots: string | null
     rpc: string[]
     shardSize: number | null
     genesisHash: string | null
     commit: string | null
+    expectedTreasury: string | null
+    expectedNotaryKeys: string | null
     json: boolean
     plan: boolean
     timeoutMs: number
@@ -856,10 +1481,12 @@ interface CliArgs {
 
 function usage(): string {
     return [
-        "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
-        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE",
-        "  --plan               check the genesis file and the launch validator table only, with no",
-        "                       network: one PASS/FAIL line per check, exit 0 when all pass",
+        "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE --bots FILE [options]",
+        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
+        "           --bots FILE --expected-treasury ADDRESS --expected-notary-keys ID:HEX[,ID:HEX...]",
+        "  --plan               check the genesis file, launch validator table and reviewed bot inventory,",
+        "                       with no node: one PASS/FAIL line per check, exit 0 when all pass; it reads",
+        "                       Solana for the NFT proofs of the block 0 seats",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
         "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",
@@ -870,11 +1497,22 @@ function usage(): string {
         "                       a fresh nonce; without --genesis they define the launch set",
         "  --shard-size N       shardSize when no genesis file is given; with --genesis it must",
         "                       equal the genesis properties.shardSize or the run is refused",
-        "  --operators FILE     identity -> { operator, provider, region }",
+        "  --operators FILE     identity -> { owner, operator, provider, region }; owner (the",
+        "                       beneficial owner) is required on the mainnet chain id",
+        "  --bots FILE          required for GO and --plan: reviewed JSON array of bot addresses;",
+        "                       must exactly match raw genesis balances >= 1000000000000; [] means no bots",
         "  --genesis-hash HASH  required for GO: the agreed block 0 hash, the genesis block hash",
         "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
         "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
         "                       a branch prefix in what a node reports is ignored",
+        "  --expected-treasury ADDRESS",
+        "                       required for GO and --plan on the mainnet chain id: the agreed",
+        "                       gasFeeSeparation treasury; the genesis must name it (default:",
+        "                       DEMOS_EXPECTED_TREASURY)",
+        "  --expected-notary-keys ID:HEX[,ID:HEX...]",
+        "                       required for GO and --plan on the mainnet chain id: the tlsnVerified",
+        "                       notary keys from the notary key ceremony; the genesis must list",
+        "                       exactly these (default: DEMOS_EXPECTED_NOTARY_KEYS)",
         "  --timeout MS         per-request timeout (default 5000)",
         "  --json               machine-readable output",
     ].join("\n")
@@ -893,10 +1531,13 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         snapshot: null,
         peerlist: null,
         operators: null,
+        bots: null,
         rpc: [],
         shardSize: null,
         genesisHash: null,
         commit: null,
+        expectedTreasury: null,
+        expectedNotaryKeys: null,
         json: false,
         plan: false,
         timeoutMs: 5000,
@@ -913,10 +1554,13 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--snapshot": args.snapshot = value(); break
             case "--peerlist": args.peerlist = value(); break
             case "--operators": args.operators = value(); break
+            case "--bots": args.bots = value(); break
             case "--rpc": args.rpc.push(...value().split(",").map(s => s.trim()).filter(Boolean)); break
             case "--shard-size": args.shardSize = Number(value()); break
             case "--genesis-hash": args.genesisHash = value(); break
             case "--commit": args.commit = value(); break
+            case "--expected-treasury": args.expectedTreasury = value(); break
+            case "--expected-notary-keys": args.expectedNotaryKeys = value(); break
             case "--timeout": args.timeoutMs = Number(value()); break
             case "--json": args.json = true; break
             case "--plan": args.plan = true; break
@@ -933,6 +1577,8 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         args.genesis = fromEnv("DEMOS_GENESIS_FILE")
         if (args.genesis !== null) args.snapshot = fromEnv("DEMOS_SNAPSHOT_DIR")
     }
+    if (args.expectedTreasury === null) args.expectedTreasury = fromEnv("DEMOS_EXPECTED_TREASURY")
+    if (args.expectedNotaryKeys === null) args.expectedNotaryKeys = fromEnv("DEMOS_EXPECTED_NOTARY_KEYS")
     return args
 }
 
@@ -985,33 +1631,57 @@ export async function startIdentityProver(timeoutMs: number): Promise<IdentityPr
     const pool = validatorPool.getInstance()
     await pool.start(1)
 
+    // Peer auth is bound to a genesis hash (the node's shared state). Probes
+    // run in parallel and may report different genesis hashes, so one probe
+    // at a time sets it for its own handshake
+    let turn: Promise<unknown> = Promise.resolve()
+    const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+        const run = turn.then(fn, fn)
+        turn = run.catch(() => undefined)
+        return run
+    }
+
     return {
-        async prove(identity, url, genesisHash) {
-            const { request, nonce } = await PeerManager.buildHelloRequest()
-            // Only the URL is signed in the request; the genesis lets a node
-            // on that genesis answer at all
-            if (genesisHash) request.genesisHash = genesisHash
-            const peer = new Peer(url, identity)
-            const response = await Promise.race([
-                peer.call({ method: "hello_peer", params: [request] }, true),
-                new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error(`hello timed out after ${timeoutMs} ms`)), timeoutMs),
-                ),
-            ]).catch(e => ({ result: 0, response: (e as Error).message, extra: null }) as any)
-            if (response.result !== 200) {
-                const msg = response.extra?.msg ?? response.response
-                return { proof: "failed", detail: `hello_peer ${response.result}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` }
-            }
-            if (typeof response.extra?.msg === "string" && response.extra.msg.startsWith("Peer is us")) {
-                return { proof: "invalid", detail: "the endpoint answered as this checker" }
-            }
-            const proof = await PeerManager.verifyHelloResponse(response, peer, nonce)
-            return { proof, detail: proof === "verified" ? null : `identity proof ${proof}` }
-        },
+        prove: (identity, url, genesisHash) =>
+            oneAtATime(async () => {
+                getSharedState.genesisBlockHash = genesisHash
+                try {
+                    return await proveOnce(identity, url, genesisHash)
+                } finally {
+                    getSharedState.genesisBlockHash = null
+                }
+            }),
         async stop() {
             await pool.stop()
             fs.rmSync(dir, { recursive: true, force: true })
         },
+    }
+
+    async function proveOnce(
+        identity: string,
+        url: string,
+        genesisHash: string | null,
+    ): Promise<{ proof: IdentityProof; detail: string | null }> {
+        const { request, nonce } = await PeerManager.buildHelloRequest()
+        // Only the URL is signed in the request; the genesis lets a node
+        // on that genesis answer at all
+        if (genesisHash) request.genesisHash = genesisHash
+        const peer = new Peer(url, identity)
+        const response = await Promise.race([
+            peer.call({ method: "hello_peer", params: [request] }, true),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`hello timed out after ${timeoutMs} ms`)), timeoutMs),
+            ),
+        ]).catch(e => ({ result: 0, response: (e as Error).message, extra: null }) as any)
+        if (response.result !== 200) {
+            const msg = response.extra?.msg ?? response.response
+            return { proof: "failed", detail: `hello_peer ${response.result}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` }
+        }
+        if (typeof response.extra?.msg === "string" && response.extra.msg.startsWith("Peer is us")) {
+            return { proof: "invalid", detail: "the endpoint answered as this checker" }
+        }
+        const proof = await PeerManager.verifyHelloResponse(response, peer, nonce)
+        return { proof, detail: proof === "verified" ? null : `identity proof ${proof}` }
     }
 }
 
@@ -1092,6 +1762,19 @@ function readJson(file: string): any {
     return JSON.parse(fs.readFileSync(file, "utf8"))
 }
 
+const UNREADABLE_BOTS = Symbol("unreadable --bots file")
+
+/** The parsed --bots file, undefined without one; prints why and returns UNREADABLE_BOTS when it cannot be read. */
+function readBotAllowlist(file: string | null): unknown {
+    if (!file) return undefined
+    try {
+        return readJson(file)
+    } catch (e) {
+        console.error(`--bots: ${(e as Error).message}`)
+        return UNREADABLE_BOTS
+    }
+}
+
 async function runPlan(
     args: CliArgs,
     genesis: any,
@@ -1100,6 +1783,8 @@ async function runPlan(
     operators: Record<string, unknown> | null,
     manifestSha256: string | null,
     snapshotForkState: ForkStateEntry[] | null,
+    botAllowlist: unknown,
+    genesisIsJsonString: boolean,
 ): Promise<number> {
     if (!args.genesis || !args.snapshot || !args.operators) {
         console.error(`--plan needs --genesis, --snapshot and --operators\n${usage()}`)
@@ -1112,17 +1797,44 @@ async function runPlan(
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
     }
-    const checks = launchPlanChecks({ genesis, blockZero, shardSize, operators, genesisFileProblems })
+    genesisFileProblems.push(...(await genesisNftProblems(genesis, blockZero)))
+    const checks = launchPlanChecks({
+        genesis,
+        botAllowlist,
+        genesisIsJsonString,
+        blockZero,
+        shardSize,
+        operators,
+        genesisFileProblems,
+        expectedTreasury: args.expectedTreasury,
+        expectedNotaryKeys: args.expectedNotaryKeys,
+    })
     const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
     if (args.json) {
-        console.log(JSON.stringify({ pass: checks.every(c => c.ok), checks, operatorCounts: table.operatorCounts, providerCounts: table.providerCounts, groupCap: table.groupCap }, null, 2))
+        console.log(
+            JSON.stringify(
+                {
+                    pass: checks.every(c => c.ok),
+                    checks,
+                    operatorCounts: table.operatorCounts,
+                    providerCounts: table.providerCounts,
+                    ownerCounts: table.ownerCounts,
+                    regionCounts: table.regionCounts,
+                    groupCap: table.groupCap,
+                },
+                null,
+                2,
+            ),
+        )
     } else {
         for (const c of checks) {
-            console.log(`${c.ok ? "PASS" : "FAIL"} ${c.name}${c.ok ? "" : `: ${c.details.join("; ")}`}`)
+            const status = !c.ok ? "FAIL" : c.advisory && c.details.length > 0 ? "NOTE" : "PASS"
+            console.log(`${status} ${c.name}${status === "PASS" ? "" : `: ${c.details.join("; ")}`}`)
         }
         console.log(
             `operators: ${JSON.stringify(table.operatorCounts)} providers: ${JSON.stringify(table.providerCounts)} ` +
-                `cap ${table.groupCap} of ${table.committeeSeats} first-committee seats`,
+                `owners: ${JSON.stringify(table.ownerCounts)} regions: ${JSON.stringify(table.regionCounts)} ` +
+                `provider cap ${table.groupCap} of ${table.committeeSeats} first-committee seats`,
         )
     }
     return checks.every(c => c.ok) ? 0 : 1
@@ -1153,18 +1865,33 @@ async function main(): Promise<number> {
         console.error(`--commit must be a 7 to 40 character hex SHA, got ${JSON.stringify(args.commit)}`)
         return 2
     }
+    if (args.expectedTreasury !== null && !/^0x[0-9a-f]{64}$/.test(args.expectedTreasury.trim().toLowerCase())) {
+        console.error(`--expected-treasury must be 0x and 64 hex characters, got ${JSON.stringify(args.expectedTreasury)}`)
+        return 2
+    }
+    if (args.expectedNotaryKeys !== null) {
+        try {
+            parseExpectedNotaryKeys(args.expectedNotaryKeys)
+        } catch (e) {
+            console.error((e as Error).message)
+            return 2
+        }
+    }
 
     let shardSize = args.shardSize
     // identity -> URL to probe; "" identity means "learn it from /info"
     const targets = new Map<string, string>()
     let launch: string[] = []
     let genesis: any = null
+    let genesisIsJsonString = false
     let blockZero: BlockZeroValidators | null = null
     let manifestSha256: string | null = null
     let snapshotForkState: ForkStateEntry[] | null = null
     if (args.genesis) {
         const { readGenesisFile, snapshotManifestSha256, snapshotManifestForkState } = await import("./genesis-hash")
         genesis = readGenesisFile(args.genesis)
+        // readGenesisFile parses a JSON string a second time; the node's bot loader does not
+        genesisIsJsonString = typeof JSON.parse(fs.readFileSync(args.genesis, "utf8")) === "string"
         // The node takes shardSize from block 0 and nowhere else; a flag
         // that moved q here would judge a quorum the chain does not use
         const { readGenesisShardSize } = await import("src/libs/consensus/genesisShardSize")
@@ -1218,10 +1945,16 @@ async function main(): Promise<number> {
         return 2
     }
     const operators = operatorsRaw as Record<string, unknown> | null
+    const botAllowlist = readBotAllowlist(args.bots)
+    if (botAllowlist === UNREADABLE_BOTS) return 2
 
-    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState)
+    if (args.plan) {
+        return await runPlan(
+            args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState, botAllowlist, genesisIsJsonString,
+        )
+    }
 
-    let expectations = {}
+    let expectations: Partial<Awaited<ReturnType<typeof launchGenesisExpectations>>> = {}
     if (genesis) {
         try {
             expectations = await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)
@@ -1229,6 +1962,10 @@ async function main(): Promise<number> {
             console.error(`genesis: ${(e as Error).message}`)
             return 2
         }
+        expectations.genesisFileProblems = [
+            ...(expectations.genesisFileProblems ?? []),
+            ...(await genesisNftProblems(genesis, blockZero)),
+        ]
     }
 
     const prover = await startIdentityProver(args.timeoutMs)
@@ -1263,6 +2000,8 @@ async function main(): Promise<number> {
     const decision = checkLaunch({
         shardSize,
         genesis,
+        botAllowlist,
+        genesisIsJsonString,
         blockZero,
         launchValidators: launch,
         probes: [...merged.values()],
@@ -1270,6 +2009,8 @@ async function main(): Promise<number> {
         expectedGenesisHash: args.genesisHash,
         ...expectations,
         expectedCommit: args.commit,
+        expectedTreasury: args.expectedTreasury,
+        expectedNotaryKeys: args.expectedNotaryKeys,
     })
 
     if (args.json) {
@@ -1289,7 +2030,10 @@ async function main(): Promise<number> {
                     (p?.error ? `  (${p.error})` : ""),
             )
         }
-        console.log(`operators: ${JSON.stringify(decision.operatorCounts)} providers: ${JSON.stringify(decision.providerCounts)} cap ${decision.groupCap}`)
+        console.log(
+            `operators: ${JSON.stringify(decision.operatorCounts)} providers: ${JSON.stringify(decision.providerCounts)} ` +
+                `owners: ${JSON.stringify(decision.ownerCounts)} regions: ${JSON.stringify(decision.regionCounts)} provider cap ${decision.groupCap}`,
+        )
         for (const w of decision.warnings) console.log(`warning: ${w}`)
         if (decision.go) {
             console.log(

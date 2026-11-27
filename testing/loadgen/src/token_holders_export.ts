@@ -7,6 +7,7 @@ import {
   nodeCall,
   readWalletMnemonics,
 } from "./token_shared"
+import { logNonCriticalErrorOnce, textOrType } from "./framework/common"
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -64,13 +65,13 @@ function stableSortedUnique(values: string[]): string[] {
   return out
 }
 
-function parseBigintOrZero(value: any): bigint {
+export function parseBigintOrZero(value: any): bigint {
   try {
     if (typeof value === "bigint") return value
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     if (typeof value === "string") return BigInt(value)
-  } catch {
-    // ignore
+  } catch (error) {
+    logNonCriticalErrorOnce("token_holders_export.parseBigintOrZero", "token_holders_export.parseBigintOrZero", error, { value: textOrType(value).slice(0, 80) })
   }
   return 0n
 }

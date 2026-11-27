@@ -1,6 +1,10 @@
 #!/bin/bash
 
+# PG_PORT as the operator set it in the shell, kept before the default below
+# overwrites it: with an external database (-e) it is still the operator's.
+OPERATOR_PG_PORT="${PG_PORT:-}"
 PG_PORT=5332
+PG_PORT_FROM_FLAG=false
 PEER_LIST_FILE="demos_peerlist.json"
 GOSSIP_PORT="${GOSSIP_PORT:-}"
 GOSSIP_KEY_FILE="${GOSSIP_KEY_FILE:-}"
@@ -80,7 +84,7 @@ Welcome to Demos Network! This script helps you run your blockchain node easily.
 
 OPTIONS:
     -p <port>                      Node port (default: 53550)
-    -d <port>                      PostgreSQL port (default: 5332)
+    -d <port>                      PostgreSQL port (default: 5332; with -e: PG_PORT from env or .env)
     -i <path>                      Identity file path (default: .demos_identity)
     -c <true/false>                Clean database on startup
     -U                             Update the checkout (git pull) before starting
@@ -108,7 +112,7 @@ EXAMPLES:
     ./run -U                       # Pull origin first (development only)
     ./run -t                       # Legacy mode (scrolling logs for developers)
     ./run --no-tui                 # Same as -t
-    ./run -e                       # Use external database (DATABASE_URL from env)
+    ./run -e                       # Use external database (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE from env or .env)
     ./run --external-db            # Same as -e
 
 SYSTEM REQUIREMENTS:
@@ -497,32 +501,28 @@ fi
 CLEAN="false"
 PORT=53550
 
-# Handle long options (--no-tui, --external-db) before getopts
+# Handle long options (--no-tui, --external-db, --no-monitoring) before getopts.
+# The argument list is rebuilt without them, every other argument kept in
+# order: an empty entry left in their place would stop getopts there.
+SHORT_ARGS=()
 for arg in "$@"; do
 	case ${arg} in
-	--no-tui)
-		NO_TUI=true
-		# Remove --no-tui from arguments so getopts doesn't choke on it
-		set -- "${@/--no-tui/}"
-		;;
-	--external-db)
-		EXTERNAL_DB=true
-		# Remove --external-db from arguments so getopts doesn't choke on it
-		set -- "${@/--external-db/}"
-		;;
-	--no-monitoring)
-		MONITORING_DISABLED=true
-		# Remove --no-monitoring from arguments so getopts doesn't choke on it
-		set -- "${@/--no-monitoring/}"
-		;;
+	--no-tui) NO_TUI=true ;;
+	--external-db) EXTERNAL_DB=true ;;
+	--no-monitoring) MONITORING_DISABLED=true ;;
+	*) SHORT_ARGS+=("${arg}") ;;
 	esac
 done
+set -- "${SHORT_ARGS[@]}"
 
 # Getting arguments
 while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehmU" opt; do
 	case $opt in
 	p) PORT=$OPTARG ;;
-	d) PG_PORT=$OPTARG ;;
+	d)
+		PG_PORT=$OPTARG
+		PG_PORT_FROM_FLAG=true
+		;;
 	c) CLEAN=$OPTARG ;;
 	i) IDENTITY_FILE=$OPTARG ;;
 	l) PEER_LIST_FILE=$OPTARG ;;
@@ -548,6 +548,17 @@ while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehmU" opt; do
 	esac
 done
 shift $((OPTIND - 1))
+
+# With an external database the script's own default (5332, for the bundled
+# PostgreSQL) does not apply: PG_PORT is the -d value, else the shell's, else
+# unset, and the node then reads it from .env (or its default) itself.
+if [[ "${EXTERNAL_DB}" = true && "${PG_PORT_FROM_FLAG}" = false ]]; then
+	if [[ -n "${OPERATOR_PG_PORT}" ]]; then
+		PG_PORT=$OPERATOR_PG_PORT
+	else
+		unset PG_PORT
+	fi
+fi
 
 # if RESTORE is true, make clean false
 if [[ "${RESTORE}" == "true" ]]; then
@@ -627,6 +638,8 @@ echo "⚙️  Node Configuration:"
 echo "   🌐 Node Port: $PORT"
 if [[ "${EXTERNAL_DB}" = false ]]; then
 	echo "   🗄️  Database Port: $PG_PORT"
+else
+	echo "   🗄️  Database: host ${PG_HOST:-(PG_HOST from .env, default localhost)}, port ${PG_PORT:-(PG_PORT from .env, default 5332)}"
 fi
 if [[ ! -z "${IDENTITY_FILE}" ]]; then
 	echo "   🔑 Identity File: $IDENTITY_FILE"
@@ -642,7 +655,7 @@ if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
 	echo "   🔐 Gossip Key File: $GOSSIP_KEY_FILE"
 fi
 if [[ "${EXTERNAL_DB}" = true ]]; then
-	echo "   🔗 Mode: External database (DATABASE_URL)"
+	echo "   🔗 Mode: External database (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE)"
 elif [[ "${RESTORE}" = "true" ]]; then
 	echo "   📦 Mode: Restore from backup"
 elif [[ "${CLEAN}" = "true" ]]; then
@@ -702,8 +715,11 @@ log_verbose "Using command: ${START_COMMAND}"
 echo "💡 This may take a moment to initialize all services..."
 sleep 1
 
-# PG_PORT and IDENTITY_FILE are exported for both docker and bun
-export PG_PORT=$PG_PORT
+# PG_PORT and IDENTITY_FILE are exported for both docker and bun (PG_PORT is
+# left alone when -e found no value: the node reads it from .env)
+if [[ -n "${PG_PORT:-}" ]]; then
+	export PG_PORT
+fi
 export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
@@ -724,7 +740,7 @@ if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
 		exit 1
 	fi
 	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
-	if [[ ! -f "$SIDECAR_BUNDLE" || "sidecar/src/index.js" -nt "$SIDECAR_BUNDLE" ]]; then
+	if [[ ! -f "$SIDECAR_BUNDLE" ]] || find sidecar/src -maxdepth 1 -name '*.js' -newer "$SIDECAR_BUNDLE" -print -quit | grep -q .; then
 		echo "🔧 Building gossip sidecar..."
 		(cd sidecar && bun install --frozen-lockfile --silent && node build.mjs) || {
 			echo "❌ Gossip sidecar build failed"
@@ -1046,15 +1062,22 @@ if [[ "${NO_TUI}" = true ]]; then
 fi
 
 # Starting the node managing errors
-log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT} IDENTITY_FILE=${IDENTITY_FILE}"
+log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT:-(from .env)} IDENTITY_FILE=${IDENTITY_FILE}"
 log_verbose "Command: ${FINAL_COMMAND}"
-if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
+# The node's status, read before anything else runs. The launcher exits with it
+# after the clean-up below, so a supervisor sees a crash or a refusal (exit 1).
+# Only a Ctrl-C while the node runs counts as a stop, not one during setup.
+HAS_BEEN_INTERRUPTED=false
+RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND
+exit_code=$?
+if [[ "$exit_code" -ne 0 ]]; then
 	if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
 		echo ""
 		echo "✅ Demos Network node stopped successfully"
+		# Ctrl-C is a requested stop: exit 0, as the launcher always has
+		exit_code=0
 	else
-		echo "❌ Error: RPC failed to start or crashed"
-		exit_code=$?
+		echo "❌ Error: RPC failed to start or crashed (exit code ${exit_code})"
 		# Logging memory usage (cross-platform)
 		echo "💾 Memory usage at crash:"
 		if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
@@ -1071,7 +1094,6 @@ if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND
 else
 	echo ""
 	echo "✅ Demos Network node exited successfully"
-	exit_code=0
 fi
 
 # Only stop PostgreSQL if we started it
@@ -1126,3 +1148,4 @@ echo "📚 For support: https://demos.network/support"
 echo ""
 
 log_verbose "Final exit code: ${exit_code}"
+exit "$exit_code"

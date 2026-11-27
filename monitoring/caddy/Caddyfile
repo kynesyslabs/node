@@ -51,13 +51,14 @@
 	# in the environment to receive expiry-warning emails.
 	tls {$ACME_EMAIL}
 
-	# Strip any inbound X-Forwarded-* the client sent us; only Caddy may
-	# set them downstream. Combined with the node's TRUSTED_PROXIES list
-	# (Epic 14 T1) this defeats source-IP spoofing.
+	# Strip the forwarding headers the client sent (X-Forwarded-*, X-Real-IP,
+	# CF-Connecting-IP); only Caddy may set them downstream. With the node's
+	# TRUSTED_PROXIES list (Epic 14 T1) the node reads the address Caddy set.
 	request_header -X-Forwarded-For
 	request_header -X-Forwarded-Host
 	request_header -X-Forwarded-Proto
 	request_header -X-Real-IP
+	request_header -CF-Connecting-IP
 
 	encode zstd gzip
 

@@ -6,6 +6,8 @@ import { normalizeAccount } from "@/libs/l2ps/editConservation"
 import {
     deepWindowCutoff,
     isReferenceBlockAllowed,
+    referenceBlockRoomAt,
+    signedReferenceBlock,
 } from "@/libs/blockchain/referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { ErrorCode } from "@/errors"
@@ -26,7 +28,7 @@ export type MempoolTransaction = Transaction & { reference_block: number }
  * fail because the reference block is out of range.
  *
  * With `includeExpiredAsFailed`: expired txs still inside the deep window
- * (5x referenceBlockRoom) are marked FAILED and kept in `validTxs` so
+ * (5x the room of the head) are marked FAILED and kept in `validTxs` so
  * they enter the block as failed — mirroring the TX_NONCE_INVALID_LOW
  * pattern. Txs older than the deep window, and txs whose reference block
  * is in the future, are removed as before; the merge admission path
@@ -46,19 +48,26 @@ export function filterMempoolByRefBlock(
     const lastBlockNumber = getSharedState.lastBlockNumber
 
     for (const tx of mempool) {
-        if (!isReferenceBlockAllowed(tx.reference_block, lastBlockNumber)) {
+        // Judged on the reference block the sender signed, never on the pool
+        // row's own column: a tx without one is left out, not included.
+        const reference = signedReferenceBlock(tx)
+        if (
+            reference === null ||
+            !isReferenceBlockAllowed(reference, lastBlockNumber)
+        ) {
             const code = ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE
-            const message = `Reference block expired. Expected: ${lastBlockNumber - getSharedState.referenceBlockRoom} - ${lastBlockNumber} got ${tx.reference_block}`
+            const message = `Reference block expired. Expected: ${lastBlockNumber - referenceBlockRoomAt(lastBlockNumber)} - ${lastBlockNumber} got ${reference}`
             if (
                 includeExpiredAsFailed &&
-                tx.reference_block <= lastBlockNumber &&
-                tx.reference_block >= deepWindowCutoff(lastBlockNumber)
+                reference !== null &&
+                reference <= lastBlockNumber &&
+                reference >= deepWindowCutoff(lastBlockNumber)
             ) {
                 tx.status = TRANSACTION_STATUS.FAILED
                 tx.attrs = {
                     code,
                     message,
-                    reference_block: tx.reference_block,
+                    reference_block: reference,
                 }
                 validTxs.push(tx)
                 log.debug(
@@ -91,9 +100,12 @@ export async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
     const validTxs: MempoolTransaction[] = []
     const failedTxs: Array<FailedTranscation> = []
     const nonceAccounts = new Set<string>()
+    // Admission reads a missing field as no edits (an l2psBatch ships none).
+    const editsOf = (tx: MempoolTransaction) =>
+        Array.isArray(tx.content.gcr_edits) ? tx.content.gcr_edits : []
 
     for (const tx of mempool) {
-        for (const edit of tx.content.gcr_edits) {
+        for (const edit of editsOf(tx)) {
             if (edit.type === "nonce") {
                 nonceAccounts.add(normalizeAccount(edit.account))
             }
@@ -119,7 +131,7 @@ export async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
             continue txLoop
         }
 
-        const nonceEdits = tx.content.gcr_edits.filter(e => e.type === "nonce")
+        const nonceEdits = editsOf(tx).filter(e => e.type === "nonce")
 
         if (nonceEdits.length === 0) {
             validTxs.push(tx)
@@ -140,7 +152,7 @@ export async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
                 tx.attrs = {
                     code: ErrorCode.TX_NONCE_INVALID_LOW,
                     message: `Invalid nonce edit. Expected ${expected}, got ${tx.content.nonce}`,
-                    reference_block: tx.reference_block,
+                    reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                 }
                 validTxs.push(tx)
 

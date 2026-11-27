@@ -93,16 +93,42 @@ export function credentialFieldsInDemoScript(script: unknown): string[] {
     return found
 }
 
+/** Request headers the broadcast-time replay may forward (lowercase). */
+const REPLAY_HEADER_ALLOW_LIST = new Set([
+    "accept",
+    "accept-charset",
+    "accept-encoding",
+    "accept-language",
+    "cache-control",
+    "content-language",
+    "content-type",
+    "idempotency-key",
+    "if-match",
+    "if-modified-since",
+    "if-none-match",
+    "if-range",
+    "if-unmodified-since",
+    "pragma",
+    "range",
+    "user-agent",
+])
+
 /**
- * Headers for the broadcast-time replay of a signed `web2Request` tx. The
- * replay must not carry the caller's credentials (they were only meant for the
- * attested RPC call), so sensitive keys are dropped. Always returns an object:
- * the proxy iterates the map and would throw on `undefined`.
+ * Headers for the broadcast-time replay of a signed `web2Request` tx. Only
+ * the allow-listed headers are kept, in any casing; every other header was
+ * meant for the attested RPC call alone. Always returns an object: the proxy
+ * iterates the map and would throw on `undefined`.
  */
 export function headersForReplay(
     headers?: IWeb2Request["raw"]["headers"],
 ): Web2Headers {
-    return (stripSensitiveWeb2Headers(headers) ?? {}) as Web2Headers
+    const kept: Partial<Web2Headers> = {}
+    for (const [key, value] of Object.entries(headers ?? {})) {
+        if (REPLAY_HEADER_ALLOW_LIST.has(key.toLowerCase())) {
+            kept[key] = value
+        }
+    }
+    return kept as Web2Headers
 }
 
 export function redactSensitiveWeb2Headers(

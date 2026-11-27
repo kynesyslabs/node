@@ -3,7 +3,7 @@ import {
     IWeb2Request,
     IWeb2Result,
 } from "@kynesyslabs/demosdk/types"
-import { Proxy } from "src/features/web2/proxy/Proxy"
+import { Proxy, type Web2FetchMeter } from "src/features/web2/proxy/Proxy"
 import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
@@ -18,6 +18,8 @@ import {
 export type DAHRStartProxyParams = IDAHRStartProxyParams & {
     /** Return non-2xx origin responses instead of refusing them. */
     allowNonSuccessStatus?: boolean
+    /** Receives the count of origin response bytes read, whatever the outcome. */
+    meter?: Web2FetchMeter
 }
 
 /**
@@ -33,10 +35,9 @@ export class DAHR {
      * This constructor initializes a new DAHR (Data Agnostic HTTPS Relay) instance.
      * It sets up the necessary components to handle Web2 requests and manage the proxy process.
      *
-     * @param {IWeb2Request} _web2Request - The Web2 request to handle. This object contains all
-     * the necessary information about the request, including the raw request data, any existing
-     * results, and a hash of the request. It's used to initialize the DAHR instance
-     * and guide its operations.
+     * @param {IWeb2Request} _web2Request - The request the session keeps. The DAHR holds this
+     * object as given, and a start does not change it, so whoever constructs the DAHR decides
+     * its size: DAHRFactory passes a small copy of the create request.
      *
      * The constructor performs the following actions:
      * 1. Validates that a web2Request is provided (using the 'required' utility).
@@ -82,6 +83,7 @@ export class DAHR {
         authorization,
         url,
         allowNonSuccessStatus = false,
+        meter,
     }: DAHRStartProxyParams): Promise<IWeb2Result> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
@@ -113,7 +115,7 @@ export class DAHR {
             targetHeaders: headers,
             payload,
             targetAuthorization: authorization,
-        })
+        }, meter)
 
         // An error page attested as data is indistinguishable from the real
         // thing to anyone reading the chain, so it needs an explicit opt-in.

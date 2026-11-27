@@ -13,7 +13,21 @@
 import { CategorizedLogger, type LogEntry } from "./CategorizedLogger"
 import { TAG_TO_CATEGORY, type LogCategory } from "./tagCategories"
 import { getSharedState } from "@/utilities/sharedState"
+import { Config } from "src/config"
 import fs from "fs"
+import path from "path"
+
+/**
+ * Per-node log directory: `logs_<port>_<identity>` inside `baseDir`, or in
+ * the working directory when `baseDir` is empty.
+ */
+export function nodeLogsDir(
+    baseDir: string,
+    port: number,
+    identityFile: string,
+): string {
+    return path.join(baseDir, `logs_${port}_${identityFile}`)
+}
 
 /**
  * Stringify any value for logging - matches console.log behavior
@@ -91,7 +105,11 @@ export default class LegacyLoggerAdapter {
         try {
             const identityFile =
                 getSharedState.identityFile?.replace(".", "") ?? ""
-            const logsDir = `logs_${port}_${identityFile}`
+            const logsDir = nodeLogsDir(
+                Config.getInstance().core.logsDir,
+                port,
+                identityFile,
+            )
 
             this.LOGS_DIR = logsDir
             this.LOG_INFO_FILE = `${logsDir}/info.log`

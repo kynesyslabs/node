@@ -14,7 +14,6 @@ const sharedState = {
     PROD: true,
     signingAlgorithm: "ed25519",
     lastBlockNumber: 100,
-    referenceBlockRoom: 10,
 }
 
 const submitValidatedTx = jest.fn(async (..._args: unknown[]) => ({
@@ -38,9 +37,18 @@ jest.mock("@kynesyslabs/demosdk/encryption", () => ({
 jest.mock("@/libs/blockchain/validation/validityData", () => ({ verifyValidityDataSignature: async () => true }))
 jest.mock("../blockchain/gcr/handleGCR", () => ({
     __esModule: true,
-    default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
+    default: {
+        prepareEntities: jest.fn(async () => ({})),
+        applyTransaction: jest.fn(async () => ({ success: true })),
+    },
+    withDerivedFeeEdits: jest.fn((tx: any) => ({ ...tx, content: { ...tx.content, gcr_edits: ["derived fee"] } })),
 }))
-jest.mock("./txSubmission", () => ({ submitValidatedTx }))
+jest.mock("./txSubmission", () => ({ submitValidatedTx, gossipSizeRefusal: () => null }))
+jest.mock("src/libs/gossip/GossipManager", () => ({
+    __esModule: true,
+    default: { isEnabled: () => true },
+}))
+jest.mock("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 jest.mock("src/libs/consensus/stakedSet", () => ({ isSelfStaked }))
 jest.mock("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: {} }))
@@ -54,6 +62,7 @@ const handleL2PS = jest.fn(async (..._args: unknown[]) => ({ result: 200, respon
 jest.mock("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: handleL2PS }))
 
 const { handleExecuteTransaction } = await import("./endpointExecution")
+const { default: HandleGCR } = await import("../blockchain/gcr/handleGCR")
 
 function validityData(): any {
     return {
@@ -61,7 +70,7 @@ function validityData(): any {
             valid: true,
             reference_block: 100,
             message: "",
-            transaction: { hash: HASH, blockNumber: 101, content: { type: "native", data: ["native", {}] } },
+            transaction: { hash: HASH, blockNumber: 101, content: { type: "native", data: ["native", {}], reference_block: 100 } },
         },
         signature: { type: "ed25519", data: "bb".repeat(64) },
         rpc_public_key: { type: "ed25519", data: OUR_KEY },
@@ -80,6 +89,19 @@ beforeEach(() => {
 })
 
 describe("broadcastTx disposition", () => {
+    it("simulates the same fee edits that block apply derives", async () => {
+        const data = validityData()
+        const reply = await handleExecuteTransaction(data, "sender")
+        expect(reply.success).toBe(true)
+        expect(HandleGCR.prepareEntities).toHaveBeenCalledWith([
+            expect.objectContaining({ content: expect.objectContaining({ gcr_edits: ["derived fee"] }) }),
+        ])
+        expect(HandleGCR.applyTransaction).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ content: expect.objectContaining({ gcr_edits: ["derived fee"] }) }),
+            false, true,
+        )
+    })
     it("mempool: this node keeps it and publishes it", async () => {
         const reply = await handleExecuteTransaction(validityData(), "sender")
 
@@ -109,7 +131,7 @@ describe("broadcastTx disposition", () => {
 
     it("mempool: an L2PS transaction accepted into this node's L2PS mempool", async () => {
         const data = validityData()
-        data.data.transaction.content = { type: "l2psEncryptedTx", from: "0xaa", data: ["l2psEncryptedTx", { ciphertext: "x" }] }
+        data.data.transaction.content = { type: "l2psEncryptedTx", from: "0xaa", data: ["l2psEncryptedTx", { ciphertext: "x" }], reference_block: 100 }
         data.data.transaction.signature = { type: "ed25519", data: "cc".repeat(64) }
 
         const reply = await handleExecuteTransaction(data, "sender")
@@ -139,7 +161,7 @@ describe("broadcastTx disposition", () => {
             authorization: "Bearer tx-token",
         }))
         const data = validityData()
-        data.data.transaction.content = { type: "web2Request", from: "0xaa", data: ["web2Request", { message: {} }] }
+        data.data.transaction.content = { type: "web2Request", from: "0xaa", data: ["web2Request", { message: {} }], reference_block: 100 }
 
         await handleExecuteTransaction(data, "sender")
 

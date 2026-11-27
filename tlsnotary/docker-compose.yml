@@ -19,8 +19,14 @@ services:
         ports:
             - "${TLSNOTARY_PORT:-7047}:7047"
         restart: unless-stopped
+        # The stock image (ubuntu with the notary-server binary) has bash, head
+        # and grep but no curl or wget: ask /info over bash's /dev/tcp.
         healthcheck:
-            test: [CMD, curl, -f, http://localhost:7047/info]
+            test:
+                - CMD
+                - bash
+                - -c
+                - exec 3<>/dev/tcp/127.0.0.1/7047 && printf 'GET /info HTTP/1.0\r\n\r\n' >&3 && head -n1 <&3 | grep -q ' 200'
             interval: 10s
             timeout: 5s
             retries: 3

@@ -12,12 +12,17 @@ import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import handleNativeRequest from "../handleNativeRequest"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
+import type { Web2FetchCaller } from "src/features/web2/web2FetchLimiter"
+import { logField } from "src/features/multichain/routines/errorKind"
 // ? Remove this proxy if possible
 const handleXMRequest = multichainDispatcher
 
 // ANCHOR - Handle the step
 // This method is responsible for handling the step and compiling the result
-export default async function handleStep(step: WorkStep): Promise<StepResult> {
+export default async function handleStep(
+    step: WorkStep,
+    web2Caller?: Web2FetchCaller,
+): Promise<StepResult> {
     const stepResult: StepResult = {
         step: step,
         success: false,
@@ -30,9 +35,9 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
     const task = step.content
     log.info(
         "[demosWork] [handleStep] Handling a step with context: " +
-            context +
+            logField(context) +
             " and description: " +
-            step.description,
+            logField(step.description),
     )
     // A step the operator switched off must fail the operation, not be
     // recorded as done with the refusal as its output.
@@ -56,7 +61,7 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         }
     } else if (context === "web2") {
         const web2Request = task as IWeb2Request
-        result = await handleWeb2ProxyRequest({ web2Request })
+        result = await handleWeb2ProxyRequest({ web2Request }, web2Caller)
         // A refused request (non-2xx origin, proxy failure) has no data for
         // the next steps to build on.
         if (result?.result !== 200) {

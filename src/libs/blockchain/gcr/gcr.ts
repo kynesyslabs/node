@@ -45,6 +45,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 // TODO insert it in the gcr automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
 
+import {
+    VALIDATOR_STATUS_ACTIVE,
+    VALIDATOR_STATUS_UNSTAKING,
+} from "src/features/staking/constants"
 import _ from "lodash"
 import { In, LessThan, LessThanOrEqual, Not, Repository } from "typeorm"
 
@@ -310,6 +314,13 @@ export default class GCR {
             log.error(`Error fetching validator status: ${e}`)
             return null
         }
+    }
+
+    /** The validator row whose seat `mint` currently backs, active or unstaking, or null. */
+    static async getGCRValidatorByMint(mint: string): Promise<Validators | null> {
+        const repository = await GCR.validatorsRepository()
+        const rows = await repository.findBy({ nft_mint: mint })
+        return rows.find(row => isSeatHolding(row.status)) ?? null
     }
 
     private static async validatorsRepository(): Promise<Repository<Validators>> {
@@ -926,6 +937,8 @@ export default class GCR {
         // The chain head is the correct reference; this tx is created at
         // runtime, not bound to a specific block.
         const referenceHeight = await Chain.getLastBlockNumber()
+        // Signed with the rest of the content, as for a client's transaction.
+        Object.assign(tx.content, { reference_block: referenceHeight })
         tx.hash = Hashing.sha256(
             serializeTransactionContent(tx.content, referenceHeight),
         )
@@ -1151,10 +1164,10 @@ export default class GCR {
             }
         }
 
-        const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
-            ...tx,
-            reference_block: await Chain.getLastBlockNumber(),
-        })
+        // The pool takes the reference block from the signed content.
+        const { confirmationBlock, error } = await Mempool.addTransactionWithLock(
+            tx as typeof tx & { reference_block: number },
+        )
 
         if (error) {
             log.error("Failed to add transaction to mempool")
@@ -1365,4 +1378,9 @@ export default class GCR {
     // TODO Build objects for tokens and nfts and write setters for them
 
     // !SECTION Setters
+}
+
+/** Whether a validator status still holds its NFT's seat. */
+function isSeatHolding(status: string | null): boolean {
+    return status === VALIDATOR_STATUS_ACTIVE || status === VALIDATOR_STATUS_UNSTAKING
 }

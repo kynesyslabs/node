@@ -25,6 +25,14 @@ import {
     onSelfStakeChange,
 } from "./libs/consensus/stakedSet"
 import { syncL2PSServices } from "./libs/l2ps/roleServices"
+import {
+    settlementProverProblem,
+    settlementScheduled,
+    settlementVerifierProblem,
+} from "./libs/l2ps/settlement/bootCheck"
+import { loadSettlementVerificationKey, settlementProverPool } from "./libs/l2ps/settlement/prover"
+import { isSettlementBuilt } from "./libs/l2ps/zk/settlementArtifacts"
+import { l2psOff } from "./forks/l2psGate"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
 import {
@@ -33,6 +41,7 @@ import {
 } from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
+import { createShutdownExitStatus } from "./utilities/shutdownExitStatus"
 import { markSubsystem, subsystemError } from "./utilities/subsystemRegistry"
 import {
     fastSync,
@@ -46,15 +55,21 @@ import { checkClockAtBoot, startClockProbe } from "./libs/utils/clockProbe"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { ensureNftGatingReady } from "./features/staking/boot"
 import { ensureValidatorSetSnapshot } from "./libs/blockchain/finality/validatorSet"
 import { pruneStorageHistory } from "./libs/blockchain/finality/storageHistory"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
+    bindSigningRecordKey,
+    SigningKeyMismatchError,
     haltSigning,
     holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
 } from "./libs/identity/signingRecord"
-import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
+import {
+    armRestartSigningFloor,
+    waitForRestartSigningFloor,
+} from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -531,6 +546,41 @@ async function startInboundServers() {
 
 // ANCHOR Preparing the main loop
 // ! Simplify this too
+/**
+ * Loads the joined L2PS networks and, for a settlement member, checks that
+ * it can prove. Runs before the node serves or joins consensus: a member
+ * that cannot prove would admit transfers it never settles, and one that
+ * exits only after joining has already been counted in the validator set.
+ */
+async function loadL2PSNetworks() {
+    const bootTracker = getSharedState.bootTracker
+    bootTracker.start("l2ps.networks")
+    try {
+        await ParallelNetworks.getInstance().loadAllL2PS()
+        bootTracker.ready("l2ps.networks")
+        log.info(
+            `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
+        )
+    } catch (error) {
+        handleError(error, "CORE", {
+            source: ErrorSource.L2PS_NETWORK_LOADING,
+        })
+        bootTracker.fail("l2ps.networks", error)
+        subsystemError(getSharedState.subsystems, "l2ps", error)
+    }
+
+    const proverProblem = await settlementProverProblem({
+        scheduled: settlementScheduled(),
+        member: (getSharedState.l2psJoinedUids?.length ?? 0) > 0,
+        built: () => isSettlementBuilt(),
+        probe: () => settlementProverPool().probe(),
+    })
+    if (proverProblem) {
+        log.error(`[BOOT] Refusing to start: ${proverProblem}`)
+        process.exit(1)
+    }
+}
+
 async function preMainLoop() {
     // NOTE Overriding if necessary
     if (indexState.OVERRIDE_PORT) {
@@ -608,6 +658,7 @@ async function preMainLoop() {
             )
         }
         await ensureValidatorSeed(genesisData)
+        await ensureNftGatingReady()
         // Committee selection under finalityProofs reads the set from here
         await ensureValidatorSetSnapshot(await Chain.getLastBlockNumber())
         await pruneStorageHistory(await Chain.getLastBlockNumber())
@@ -623,6 +674,14 @@ async function preMainLoop() {
     // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
 
+    // The fork schedule is known from here; the key is otherwise read at the
+    // first settlement batch, where a missing one halts block apply.
+    const verifierProblem = settlementVerifierProblem(settlementScheduled(), () => loadSettlementVerificationKey())
+    if (verifierProblem) {
+        log.error(`[BOOT] Refusing to start: ${verifierProblem}`)
+        process.exit(1)
+    }
+
     // INFO: Set initial last block data before the first hello goes out, so
     // the sync data we advertise carries the real tip and genesis hash
     const lastBlock = await Chain.getLastBlock()
@@ -637,6 +696,16 @@ async function preMainLoop() {
     // Prime the node's own role before anything role-gated starts.
     invalidateStakedSet()
     await getStakedSet()
+
+    // After the first stake notice, which saw no joined network yet, so the
+    // L2PS services still start only once the node has synced. Under
+    // l2psGate no network is loaded, so l2psJoinedUids stays empty.
+    if (!l2psOff()) {
+        await loadL2PSNetworks()
+    }
+
+    // Peers start a round as soon as they see this node.
+    await waitForRestartSigningFloor(getNetworkTimestamp)
 
     await startInboundServers()
 
@@ -761,6 +830,19 @@ async function main() {
             `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,
         )
         process.exit(1)
+    }
+    // From here on a signing record of another key is refused
+    try {
+        bindSigningRecordKey(
+            getSharedState.identityFile,
+            getSharedState.publicKeyHex,
+        )
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error(`[SIGNING] ${message}`)
+        // Stopped in this process only (no marker): a restart with the
+        // record's key, or with the record moved away, signs again
+        if (error instanceof SigningKeyMismatchError) haltSigning(message)
     }
     // The node still syncs and serves; only block signing stays refused.
     reportSigningHaltMarker(getSharedState.identityFile)
@@ -1004,8 +1086,15 @@ async function main() {
             )
         }
 
-        // Start L2PS Messaging server (failsafe)
-        if (indexState.L2PS_MESSAGING_ENABLED) {
+        // Start L2PS Messaging server (failsafe). It turns messages into L2PS
+        // transactions, so it stays down while l2psGate is active; a server
+        // started below a later gate height refuses every frame once the
+        // gate activates.
+        if (indexState.L2PS_MESSAGING_ENABLED && l2psOff()) {
+            log.info(
+                "[L2PS-IM] Messaging server not started: L2PS is off on this network (fork l2psGate)",
+            )
+        } else if (indexState.L2PS_MESSAGING_ENABLED) {
             try {
                 const { startL2PSMessaging } =
                     await import("./features/l2ps-messaging")
@@ -1153,20 +1242,35 @@ async function main() {
                     log.warning(msg)
                 }
             } catch (error) {
-                log.error(
-                    "[TLSNotary] Failed to start TLSNotary service: " + error,
-                )
-                bootTracker.fail("tlsnotary", error)
-                subsystemError(getSharedState.subsystems, "tlsnotary", error)
-                const { isTLSNotaryFatal } =
-                    await import("./features/tlsnotary")
-                if (isTLSNotaryFatal()) {
-                    log.error(
-                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                const tlsnotary = await import("./features/tlsnotary")
+                if (error instanceof tlsnotary.NotaryUnreachableError) {
+                    // requestTLSNproxy needs only TLSNOTARY_ENABLED: a node
+                    // that relays for the network's notary hosts none itself
+                    log.warning(
+                        `[TLSNotary] Relay only: ${error.message}. This node serves requestTLSNproxy ` +
+                            "sessions; provers notarize at the network's notary. To host a notary on this " +
+                            "node, start it (docker compose profile tlsnotary); TLSNOTARY_FATAL=true " +
+                            "makes a missing notary stop the node.",
                     )
-                    process.exit(1)
+                    bootTracker.ready("tlsnotary")
+                    markSubsystem(getSharedState.subsystems, "tlsnotary", "ready", {
+                        enabled: true,
+                        extra: { mode: "relay-only", notary: error.message },
+                    })
+                } else {
+                    log.error(
+                        "[TLSNotary] Failed to start TLSNotary service: " + error,
+                    )
+                    bootTracker.fail("tlsnotary", error)
+                    subsystemError(getSharedState.subsystems, "tlsnotary", error)
+                    if (tlsnotary.isTLSNotaryFatal()) {
+                        log.error(
+                            "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                        )
+                        process.exit(1)
+                    }
+                    // Continue without TLSNotary (failsafe)
                 }
-                // Continue without TLSNotary (failsafe)
             }
         } else {
             log.info(
@@ -1335,63 +1439,63 @@ async function main() {
         bootTracker.ready("main_loop")
         markSubsystem(getSharedState.subsystems, "main_loop", "running")
 
-        // Load L2PS networks configuration
-        bootTracker.start("l2ps.networks")
-        try {
-            await ParallelNetworks.getInstance().loadAllL2PS()
-            bootTracker.ready("l2ps.networks")
+        // Under l2psGate no network is loaded, so l2psJoinedUids stays empty
+        // and the hash service, the batch aggregator and the L2PS mempool sync
+        // that key on it never start.
+        if (l2psOff()) {
             log.info(
-                `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
-            )
-        } catch (error) {
-            handleError(error, "CORE", {
-                source: ErrorSource.L2PS_NETWORK_LOADING,
-            })
-            bootTracker.fail("l2ps.networks", error)
-            subsystemError(getSharedState.subsystems, "l2ps", error)
-        }
-
-        // Start L2PS hash generation service (for L2PS participating nodes)
-        // Note: l2psJoinedUids is populated during ParallelNetworks initialization
-        if (
-            getSharedState.l2psJoinedUids &&
-            getSharedState.l2psJoinedUids.length > 0
-        ) {
-            bootTracker.start("l2ps.services")
-            try {
-                const l2psHashService = L2PSHashService.getInstance()
-                await l2psHashService.start()
-                log.info(
-                    `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
-                )
-
-                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
-                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
-                await l2psBatchAggregator.start()
-                log.info("[CORE] [L2PS] Batch aggregator service started")
-                bootTracker.ready("l2ps.services")
-                markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
-                    enabled: true,
-                    extra: {
-                        joined_uids: getSharedState.l2psJoinedUids.length,
-                    },
-                })
-            } catch (error) {
-                handleError(error, "CORE", {
-                    source: ErrorSource.L2PS_SERVICES_STARTUP,
-                })
-                bootTracker.fail("l2ps.services", error)
-                subsystemError(getSharedState.subsystems, "l2ps", error)
-            }
-        } else {
-            log.info(
-                "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
+                "[CORE] [L2PS] L2PS is off on this network (fork l2psGate): networks not loaded, services not started",
             )
             markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
-                reason: "no joined networks",
+                reason: "fork l2psGate",
                 enabled: false,
             })
-            bootTracker.skip("l2ps.services", "no joined networks")
+            bootTracker.skip("l2ps.networks", "fork l2psGate")
+            bootTracker.skip("l2ps.services", "fork l2psGate")
+        } else {
+            // Networks were loaded in preMainLoop, before the node joined
+            // consensus. Start L2PS hash generation service (for L2PS participating nodes)
+            // Note: l2psJoinedUids is populated during ParallelNetworks initialization
+            if (
+                getSharedState.l2psJoinedUids &&
+                getSharedState.l2psJoinedUids.length > 0
+            ) {
+                bootTracker.start("l2ps.services")
+                try {
+                    const l2psHashService = L2PSHashService.getInstance()
+                    await l2psHashService.start()
+                    log.info(
+                        `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
+                    )
+
+                    // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+                    const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+                    await l2psBatchAggregator.start()
+                    log.info("[CORE] [L2PS] Batch aggregator service started")
+                    bootTracker.ready("l2ps.services")
+                    markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
+                        enabled: true,
+                        extra: {
+                            joined_uids: getSharedState.l2psJoinedUids.length,
+                        },
+                    })
+                } catch (error) {
+                    handleError(error, "CORE", {
+                        source: ErrorSource.L2PS_SERVICES_STARTUP,
+                    })
+                    bootTracker.fail("l2ps.services", error)
+                    subsystemError(getSharedState.subsystems, "l2ps", error)
+                }
+            } else {
+                log.info(
+                    "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
+                )
+                markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
+                    reason: "no joined networks",
+                    enabled: false,
+                })
+                bootTracker.skip("l2ps.services", "no joined networks")
+            }
         }
     }
 }
@@ -1430,8 +1534,11 @@ async function shutdownStep(
     }
 }
 
+const shutdownExitStatus = createShutdownExitStatus()
+
 // Graceful shutdown handler
 export async function gracefulShutdown(signal: string, exitCode = 0) {
+    shutdownExitStatus.request(exitCode)
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
     if (getSharedState.isShuttingDown) {
         return
@@ -1442,9 +1549,8 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
 
     log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
 
-    // A block apply writes GCR state and then inserts the block in separate
-    // commits; exiting between them leaves state ahead of the chain. Let the
-    // block in flight finish before anything else is torn down.
+    // An apply that has not reached its insert refuses it; one already
+    // inserting finishes, and the drain waits for it.
     const BLOCK_APPLY_DRAIN_MS = 30_000
     let drainTimer: ReturnType<typeof setTimeout> | null = null
     const drained = await Promise.race([
@@ -1460,10 +1566,10 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
         )
     }
 
-    // Force exit after 10 seconds if graceful shutdown hangs
+    // Force exit after 3 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
         log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
-        process.exit(exitCode)
+        process.exit(shutdownExitStatus.code)
     }, 3_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
@@ -1600,14 +1706,14 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
 
         log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
-        process.exit(exitCode)
+        process.exit(shutdownExitStatus.code)
     } catch (error) {
         handleError(error, "CORE", {
             source: ErrorSource.GRACEFUL_SHUTDOWN,
             fatal: true,
         })
         clearTimeout(forceExitTimeout)
-        process.exit(exitCode === 0 ? 1 : exitCode)
+        process.exit(shutdownExitStatus.code || 1)
     }
 }
 

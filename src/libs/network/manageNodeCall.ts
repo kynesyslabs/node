@@ -18,6 +18,7 @@ export interface NodeCall {
 export async function manageNodeCall(
     content: NodeCall,
     sender = "",
+    clientIP?: string,
 ): Promise<RPCResponse> {
     const { data } = content
     const response = structuredClone(emptyResponse)
@@ -27,7 +28,7 @@ export async function manageNodeCall(
 
     const handler = handlerRegistry[content.message]
     if (handler) {
-        return await handler(data, response, sender)
+        return await handler(data, response, sender, clientIP)
     }
 
     // Return a real 404 with a structured error body so SDK clients can

@@ -23,17 +23,17 @@ import {
 import {
     GenesisRefusal,
     blockPinProblem,
+    bootSettingProblems as settingProblems,
     chainIdOf,
     defaultTreasuryWarning,
-    devModeProblem,
     genesisScheduleProblems,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
-    pinRequirementProblem,
     restartGenesisProblems,
     unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
+import { explicitXffMode } from "@/libs/network/middleware/rateLimiter"
 import {
     acceptSchedule,
     parseOverrideDigest,
@@ -50,6 +50,7 @@ import { GenesisImportedIdentity } from "@/model/entities/GenesisImportedIdentit
 import Datasource from "src/model/datasource"
 import { identityCarryoverActiveAtGenesis } from "@/forks/identityCarryoverGate"
 import { genesisFileExists, genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
+import { asGenesisBlockContent } from "@/libs/blockchain/genesis/genesisBlockContent"
 import { readGenesisSudoPubkey } from "@/libs/consensus/genesisSudoPubkey"
 import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
 import { WINDOW_BLOCKS } from "@/libs/peer/routines/forkScheduleWatch"
@@ -137,6 +138,34 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
     genesisData["balances"] = Object.entries(finalBalances)
 }
 
+/** Read as getShard and peerlistMerge read it: only the exact string "true" switches it on. */
+function requireValidatorsEnabled(): boolean {
+    return process.env.DEMOS_REQUIRE_VALIDATORS === "true"
+}
+
+/**
+ * The genesis file's data, or `fallback` when no file was read (`undefined`).
+ * A file that holds JSON `null` is still data, so only `undefined` falls back.
+ */
+function fileGenesisOr<T>(fileGenesis: unknown, fallback: T) {
+    return fileGenesis === undefined ? fallback : fileGenesis
+}
+
+/** The XFF mode the rate limiter will run with when it is set explicitly. */
+function configuredXffMode(): string | undefined {
+    return explicitXffMode(Config.getInstance().core.xffMode)
+}
+
+/** Every refusal of this node's pin, PROD, XFF_MODE and DEMOS_REQUIRE_VALIDATORS settings for a genesis with this chain id. */
+function bootSettingProblems(pin: string, chainId: unknown): string[] {
+    return settingProblems(pin, chainId, {
+        env: process.env,
+        prod: Config.getInstance().core.prod,
+        xffMode: configuredXffMode(),
+        requireValidators: requireValidatorsEnabled(),
+    })
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -161,11 +190,8 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
-    const pinProblem = pinRequirementProblem(pin, process.env, fileChainId)
-    if (pinProblem) refuse([pinProblem])
-    const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
-    if (modeProblem) refuse([modeProblem])
+    const fileGenesis = hasGenesisFile ? readGenesisFile() : undefined
+    refuse(bootSettingProblems(pin, chainIdOf(fileGenesis)))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -173,24 +199,21 @@ export default async function findGenesisBlock() {
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
         log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
-        const genesisContent = (await Chain.getGenesisBlock())?.content as
-            | { extra?: { genesisData?: unknown } }
-            | undefined
+        const genesisContent = asGenesisBlockContent(
+            (await Chain.getGenesisBlock())?.content,
+        )
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
-        const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
-        if (storedPinProblem) refuse([storedPinProblem])
-        const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
-        if (storedModeProblem) refuse([storedModeProblem])
+        refuse(bootSettingProblems(pin, chainIdOf(stored)))
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
+                fileGenesisData: fileGenesisOr(fileGenesis, null),
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(hasGenesisFile ? readGenesisFile() : stored)
+        warnDefaultTreasury(fileGenesisOr(fileGenesis, stored))
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -199,8 +222,8 @@ export default async function findGenesisBlock() {
             restartGenesisProblems({
                 storedGenesisData: stored,
                 // Without a file only the pin can be checked; the schedule check
-                // below still sees the defaults this node would run with.
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : stored,
+                // still sees the defaults this node would run with.
+                fileGenesisData: fileGenesisOr(fileGenesis, stored),
                 pin,
             }),
         )
@@ -232,8 +255,8 @@ export default async function findGenesisBlock() {
         )
     }
 
-    // Loading the genesis block
-    const genesisData = readGenesisFile()
+    // Block 0 is built from the data the boot-setting checks already ran on
+    const genesisData = fileGenesis
 
     // Everything is checked before the first write: a refused node must leave
     // an empty database, or its next boot finds a block 0 and trusts it.

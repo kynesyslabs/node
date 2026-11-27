@@ -1,5 +1,4 @@
 import {
-    BrowserRequest,
     BundleContent,
     RPCRequest,
     RPCResponse,
@@ -13,7 +12,6 @@ import manageConsensusRoutines from "./manageConsensusRoutines"
 import manageGCRRoutines from "./manageGCRRoutines"
 import { manageExecution } from "./manageExecution"
 import { HelloPeerRequest, manageHelloPeer } from "./manageHelloPeer"
-import { handleLoginRequest, handleLoginResponse } from "./manageLogin"
 import { manageNodeCall, NodeCall } from "./manageNodeCall"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
@@ -21,17 +19,15 @@ import manageBridges from "./manageBridge"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import { RateLimiter } from "./middleware/rateLimiter"
+import { rateLimitSubject } from "./middleware/rateLimitSubject"
+import type { Web2FetchCaller } from "@/features/web2/web2FetchLimiter"
+import { SUDO_METHODS } from "./peerHttpAuth"
 import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import Datasource from "@/model/datasource"
 import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
 
-// Protected endpoints requiring SUDO access
-const PROTECTED_ENDPOINTS = new Set([
-    "rate-limit/unblock",
-    "getCampaignData",
-    "awardPoints",
-])
+const PROTECTED_ENDPOINTS = SUDO_METHODS
 
 export const emptyResponse: RPCResponse = {
     result: 0,
@@ -62,9 +58,23 @@ export function isRPCRequest(obj: any): obj is RPCRequest {
     )
 }
 
+/**
+ * The caller a web2 fetch from an RPC client is counted against: its address
+ * as the rate limiter resolved it (proxy headers only from trusted proxies),
+ * grouped the same way, so every address of one IPv6 /64 shares a budget.
+ */
+function web2CallerForClient(clientIP: string | undefined): Web2FetchCaller {
+    const ip = clientIP || "unknown"
+    return {
+        key: `ip:${rateLimitSubject(ip)}`,
+        exempt: RateLimiter.getInstance().isWhitelistedIP(ip),
+    }
+}
+
 export async function processPayload(
     payload: RPCRequest,
     sender: string,
+    clientIP?: string,
 ): Promise<RPCResponse> {
     const splits = sender.split(":")
     if (splits.length > 1) {
@@ -116,11 +126,19 @@ export async function processPayload(
                 payload.params,
                 sender,
             )
-            log.info(`[RPC Call] Merged mempool from: ${sender}`)
+            // Hashes only: the full response carries every mempool tx, and an
+            // L2PS entry node must not write tx payloads to INFO logs.
+            const merged = (res?.response as { txs?: { hash?: string }[] } | undefined)?.txs
+            log.info(
+                `[RPC Call] Merged mempool from: ${sender} (result ${res?.result}, ${Array.isArray(merged) ? merged.length : 0} txs)`,
+            )
+            if (Array.isArray(merged) && merged.length > 0) {
+                log.debug(`[RPC Call] Mempool merge tx hashes: ${merged.map(tx => tx?.hash).join(",")}`)
+            }
             return res
         }
         case "peerlist":
-            return await ServerHandlers.handlePeerlist(payload.params[0])
+            return await ServerHandlers.handlePeerlist(payload.params[0], sender)
         case "auth":
             return await manageAuth(payload.params[0] as AuthMessage)
         case "nodeCall": {
@@ -128,6 +146,7 @@ export async function processPayload(
                 return await manageNodeCall(
                     payload.params[0] as NodeCall,
                     sender,
+                    clientIP,
                 )
             } catch (error) {
                 log.error(`[RPC Call] Error in nodeCall: ${error}`)
@@ -141,26 +160,22 @@ export async function processPayload(
                 }
             }
         }
-        case "login_request":
-            return await handleLoginRequest(payload.params[0] as BrowserRequest)
-        case "login_response":
-            return await handleLoginResponse(
-                payload.params[0] as BrowserRequest,
-            )
-
         case "consensus_routine": {
             return await manageConsensusRoutines(sender, payload.params[0])
         }
 
         case "gcr_routine":
-            return await manageGCRRoutines(sender, payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0], clientIP)
 
         case "bridge":
             return await manageBridges(sender, payload.params[0])
 
         case "web2ProxyRequest": {
             const params = parseWeb2ProxyRequest(payload.params[0])
-            return await handleWeb2ProxyRequest(params)
+            return await handleWeb2ProxyRequest(
+                params,
+                web2CallerForClient(clientIP),
+            )
         }
 
         case "rate-limit/unblock": {

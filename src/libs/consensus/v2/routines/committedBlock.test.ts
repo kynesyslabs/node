@@ -54,7 +54,7 @@ jest.mock("src/libs/blockchain/routines/Sync", () => ({
     syncLock: { acquire: async () => () => undefined },
     unreconciledGcrBlockNumber: () => latchedDrift,
     // Like the real one: verify, then insert
-    syncBlock: async (b: any, p: any) => {
+    syncBlockIfRunning: async (b: any, p: any) => {
         attempts.push(p?.identity)
         now += attemptCostMs
         if (latchingSources.has(p?.identity)) {

@@ -6,6 +6,8 @@
 node_modules/
 .bun/
 dist/
+# The TLSN verifier wasm is a pinned build artifact; CI rebuilds and compares it.
+!native/tlsn-verify/dist/
 output/
 *.db
 *.sqlite3
@@ -151,6 +153,7 @@ src/libs/l2ps/zk/keys/**/*.r1cs
 src/libs/l2ps/zk/keys/**/*.sym
 src/libs/l2ps/zk/keys/**/*.wasm
 src/libs/l2ps/zk/keys/**/*_js/
+src/libs/l2ps/zk/keys/**/.built-for-vkey
 src/libs/l2ps/zk/ptau/
 !src/libs/l2ps/zk/keys/**/verification_key.json
 
@@ -182,6 +185,8 @@ bridges_docs/
 aptos_examples_ts/
 target/
 bin/
+# The native twin of the TLSN verifier (build.sh parity) lives in src/bin.
+!native/tlsn-verify/src/bin/
 omniprotocol_fixtures_scripts/
 prop_agent/
 temp/

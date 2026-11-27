@@ -8,6 +8,7 @@ import {
     isReferenceBlockAllowed,
     isWithinDeepWindow,
     previousRuleHeights,
+    signedReferenceBlock,
 } from "../referenceBlockWindow"
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
@@ -25,6 +26,21 @@ import log from "src/utilities/logger"
 import { countStorageRootSyncMismatch } from "@/features/metrics/consensusMetrics"
 
 type FinalStatus = typeof TRANSACTION_STATUS.CONFIRMED | typeof TRANSACTION_STATUS.FAILED
+
+/**
+ * Attrs as sync writes them. The SDK's TransactionAttrs requires
+ * reference_block, but a transaction served without attrs gets code-only
+ * attrs when its failure code is pinned, and is stored that way.
+ */
+type NodeTransactionAttrs = Omit<
+    NonNullable<Transaction["attrs"]>,
+    "reference_block"
+> & { reference_block?: number }
+
+/** A served transaction whose attrs sync may rewrite. */
+type ServedTransaction = Omit<Transaction, "attrs"> & {
+    attrs?: NodeTransactionAttrs
+}
 
 /**
  * A served block that must not be applied: what the peer sent disagrees with
@@ -119,11 +135,16 @@ export async function verifyBlockTransactions(
 }
 
 /**
- * Left out of the comparison: its hash covers a `createdAt` the database
- * stamps with each node's own clock, so no two nodes hold the same value for
- * the same row and the entry cannot match across nodes.
+ * Left out of the comparison before `tlsnVerified`: its hash covers a
+ * `createdAt` the database stamps with each node's own clock, so no two nodes
+ * hold the same value for the same row. Under the fork the hash covers only
+ * chain-written columns and the chain writes the table, so it is compared.
  */
-const NODE_LOCAL_TABLE_HASHES = new Set(["native_tlsnotary"])
+const TLSN_TABLE_HASH = "native_tlsnotary"
+
+function nodeLocalTableHash(key: string, blockNumber: number): boolean {
+    return key === TLSN_TABLE_HASH && !isForkActive("tlsnVerified", blockNumber)
+}
 
 /**
  * The storage root. A difference is counted before the block is refused, so
@@ -149,7 +170,7 @@ export async function verifyNativeTablesHashes(block: Block): Promise<void> {
     const keys = new Set([...Object.keys(committed ?? {}), ...Object.keys(local)])
     const differing = [...keys].filter(
         key =>
-            !NODE_LOCAL_TABLE_HASHES.has(key) && committed?.[key] !== local[key],
+            !nodeLocalTableHash(key, block.number) && committed?.[key] !== local[key],
     )
     if (
         differing.includes(STORAGE_ROOT_KEY) &&
@@ -184,10 +205,8 @@ const statusOf = (tx: Transaction) => tx.status
  * nonce is already spent. Everything else was applied and its status is
  * decided by the apply itself, which the caller runs locally.
  *
- * The reference block of a transaction is not part of what the sender signs;
- * it is read from the attrs the peer served. That is a limit of this check: a
- * peer can serve an expired tx as confirmed with an in-window reference block
- * and nothing here can tell. Closing it needs the block to commit to the attrs.
+ * The reference block is the one the sender signed in the transaction
+ * content, which the hash check has already covered.
  */
 export async function planBlockOutcome(
     block: Block,
@@ -220,17 +239,21 @@ export async function planBlockOutcome(
             continue
         }
 
-        const reference = tx.attrs?.reference_block
+        // The signed value: the attrs a peer serves are not read. A listed
+        // tx without one cannot have been admitted by any forger.
+        const reference = signedReferenceBlock(tx)
+        if (reference === null) {
+            throw new SyncBlockRejectedError(
+                `tx ${tx.hash} of block ${block.number} has no valid signed reference block`,
+            )
+        }
         const copy = Object.assign(
             Object.create(Object.getPrototypeOf(tx)),
             tx,
             { reference_block: reference },
         ) as MempoolTransaction
 
-        if (
-            typeof reference === "number" &&
-            !isReferenceBlockAllowed(reference, head)
-        ) {
+        if (!isReferenceBlockAllowed(reference, head)) {
             // Outside the deep window the forger never admits the tx at all,
             // so it cannot be in a block, failed or not.
             if (!isWithinDeepWindow(reference, head)) {
@@ -322,7 +345,7 @@ export function localStatuses(
  * the local apply does not report one. TX_EXISTS is left alone: the forger
  * checks nonce and reference block first, so an honest code can differ.
  */
-export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): void {
+export function pinFailureCodes(txs: ServedTransaction[], plan: BlockOutcomePlan): void {
     for (const tx of txs) {
         const code = plan.failedBeforeApply.get(tx.hash)
         if (code === undefined || code === ErrorCode.TX_EXISTS || tx.attrs?.code === code) continue
@@ -344,7 +367,7 @@ export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): voi
  * local outcome.
  */
 export function pinResultCodes(
-    txs: Transaction[],
+    txs: ServedTransaction[],
     plan: BlockOutcomePlan,
     height: number,
 ): void {
@@ -354,7 +377,7 @@ export function pinResultCodes(
             if (tx.attrs && "code" in tx.attrs) {
                 log.warn(`[sync] tx ${tx.hash}: served code on a confirmed transaction dropped`)
                 const { code: _served, ...rest } = tx.attrs
-                tx.attrs = rest as typeof tx.attrs
+                tx.attrs = rest
             }
             continue
         }
@@ -369,7 +392,7 @@ export function pinResultCodes(
         tx.attrs = {
             ...(tx.attrs ?? {}),
             code: ErrorCode.TX_EXECUTE_FAILED,
-        } as typeof tx.attrs
+        }
     }
 }
 

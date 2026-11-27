@@ -41,7 +41,9 @@ import log from "src/utilities/logger"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import type { SavedUdIdentity } from "src/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
+import { decimalBigInt } from "./decimalAmount"
 import { duplicateBalanceProblems } from "./genesisPin"
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 
 const GENESIS_ADDRESS_RE = /^0x[0-9a-f]{64}$/
 
@@ -49,7 +51,7 @@ const GENESIS_ADDRESS_RE = /^0x[0-9a-f]{64}$/
  * Parse a `genesisData.balances` entry into `[pubkey, bigint]`.
  *
  * `data/genesis.json` historically allows the balance side to be a
- * decimal string, a number, or a bigint-string. We coerce to bigint
+ * decimal string or a number. We coerce to bigint
  * (OS denomination) here and fail loudly on anything malformed — a
  * silent BigInt(0) on a typo would re-introduce the same class of
  * "operator wrote it but the chain doesn't know" bug we're fixing.
@@ -82,14 +84,21 @@ function parseGenesisBalanceEntry(
         if (typeof rawBalance === "bigint") {
             balance = rawBalance
         } else if (typeof rawBalance === "number") {
-            if (!Number.isFinite(rawBalance) || !Number.isInteger(rawBalance)) {
+            // Above 2^53 a JSON number has already lost digits
+            if (!Number.isSafeInteger(rawBalance)) {
                 throw new Error(
-                    `numeric balance must be a finite integer, got ${rawBalance}`,
+                    `numeric balance must be a finite integer no larger than 2^53-1 (write larger amounts as a decimal string), got ${rawBalance}`,
                 )
             }
             balance = BigInt(rawBalance)
         } else if (typeof rawBalance === "string") {
-            balance = BigInt(rawBalance.trim())
+            const parsed = decimalBigInt(rawBalance)
+            if (parsed === null) {
+                throw new Error(
+                    `string balance must be decimal digits (no hex, sign, spaces or empty string), got ${JSON.stringify(rawBalance)}`,
+                )
+            }
+            balance = parsed
         } else {
             throw new Error(
                 `unsupported balance type ${typeof rawBalance}`,
@@ -136,7 +145,7 @@ export function genesisBalancesProblems(balances: unknown): string[] {
  * indistinguishable from one created via the normal account flow.
  */
 function defaultEmptyAccountFields(pubkey: string) {
-    const now = new Date()
+    const now = applyTime()
     // NOTE: no `assignedTxs` — that array was moved off gcr_main into the
     // dedicated gcr_assigned_txs relation (MoveAssignedTxsToOwnTable). A
     // freshly-merged genesis account simply has no assignments yet.
@@ -247,7 +256,7 @@ export async function mergeGenesisBalances(
             // (identities, points, referralInfo, flagged, …) belongs to
             // the snapshot row and we have no business stomping it.
             existing.balance = balance
-            existing.updatedAt = new Date()
+            existing.updatedAt = applyTime()
             await repo.save(existing)
             result.updated++
         } else {

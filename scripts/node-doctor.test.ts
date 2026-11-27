@@ -1,10 +1,13 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { spawnSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { SHARD_SIZE_MAX, SHARD_SIZE_MIN } from "src/libs/consensus/genesisShardSize"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
+import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
+import { genesisScheduleProblems } from "src/libs/blockchain/genesis/genesisPin"
 
 // `--env-from env` keeps docker out of it: the doctor reads the process
 // environment we pass, over a .env this checkout may hold.
@@ -31,13 +34,20 @@ function readSheet(file: string): Record<string, string> {
     return values
 }
 
+// With a GITHUB_TOKEN set the doctor asks GitHub about it. A curl that
+// answers 200 first on PATH keeps these runs off the network.
+const offline = path.join(tmp, "offline")
+fs.mkdirSync(offline)
+fs.writeFileSync(path.join(offline, "curl"), "#!/bin/sh\ncat >/dev/null\nprintf '\\n200'\n")
+fs.chmodSync(path.join(offline, "curl"), 0o755)
+
 function run(env: Record<string, string>, ...args: string[]) {
     const r = spawnSync(
         "bash",
         [doctor, "--production", "--env-from", "env", ...args],
         {
             encoding: "utf8",
-            env: { PATH: process.env.PATH ?? "", HOME: tmp, ...env },
+            env: { PATH: `${offline}:${process.env.PATH ?? ""}`, HOME: tmp, ...env },
             timeout: 60_000,
         },
     )
@@ -52,6 +62,32 @@ function writeSheet(name: string, body: string): string {
 
 const line = (lines: string[], key: string) =>
     lines.find(l => l.startsWith(`PASS ${key}:`) || l.startsWith(`FAIL ${key}:`))
+
+it("runs the production debug assertion guard test in the consensus suite", () => {
+    const suite = fs.readFileSync(path.join(repo, "scripts/test-consensus.sh"), "utf8")
+    expect(/^\s*src\/config\/loader\.debugAssertions\.test\.ts$/m.test(suite)).toBe(true)
+})
+
+it("lists debug assertions in the install guide's production doctor checklist", () => {
+    const guide = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const checklist = guide.match(/^A validator never leaves these enabled in `.env`:.*$/m)?.[0]
+    expect(checklist).toContain("DEBUG_ASSERTIONS_ENABLED")
+})
+
+it("lists every production doctor unset check in both operator checklists", () => {
+    const script = fs.readFileSync(doctor, "utf8")
+    const keys = [...script.matchAll(/^\s*check_unset ([A-Z_]+) /gm)].map(m => m[1])
+    expect(keys.length).toBeGreaterThan(0)
+
+    const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const installList = install.match(/^A validator never leaves these enabled in `.env`:.*$/m)?.[0]
+    const parameters = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.md"), "utf8")
+    const mainnetList = parameters.split("### Must stay disabled\n")[1]?.split("\n### ")[0]
+    for (const key of keys) {
+        expect(installList).toContain(`\`${key}\``)
+        expect(mainnetList).toContain(`\`${key}\``)
+    }
+})
 
 describe("node-doctor --production against the parameter sheet", () => {
     it("passes every published value when the node runs exactly the sheet", () => {
@@ -79,6 +115,16 @@ describe("node-doctor --production against the parameter sheet", () => {
         const { lines } = run({ PROD: "1" }, "--parameters", sheet)
         expect(line(lines, "PROD")).toStartWith("FAIL PROD: is '1'")
     }, 60_000)
+
+    it("refuses debug assertions in the effective production environment", () => {
+        for (const value of ["true", "1"]) {
+            const { status, lines } = run({ DEBUG_ASSERTIONS_ENABLED: value })
+            expect(status).toBe(1)
+            expect(line(lines, "DEBUG_ASSERTIONS_ENABLED")).toStartWith(
+                "FAIL DEBUG_ASSERTIONS_ENABLED: is set",
+            )
+        }
+    }, 120_000)
 
     it("compares a published genesis pin, case and 0x aside", () => {
         const pin = "ab".repeat(32)
@@ -137,6 +183,53 @@ describe("node-doctor --production against the parameter sheet", () => {
         const { status, lines } = run({}, "--parameters", path.join(tmp, "nope.env"))
         expect(status).toBe(1)
         expect(lines.some(l => l.startsWith("FAIL parameter sheet:"))).toBe(true)
+    }, 60_000)
+})
+
+describe("node-doctor --production web2 identity credentials", () => {
+    const credentials = {
+        GITHUB_TOKEN: "ghp_test",
+        DISCORD_BOT_TOKEN: "discord-test",
+        RAPID_API_KEY: "rapid-key",
+        RAPID_API_HOST: "twitter-api.example.com",
+    }
+
+    it("passes when every provider credential is set, without printing it", () => {
+        const { lines } = run(credentials)
+        for (const key of Object.keys(credentials)) {
+            expect(line(lines, key)).toBe(`PASS ${key}: set`)
+        }
+        expect(lines.some(l => l.includes("ghp_test"))).toBe(false)
+    }, 60_000)
+
+    it("asks the test's curl about the token, not GitHub", () => {
+        const { lines } = run(credentials)
+        expect(lines).toContain("PASS GitHub token: accepted by GitHub")
+    }, 60_000)
+
+    it("fails missing provider credentials while accepting the default RapidAPI host", () => {
+        const { status, lines } = run({
+            GITHUB_TOKEN: "",
+            DISCORD_BOT_TOKEN: "  ",
+            RAPID_API_KEY: "rapid-key",
+        })
+        expect(status).toBe(1)
+        expect(line(lines, "GITHUB_TOKEN")).toStartWith("FAIL GITHUB_TOKEN: empty: this node would refuse every GitHub identity link")
+        expect(line(lines, "DISCORD_BOT_TOKEN")).toStartWith("FAIL DISCORD_BOT_TOKEN: empty: this node would refuse every Discord identity link")
+        expect(line(lines, "RAPID_API_KEY")).toBe("PASS RAPID_API_KEY: set")
+        expect(line(lines, "RAPID_API_HOST")).toBe("PASS RAPID_API_HOST: empty: using Twitter API45 default (twitter-api45.p.rapidapi.com)")
+    }, 60_000)
+
+    it("uses the default for an explicitly empty RapidAPI host while requiring its key", () => {
+        const { lines } = run({ ...credentials, RAPID_API_HOST: "", RAPID_API_KEY: "" })
+        expect(line(lines, "RAPID_API_HOST")).toBe("PASS RAPID_API_HOST: empty: using Twitter API45 default (twitter-api45.p.rapidapi.com)")
+        expect(line(lines, "RAPID_API_KEY")).toStartWith("FAIL RAPID_API_KEY: empty:")
+    }, 60_000)
+
+    it("fails a whitespace-only RapidAPI host", () => {
+        const { status, lines } = run({ ...credentials, RAPID_API_HOST: " \t " })
+        expect(status).toBe(1)
+        expect(line(lines, "RAPID_API_HOST")).toBe("FAIL RAPID_API_HOST: RAPID_API_HOST is whitespace only; the node will not fall back to the default for it")
     }, 60_000)
 })
 
@@ -231,6 +324,98 @@ describe("node-doctor checks against fake commands", () => {
             const result = runCheck(`cd "${bin}"; check_extra_env_files`)
             expect(result.line).toStartWith("FAIL env files: .env.local .env.production present")
             expect(result.fails).toBe(1)
+        })
+    })
+
+    describe("node-doctor --production GitHub token", () => {
+        const TOKEN_REJECTED =
+            "this node's GitHub token was rejected by GitHub (expired or revoked); the node operator must renew GITHUB_TOKEN"
+
+        /** A curl that keeps its arguments and stdin, prints `stdout`, `stderr` and exits with `code`. */
+        function fakeCurl(stdout: string, stderr = "", code = 0): void {
+            const file = path.join(bin, "curl")
+            fs.writeFileSync(
+                file,
+                `#!${BASH}\nprintf '%s\\n' "$@" > "${bin}/curl.args"\n` +
+                    `while IFS= read -r l; do printf '%s\\n' "$l"; done > "${bin}/curl.stdin"\n` +
+                    `printf ${JSON.stringify(stderr)} >&2\nprintf ${JSON.stringify(stdout)}\nexit ${code}\n`,
+            )
+            fs.chmodSync(file, 0o755)
+        }
+        const curlFile = (name: string) => fs.readFileSync(path.join(bin, `curl.${name}`), "utf8")
+        const check = (token = "ghp_secret") =>
+            runCheck(`NODE_ENV_VALUES[GITHUB_TOKEN]=${JSON.stringify(token)}; check_github_token`)
+
+        it("passes when GitHub accepts the token, asking once with a bounded wait", () => {
+            fakeCurl("\\n200")
+            expect(check()).toEqual({ line: "PASS GitHub token: accepted by GitHub", fails: 0, warns: 0 })
+            const args = curlFile("args").split("\n")
+            expect(args).toContain("https://api.github.com/rate_limit")
+            expect(args[args.indexOf("--max-time") + 1]).toBe("10")
+        })
+
+        it("sends the token on stdin, never on the command line", () => {
+            fakeCurl("\\n200")
+            check()
+            expect(curlFile("args")).not.toContain("ghp_secret")
+            expect(curlFile("stdin")).toBe('header = "Authorization: Bearer ghp_secret"\n')
+        })
+
+        // Octokit's createTokenAuth strips /^(token|bearer) +/i before it sends the token.
+        it.each(["token ghp_secret", "Bearer ghp_secret", "BEARER   ghp_secret"])(
+            "drops the scheme from '%s', as the node's GitHub client does",
+            token => {
+                fakeCurl("\\n200")
+                expect(check(token)).toEqual({ line: "PASS GitHub token: accepted by GitHub", fails: 0, warns: 0 })
+                expect(curlFile("stdin")).toBe('header = "Authorization: Bearer ghp_secret"\n')
+            },
+        )
+
+        it("keeps a token that only starts with those letters", () => {
+            fakeCurl("\\n200")
+            check("tokenghp_secret")
+            expect(curlFile("stdin")).toBe('header = "Authorization: Bearer tokenghp_secret"\n')
+        })
+
+        it("fails with the cause when GitHub rejects the token", () => {
+            fakeCurl("\\n401")
+            const result = check()
+            expect(result.line).toBe(`FAIL GitHub token: ${TOKEN_REJECTED}`)
+            expect(result.fails).toBe(1)
+        })
+
+        it("warns when GitHub cannot be reached", () => {
+            fakeCurl("\\n000", "curl: (6) Could not resolve host: api.github.com\\n", 6)
+            const result = check()
+            expect(result.line).toBe(
+                "WARN GitHub token: api.github.com could not be reached (curl: (6) Could not resolve host: api.github.com): the node reads gists there, so allow outbound HTTPS to it",
+            )
+            expect(result).toMatchObject({ fails: 0, warns: 1 })
+        })
+
+        it("warns on any other answer", () => {
+            fakeCurl("\\n403")
+            const result = check()
+            expect(result.line).toStartWith("WARN GitHub token: api.github.com answered HTTP 403")
+            expect(result).toMatchObject({ fails: 0, warns: 1 })
+        })
+
+        it("skips with a warning when curl is not installed", () => {
+            const result = check()
+            expect(result.line).toStartWith("WARN GitHub token: skipped: curl is needed")
+            expect(result).toMatchObject({ fails: 0, warns: 1 })
+        })
+
+        it("leaves an empty token to the credentials check, without asking GitHub", () => {
+            fakeCurl("\\n401")
+            expect(check("  ")).toEqual({ line: "fails=0 warns=0", fails: 0, warns: 0 })
+            expect(fs.existsSync(path.join(bin, "curl.args"))).toBe(false)
+        })
+
+        it("says in --help that --production sends the token to api.github.com", () => {
+            const help = Bun.spawnSync([BASH, doctor, "--help"], { env: { PATH: process.env.PATH ?? "" } })
+            expect(help.exitCode).toBe(0)
+            expect(help.stdout.toString()).toContain("the GitHub token (one request to api.github.com)")
         })
     })
 
@@ -454,3 +639,230 @@ describe("node-doctor --production genesis file", () => {
     })
 })
 
+
+describe("node-doctor identity file mode", () => {
+    let dir: string
+    let tools: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-key-"))
+        tools = path.join(dir, "bin")
+        fs.mkdirSync(tools)
+        for (const name of ["stat", "wc", "grep"]) {
+            fs.symlinkSync(Bun.which(name) as string, path.join(tools, name))
+        }
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    const keyWithMode = (mode: number): string => {
+        const file = path.join(dir, ".demos_identity")
+        fs.writeFileSync(file, "0x" + "ab".repeat(64))
+        fs.chmodSync(file, mode)
+        return file
+    }
+
+    const sourced = (script: string, env: Record<string, string> = {}) =>
+        Bun.spawnSync([BASH, "-c", `source "${doctor}"; ${script}`], {
+            env: { PATH: tools, ...env },
+        }).stdout.toString().trim().split("\n")
+
+    const production = (file: string) => {
+        const lines = sourced(
+            `NODE_ENV_VALUES[IDENTITY_FILE]="${file}"; check_identity_file_mode; echo "fails=$PROD_FAILS warns=$PROD_WARNS"`,
+        )
+        return { line: lines[0], counts: lines.at(-1) }
+    }
+
+    it("--production passes 600 and stricter", () => {
+        for (const mode of [0o600, 0o400]) {
+            const file = keyWithMode(mode)
+            const out = production(file)
+            expect(out.line).toBe(`PASS identity file mode: ${file} ${mode.toString(8)}`)
+            expect(out.counts).toBe("fails=0 warns=0")
+        }
+    })
+
+    it("--production fails a key file group or other users can read", () => {
+        for (const mode of [0o640, 0o604, 0o644, 0o660]) {
+            const file = keyWithMode(mode)
+            const out = production(file)
+            expect(out.line).toStartWith(`FAIL identity file mode: ${file} has mode ${mode.toString(8)}`)
+            expect(out.line).toContain(`chmod 600 ${file}`)
+            expect(out.counts).toBe("fails=1 warns=0")
+        }
+    })
+
+    it("--production warns when the file is not on this host path", () => {
+        const out = production(path.join(dir, "missing"))
+        expect(out.line).toStartWith("WARN identity file mode:")
+        expect(out.counts).toBe("fails=0 warns=1")
+    })
+
+    it("the general identity check reports an open mode as a problem", () => {
+        const file = keyWithMode(0o644)
+        const lines = sourced(
+            `check_identity_file; echo "failed=$CHECKS_FAILED"; printf '%s\\n' "\${PROBLEM_MESSAGES[@]}"`,
+            { IDENTITY_FILE: file },
+        )
+        expect(lines[0]).toBe("failed=1")
+        expect(lines[1]).toContain("has mode 644")
+
+        fs.chmodSync(file, 0o600)
+        expect(sourced(`check_identity_file; echo "failed=$CHECKS_FAILED"`, { IDENTITY_FILE: file })[0]).toBe(
+            "failed=0",
+        )
+    })
+})
+
+describe("node-doctor --production genesis fork schedule", () => {
+    let dir: string
+    let tools: string
+    const BUN = process.execPath
+    // Pins of the right shape, derived so no key-looking literal is committed
+    const PIN = createHash("sha256").update("node-doctor schedule pin").digest("hex")
+
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-schedule-"))
+        tools = path.join(dir, "bin")
+        fs.mkdirSync(tools)
+        for (const name of ["env", "grep", "tail"]) {
+            fs.symlinkSync(Bun.which(name) as string, path.join(tools, name))
+        }
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    /** A mainnet chain id genesis declaring every fork this build knows, minus `leave`. */
+    function writeGenesis(leave: string[] = []): string {
+        const forks: Record<string, unknown> = {}
+        for (const name of Object.keys(DEFAULT_FORK_CONFIG)) {
+            if (!leave.includes(name)) forks[name] = { activationHeight: null }
+        }
+        const file = path.join(dir, "genesis.json")
+        fs.writeFileSync(file, JSON.stringify({ properties: { id: 4242, shardSize: 10 }, forks }))
+        return file
+    }
+
+    function check(settings: Record<string, string>, composeJson = "", env: Record<string, string> = {}) {
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ") || ":"
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; COMPOSE_CONFIG_JSON="$DOCTOR_COMPOSE"; check_genesis_schedule; echo "fails=$PROD_FAILS warns=$PROD_WARNS"`],
+            { cwd: repo, env: { PATH: tools, DOCTOR_COMPOSE: composeJson, ...env } },
+        )
+        const lines = run.stdout.toString().trim().split("\n")
+        return { lines: lines.slice(0, -1), counts: lines.at(-1) }
+    }
+
+    const withBun = () => fs.symlinkSync(BUN, path.join(tools, "bun"))
+
+    it("fails a genesis the node refuses at boot, with the node's own reason", () => {
+        withBun()
+        const file = writeGenesis(["l2psSettlement", "tlsnVerified"])
+        const [reason] = genesisScheduleProblems({
+            fileGenesisData: JSON.parse(fs.readFileSync(file, "utf8")),
+            pin: PIN,
+            blockPin: PIN,
+        })
+        expect(reason).toStartWith("the genesis does not declare l2psSettlement, tlsnVerified")
+        const out = check({ DEMOS_GENESIS_FILE: file, EXPECTED_GENESIS_HASH: PIN, EXPECTED_GENESIS_BLOCK_HASH: PIN })
+        expect(out.lines).toEqual([`FAIL genesis fork schedule: the node refuses to boot on it: ${reason}`])
+        expect(out.counts).toBe("fails=1 warns=0")
+    }, 30_000)
+
+    it("passes a genesis the node's boot check accepts", () => {
+        withBun()
+        const out = check({ DEMOS_GENESIS_FILE: writeGenesis(), EXPECTED_GENESIS_HASH: PIN, EXPECTED_GENESIS_BLOCK_HASH: PIN })
+        expect(out.lines).toEqual(["PASS genesis fork schedule: the node's boot check accepts it"])
+        expect(out.counts).toBe("fails=0 warns=0")
+    }, 30_000)
+
+    it("warns that the check was skipped on a bare-metal host without bun", () => {
+        const out = check({ DEMOS_GENESIS_FILE: writeGenesis(["tlsnVerified"]) })
+        expect(out.lines[0]).toStartWith("WARN genesis fork schedule: skipped: bun is needed")
+        expect(out.counts).toBe("fails=0 warns=1")
+    })
+
+    it("runs the check in the node image under compose, with the container's settings", () => {
+        // Stands in for `docker compose run`: the container gets the node's environment
+        const expected = "compose run --rm --no-deps -T node bun scripts/genesis-schedule-check.ts"
+        fs.writeFileSync(
+            path.join(tools, "docker"),
+            `#!${BASH}\n[ "$*" = "${expected}" ] || { echo "unexpected docker $*" >&2; exit 125; }\nshift 7\nexec "${BUN}" "$@"\n`,
+        )
+        fs.chmodSync(path.join(tools, "docker"), 0o755)
+        const compose = JSON.stringify({ services: { node: {} } })
+        const file = writeGenesis(["tlsnVerified"])
+        const refused = check({}, compose, { DEMOS_GENESIS_FILE: file, EXPECTED_GENESIS_HASH: PIN })
+        expect(refused.lines).toHaveLength(1)
+        expect(refused.lines[0]).toStartWith(
+            "FAIL genesis fork schedule: the node refuses to boot on it: the genesis does not declare tlsnVerified",
+        )
+
+        fs.writeFileSync(path.join(tools, "docker"), `#!${BASH}\necho "no such service: node" >&2\nexit 1\n`)
+        const broken = check({}, compose)
+        expect(broken.lines).toEqual([
+            "FAIL genesis fork schedule: the node's boot check did not run (exit 1): no such service: node",
+        ])
+    }, 30_000)
+})
+
+describe("node-doctor --production web2 identity credentials under keylessWeb2Identity", () => {
+    let dir: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-keyless-"))
+        fs.symlinkSync(PYTHON3, path.join(dir, "python3"))
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    function genesisWith(keyless: unknown, raw?: string): string {
+        const file = path.join(dir, "genesis.json")
+        const forks = keyless === undefined ? {} : { keylessWeb2Identity: keyless }
+        fs.writeFileSync(file, raw ?? JSON.stringify({ properties: { id: 4242, shardSize: 3 }, forks }))
+        return file
+    }
+
+    /** The credential lines after check_genesis_file read `file`, every credential empty. */
+    function credentialLines(file: string, token = ""): string[] {
+        const settings = { DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir, GITHUB_TOKEN: token }
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ")
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; check_genesis_file >/dev/null; check_web2_identity_credentials; check_github_token`],
+            { env: { PATH: dir } },
+        )
+        return run.stdout.toString().trim().split("\n")
+    }
+
+    it("reports the credentials as not needed when the genesis schedules the fork at 0", () => {
+        const lines = credentialLines(genesisWith({ activationHeight: 0 }), "ghp_expired")
+        expect(lines).toEqual([
+            "PASS GITHUB_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so GitHub identity links go through TLSNotary only",
+            "PASS DISCORD_BOT_TOKEN: not needed: the genesis schedules keylessWeb2Identity at 0, so Discord identity links go through TLSNotary only",
+            "PASS RAPID_API_KEY: not needed: the genesis schedules keylessWeb2Identity at 0, so Twitter/X identity links go through TLSNotary only",
+        ])
+    })
+
+    it("reads a height written as 0.0 as 0, like the node", () => {
+        const raw = '{"properties":{"id":4242,"shardSize":3},"forks":{"keylessWeb2Identity":{"activationHeight":0.0}}}'
+        const lines = credentialLines(genesisWith(undefined, raw))
+        expect(lines.filter(l => l.startsWith("FAIL"))).toEqual([])
+        expect(lines).toHaveLength(3)
+    })
+
+    it("still fails empty credentials when the fork is absent, unscheduled or later", () => {
+        for (const keyless of [
+            undefined,
+            { activationHeight: null },
+            { activationHeight: 10 },
+            { activationHeight: "0" },
+            { activationHeight: false },
+        ]) {
+            const lines = credentialLines(genesisWith(keyless))
+            expect([keyless, lines.filter(l => l.startsWith("FAIL")).map(l => l.split(":")[0])]).toEqual([
+                keyless,
+                ["FAIL GITHUB_TOKEN", "FAIL DISCORD_BOT_TOKEN", "FAIL RAPID_API_KEY"],
+            ])
+        }
+    })
+})

@@ -53,6 +53,21 @@ describe("metrics endpoint exposure", () => {
 })
 
 describe("block-stall alerting is loaded", () => {
+    it("runs these monitoring checks in the consensus suite", () => {
+        expect(read("scripts/test-consensus.sh")).toContain("testing/monitoring/metricsExposure.test.ts")
+    })
+
+    it("recognizes the temporary signing stop in both operator guides", () => {
+        const guidance = "A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block that committed but whose follow-up failed, or whose commit could not be confirmed; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting."
+        for (const file of ["docs/runbooks/mainnet-monitoring.md", "monitoring/prometheus/alerts/consensus.yml"]) {
+            expect(read(file)).toContain(guidance)
+            expect(read(file)).not.toContain("implies no second key")
+            expect(read(file)).toContain("If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting.")
+            expect(read(file)).toContain("the log says the signing record belongs to another key, run that key's identity, or, after confirming the key now configured runs nowhere else, move that key's signing-state files away together with its identity.")
+            expect(read(file)).toContain("For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again.")
+        }
+    })
+
     it("root compose Prometheus mounts the alert rules directory", () => {
         expect(read("docker-compose.yml")).toContain(
             "./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro",
@@ -66,6 +81,64 @@ describe("block-stall alerting is loaded", () => {
         expect(read("monitoring/prometheus/alerts/node-health.yml")).toContain(
             'absent(up{job="demos-node"})',
         )
+    })
+
+    it("DbDown reads a gauge the node registers", () => {
+        expect(read("monitoring/prometheus/alerts/node-health.yml")).toMatch(
+            /alert: DbDown\s+expr: demos_db_up == 0/,
+        )
+        expect(read("src/features/metrics/MetricsCollector.ts")).toMatch(
+            /"db_up"/,
+        )
+    })
+
+    it("says the probe duration gauge includes getting a pool connection and is stale while demos_db_up is 0", () => {
+        expect(read("src/features/metrics/MetricsCollector.ts")).toMatch(
+            /"Seconds the last successful Postgres probe took, including getting a pool connection and SELECT 1; stale while demos_db_up is 0"/,
+        )
+        expect(
+            read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " "),
+        ).toContain(
+            "`demos_db_probe_duration_seconds`: how long the last successful probe took, including getting a pool connection, so a busy node pool also raises it.",
+        )
+        expect(
+            read("docs/runbooks/mainnet-monitoring.md").replace(/\s+/g, " "),
+        ).toContain(
+            "It is not updated by failed probes, so it is stale while `demos_db_up` is 0.",
+        )
+    })
+
+    // YAML comment lines joined into one line of text.
+    const flat = (s: string) => s.replace(/\n\s*#/g, " ").replace(/\s+/g, " ")
+
+    it("says DbDown also fires when the node's own pool is full", () => {
+        const rules = flat(read("monitoring/prometheus/alerts/node-health.yml"))
+        const runbook = flat(read("docs/runbooks/mainnet-monitoring.md"))
+        expect(rules).toContain(
+            "SELECT 1 through the node's connection pool fails or gets no answer within 5 s, or the node's pool is exhausted.",
+        )
+        expect(runbook).toContain(
+            "`no answer within 5000 ms`: Postgres, or the network path to it, hangs, or the node's own connection pool is fully in use. Check the node's connections in `pg_stat_activity` before you restart Postgres.",
+        )
+    })
+
+    it("says DbDown does not page an outage with a good probe each minute", () => {
+        const rules = flat(read("monitoring/prometheus/alerts/node-health.yml"))
+        const runbook = flat(read("docs/runbooks/mainnet-monitoring.md"))
+        expect(rules).toContain(
+            "An outage with at least one good probe each minute (for example Postgres crash-looping and restarting) does not fire DbDown either; it is seen only through HeightStalled, if blocks stop.",
+        )
+        expect(runbook).toContain(
+            "An outage with at least one good probe each minute, for example Postgres crash-looping and restarting, does not fire it; it is seen only through `HeightStalled`, if blocks stop",
+        )
+    })
+
+    it("says DbDown clears once the node's pool has a free connection, and to restart a node it keeps firing on", () => {
+        const runbook = flat(read("docs/runbooks/mainnet-monitoring.md"))
+        expect(runbook).toContain(
+            "so the alert clears with the next probe once the node's pool has a free connection; if it keeps firing while Postgres answers (`psql` works), or the height still does not advance a few minutes later, restart the node.",
+        )
+        expect(runbook).not.toContain("without a node restart")
     })
 })
 

@@ -1,57 +1,86 @@
 {
-  "properties": {
-      "id": 1,
-      "name": "DEMOS",
-      "currency": "DEM",
-      "shardSize": 10
-  },
-  "mutables": {
-      "minBlocksForValidationOnlineStatus": 4
-  },
-  "forks": {
-      "osDenomination": {
-          "activationHeight": 0
-      },
-      "gasFeeSeparation": {
-          "activationHeight": null,
-          "treasuryAddress": "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23"
-      }
-  },
-  "balances": [],
-  "timestamp": "1692734616",
-  "status": "confirmed",
-  "validators": [
-      {
-          "address": "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
-          "status": "2",
-          "connection_url": "https://node2.demos.sh",
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      },
-      {
-          "address": "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
-          "status": "2",
-          "connection_url": "https://node3.demos.sh",
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      },
-      {
-          "address": "0x62f54cefb244538498b18687dbbb7faeb607b9ea51e8d9bcb952fd038b89ece9",
-          "status": "2",
-          "connection_url": null,
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      },
-      {
-          "address": "0xe6313748a6bbd8e0ebdb578ca0df5f050711819c8dba291930969f72a7f5cdac",
-          "status": "2",
-          "connection_url": null,
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      }
-  ]
+    "properties": {
+        "id": 8587492,
+        "name": "DEMOS",
+        "currency": "DEM",
+        "shardSize": 10
+    },
+    "mutables": {
+        "minBlocksForValidationOnlineStatus": 4
+    },
+    "forks": {
+        "osDenomination": {
+            "activationHeight": 0
+        },
+        "gasFeeSeparation": {
+            "activationHeight": null,
+            "treasuryAddress": "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23"
+        }
+    },
+    "balances": [
+        [
+            "0x1628e929d5105bbc2c53e386f9e3b6393b3e630b63757409025cacae95bc45c9",
+            "230000000000000000"
+        ],
+        [
+            "0x6c7c089b60f1a077ea63a6bdd4c7e24cda47ed38e2cde5c9140e00ac2d14d700",
+            "160000000000000000"
+        ],
+        [
+            "0x0e896c3d82ccb723cfee6ef514e6828e98b4ef1267bbdfd8f1baaf31000e22c6",
+            "30000000000000000"
+        ],
+        [
+            "0x404aaf4c9b6875552a21987e2d841a822529b346b6b0820f9107daa758cd1aa6",
+            "100000000000000000"
+        ],
+        [
+            "0xa90b8c4df9127fc14e6745edae4aae5675f5c047a7c071b2a0c8fde0784d65f8",
+            "300000000000000000"
+        ],
+        [
+            "0x2ad5030c32f3b5e4b4a5de68254dbb889046fd012c3dc3a1f58bf1ce26620e21",
+            "140000000000000000"
+        ],
+        [
+            "0x11dced2f2ce8ebd2f1eac8ff28da1680445a4464839ff9b096ff93227c2378d2",
+            "40000000000000000"
+        ]
+    ],
+    "timestamp": "1692734616",
+    "status": "confirmed",
+    "validators": [
+        {
+            "address": "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
+            "status": "2",
+            "connection_url": "https://node2.demos.sh",
+            "staked_amount": "1000000000000000000",
+            "first_seen": 0,
+            "valid_at": 0
+        },
+        {
+            "address": "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
+            "status": "2",
+            "connection_url": "https://node3.demos.sh",
+            "staked_amount": "1000000000000000000",
+            "first_seen": 0,
+            "valid_at": 0
+        },
+        {
+            "address": "0x62f54cefb244538498b18687dbbb7faeb607b9ea51e8d9bcb952fd038b89ece9",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000000000",
+            "first_seen": 0,
+            "valid_at": 0
+        },
+        {
+            "address": "0xe6313748a6bbd8e0ebdb578ca0df5f050711819c8dba291930969f72a7f5cdac",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000000000",
+            "first_seen": 0,
+            "valid_at": 0
+        }
+    ]
 }

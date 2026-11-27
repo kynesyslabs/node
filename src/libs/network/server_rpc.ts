@@ -4,6 +4,7 @@ import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
 import Chain from "../blockchain/chain"
+import { asGenesisBlockContent } from "../blockchain/genesis/genesisBlockContent"
 import Mempool from "../blockchain/mempool"
 import GCR from "../blockchain/gcr/gcr"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
@@ -13,7 +14,8 @@ import { isOperatorRequest } from "./operatorAuth"
 import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
 import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
-import { BODY_BOUND_METHODS } from "./peerHttpAuth"
+import { BODY_BOUND_METHODS, BODY_BOUND_NODE_CALLS, SUDO_METHODS } from "./peerHttpAuth"
+import { admitSudoCall } from "./sudoReplayFloor"
 import Hashing from "src/libs/crypto/hashing"
 import { handleError } from "src/errors"
 
@@ -30,6 +32,7 @@ import {
     IDENTITIES_MAX_QUEUE,
     IDENTITIES_ACQUIRE_TIMEOUT_MS,
 } from "src/utilities/constants"
+import { nftGatingScheduled } from "@/forks/nftValidatorGatingGate"
 
 // Re-export for backward compatibility
 export { emptyResponse }
@@ -91,11 +94,14 @@ export async function serverRpcBun() {
         bodyLimit({
             maxBytes: rpcMaxBodyBytes,
             peerMaxBytes: rpcPeerMaxBodyBytes,
-            // Only a signed request from a merge-eligible validator may send
-            // more than the public limit: the consensus mempool merge does.
+            // Only a request a merge-eligible validator signed for this node
+            // may send more than the public limit: the consensus mempool
+            // merge does.
             isPeer: async req => {
                 const auth = getAuthContext(req)
-                if (!auth.verified || !auth.publicKey) return false
+                if (!auth.verified || !auth.publicKey || !auth.audienceBound) {
+                    return false
+                }
                 const key = auth.publicKey.includes(":")
                     ? auth.publicKey.split(":")[1]
                     : auth.publicKey
@@ -319,8 +325,9 @@ export async function serverRpcBun() {
 
     server.get("/genesis", async () => {
         try {
-            const genesisBlock = await Chain.getGenesisBlock()
-            let genesisData = genesisBlock.content.extra?.genesisData || null
+            let genesisData =
+                asGenesisBlockContent((await Chain.getGenesisBlock()).content)
+                    .extra?.genesisData || null
 
             if (typeof genesisData === "string") {
                 try {
@@ -493,8 +500,51 @@ export async function serverRpcBun() {
                 )
             }
 
+            const nodeCallMessage =
+                payload.method === "nodeCall" ? (payload.params?.[0] as any)?.message : undefined
+            if (
+                typeof nodeCallMessage === "string" &&
+                BODY_BOUND_NODE_CALLS.has(nodeCallMessage) &&
+                !(authCtx.bodyHash && authCtx.audienceBound)
+            ) {
+                return jsonResponse(
+                    {
+                        result: 401,
+                        response: `${nodeCallMessage} requires a body-bound signature naming this node as the audience`,
+                        require_reply: false,
+                        extra: null,
+                    },
+                    401,
+                )
+            }
+
+            // Peer and sudo methods alike: a request signed for one node is
+            // not a request to this one.
+            if (BODY_BOUND_METHODS.has(payload.method) && !authCtx.audienceBound) {
+                return jsonResponse(
+                    {
+                        result: 401,
+                        response: `${payload.method} must be signed for this node: name its public key as the audience`,
+                        require_reply: false,
+                        extra: null,
+                    },
+                    401,
+                )
+            }
+
             const sender = authCtx.publicKey || ""
-            const response = await processPayload(payload, sender)
+            // Only a call from the sudo key may raise the floor; any other
+            // sender is refused by processPayload without touching it.
+            if (SUDO_METHODS.has(payload.method) && sender === getSharedState.SUDO_PUBKEY) {
+                const refusal = admitSudoCall(getSharedState.identityFile, authCtx.timestamp)
+                if (refusal) {
+                    return jsonResponse(
+                        { result: 401, response: refusal, require_reply: false, extra: null },
+                        401,
+                    )
+                }
+            }
+            const response = await processPayload(payload, sender, clientIP)
 
             // Surface current rate-limit window so SDK clients can
             // self-throttle (best-effort: skip when no IP data yet).
@@ -514,7 +564,7 @@ export async function serverRpcBun() {
     })
 
     // ── Feature routes (lazy loaded) ──────────────────────────
-    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+    if (Config.getInstance().tlsnotary.enabled) {
         try {
             const { registerTLSNotaryRoutes } =
                 await import("@/features/tlsnotary/routes")
@@ -530,6 +580,19 @@ export async function serverRpcBun() {
         registerStorageProgramRoutes(server)
     } catch (error) {
         log.warning("[RPC] Failed to register StorageProgram routes: " + error)
+    }
+
+    // Staking page and its proof relay; the routes answer only while this
+    // node has no seat. A network that never schedules NFT gating has no use
+    // for them, and they relay to Solana on the node's endpoints.
+    if (nftGatingScheduled()) {
+        try {
+            const { registerStakingValidationRoutes } =
+                await import("@/features/staking/validationPage")
+            registerStakingValidationRoutes(server)
+        } catch (error) {
+            log.warning("[RPC] Failed to register staking page routes: " + error)
+        }
     }
 
     log.info(`[RPC Call] Server is running on ${rpcBind}:${port}`, true)

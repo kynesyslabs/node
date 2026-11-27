@@ -73,8 +73,13 @@ mock.module("./records", () => ({
     buildHeightsRecord: async () => ({}),
     isHeightsRecordShape: () => false,
 }))
+let blockValidation: { result: string; knownHash?: string; block?: unknown } = { result: "ignore" }
+const confirmedHashes: string[] = []
+const applyingBlocks = new Set<string>()
 mock.module("./validators", () => ({
-    validateBlockMessage: async () => ({ result: "ignore" }),
+    validateBlockMessage: async () => blockValidation,
+    applyingBlocks,
+    confirmBlock: (hash: string) => { confirmedHashes.push(hash) },
     validateHeightsMessage: async () => ({ result: "ignore" }),
     validateTxMessage: async () => ({ result: "ignore" }),
 }))
@@ -179,6 +184,9 @@ beforeEach(() => {
     degradedGauge.length = 0
     relaunchFailures = 0
     stakeLookupMs = 0
+    blockValidation = { result: "ignore" }
+    confirmedHashes.length = 0
+    applyingBlocks.clear()
     exitCalls = []
     exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
         exitCalls.push(code)
@@ -196,6 +204,37 @@ afterEach(async () => {
 })
 
 describe("GossipManager sidecar lifecycle", () => {
+    it("allows retry after applying is skipped or fails", async () => {
+        const gm = manager() as any
+        const send = spyOn(gm, "send").mockImplementation(() => undefined)
+        const hash = "ef".repeat(32)
+        blockValidation = { result: "accept", block: { number: 1, hash } }
+        const apply = spyOn(gm, "applyBlock").mockImplementation(async () => false)
+        await gm.onGossipMessage("demos/blocks/1", Buffer.from("{}"), "relay")
+        apply.mockImplementation(async () => { throw new Error("apply failed") })
+        await expect(gm.onGossipMessage("demos/blocks/1", Buffer.from("{}"), "relay")).rejects.toThrow("apply failed")
+        expect(applyingBlocks.size).toBe(0)
+        apply.mockImplementation(async () => true)
+        await gm.onGossipMessage("demos/blocks/1", Buffer.from("{}"), "relay")
+        expect(apply).toHaveBeenCalledTimes(3)
+        expect(confirmedHashes).toEqual([hash])
+        expect(send).toHaveBeenCalledWith({ type: "remember_block", hash })
+    })
+
+    it("applies one accepted copy while another copy of the same hash is in flight", async () => {
+        const gm = manager() as any
+        blockValidation = { result: "accept", block: { number: 1, hash: "12".repeat(32) } }
+        let finishApply!: (applied: boolean) => void
+        const apply = spyOn(gm, "applyBlock").mockImplementation(() => new Promise<boolean>(resolve => { finishApply = resolve }))
+        const first = gm.onGossipMessage("demos/blocks/1", Buffer.from("{}"), "relay")
+        await gm.onGossipMessage("demos/blocks/1", Buffer.from("{}"), "relay")
+        expect(applyingBlocks.has("12".repeat(32))).toBe(true)
+        expect(apply).toHaveBeenCalledTimes(1)
+        finishApply(true)
+        await first
+        expect(applyingBlocks.size).toBe(0)
+    })
+
     it("keeps the node up when a relaunch times out on IPC, and recovers once the sidecar comes back", async () => {
         const gm = manager()
         await gm.start()

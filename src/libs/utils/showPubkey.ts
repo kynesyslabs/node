@@ -98,6 +98,14 @@ async function mnemonicToSeed(mnemonic: string): Promise<Uint8Array> {
         process.exit(1)
     }
 
+    if (mnemonic.normalize("NFKD") !== mnemonic) {
+        console.error(
+            "Error: Invalid mnemonic - the phrase is not in canonical form (full-width letters, ideographic or no-break spaces). " +
+                "Retype it in plain lowercase ASCII letters with ASCII spaces between the words",
+        )
+        process.exit(1)
+    }
+
     // Use raw mnemonic string to match wallet/SDK derivation
     const hashable = mnemonic
     const seedHash = Hashing.sha3_512(hashable)
@@ -123,8 +131,8 @@ async function main() {
     // Read the mnemonic from identity file
     const mnemonic = fs.readFileSync(identityFile, "utf8").trim()
 
-    // Check if this looks like a mnemonic (has spaces) vs old hex format
-    if (!mnemonic.includes(" ")) {
+    // Check if this looks like a mnemonic (has whitespace) vs old hex format
+    if (!/\s/.test(mnemonic)) {
         console.error(
             "Error: Identity file appears to use old format (hex private key).",
         )

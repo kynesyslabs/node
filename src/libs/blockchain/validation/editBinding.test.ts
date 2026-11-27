@@ -86,6 +86,13 @@ const builders = {
         ),
 }
 
+/** Schedules nftValidatorGating on the fork config `chainIs` set up. */
+function nftGatingFrom(height: number): void {
+    ;(getSharedState.forkConfig as unknown as Record<string, unknown>).nftValidatorGating = {
+        activationHeight: height,
+    }
+}
+
 async function wire(kind: keyof typeof builders): Promise<Transaction> {
     return onTheWire(await builders[kind]())
 }
@@ -207,10 +214,38 @@ describe("a forged edit shipped by a peer that signed the transaction itself", (
         await refusedEverywhere(tx)
     })
 
-    it("a dropped gas edit, which would make the transaction free", async () => {
+    it("a dropped gas edit on an unstake, which pays gas before nftValidatorGating", async () => {
         const tx = await wire("unstake")
         tx.content.gcr_edits = edits(tx).filter(e => e.type !== "balance") as unknown as GCREdit[]
         await refusedEverywhere(tx)
+    })
+
+    it("a dropped gas edit, which would make the transaction free", async () => {
+        const tx = await wire("native")
+        const gas = edits(tx).filter(e => e.type === "balance" && e.operation === "remove")[1]
+        tx.content.gcr_edits = edits(tx).filter(e => e !== gas) as unknown as GCREdit[]
+        await refusedEverywhere(tx)
+    })
+
+    it("a gas edit on a stake or unstake, which pay none under nftValidatorGating", async () => {
+        for (const kind of ["stake", "unstake"] as const) {
+            // The released SDK still ships gas on seat transactions; the
+            // edits a gating-aware client ships carry none.
+            const tx = await wire(kind)
+            tx.content.gcr_edits = edits(tx).filter(e => e.type !== "balance") as unknown as GCREdit[]
+            for (const post of [true, false]) {
+                chainIs(post)
+                nftGatingFrom(0)
+                expect(await verifyAdmissionEdits(tx)).toEqual({ ok: true })
+            }
+            edits(tx).push({ type: "balance", operation: "remove", account: SENDER, amount: String(OS), isRollback: false, txhash: "" })
+            for (const post of [true, false]) {
+                chainIs(post)
+                nftGatingFrom(0)
+                expect((await verifyAdmissionEdits(tx)).ok).toBe(false)
+                expect((await verifyEditsAtApply(tx)).ok).toBe(false)
+            }
+        }
     })
 
     it("the same edits in another order", async () => {
@@ -328,6 +363,14 @@ describe("sender binding", () => {
             expect(verifySenderBinding(sender({ gcr_edits: [own] })).ok).toBe(true)
         })
     }
+
+    it("lets a challenge evict another validator under nftValidatorGating: the evidence vouches for it", () => {
+        const evict = { type: "validatorStake", account: VICTIM, operation: "evict", amount: "0", evidenceTx: "sig", proofTx: "sig" }
+        const challenge = sender({ type: "validatorChallenge", gcr_edits: [evict] })
+        expect(verifySenderBinding(challenge).ok).toBe(false)
+        nftGatingFrom(0)
+        expect(verifySenderBinding(challenge).ok).toBe(true)
+    })
 
     it("leaves balance edits alone: paying another account is what a transfer is", () => {
         const tx = sender({ gcr_edits: [{ type: "balance", operation: "add", account: VICTIM, amount: "1" }] })
@@ -637,6 +680,10 @@ describe("the editBinding fork gates admission as well as apply", () => {
             messageBinding: false,
             stakeChecks: false,
             stakingOpen: true,
+            l2psOff: false,
+            tlsnOff: false,
+            nftGating: false,
+            settling: false,
             sendBound: false,
             canonical: false,
             feeBound: false,
@@ -652,6 +699,10 @@ describe("the editBinding fork gates admission as well as apply", () => {
             messageBinding: false,
             stakeChecks: false,
             stakingOpen: true,
+            l2psOff: false,
+            tlsnOff: false,
+            nftGating: false,
+            settling: false,
             sendBound: false,
             canonical: false,
             feeBound: false,

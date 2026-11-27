@@ -9,7 +9,13 @@ import PeerManager from "./PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import Hashing from "../crypto/hashing"
-import { BODY_HASH_HEADER, httpAuthMessage } from "../network/peerHttpAuth"
+import {
+    AUDIENCE_HEADER,
+    audienceKey,
+    BODY_HASH_HEADER,
+    httpAuthMessage,
+    nextAuthTimestamp,
+} from "../network/peerHttpAuth"
 
 export interface SyncData {
     status: boolean
@@ -303,7 +309,7 @@ export default class Peer {
         timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
         { offlineOnTimeout = true }: { offlineOnTimeout?: boolean } = {},
     ): Promise<RPCResponse> {
-        const timestamp = Date.now()
+        const timestamp = nextAuthTimestamp()
         const timestampReadable = new Date(timestamp).toISOString()
         log.info(
             `[RPC Call] [${request.method}] [${timestampReadable}] Making RPC call to: ${this.connection.string}`,
@@ -316,6 +322,9 @@ export default class Peer {
         // Sent as this exact string so the receiver hashes the bytes we signed.
         const body = JSON.stringify(request)
         const bodyHash = Hashing.sha256(body)
+        // The node this request is for, as the signature names it: a request
+        // signed for one node is not a request to any other.
+        const audience = audienceKey(this.identity ?? "")
 
         // Unknown network: a signature without it would verify anywhere.
         const genesisHash = getSharedState.genesisBlockHash
@@ -340,7 +349,13 @@ export default class Peer {
             const bufferSignature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(
-                    httpAuthMessage(genesisHash!, pubkey, timestamp, bodyHash),
+                    httpAuthMessage(
+                        genesisHash!,
+                        pubkey,
+                        timestamp,
+                        bodyHash,
+                        audience,
+                    ),
                 ),
             )
 
@@ -375,7 +390,10 @@ export default class Peer {
                         signature,
                         timestamp: timestamp,
                         ...(isAuthenticated
-                            ? { [BODY_HASH_HEADER]: bodyHash }
+                            ? {
+                                  [BODY_HASH_HEADER]: bodyHash,
+                                  [AUDIENCE_HEADER]: audience,
+                              }
                             : {}),
                     },
                     timeout: RPC_TIMEOUT_MS,

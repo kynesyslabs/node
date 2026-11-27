@@ -17,6 +17,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
     AbortConsensusError,
     PEERLIST_PHASE,
+    SUPERSEDED_ROUND,
 } from "./types/secretaryManager"
 import {
     BlockInvalidError,
@@ -29,7 +30,10 @@ import HandleGCR, {
     type PendingGCRWrite,
 } from "src/libs/blockchain/gcr/handleGCR"
 import { StateReadError } from "src/libs/blockchain/gcr/stateReadError"
-import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
+import {
+    CommittedBlockFollowUpError,
+    stopAfterCommittedBlockFailure,
+} from "src/libs/blockchain/committedBlockError"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -52,18 +56,24 @@ import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
 } from "./routines/forkScheduleAbstain"
-import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
+import {
+    ensureWindowChecked,
+    onShardMemberUnresponsive,
+} from "@/libs/peer/routines/forkScheduleWatch"
 import {
     filterMempoolByRefBlock,
     type FailedTranscation,
     type MempoolTransaction,
 } from "./routines/mempoolFilters"
+import { signedReferenceBlock } from "@/libs/blockchain/referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
 import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { isForkActive } from "@/forks/forkGates"
+import { l2psOffAt } from "@/forks/l2psGate"
 import {
     MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
@@ -88,6 +98,7 @@ import {
 } from "./commitLock/candidate"
 import { broadcastPrecommit, lockAndPrecommit } from "./commitLock/precommit"
 import { proofOfLock } from "./commitLock/votes"
+import { latestPrevote, withLockMutex } from "./commitLock/roundState"
 import { CosignTimestampError } from "./routines/cosignTimestamp"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
@@ -127,6 +138,7 @@ export const txMap: Map<TxHash, MempoolTransaction> = new Map()
  * The main consensus routine calling all the subroutines.
  */
 export async function consensusRoutine(): Promise<void> {
+    if (!getSharedState.runMainLoop) return
     if (isConsensusAlreadyRunning()) {
         log.warning(
             "[consensusRoutine] Consensus loop already running: keeping it running (returning)",
@@ -454,7 +466,7 @@ export async function consensusRoutine(): Promise<void> {
                         tx.attrs = {
                             code: failed.code,
                             message: failed.message,
-                            reference_block: tx.reference_block,
+                            reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                             ...(failed.attrs ?? {}),
                         }
                     }
@@ -556,7 +568,7 @@ export async function consensusRoutine(): Promise<void> {
                         tx.attrs = {
                             code: failed.code,
                             message: failed.message,
-                            reference_block: tx.reference_block,
+                            reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                             ...(failed.attrs ?? {}),
                         }
                     }
@@ -572,7 +584,7 @@ export async function consensusRoutine(): Promise<void> {
                     if (tx) {
                         tx.status = TRANSACTION_STATUS.CONFIRMED
                         tx.attrs = {
-                            reference_block: tx.reference_block,
+                            reference_block: signedReferenceBlock(tx) ?? tx.reference_block,
                         }
                     }
                 }
@@ -580,7 +592,7 @@ export async function consensusRoutine(): Promise<void> {
 
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all transactions in the block are either confirmed or failed
-            const states = new Set([
+            const states = new Set<string>([
                 TRANSACTION_STATUS.CONFIRMED,
                 TRANSACTION_STATUS.FAILED,
             ])
@@ -600,27 +612,33 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            // Apply pending L2PS proofs to L1 state
-            // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
-            // Their edits join the block's pending state and commit with it.
-            const l2psStart = Date.now()
-            const l2psResult = await L2PSConsensus.applyPendingProofs(
-                blockRef,
-                false,
-                pendingGCR,
-            )
-            const l2psEnd = Date.now()
-            log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
+            // Before l2psSettlement only the entry node held these proofs, so
+            // only it moved the balances (DEM-816). Under the fork a batch
+            // settles inside applyTransactions on every node instead.
+            // Under l2psGate none apply: a proof debits the L2 fee with no
+            // credit, and the proofs a node holds are its own, not the block's.
+            if (!l2psSettlementActive() && !l2psOffAt(blockRef - 1)) {
+                // Their edits join the block's pending state and commit with it.
+                const l2psStart = Date.now()
+                const l2psResult = await L2PSConsensus.applyPendingProofs(
+                    blockRef,
+                    false,
+                    pendingGCR,
+                    block.content.timestamp,
+                )
+                const l2psEnd = Date.now()
+                log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
 
-            if (l2psResult.proofsApplied > 0) {
-                log.info(
-                    `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
-                )
-            }
-            if (l2psResult.proofsFailed > 0) {
-                log.warning(
-                    `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
-                )
+                if (l2psResult.proofsApplied > 0) {
+                    log.info(
+                        `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+                    )
+                }
+                if (l2psResult.proofsFailed > 0) {
+                    log.warning(
+                        `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+                    )
+                }
             }
             log.debug(
                 "[consensusRoutine] [result] Block is valid with " +
@@ -756,10 +774,12 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        // Only a diverged round gets here
         console.error(error)
         console.error((error as Error).stack)
-        log.error(`[CONSENSUS] ${error}`)
-        process.exit(1)
+        log.error(`[CONSENSUS] ${error}; shutting down`)
+        exitReason = "diverged"
+        stopAfterCommittedBlockFailure(error as CommittedBlockFollowUpError)
     } finally {
         markStep("consensus", null)
         releaseSyncLock?.()
@@ -790,7 +810,7 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             if (
-                !new Set(["blockTimestampNotReceived", "abortConsensus"]).has(
+                !new Set(["blockTimestampNotReceived", "abortConsensus", "diverged"]).has(
                     exitReason,
                 ) &&
                 txs.length !== blockTxs.length
@@ -898,11 +918,22 @@ async function mergeAndOrderMempools(
     // relay txs, our locked block's txs) is left out of the round, so the
     // round's pool is the one peers holding the same txs keep.
     const capped = blockCapsActive(blockRef)
-    const preMempool = await Mempool.lock.runExclusive(async () => {
-        if (capped) await Mempool.capPoolSenders(blockRef)
-        const pool = await Mempool.getMempool(blockRef)
-        return capped ? holdSendersToCap(pool) : pool
-    })
+    // Seat transactions the background re-judge refused leave here, before
+    // the round reads its pool and never during it. Under the commit lock
+    // mutex too, so no precommit writes a lock between the check and the
+    // deletion; the open prevote's candidate may still be locked by one.
+    const preMempool = await withLockMutex(() =>
+        Mempool.lock.runExclusive(async () => {
+            const prevote = latestPrevote()
+            await Mempool.applySeatRefusals(
+                blockRef,
+                new Set(prevote?.open ? prevote.inputs.orderedTransactions : []),
+            )
+            if (capped) await Mempool.capPoolSenders(blockRef)
+            const pool = await Mempool.getMempool(blockRef)
+            return capped ? holdSendersToCap(pool) : pool
+        }),
+    )
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
     const preHashes = preMempool.map(tx => tx.hash)
@@ -952,7 +983,13 @@ async function mergeAndOrderMempools(
 
     const existingHashes = preExisting.union(newlyExisting)
     log.only(`[mergeAndOrderMempools] Existing hashes: ${existingHashes.size}`)
-    const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
+    const unexecuted = postMempool.filter(tx => !existingHashes.has(tx.hash))
+    const finalMempool = await Mempool.boundSeatTransactions(unexecuted)
+    if (finalMempool.length < unexecuted.length) {
+        log.info(
+            `[mergeAndOrderMempools] Leaving ${unexecuted.length - finalMempool.length} seat txs for a later round`,
+        )
+    }
     log.only(
         `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs`,
     )
@@ -1035,6 +1072,9 @@ async function applyGCREditsFromMergedMempool(
         return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
+    if (!getSharedState.runMainLoop) {
+        throw new AbortConsensusError("Refusing GCR apply during shutdown")
+    }
     const res = await HandleGCR.applyTransactions(pendingTxs, false, clock, {
         defer: true,
     })
@@ -1351,9 +1391,9 @@ async function voteOnBlock(
 }
 
 /**
- * A failed attempt to take a peer's block only means we do not have it: the
- * round's catch treats unknown errors as fatal and exits the process, which
- * a peer serving a certified header and then dropping must not cause.
+ * A failed attempt to take a peer's block only means we do not have it.
+ * An unknown error ends the round; a peer serving a certified header and
+ * then dropping must not cause that.
  *
  * The exception is a failed apply whose undo also failed: its edits stay in
  * local state without the block, so the round must not fall back to its own
@@ -1367,9 +1407,15 @@ async function adoptionSucceeded(
     try {
         adopted = await adopt()
     } catch (e) {
+        if (!getSharedState.runMainLoop) {
+            throw new AbortConsensusError("Shutting down; not deciding on our own round")
+        }
         log.error(
             `[consensusRoutine] Taking a member's block ${blockRef} failed, deciding on our own round: ${e instanceof Error ? e.message : String(e)}`,
         )
+    }
+    if (!getSharedState.runMainLoop) {
+        throw new AbortConsensusError("Shutting down; not deciding on our own round")
     }
     if (!adopted) abortIfGcrStateUnreconciled(blockRef)
     return adopted
@@ -1391,7 +1437,8 @@ let driftWarnedHeight: number | null = null
  * Before the first fast sync succeeds, sync applies without the lock, so the
  * check is left to sync then.
  *
- * @throws AbortConsensusError when the durable check finds drift it cannot undo
+ * @throws AbortConsensusError when the durable check finds drift it cannot
+ *   undo, or when the drift check cannot run (database error)
  */
 async function gcrDriftBlocksRound(blockRef: number): Promise<boolean> {
     if (
@@ -1491,6 +1538,9 @@ async function finalizeBlock(
     txs: MempoolTransaction[],
     pendingGCR?: PendingGCRWrite,
 ): Promise<void> {
+    if (!getSharedState.runMainLoop) {
+        throw new AbortConsensusError("Refusing block insert during shutdown")
+    }
     await Chain.insertBlock(block, txs, undefined, pendingGCR) // NOTE Transactions are added to the Transactions table here
     getSharedState.consecutiveMissedShardBlocks = 0
     log.info("[CONSENSUS] Block added to the chain")
@@ -1539,6 +1589,12 @@ async function updateValidatorPhase(
     const retries = phase === 1 ? 5 : 2
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
+    // A replaced secretary may be abstaining on its own fork schedule:
+    // start the comparison that leaves it out of the next shard.
+    if (manager.passedOverSecretaries?.size) {
+        void onShardMemberUnresponsive()
+    }
+
     preventForgingEnded(blockRef)
     log.debug(
         `[updateValidatorStatus 🎉] Validator phase ${phase} resolved with value: ${JSON.stringify(
@@ -1548,8 +1604,19 @@ async function updateValidatorPhase(
         )}`,
     )
 
+    if (res === SUPERSEDED_ROUND) {
+        // Not a fault of the secretary: it restarted the height in a newer
+        // round, and the next attempt reports into that one.
+        throw new AbortConsensusError(
+            `The secretary started a newer round for block ${blockRef}; leaving this attempt to join it`,
+        )
+    }
+
     if (res === ("abortConsensus" as any)) {
         log.error("[consensusRoutine] Abort consensus routine")
+        // The secretary may be a validator that abstains on its own fork
+        // schedule; only a comparison round can leave it out of the next shard.
+        void onShardMemberUnresponsive()
         throw new AbortConsensusError("500 error received from secretary")
     }
 

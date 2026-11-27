@@ -120,6 +120,23 @@ async function main(): Promise<number> {
             }),
         })
 
+        // The node refuses an unsigned requestTLSNproxy with 401 before the
+        // handler runs: it needs a signature over the body naming this node.
+        // That refusal still proves the call crossed the reverse proxy.
+        if (res.status === 401) {
+            const text = await res.text()
+            if (/body-bound signature/i.test(text)) {
+                log(
+                    "pass",
+                    "requestTLSNproxy reached the node (401: unsigned calls are refused; a real client signs over the body for this node).",
+                )
+                log(
+                    "info",
+                    "Full proxy URL validation needs a signed call carrying a confirmed tlsn_request hash. Use a browser/Playwright driver for that path.",
+                )
+                return 0
+            }
+        }
         if (!res.ok) {
             log("fail", `requestTLSNproxy -> HTTP ${res.status}`)
             return 1
@@ -132,7 +149,7 @@ async function main(): Promise<number> {
         if (body.result !== 200) {
             const err = body.response as { error?: string; message?: string }
             const msg = err.message || err.error || "(no message)"
-            // 400 with "Missing tokenId or owner parameter" proves the
+            // 400 with "Missing tokenId parameter" proves the
             // node received + parsed our call. Without a real DAHR
             // token we can't get a real proxy URL — but reaching the
             // handler is the only thing this driver verifies. Treat

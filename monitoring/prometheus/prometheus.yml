@@ -25,7 +25,7 @@ alerting:
             - alertmanager:9093
 
 # Alert rules (Epic 13 T14). Files under alerts/ are loaded at startup
-# and reloaded on SIGHUP. Routing to Slack is in monitoring/alertmanager/alertmanager.yml;
+# and reloaded on SIGHUP. Routing (Slack, paging, dead-man) is in monitoring/alertmanager/alertmanager.yml;
 # see docs/runbooks/mainnet-monitoring.md.
 rule_files:
   - alerts/*.yml
@@ -55,6 +55,12 @@ scrape_configs:
       # authorization:
       #   credentials_file: /etc/prometheus/metrics_token
 
+    # Optional public RPC watcher (--profile network); no validator metrics access.
+    - job_name: demos-network-watcher
+      static_configs:
+          - targets: [network-watcher:9465]
+      scrape_timeout: 5s
+
     # Node Exporter for host-level metrics (optional)
     # Only scraped if node-exporter is running (--profile full)
     - job_name: node-exporter
@@ -64,19 +70,45 @@ scrape_configs:
                 instance: host
       metrics_path: /metrics
       scrape_interval: 15s
-# Additional scrape configs for multi-node setups
-# Uncomment and customize for your deployment. Mainnet: one monitoring host off
-# the validators scrapes each validator on its PRIVATE address (the node's
-# METRICS_BIND), and keeps job_name demos-node so the alert rules match.
+
+# Mainnet (multi-validator) setup. One monitoring host off the validators scrapes each
+# validator on its PRIVATE address (the node's METRICS_BIND). In the demos-node job above,
+# replace the single target with ONE static_configs entry PER VALIDATOR, each with its
+# own `instance` name, and keep the job name demos-node so the alert rules match. A
+# separate entry per validator is what makes NodeDown, HeightStalled and DiskSpaceLow fire
+# for that validator alone instead of as one merged alert. The node-exporter job is
+# optional (host metrics; no alert rule reads it). The addresses below are placeholders:
 #
-# - job_name: 'demos-nodes-production'
-#   static_configs:
-#     - targets:
-#       - '10.0.0.11:9090'
-#       - '10.0.0.12:9090'
-#       - '10.0.0.13:9090'
-#   relabel_configs:
-#     - source_labels: [__address__]
-#       target_label: instance
-#       regex: '([^:]+):\d+'
-#       replacement: '${1}'
+#     - job_name: demos-node
+#       static_configs:
+#           - targets: ['<VALIDATOR_1_PRIVATE_ADDR>:9090']
+#             labels: {instance: validator-1, environment: mainnet}
+#           - targets: ['<VALIDATOR_2_PRIVATE_ADDR>:9090']
+#             labels: {instance: validator-2, environment: mainnet}
+#           - targets: ['<VALIDATOR_3_PRIVATE_ADDR>:9090']
+#             labels: {instance: validator-3, environment: mainnet}
+#
+#     - job_name: node-exporter     # one node-exporter per validator host, port 9100
+#       static_configs:
+#           - targets: ['<VALIDATOR_1_PRIVATE_ADDR>:9100']
+#             labels: {instance: validator-1, environment: mainnet}
+#           (same for validator-2, validator-3)
+#
+# Validators whose metrics port is bound to loopback and that have no private network to the
+# monitoring host: put a TLS reverse proxy on each validator host that serves only /metrics,
+# allows only the monitoring host's address and requires basic auth (or the node's
+# METRICS_BEARER_TOKEN), and scrape it over https. `__metrics_path__` per target lets one
+# proxy hostname front several validators on the same host. Placeholders as above:
+#
+#     - job_name: demos-node
+#       scheme: https
+#       basic_auth:
+#           username: prometheus
+#           password_file: /etc/prometheus/secrets/metrics_basic_auth_password
+#       static_configs:
+#           - targets: ['<METRICS_PROXY_HOST>:443']
+#             labels: {instance: validator-1, environment: mainnet, __metrics_path__: /v1/metrics}
+#           - targets: ['<METRICS_PROXY_HOST>:443']
+#             labels: {instance: validator-2, environment: mainnet, __metrics_path__: /v2/metrics}
+#
+# Mount the password file read-only into the prometheus service (owned by uid 65534, mode 400).

@@ -1,0 +1,34 @@
+# systemd unit of one Demos TLSNotary notary. Install as
+# /etc/systemd/system/tlsn-notary.service; docs/runbooks/tlsn-notary.md.
+#
+# The preflight runs before every start, restarts included, so the notary
+# never starts on a missing or foreign key or an unsynchronised clock.
+# Compose's restart policy is "no", so Docker never restarts the container
+# on its own; systemd restarts it through the preflight. A container started
+# by hand long after its preflight refuses on the stale stamp.
+#
+# <checkout> is the node checkout on the host, at the release tag in use.
+
+[Unit]
+Description=Demos TLSNotary notary (stock notary-server, pinned signing key)
+Requires=docker.service
+After=docker.service network-online.target time-sync.target
+Wants=network-online.target time-sync.target
+# A key or clock refusal is not fixed by retrying: stop after 5 tries
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/tlsn-notary/notary.env
+WorkingDirectory=<checkout>/tlsnotary/notary-service
+ExecStartPre=<checkout>/tlsnotary/notary-service/notary-guard.sh preflight
+ExecStart=/usr/bin/docker compose --env-file /etc/tlsn-notary/notary.env up --no-log-prefix --exit-code-from notary notary
+ExecStop=/usr/bin/docker compose --env-file /etc/tlsn-notary/notary.env down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

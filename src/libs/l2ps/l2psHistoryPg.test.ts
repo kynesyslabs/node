@@ -16,6 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun
 import { DataSource } from "typeorm"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 import { L2PSExecutedHash } from "@/model/entities/L2PSExecutedHashes"
+import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 
 const PG_URL = process.env.L2PS_TEST_PG_URL
 const HOUR = 60 * 60 * 1000
@@ -56,10 +57,11 @@ jest.mock("@/model/datasource", () => ({
 
 import L2PSTransactionExecutor from "./L2PSTransactionExecutor"
 
-async function insertAged(hash: string, ageMs: number): Promise<void> {
+async function insertAged(hash: string, ageMs: number, encryptedHash?: string): Promise<void> {
     await ds.getRepository(L2PSTransaction).insert({
         l2ps_uid: "subnet-1",
         hash,
+        ...(encryptedHash ? { encrypted_hash: encryptedHash } : {}),
         type: "native",
         from_address: "a",
         to_address: "b",
@@ -74,6 +76,21 @@ async function insertAged(hash: string, ageMs: number): Promise<void> {
     )
 }
 
+let queued = 0
+
+async function insertQueued(hash: string, status: string): Promise<void> {
+    await ds.getRepository(L2PSMempoolTx).insert({
+        hash,
+        l2ps_uid: "subnet-1",
+        sequence_number: String(++queued),
+        original_hash: `orig-${hash}`,
+        encrypted_tx: {} as never,
+        status,
+        timestamp: "1",
+        block_number: 0,
+    })
+}
+
 describe.skipIf(!PG_URL)(`L2PS history on Postgres (TZ=${process.env.TZ ?? "unset"})`, () => {
     beforeAll(async () => {
         assertDisposable(PG_URL as string)
@@ -83,7 +100,7 @@ describe.skipIf(!PG_URL)(`L2PS history on Postgres (TZ=${process.env.TZ ?? "unse
             schema: SCHEMA,
             // The executor's raw SQL names tables unqualified.
             extra: { options: `-c search_path=${SCHEMA}` },
-            entities: [L2PSTransaction, L2PSExecutedHash],
+            entities: [L2PSTransaction, L2PSExecutedHash, L2PSMempoolTx],
         })
         await ds.initialize()
         await ds.query(`CREATE SCHEMA "${SCHEMA}"`)
@@ -98,7 +115,7 @@ describe.skipIf(!PG_URL)(`L2PS history on Postgres (TZ=${process.env.TZ ?? "unse
     })
 
     beforeEach(async () => {
-        await ds.query(`TRUNCATE "l2ps_transactions", "l2ps_executed_hashes" RESTART IDENTITY`)
+        await ds.query(`TRUNCATE "l2ps_transactions", "l2ps_executed_hashes", "l2ps_mempool" RESTART IDENTITY`)
         ;(L2PSTransactionExecutor as unknown as { l1Repo: unknown }).l1Repo = {}
     })
 
@@ -110,6 +127,30 @@ describe.skipIf(!PG_URL)(`L2PS history on Postgres (TZ=${process.env.TZ ?? "unse
 
         const left = await ds.getRepository(L2PSTransaction).find()
         expect(left.map(r => r.hash)).toEqual(["recent"])
+    })
+
+    it("keeps a transfer past retention while its queue row can still settle", async () => {
+        for (const status of ["executed", "deferred", "batched", "confirmed", "failed"]) {
+            await insertAged(`tx-${status}`, 3 * HOUR, `enc-${status}`)
+            await insertQueued(`enc-${status}`, status)
+        }
+        await insertAged("tx-dropped", 3 * HOUR, "enc-dropped")
+
+        await expect(L2PSTransactionExecutor.pruneHistory(2 / 24)).resolves.toBe(3)
+
+        const left = await ds.getRepository(L2PSTransaction).find({ order: { hash: "ASC" } })
+        expect(left.map(r => r.hash)).toEqual(["tx-batched", "tx-deferred", "tx-executed"])
+    })
+
+    it("prunes a kept transfer once its queue row settles", async () => {
+        await insertAged("tx", 3 * HOUR, "enc")
+        await insertQueued("enc", "batched")
+        await expect(L2PSTransactionExecutor.pruneHistory(2 / 24)).resolves.toBe(0)
+
+        await ds.getRepository(L2PSMempoolTx).update({ hash: "enc" }, { status: "confirmed" })
+
+        await expect(L2PSTransactionExecutor.pruneHistory(2 / 24)).resolves.toBe(1)
+        expect(await L2PSTransactionExecutor.hasExecuted("tx")).toBe(true)
     })
 
     it("serves rows recorded after a peer's time cursor whatever the process time zone", async () => {

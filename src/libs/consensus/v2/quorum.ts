@@ -12,6 +12,19 @@ export function quorumThreshold(shardSize: number): number {
 }
 
 /**
+ * Observations an identity needs to enter the merged peerlist under
+ * `peerlistFloor`: one more than the members a block can do without. A
+ * coalition below `quorum` leaves at least that many honest members, so
+ * every honest member's report together reaches the floor and a list
+ * without them gets no honest signature. `quorum` is the block's signature
+ * bar, which a committee short of shardSize must still reach, so the floor
+ * follows the committee's real size, never shardSize.
+ */
+export function peerlistFloorThreshold(voters: number, quorum: number): number {
+    return Math.max(1, voters - quorum + 1)
+}
+
+/**
  * Whether a producer commits its block. The tally must clear 2/3 + 1 of
  * the members it polled and, independently, 2/3 + 1 of a full committee,
  * so a shard that shrank after liveness filtering cannot lower the bar.

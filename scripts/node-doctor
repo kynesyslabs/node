@@ -245,15 +245,34 @@ check_node_modules() {
 	fi
 }
 
+# Permission bits of a file in octal (GNU stat, then BSD stat).
+file_mode() {
+	stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+# The identity file holds the validator key: any group or other bit lets
+# another local user read it.
+mode_opens_key() { # $1 octal mode
+	[[ "$1" =~ ^[0-7]+$ ]] || return 0
+	(((8#$1 & 8#077) != 0))
+}
+
 # --- Example Check: Identity File ---
 check_identity_file() {
-	local identity_file=".demos_identity"
+	local identity_file="${IDENTITY_FILE:-.demos_identity}"
 
 	if [[ -f "${identity_file}" ]]; then
+		local mode
+		mode=$(file_mode "${identity_file}")
+		if mode_opens_key "${mode}"; then
+			report_problem "Identity" "Identity file ${identity_file} has mode ${mode:-unknown}: other users can read the validator key" \
+				"Run: chmod 600 ${identity_file}"
+			return 1
+		fi
 		# Check if file is not empty and has reasonable size
 		local size=$(wc -c <"${identity_file}")
 		if [[ "${size}" -gt 50 ]]; then
-			report_ok "Identity" "Identity file exists (${size} bytes)"
+			report_ok "Identity" "Identity file exists (${size} bytes, mode ${mode})"
 			return 0
 		else
 			report_warning "Identity" "Identity file seems too small (${size} bytes)" \
@@ -618,6 +637,10 @@ check_extra_env_files() {
 	fi
 }
 
+# Set by check_genesis_file when the genesis schedules keylessWeb2Identity
+# at 0: no web2 link on that chain needs a validator's provider credentials.
+GENESIS_KEYLESS_WEB2_IDENTITY=0
+
 # The range the node accepts for properties.shardSize, mirrored from
 # src/libs/consensus/genesisShardSize.ts (no Bun on a Docker host); a test
 # keeps the two equal.
@@ -720,6 +743,15 @@ def main():
         return
     out("PASS", "genesis file", genesis_file)
 
+    # Not a check of its own: tells check_web2_identity_credentials whether
+    # this chain links GitHub, Discord and Twitter accounts without them.
+    forks = genesis.get("forks")
+    keyless = forks.get("keylessWeb2Identity") if isinstance(forks, dict) else None
+    height = keyless.get("activationHeight") if isinstance(keyless, dict) else None
+    # JSON 0.0 is 0 to the node; bool is excluded because True == 1 is not a height.
+    if isinstance(height, (int, float)) and not isinstance(height, bool) and height == 0:
+        out("FACT", "keylessWeb2Identity", "0")
+
     props = genesis.get("properties")
     shard = props.get("shardSize") if isinstance(props, dict) else None
     if isinstance(shard, float) and shard.is_integer():
@@ -811,10 +843,144 @@ check_genesis_file() {
 	local mode=env level item detail
 	[[ -n "${COMPOSE_CONFIG_JSON}" ]] && mode=compose
 	while IFS=$'\t' read -r level item detail; do
+		if [[ "${level}" == FACT ]]; then
+			[[ "${item}" == keylessWeb2Identity ]] && GENESIS_KEYLESS_WEB2_IDENTITY=1
+			continue
+		fi
 		prod_line "${level}" "${item}" "${detail}"
 	done < <(python3 -c "${GENESIS_CHECK_PY}" "${mode}" \
 		"$(node_env DEMOS_GENESIS_FILE)" "$(node_env DEMOS_SNAPSHOT_DIR)" \
 		"${GENESIS_SHARD_SIZE_MIN}" "${GENESIS_SHARD_SIZE_MAX}" <<<"${COMPOSE_CONFIG_JSON}")
+}
+
+# The fork schedule check the node runs on its genesis at boot
+# (genesisScheduleProblems), run as the node would run it: in the node image
+# under compose (no Bun on a Docker host), with Bun on a bare-metal host. A
+# pinned hash accepts a genesis that this check refuses, and the node would
+# report that only after it was stopped for the upgrade.
+GENESIS_SCHEDULE_CHECK=scripts/genesis-schedule-check.ts
+check_genesis_schedule() {
+	local item="genesis fork schedule" out code line failed=0
+	local -a cmd
+	if [[ -n "${COMPOSE_CONFIG_JSON}" ]]; then
+		cmd=(docker compose run --rm --no-deps -T node bun "${GENESIS_SCHEDULE_CHECK}")
+	elif command -v bun &>/dev/null; then
+		cmd=(env "DEMOS_GENESIS_FILE=$(node_env DEMOS_GENESIS_FILE)"
+			"EXPECTED_GENESIS_HASH=$(node_env EXPECTED_GENESIS_HASH)"
+			"EXPECTED_GENESIS_BLOCK_HASH=$(node_env EXPECTED_GENESIS_BLOCK_HASH)"
+			bun "${GENESIS_SCHEDULE_CHECK}")
+	else
+		prod_line WARN "${item}" "skipped: bun is needed to run the node's boot check of the genesis (${GENESIS_SCHEDULE_CHECK})"
+		return
+	fi
+	out=$("${cmd[@]}" 2>&1)
+	code=$?
+	if [[ ${code} -eq 0 ]]; then
+		prod_line PASS "${item}" "the node's boot check accepts it"
+		return
+	fi
+	if [[ ${code} -eq 1 ]]; then
+		while IFS= read -r line; do
+			[[ "${line}" == "problem: "* ]] || continue
+			prod_line FAIL "${item}" "the node refuses to boot on it: ${line#problem: }"
+			failed=1
+		done <<<"${out}"
+		[[ ${failed} -eq 1 ]] && return
+	fi
+	line=$(printf '%s\n' "${out}" | grep -v '^[[:space:]]*$' | tail -n 1)
+	prod_line FAIL "${item}" "the node's boot check did not run (exit ${code}): ${line:-no output}"
+}
+
+# The provider credentials the node verifies web2 identity links with. No
+# node setting refuses those links, so a validator of a chain that takes
+# them needs every one: without a credential it refuses every link of that
+# provider (proof fetch, or the Twitter/X bot check) that validators holding
+# one admit. Under keylessWeb2Identity those providers link only through
+# TLSNotary, which no credential takes part in.
+WEB2_IDENTITY_CREDENTIALS=(
+	"GITHUB_TOKEN:GitHub identity links"
+	"DISCORD_BOT_TOKEN:Discord identity links"
+	"RAPID_API_KEY:Twitter/X identity links"
+)
+check_web2_identity_credentials() {
+	local entry key what v
+	if [[ ${GENESIS_KEYLESS_WEB2_IDENTITY} -eq 1 ]]; then
+		for entry in "${WEB2_IDENTITY_CREDENTIALS[@]}"; do
+			prod_line PASS "${entry%%:*}" "not needed: the genesis schedules keylessWeb2Identity at 0, so ${entry#*:} go through TLSNotary only"
+		done
+		return
+	fi
+	for entry in "${WEB2_IDENTITY_CREDENTIALS[@]}"; do
+		key="${entry%%:*}"
+		what="${entry#*:}"
+		v=$(node_env "${key}")
+		if [[ -z "${v//[[:space:]]/}" ]]; then
+			prod_line FAIL "${key}" "empty: this node would refuse every ${what}, which mainnet allows"
+		else
+			prod_line PASS "${key}" "set"
+		fi
+	done
+	local host
+	host=$(node_env RAPID_API_HOST)
+	if [[ -z "${host}" ]]; then
+		prod_line PASS "RAPID_API_HOST" "empty: using Twitter API45 default (twitter-api45.p.rapidapi.com)"
+	elif [[ -z "${host//[[:space:]]/}" ]]; then
+		prod_line FAIL "RAPID_API_HOST" "RAPID_API_HOST is whitespace only; the node will not fall back to the default for it"
+	else
+		prod_line PASS "RAPID_API_HOST" "set"
+	fi
+}
+
+# A set GITHUB_TOKEN can still be one GitHub no longer accepts: expired or
+# revoked, it makes the node refuse every GitHub identity link (#1027).
+check_github_token() {
+	local token out code
+	# No GitHub link reaches the token on such a chain.
+	[[ ${GENESIS_KEYLESS_WEB2_IDENTITY} -eq 1 ]] && return 0
+	token=$(node_env GITHUB_TOKEN)
+	# An empty one is already a FAIL of check_web2_identity_credentials.
+	[[ -n "${token//[[:space:]]/}" ]] || return 0
+	if ! command -v curl &>/dev/null; then
+		prod_line WARN "GitHub token" "skipped: curl is needed to ask GitHub whether it accepts GITHUB_TOKEN"
+		return
+	fi
+	# The node's GitHub client drops a leading "token " or "bearer " (any
+	# case), so a token written that way works there and is asked about bare.
+	case "${token}" in
+	[Tt][Oo][Kk][Ee][Nn]\ * | [Bb][Ee][Aa][Rr][Ee][Rr]\ *)
+		token="${token#* }"
+		while [[ "${token}" == " "* ]]; do token="${token# }"; done
+		;;
+	esac
+	# The token goes in on stdin, not on a command line other users can list.
+	out=$(printf 'header = "Authorization: Bearer %s"\n' "${token}" |
+		curl -sS -K - -o /dev/null -w '\n%{http_code}' --max-time 10 https://api.github.com/rate_limit 2>&1)
+	code="${out##*$'\n'}"
+	case "${code}" in
+	200) prod_line PASS "GitHub token" "accepted by GitHub" ;;
+	401) prod_line FAIL "GitHub token" "this node's GitHub token was rejected by GitHub (expired or revoked); the node operator must renew GITHUB_TOKEN" ;;
+	000) prod_line WARN "GitHub token" "api.github.com could not be reached (${out%%$'\n'*}): the node reads gists there, so allow outbound HTTPS to it" ;;
+	*) prod_line WARN "GitHub token" "api.github.com answered HTTP ${code}, so whether it accepts GITHUB_TOKEN is unknown" ;;
+	esac
+}
+
+# The node tightens the mode itself on start, but with PROD=true it refuses
+# to start when it cannot (read-only mount, other owner), so a host file
+# other users can read is caught here before the start fails.
+check_identity_file_mode() {
+	local file mode
+	file=$(node_env IDENTITY_FILE)
+	file="${file:-.demos_identity}"
+	if [[ ! -f "${file}" ]]; then
+		prod_line WARN "identity file mode" "${file} is not on this host path (under docker compose it lives in the node_state volume, where the node sets 600 on start)"
+		return
+	fi
+	mode=$(file_mode "${file}")
+	if mode_opens_key "${mode}"; then
+		prod_line FAIL "identity file mode" "${file} has mode ${mode:-unknown}, other users can read the validator key: run chmod 600 ${file}"
+	else
+		prod_line PASS "identity file mode" "${file} ${mode}"
+	fi
 }
 
 run_production_checks() {
@@ -826,7 +992,12 @@ run_production_checks() {
 	check_ntp_egress
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_unset DEBUG_ASSERTIONS_ENABLED "debug assertions can exit during consensus"
 	check_genesis_file
+	check_genesis_schedule
+	check_web2_identity_credentials
+	check_github_token
+	check_identity_file_mode
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
@@ -861,7 +1032,10 @@ OPTIONS:
                     mismatch policy, block timing, fees, stake floor, ZK points),
                     clock sync, outbound NTP, genesis pins, the genesis file the
                     node reads (shardSize range, validators against the quorum,
-                    validator URLs), and one-start switches left set; one
+                    validator URLs, and the node's own boot check of its fork
+                    schedule), the identity file mode (600 or stricter),
+                    the GitHub token (one request to api.github.com),
+                    debug assertions and one-start switches left set; one
                     PASS/WARN/FAIL line each, exit 1 on any FAIL
     --parameters FILE
                     With --production: the parameter sheet to compare with

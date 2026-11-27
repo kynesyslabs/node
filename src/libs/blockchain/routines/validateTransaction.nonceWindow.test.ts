@@ -45,7 +45,7 @@ import type { Transaction } from "@kynesyslabs/demosdk/types"
 import type { ForkConfigByName } from "@/forks/forkConfig"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 import { getSharedState } from "@/utilities/sharedState"
-import { PEER, SENDER, chainIs, demos, onTheWire } from "src/libs/blockchain/validation/editBinding.fixtures"
+import { PEER, SENDER, chainIs, demos, onTheWire, sdkSignsAt } from "src/libs/blockchain/validation/editBinding.fixtures"
 
 const { confirmTransaction } = await import("./validateTransaction")
 
@@ -84,6 +84,46 @@ afterEach(() => {
     demos.getAddressNonce = originalNonce
 })
 
+describe("confirmTransaction and the signed reference block", () => {
+    const REFUSED = "[REFERENCE BLOCK ERROR]"
+    beforeEach(() => nonceIntegrity(0))
+    afterEach(() => sdkSignsAt(100))
+
+    /** A transfer signed against `height`, confirmed while the tip is 100. */
+    async function signedAt(height: number) {
+        sdkSignsAt(height)
+        return confirmTransaction((await pay(confirmedNonce + 1)) as never, SENDER)
+    }
+
+    it("copies the signed value into the validity data", async () => {
+        const result = await signedAt(99)
+        expect(result.data.message).not.toContain(REFUSED)
+        expect(result.data.reference_block).toBe(99)
+    })
+
+    it("refuses a value ahead of the node's head", async () => {
+        const result = await signedAt(101)
+        expect(result.data.valid).toBe(false)
+        expect(result.data.message).toContain(`${REFUSED} content.reference_block 101 is outside the allowed window at block 100`)
+    })
+
+    it("refuses a value older than the window", async () => {
+        const result = await signedAt(98)
+        expect(result.data.valid).toBe(false)
+        expect(result.data.message).toContain(REFUSED)
+    })
+
+    it("refuses a transaction signed without one, or with one that is not a height", async () => {
+        for (const value of [undefined, "100", 99.5, -1]) {
+            const tx = await pay(confirmedNonce + 1)
+            ;(tx.content as { reference_block?: unknown }).reference_block = value
+            const result = await confirmTransaction(tx as never, SENDER)
+            expect(result.data.valid).toBe(false)
+            expect(result.data.message).toContain(`${REFUSED} content.reference_block is missing or not a block height`)
+        }
+    })
+})
+
 describe("confirmTransaction behind nonceIntegrity", () => {
     beforeEach(() => nonceIntegrity(0))
 
@@ -112,6 +152,17 @@ describe("confirmTransaction behind nonceIntegrity", () => {
     it("still refuses a spent nonce as before", async () => {
         const message = await confirm(await pay(confirmedNonce))
         expect(message).toContain("Transaction nonce error. Expected >=8")
+    })
+
+    it("removes a client fee quote before signing a stale-nonce refusal", async () => {
+        const tx = await pay(confirmedNonce)
+        tx.attrs = { reference_block: 0, total_fee: "0" } as never
+
+        const result = await confirmTransaction(tx as never, SENDER)
+
+        expect(result.data.valid).toBe(false)
+        expect(result.data.message).toContain("NONCE ERROR")
+        expect(result.data.transaction.attrs).toEqual({ reference_block: 0 })
     })
 })
 

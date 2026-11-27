@@ -19,11 +19,13 @@ import {
     isHeightsRecordShape,
 } from "./records"
 import {
+    applyingBlocks,
+    confirmBlock,
     validateBlockMessage,
     validateHeightsMessage,
     validateTxMessage,
 } from "./validators"
-import { BLOCKS_TOPIC, HEIGHTS_TOPIC, TXS_TOPIC } from "./topics"
+import { BLOCKS_TOPIC, HEIGHTS_TOPIC, TOPIC_MAX_BYTES, TXS_TOPIC } from "./topics"
 import {
     countHeightsRecord,
     countPublishSkipped,
@@ -47,7 +49,8 @@ import {
 import { getStakedSet } from "src/libs/consensus/stakedSet"
 import { markSubsystem, subsystemError } from "src/utilities/subsystemRegistry"
 
-const PROTOCOL_VERSION = 1
+// v2: remember_block, which a v1 sidecar does not know.
+const PROTOCOL_VERSION = 2
 const READY_TIMEOUT_MS = 10_000
 const IPC_RETRY_INTERVAL_MS = 100
 const STOP_KILL_ESCALATION_MS = 2000
@@ -259,6 +262,7 @@ export class GossipManager {
                 GOSSIP_PORT: String(cfg.port),
                 GOSSIP_KEY_FILE: cfg.keyFile,
                 GOSSIP_IPC_PATH: this.ipcPath(),
+                GOSSIP_TOPIC_MAX_BYTES: JSON.stringify(TOPIC_MAX_BYTES),
             },
             stdio: ["pipe", "ignore", "pipe"],
         })
@@ -1013,6 +1017,14 @@ export class GossipManager {
     /** Publish a validated transaction envelope. Fire and forget. */
     async publishTx(validityData: ValidityData): Promise<boolean> {
         if (!(await this.mayPublish(TXS_TOPIC))) return false
+        // Readiness counts heights subscribers only, and the sidecar
+        // publishes to an empty topic without error: with no peer on the
+        // tx topic the tx would reach nobody, so it stays held for retry.
+        if ((this.lastStats?.perTopic[TXS_TOPIC]?.subscribers ?? 0) < 1) {
+            countPublishSkipped("no_tx_peers")
+            this.logPublishSkipped(TXS_TOPIC, "no peer subscribed to the tx topic")
+            return false
+        }
         this.send({
             type: "publish",
             topic: TXS_TOPIC,
@@ -1137,14 +1149,26 @@ export class GossipManager {
             if (result !== "accept" || !record) return
             await this.applyHeightsRecord(record)
         } else if (topic === BLOCKS_TOPIC) {
-            const { result, block } = await validateBlockMessage(
+            const { result, block, knownHash } = await validateBlockMessage(
                 new Uint8Array(data),
             )
+            if (knownHash) this.send({ type: "remember_block", hash: knownHash })
             if (result !== "accept" || !block) return
-            log.info(
-                `[GOSSIP] block ${block.number} (${block.hash}) received via gossip`,
-            )
-            await this.applyBlock(block)
+            if (applyingBlocks.has(block.hash)) return
+            applyingBlocks.add(block.hash)
+            let applied = false
+            try {
+                log.info(
+                    `[GOSSIP] block ${block.number} (${block.hash}) received via gossip`,
+                )
+                applied = await this.applyBlock(block)
+            } finally {
+                applyingBlocks.delete(block.hash)
+                if (applied) {
+                    confirmBlock(block.hash)
+                    this.send({ type: "remember_block", hash: block.hash })
+                }
+            }
         } else if (topic === TXS_TOPIC) {
             const { result, validityData } = await validateTxMessage(
                 new Uint8Array(data),
@@ -1261,13 +1285,13 @@ export class GossipManager {
         )
     }
 
-    private async applyBlock(block: Block): Promise<void> {
+    private async applyBlock(block: Block): Promise<boolean> {
         const sender = this.resolveBlockSender(block)
         if (!sender) {
             log.warning(
                 `[GOSSIP] no reachable sender candidate for block ${block.number}; leaving it to the poller`,
             )
-            return
+            return false
         }
 
         log.info(
@@ -1276,9 +1300,11 @@ export class GossipManager {
         const { BroadcastManager: broadcaster } =
             await import("src/libs/communications/broadcastManager")
         const { syncLock } = await import("src/libs/blockchain/routines/Sync")
-        await syncLock.runExclusive(() =>
+        const outcome = await syncLock.runExclusive(() =>
             broadcaster.handleNewBlock(sender, block as never, "gossip"),
         )
+        return outcome.message === "Block synced successfully" ||
+            outcome.message === "Block already exists"
     }
 
     /** Fetch the block's tx bodies over HTTP from a signer, else any peer past this height. */

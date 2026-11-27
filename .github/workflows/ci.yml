@@ -19,6 +19,7 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun scripts/check-secret-logs.ts
       - run: bun run type-check
       - run: bun run test:release
 
@@ -34,6 +35,13 @@ jobs:
       # Stub-based (no Docker, no Postgres): the launchers never migrate a
       # database they did not just empty
       - run: bash scripts/launcher-wipe-guard.test.sh
+      # The PG_PORT the launcher hands the node, with and without -e
+      - run: bash scripts/launcher-external-db.test.sh
+      # ./run exits with the node's status (a crash or refusal is non-zero)
+      - run: bash scripts/launcher-run-exit.test.sh
+      # Stub-based: docker-run seeds the state volume's identity only when it
+      # has none and stops on a different one
+      - run: bash scripts/docker-run-identity.test.sh
       - run: bun run test:consensus
 
   rehearsal-drill:
@@ -52,10 +60,60 @@ jobs:
       # Every rehearsal unit test: the halt/ride judge and its fixtures, the
       # drill genesis and the input staging
       - run: bun test testing/forks/rehearsal/
+      - run: bun test testing/forks/runbookCommands.test.ts
       # run.sh's lockstep wait, database reads, postgres gate and judge hand-off
       # against a fake curl/docker, including run.sh executed from the top
       - run: bash testing/devnet/quorum-drills/lockstep-stub.test.sh
+      # multihost.sh's docker stand-in and cloud-drill.sh over stubbed ssh
+      # hosts; the inventory, compose and evidence helpers in Python
+      - run: bash testing/devnet/quorum-drills/multihost-stub.test.sh
+      - run: bash testing/devnet/quorum-drills/cloud-drill-stub.test.sh
+      - run: python3 -m unittest discover -s testing/devnet/quorum-drills -p 'test_*.py'
       # bun build has no --no-emit (it is ignored and the whole bundle lands
       # in the log); write it to a scratch dir instead. A broken import still
       # fails the step.
       - run: bun build testing/forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts --target=bun --outdir "$RUNNER_TEMP/rehearsal-drill-bundle"
+      - run: bun build testing/devnet/quorum-drills/load-client.ts --target=bun --outdir "$RUNNER_TEMP/load-client-bundle"
+
+  tlsn-notary-ops:
+    # The notary's start guard, health check and key ceremony
+    # (tlsnotary/notary-service). Keys are made at run time with openssl.
+    # sops and age are installed so the ceremony's real encrypt/decrypt round
+    # trip runs here (the test fails instead of skipping under CI).
+    name: TLSN Notary Ops Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install sops and age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age
+          curl --proto =https --tlsv1.2 -fsSL -o "$RUNNER_TEMP/sops" https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+          echo "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b  $RUNNER_TEMP/sops" | sha256sum -c -
+          sudo install -m 0755 "$RUNNER_TEMP/sops" /usr/local/bin/sops
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # The production service definition parses with every setting filled
+      - name: Validate the notary compose file
+        working-directory: tlsnotary/notary-service
+        run: |
+          sed -e 's|^NOTARY_EXPECTED_PUBKEY=.*|NOTARY_EXPECTED_PUBKEY=02'"$(printf '1%.0s' $(seq 64))"'|' notary.env.example > "$RUNNER_TEMP/notary.env"
+          docker compose --env-file "$RUNNER_TEMP/notary.env" config --quiet
+      - run: for f in tlsnotary/notary-service/*.test.ts; do bun test "$f" || exit 1; done
+        env:
+          GIT_COMMIT: ${{ github.sha }}
+
+  tlsn-verifier-wasm:
+    # The TLSN verifier wasm runs inside block apply, so the committed binary
+    # must be exactly what its pinned sources build. This rebuilds it in the
+    # pinned Docker image and fails on any byte difference, then runs the
+    # native twin of the same crate over the golden vectors as an oracle.
+    name: TLSN Verifier Reproducible Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: bash native/tlsn-verify/build.sh check
+      - run: bash native/tlsn-verify/build.sh parity

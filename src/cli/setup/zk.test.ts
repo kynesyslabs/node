@@ -4,8 +4,8 @@ import * as path from "node:path"
 import { collectChecks } from "./checks"
 import { childEnv, createDefaultRunner } from "./runner"
 import { CODE_ROOT, createContext } from "./context"
-import { batchVkeyProblem, inspectBatchArtifacts, missingZkTools, runL2psZkSetup } from "./zk"
-import { BATCH_VKEY, fakeRunner, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
+import { batchVkeyProblem, inspectBatchArtifacts, inspectSettlementArtifacts, missingZkTools, runL2psZkSetup } from "./zk"
+import { BATCH_VKEY, fakeRunner, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch, writeZkKeys, zkKeyNames, type ZkKeySet } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -13,17 +13,17 @@ beforeEach(() => {
 })
 afterEach(() => removeRoot(root))
 
-const keysDir = (size: number) => path.join(root, "src/libs/l2ps/zk/keys", `batch_${size}`)
+const keysDir = (size: ZkKeySet) => path.join(root, "src/libs/l2ps/zk/keys", zkKeyNames(size).dir)
 
 function seedCommittedVkeys(content: object) {
-    for (const size of [5, 10]) {
+    for (const size of [5, 10, "settlement"] as const) {
         fs.mkdirSync(keysDir(size), { recursive: true })
         fs.writeFileSync(path.join(keysDir(size), "verification_key.json"), JSON.stringify(content))
     }
 }
 
 describe("runL2psZkSetup", () => {
-    it("downloads the ptau files, builds both sizes and keeps the committed verification key", async () => {
+    it("downloads the ptau files, builds every circuit and keeps the committed verification keys", async () => {
         seedCommittedVkeys(BATCH_VKEY)
         const runner = fakeRunner()
         const r = recorder()
@@ -38,9 +38,30 @@ describe("runL2psZkSetup", () => {
             "circom2 compile",
             "snarkjs plonk setup",
             "snarkjs zkey export",
+            // The settlement circuit reuses the ptau 16 already downloaded.
+            "circom2 compile",
+            "snarkjs plonk setup",
+            "snarkjs zkey export",
         ])
         expect(inspectBatchArtifacts(root).every(b => b.complete)).toBe(true)
+        expect(inspectSettlementArtifacts(root).complete).toBe(true)
         expect(fs.existsSync(path.join(keysDir(5), "verification_key.generated.json"))).toBe(false)
+    })
+
+    it("rebuilds settlement files that were built for an older committed verification key", async () => {
+        seedCommittedVkeys(BATCH_VKEY)
+        await runL2psZkSetup(root, fakeRunner(), recorder().say)
+        expect(inspectSettlementArtifacts(root).complete).toBe(true)
+        // A release with a new circuit ships a new committed key; the old zkey and wasm stay on disk.
+        const newKey = { ...BATCH_VKEY, power: 15 }
+        fs.writeFileSync(path.join(keysDir("settlement"), "verification_key.json"), JSON.stringify(newKey))
+        const stale = inspectSettlementArtifacts(root)
+        expect([stale.zkey, stale.wasm, stale.vkey, stale.current, stale.complete]).toEqual([true, true, true, false, false])
+        const runner = fakeRunner({ vkeyJson: JSON.stringify(newKey) })
+        const out = await runL2psZkSetup(root, runner, recorder().say, ["settlement"])
+        expect(out.ok).toBe(true)
+        expect(runner.calls).toContain("snarkjs plonk setup")
+        expect(inspectSettlementArtifacts(root).complete).toBe(true)
     })
 
     it("refuses to ship a key whose verification key differs from the committed one", async () => {

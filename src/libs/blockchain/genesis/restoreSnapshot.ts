@@ -18,6 +18,10 @@
  * intentionally change block-0 hash; restoring snapshot rows does not.
  */
 
+import { seededNftReasons } from "src/features/staking/seedNft"
+import { getSharedState } from "src/utilities/sharedState"
+import { isMainnetChainId } from "./genesisPin"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
@@ -391,7 +395,7 @@ export async function restoreSnapshot(
         validatorsInserted = await bulkInsertStream<ValidatorSeed>(
             em,
             Validators as unknown as { new (): ValidatorSeed },
-            loader.streamValidators(),
+            nftCheckedValidators(loader.streamValidators()),
             VALIDATORS_BATCH,
             n => {
                 log.info(
@@ -425,5 +429,34 @@ export async function restoreSnapshot(
         validators: validatorsInserted,
         importedIdentities,
         elapsed_ms,
+    }
+}
+
+/**
+ * Pass validator rows through to the insert and, once the file is read,
+ * refuse the restore when the set breaks the NFT rules, on a genesis that
+ * seats its validators under `nftValidatorGating`. The insert runs in the
+ * genesis transaction, so the throw rolls every row back.
+ */
+export async function* nftCheckedValidators(
+    rows: AsyncIterable<ValidatorSeed>,
+): AsyncIterable<ValidatorSeed> {
+    if (!nftGatingActiveAtGenesis()) {
+        yield* rows
+        return
+    }
+    const seen: ValidatorSeed[] = []
+    for await (const row of rows) {
+        seen.push(row)
+        yield row
+    }
+    // Offline only, like the genesis list: the manifest these rows come from
+    // is bound by the sealed genesis.
+    const reasons = seededNftReasons(seen, "validators.jsonl", {
+        fromChain: true,
+        mainnet: isMainnetChainId(getSharedState.chainId),
+    })
+    if (reasons.length > 0) {
+        throw new Error(`[GENESIS][SNAPSHOT] ${reasons.join("; ")}`)
     }
 }

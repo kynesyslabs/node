@@ -169,9 +169,17 @@ async function balanceRefusal(
     if (legacyGasRetired(tx)) {
         return retiredGasBalanceRefusal(tx, senderAddress, sender.balance, breakdown)
     }
-    return sender.balance < BigInt(breakdown.total)
-        ? `sender balance ${sender.balance.toString()} < total fee ${breakdown.total}`
+    const fee = feeInLedgerUnits(tx, breakdown.total)
+    return sender.balance < fee
+        ? `sender balance ${sender.balance.toString()} < total fee ${fee.toString()}`
         : null
+}
+
+/** A fee total in the units apply deducts it in: OS for a native fee after osDenomination. */
+function feeInLedgerUnits(tx: ApplyGasFeeSeparationTx, total: number): bigint {
+    return BigInt(total) *
+        ((tx.content.type as string) === "native" &&
+        isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0) ? 1_000_000_000n : 1n)
 }
 
 /**

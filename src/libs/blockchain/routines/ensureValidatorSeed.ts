@@ -38,7 +38,17 @@ import {
 } from "src/libs/blockchain/genesis/loadSnapshot"
 import Datasource from "src/model/datasource"
 import { Validators } from "src/model/entities/Validators"
+import { decimalBigInt } from "src/libs/blockchain/genesis/decimalAmount"
 import log from "src/utilities/logger"
+import {
+    nftExemptSeeds,
+    seededNftReasons,
+    type SeededValidatorNft,
+    type SeedNftOptions,
+} from "src/features/staking/seedNft"
+import { nftGatingActiveAtGenesis } from "@/forks/nftValidatorGatingGate"
+import { isMainnetChainId } from "src/libs/blockchain/genesis/genesisPin"
+import { getSharedState } from "src/utilities/sharedState"
 
 export interface GenesisValidatorSeed {
     address: string
@@ -47,6 +57,11 @@ export interface GenesisValidatorSeed {
     staked_amount: string
     first_seen: number
     valid_at: number
+    nft_mint?: string | null
+    nft_owner?: string | null
+    nft_proof_tx?: string | null
+    /** Genesis only: the seat holds without an NFT. */
+    nft_exempt?: boolean | null
 }
 
 /**
@@ -63,6 +78,9 @@ interface ValidatorUpsertRow {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint: string | null
+    nft_owner: string | null
+    nft_proof_tx: string | null
 }
 
 /** Matches `0x` followed by exactly 64 hex characters. */
@@ -107,12 +125,13 @@ export async function ensureValidatorSeed(
     // Primary recovery — snapshot, when it carries validators.jsonl.
     // Snapshots are the safe source on a chain that has advanced past
     // genesis because they capture post-genesis staking events.
-    const snapshotRows = await loadSnapshotValidators()
-    if (snapshotRows.length > 0) {
+    const snapshotSeeds = await loadSnapshotValidators()
+    if (snapshotSeeds.length > 0) {
+        refuseOnNftReasons(snapshotSeeds, "validators.jsonl", { fromChain: true })
         log.warning(
-            `[BOOT] validators table empty; re-seeding ${snapshotRows.length} entries from data/snapshot/validators.jsonl`,
+            `[BOOT] validators table empty; re-seeding ${snapshotSeeds.length} entries from data/snapshot/validators.jsonl`,
         )
-        await db.transaction(em => upsertValidators(em, snapshotRows))
+        await db.transaction(em => upsertValidators(em, snapshotSeeds.map(snapshotToRow)))
         return await assertSeededAndReturn("snapshot")
     }
 
@@ -143,12 +162,38 @@ export async function ensureValidatorSeed(
         )
     }
 
-    seed.forEach(validateSeedEntry)
+    const nftSeats = nftGatingActiveAtGenesis()
+    seed.forEach((entry, i) => validateSeedEntry(entry, i, nftSeats))
+    refuseOnNftReasons(seed, "genesis.validators")
+    if (nftSeats) {
+        for (const address of nftExemptSeeds(seed)) {
+            log.warning(`[BOOT] ${address} is seated without an NFT (nft_exempt); test networks only`)
+        }
+    }
     log.warning(
         `[BOOT] validators table empty at block 0; re-seeding ${seed.length} entries from data/genesis.json`,
     )
     await db.transaction(em => upsertValidators(em, seed.map(genesisToRow)))
     return await assertSeededAndReturn("genesis")
+}
+
+/**
+ * Stop the boot when a seeded set breaks the NFT rules; only on a chain
+ * that seated its validators under `nftValidatorGating`.
+ */
+function refuseOnNftReasons(
+    rows: readonly SeededValidatorNft[],
+    label: string,
+    options: SeedNftOptions = {},
+): void {
+    if (!nftGatingActiveAtGenesis()) return
+    const reasons = seededNftReasons(rows, label, {
+        ...options,
+        mainnet: isMainnetChainId(getSharedState.chainId),
+    })
+    if (reasons.length > 0) {
+        throw new ConsensusInvariantError(`[BOOT] ${reasons.join("; ")}`)
+    }
 }
 
 async function assertSeededAndReturn(
@@ -171,12 +216,12 @@ async function countValidators(): Promise<number> {
 }
 
 /**
- * Returns the snapshot's validator rows as upsert-ready objects, or an
- * empty array when no snapshot is present / the snapshot is schemaVersion
- * 1 (no validators.jsonl). Tolerant of stream-read failures — they are
- * logged and treated as "no snapshot source".
+ * Returns the snapshot's validator seeds, or an empty array when no
+ * snapshot is present / the snapshot is schemaVersion 1 (no
+ * validators.jsonl). Tolerant of stream-read failures — they are logged
+ * and treated as "no snapshot source".
  */
-async function loadSnapshotValidators(): Promise<ValidatorUpsertRow[]> {
+async function loadSnapshotValidators(): Promise<SnapshotValidatorSeed[]> {
     let snapshot: Awaited<ReturnType<typeof loadSnapshot>>
     try {
         snapshot = await loadSnapshot()
@@ -191,10 +236,10 @@ async function loadSnapshotValidators(): Promise<ValidatorUpsertRow[]> {
     if (!snapshot.available) return []
     if (!snapshot.manifest.files["validators.jsonl"]) return []
 
-    const rows: ValidatorUpsertRow[] = []
+    const rows: SnapshotValidatorSeed[] = []
     try {
         for await (const v of snapshot.streamValidators()) {
-            rows.push(snapshotToRow(v))
+            rows.push(v)
         }
     } catch (e) {
         log.warning(
@@ -217,6 +262,9 @@ function snapshotToRow(v: SnapshotValidatorSeed): ValidatorUpsertRow {
         valid_at: v.valid_at,
         unstake_requested_at: v.unstake_requested_at,
         unstake_available_at: v.unstake_available_at,
+        nft_mint: v.nft_mint,
+        nft_owner: v.nft_owner,
+        nft_proof_tx: v.nft_proof_tx,
     }
 }
 
@@ -230,6 +278,9 @@ function genesisToRow(v: GenesisValidatorSeed): ValidatorUpsertRow {
         valid_at: v.valid_at,
         unstake_requested_at: null,
         unstake_available_at: null,
+        nft_mint: v.nft_mint ?? null,
+        nft_owner: v.nft_owner ?? null,
+        nft_proof_tx: v.nft_proof_tx ?? null,
     }
 }
 
@@ -251,7 +302,7 @@ function extractGenesisSeed(genesisData: unknown): GenesisValidatorSeed[] {
  * enforces the wider schema (status / first_seen / valid_at may be
  * null) so re-validating here would reject legitimate snapshot input.
  */
-function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
+function validateSeedEntry(seed: GenesisValidatorSeed, index: number, nftSeats: boolean): void {
     // Guard the whole row first so a `null` / non-object element in
     // genesis.json (e.g. an editor accidentally writes `[null, {...}]`)
     // surfaces as a ConsensusInvariantError with the offending index,
@@ -276,17 +327,17 @@ function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
     // Split the BigInt() parse from the positivity check so the
     // operator sees a distinct, actionable message for each failure
     // mode — matches `seedValidators.ts::validateSeed` exactly.
-    let stake: bigint
-    try {
-        stake = BigInt(seed.staked_amount)
-    } catch {
+    const stake = decimalBigInt(seed.staked_amount)
+    if (stake === null) {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
+            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}" (decimal digits only)`,
         )
     }
-    if (stake <= 0n) {
+    if (nftSeats ? stake < 0n : stake <= 0n) {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
+            nftSeats
+                ? `[BOOT] genesis.validators[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`
+                : `[BOOT] genesis.validators[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
         )
     }
     if (seed.connection_url !== null) {

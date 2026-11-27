@@ -3,9 +3,10 @@ import { spawnSync } from "child_process"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
-import { cloneDefaultForkConfig } from "@/forks/forkConfig"
+import { NON_MAINNET_CHAIN_IDS, cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
 import { getSharedState } from "@/utilities/sharedState"
+import { seededNftReasons } from "src/features/staking/seedNft"
 import {
     BOOT_LOG_TAIL_LINES,
     BOOT_LOG_TIMEOUT_MS,
@@ -250,6 +251,33 @@ describe("drillOverrideYaml", () => {
     })
 })
 
+describe("what a cloud drill runs (drill_inputs.py)", () => {
+    const SCRIPT = resolve(import.meta.dir, "../../devnet/quorum-drills/drill_inputs.py")
+    const py = (args: string[], input?: string) => spawnSync(systemBinary("python3"), ["-I", SCRIPT, ...args], { encoding: "utf8", input })
+
+    it("refuses every chain id but the ones the node treats as test networks", () => {
+        // Read from the script, so the two lists cannot drift apart
+        const m = readFileSync(SCRIPT, "utf8").match(/^TEST_CHAIN_IDS = \(([0-9, ]+)\)$/m)
+        expect(m).not.toBeNull()
+        expect(m![1].split(",").map(Number)).toEqual([...NON_MAINNET_CHAIN_IDS])
+    })
+    it("declares every fork the node knows, so a node that demands the full set boots", () => {
+        const g = withLaunchForks(genesis())
+        expect(Object.keys(g.forks).sort()).toEqual(Object.keys(cloneDefaultForkConfig()).sort())
+    })
+    it("with --carryover keeps identityCarryover at the template's 0 and excludes nothing", () => {
+        const real = JSON.parse(readFileSync(LAUNCH_GENESIS_TEMPLATE, "utf8")).forks
+        const r = py(["launch-forks", "--template", LAUNCH_GENESIS_TEMPLATE, "--carryover"], JSON.stringify(genesis()))
+        expect(r.status).toBe(0)
+        const forks = JSON.parse(r.stdout).forks
+        expect(forks.identityCarryover.activationHeight).toBe(real.identityCarryover.activationHeight === 0 ? 0 : null)
+        const atZero = Object.entries<any>(real).filter(([, f]) => f.activationHeight === 0).map(([n]) => n).sort()
+        expect(Object.keys(forks).filter(n => forks[n].activationHeight === 0).sort()).toEqual(atZero)
+        const ex = py(["launch-excluded", "--template", LAUNCH_GENESIS_TEMPLATE, "--carryover"])
+        expect([ex.status, JSON.parse(ex.stdout)]).toEqual([0, {}])
+    })
+})
+
 describe("launch fork set (drill_inputs.py launch-forks)", () => {
     const template = (forks: Record<string, unknown>) => {
         const file = join(dir, "template.json")
@@ -277,12 +305,24 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
             "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "gasFeeSeparation",
+            "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "l2psSettlement", "tlsnVerified",
         ]) {
             expect(expected[n]).toBe(0)
         }
-        for (const n of ["web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "atomicWork", "networkGovernance"]) {
+        for (const n of ["atomicWork", "networkGovernance", "l2psGate", "tlsnDisabled"]) {
             expect(expected[n]).toBeNull()
         }
+    })
+    it("seats the drill validators nft_exempt under NFT gating at 0, so block 0 builds", () => {
+        const g = withLaunchForks(genesis())
+        expect(g.forks.nftValidatorGating.activationHeight).toBe(0)
+        expect(g.validators.every((v: any) => v.nft_exempt === true)).toBe(true)
+        expect(seededNftReasons(g.validators, "genesis.validators", { mainnet: false })).toEqual([])
+        expect(seededNftReasons(genesis().validators, "genesis.validators", { mainnet: false })).not.toEqual([])
+    })
+    it("leaves the validators as they are when the set does not gate seats by NFT at 0", () => {
+        const g = withLaunchForks(genesis(), template({ ...MIN, nftValidatorGating: { activationHeight: null } }))
+        expect(g.validators).toEqual(genesis().validators)
     })
     describe("excluded forks", () => {
         it("sets identityCarryover to an explicit null when the template has it at 0, and the rest of the set is unchanged", () => {
@@ -373,6 +413,18 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             expect(withLaunchForks(base, active).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x(?!0{64}$)[0-9a-f]{64}$/)
         }
         expect(withLaunchForks(own, active).forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
+    })
+    it("gives an active tlsnVerified the devnet payload when the genesis has none, and keeps one it has", () => {
+        const active = template({ ...MIN, tlsnVerified: { activationHeight: 0, notaryKeys: [{ hex: "FILL" }] } })
+        const devnet = JSON.parse(readFileSync(resolve(import.meta.dir, "../../devnet/genesis.devnet.json"), "utf8"))
+        const { activationHeight: _h, ...devnetPayload } = devnet.forks.tlsnVerified
+        expect(withLaunchForks(genesis(), active).forks.tlsnVerified).toEqual({ activationHeight: 0, ...devnetPayload })
+        const ownPayload = { ...devnetPayload, maxPresentationBytes: 4096 }
+        const own = { ...genesis(), forks: { tlsnVerified: { activationHeight: null, ...ownPayload } } }
+        expect(withLaunchForks(own, active).forks.tlsnVerified).toEqual({ activationHeight: 0, ...ownPayload })
+        // off, it needs no payload and gets none
+        const off = template({ ...MIN, tlsnVerified: { activationHeight: null } })
+        expect(withLaunchForks(genesis(), off).forks.tlsnVerified).toEqual({ activationHeight: null })
     })
     it("keeps the rest of the genesis and does not modify its input", () => {
         const input = genesis()
@@ -488,14 +540,38 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
                 treasuryAddress: devnet.forks.gasFeeSeparation.treasuryAddress,
             })
         })
-        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set", () => {
+        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set (three with --binding off)", () => {
             const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
+            expect(devnet.forks.commitLock).toEqual({ activationHeight: 0 })
             for (const [forkSet, binding, committee] of [[null, "on", 0], ["devnet", "on", 0], [null, "off", null]] as const) {
                 const { r, genesis: g } = gen(forkSet, binding)
                 expect(r.status).toBe(0)
-                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee } })
+                // off turns commitLock off with committeeBinding: the loader refuses it alone
+                const lock = binding === "off" ? { commitLock: { activationHeight: null } } : {}
+                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee }, ...lock })
                 // no exclusion list for the other scenarios
                 expect(existsSync(join(dir, `run-${forkSet}-${binding}-4`, "inputs", "launch-excluded.json"))).toBe(false)
+            }
+        })
+        it("the --binding off genesis loads: committeeBinding and commitLock off, quorumParity at 0", () => {
+            const saved = getSharedState.forkConfig
+            try {
+                for (const binding of ["on", "off"]) {
+                    const { genesis: g } = gen("devnet", binding)
+                    getSharedState.forkConfig = cloneDefaultForkConfig()
+                    loadForkConfigFromGenesis(g)
+                    const loaded = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
+                    const height = binding === "on" ? 0 : null
+                    expect(loaded.committeeBinding.activationHeight).toBe(height)
+                    expect(loaded.commitLock.activationHeight).toBe(height)
+                    expect(loaded.quorumParity.activationHeight).toBe(0)
+                }
+                // what the loader refused before: commitLock at 0 without committeeBinding
+                const { genesis: off } = gen("devnet", "off")
+                getSharedState.forkConfig = cloneDefaultForkConfig()
+                expect(() => loadForkConfigFromGenesis({ ...off, forks: { ...off.forks, commitLock: { activationHeight: 0 } } })).toThrow(/commitLock is scheduled at 0 but committeeBinding is not scheduled/)
+            } finally {
+                getSharedState.forkConfig = saved
             }
         })
         it("--fork-set launch refuses --binding off", () => {
@@ -508,8 +584,8 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
 
 describe("run.sh fork set", () => {
     const sh = readFileSync(resolve(import.meta.dir, "../../devnet/quorum-drills/run.sh"), "utf8")
-    it("runs the launch fork set for the three mainnet-shape drills and no other scenario", () => {
-        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\) FORK_SET=launch ;; esac/)
+    it("runs the launch fork set for the mainnet-shape drills (every halt, ride, restart, third, load and hostloss one, and every 30-validator one) and no other scenario", () => {
+        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-\*\|ride-\*\|restart-\*\|third-\*\|load-\*\|hostloss-\*\|\*-n30s10\) FORK_SET=launch ;; esac/)
         expect(sh).toContain("--fork-set \"${FORK_SET}\"")
         expect(sh).toContain("FORK_SET=devnet\n")
     })

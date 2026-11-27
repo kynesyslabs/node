@@ -59,7 +59,7 @@ services:
       # otherwise refuse to start without one.
       DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-true}
       TLSNOTARY_PORT: 7147
-      # wstcp proxy window, offset +100 from mainnet (55000-55063) so the
+      # TLSNotary proxy session window, offset +100 from mainnet (55000-55063) so the
       # two stacks don't fight over the same host ports. The allocation
       # range and the published range below read these same values.
       TLSNOTARY_PROXY_PORT_MIN: 55100
@@ -75,11 +75,11 @@ services:
     ports: !override
       - "53650:${RPC_PORT:-53550}"
       - "53651:${OMNI_PORT:-53551}"
-      - "3105:${RPC_SIGNALING_PORT:-3005}"
+      - "${RPC_SIGNALING_BIND:-127.0.0.1}:3105:${RPC_SIGNALING_PORT:-3005}"
       - "9195:${GOSSIP_PORT:-9095}"
       - "${L2PS_MESSAGING_BIND:-127.0.0.1}:3106:${L2PS_MESSAGING_PORT:-3006}"
       - "9190:9090"
-      # wstcp TLSNotary proxy range (devnet window), localhost-bound so only
+      # TLSNotary proxy session range (devnet window), localhost-bound so only
       # the host reverse proxy reaches it. MUST match TLSNOTARY_PROXY_PORT_MIN/
       # MAX above. Host:container are equal (no offset) — the node advertises
       # the container-internal port and nginx forwards /tlsn/<port>/ to it.

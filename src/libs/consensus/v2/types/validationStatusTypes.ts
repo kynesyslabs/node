@@ -53,3 +53,11 @@ export const emptyValidationPhase: ValidationPhase = {
     },
     blockReferenced: 0,
 }
+
+// True when the value is one of the phase numbers keyed in emptyValidationPhase.
+export function isKnownPhase(phase: unknown): phase is number {
+    return (
+        Number.isInteger(phase) &&
+        Object.hasOwn(emptyValidationPhase.phases, phase as number)
+    )
+}

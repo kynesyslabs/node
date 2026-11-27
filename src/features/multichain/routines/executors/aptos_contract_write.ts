@@ -4,6 +4,7 @@ import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Network } from "@aptos-labs/ts-sdk"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
+import errorKind from "../errorKind"
 
 export default async function handleAptosContractWrite(operation: IOperation) {
     return await handleAptosPayRest(operation)
@@ -69,7 +70,7 @@ export default async function handleAptosContractWrite(operation: IOperation) {
             status: txResponse.result === "success",
         }
     } catch (error) {
-        log.error("Aptos contract write error:", error)
+        log.error(`Aptos contract write error: ${errorKind(error)}`)
         return {
             result: "error",
             error: error.toString(),

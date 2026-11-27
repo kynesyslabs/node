@@ -11,10 +11,14 @@ Pick one. Both tracks produce a working node; they differ only in where the bina
 
 ### Hardware Minimum
 
-- 4GB RAM
-- 4 CPU cores (2GHz+)
+Per validator (node and its database):
+
+- 2 dedicated vCPU (2GHz+), not shared or burstable
+- 3 GB RAM
 - Modern SSD
 - 200 Mbps internet connection
+
+In the launch rehearsal under flood load a validator peaked at 150-164 % CPU (1.5-1.6 cores) and 0.86 GiB of memory. A shared or burstable vCPU is throttled at such peaks, and a slow validator slows every round it takes part in. Several validators on one host need this much each.
 
 ### Hardware Recommended
 
@@ -42,6 +46,8 @@ chronyc tracking       # "Leap status : Normal", "System time" well under 1 seco
 ```
 
 If NTP is off: `sudo timedatectl set-ntp true`.
+
+Keep NTP synced and alert on `demos_clock_offset_seconds` above 1 second. In the launch rehearsal a validator 4.5 seconds off still followed the chain, but that leaves only 0.5 seconds before the 5-second refusal.
 
 ---
 
@@ -178,13 +184,15 @@ IMAGE_NAME=ghcr.io/kynesyslabs/node
 IMAGE_TAG=vX.Y.Z@sha256:<digest>   # the image: line of mainnet/checksums.txt, after "ghcr.io/kynesyslabs/node:"
 RPC_PORT=53550
 EXPOSED_URL=http://YOUR_PUBLIC_IP:53550
-COMPOSE_PROFILES=tlsnotary
-TLSNOTARY_ENABLED=true
+COMPOSE_PROFILES=
+TLSNOTARY_ENABLED=false
 ```
 
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
-- **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses; without it, set `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
-- **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised proxy port (`TLSNOTARY_PROXY_PORT`) on every interface and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
+- **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. On mainnet the notary is a Demos-operated service whose keys the genesis pins (`tlsnVerified`), and every node verifies presentations itself, so a mainnet validator runs no notary and keeps `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false` as above. The exception is the TLSNotary relay role: the public RPC node or nodes the network designates as relay serve `requestTLSNproxy` (the per-session proxies a prover's browser reaches the attested site through) and set `TLSNOTARY_ENABLED=true`, still with `COMPOSE_PROFILES=` and no notary sidecar; provers notarize at the network's notary, the URL the SDK pins. Such a node logs a warning at start (`[TLSNotary] Relay only: no notary answers at ...`), its `/health` shows `tlsnotary` ready with `mode: relay-only`, and `tlsnotary.getInfo` answers 503; that is the expected state, not a failure. It also needs the `/tlsn/<port>/` reverse proxy below. Which nodes take the relay role is an owner decision ([docs/runbooks/tlsn-notary.md](docs/runbooks/tlsn-notary.md), section 10); every other validator keeps `TLSNOTARY_ENABLED=false`. On a devnet or test network, `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses, paired with `TLSNOTARY_ENABLED=true`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
+- **Behind the bundled Caddy (`proxy` profile).** Also set `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` in `.env` (on a source build, `./run --docker --proxy` does the same for one run), and leave `TRUSTED_PROXIES` unset. The override file unpublishes the node's RPC port and trusts Caddy's forwarding header from the docker bridge range (`172.16.0.0/12`). With the profile alone the node trusts no proxy: every client behind Caddy shares Caddy's rate-limit counter and is throttled together, and the node logs `X-Forwarded-For from <address> ignored: TRUSTED_PROXIES is empty` at most every 10 minutes. Behind your own proxy, list that proxy's address in `TRUSTED_PROXIES` ([docs/runbooks/proxy-setup.md](docs/runbooks/proxy-setup.md)); an entry of `0.0.0.0/0` or `::/0` stops the node at startup.
+- **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised static proxy port (`TLSNOTARY_PROXY_PORT`, on which nothing listens) and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). The node opens a proxy session only for a `requestTLSNproxy` signed over its body for this node by the sender of a confirmed `tlsn_request`, and only with `TLSNOTARY_ENABLED=true`; each session admits one websocket carrying its secret session id, and ends at 5 minutes or at its byte caps. A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
+- **`SUDO_PUBKEY`** (optional) is the ed25519 public key (`0x` + 64 hex) this node answers its admin RPC to (`rate-limit/unblock`, `getCampaignData`, `awardPoints`). Empty, nobody may call them. It only authorises calls on this node: whether an award transaction is valid is decided by the genesis `properties.sudoPubkey`, the same on every node.
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
 - **Another install on this host** also sets `INSTANCE_SUFFIX` and `COMPOSE_PROJECT_NAME` and moves every port: see [More than one install on a host](#more-than-one-install-on-a-host).
 
@@ -274,7 +282,7 @@ The helper is the Postgres image the stack already uses, pinned by digest, so no
 ./scripts/node-doctor --production --env-from compose
 ```
 
-It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the validator set block 0 seeds (the snapshot's `validators.jsonl` when it has one, otherwise the genesis `validators`) holds fewer validators active at block 0 (status `"2"`, `valid_at` 0) than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` of that set that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). A validator without a URL passes that check: `null` anywhere, and a missing or empty URL in a snapshot row, since the node accepts those rows. A PASS therefore does not mean every validator can be dialed; check those validators' addresses against the peer list of the announcement. Fix every FAIL, and check every WARN by hand, before the next step.
+It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, the GitHub, Discord and RapidAPI credentials web2 identity links are verified with (reported as not needed when the genesis schedules `keylessWeb2Identity` at 0, as the mainnet genesis does: GitHub, Discord and Twitter accounts then link through TLSNotary only), one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the validator set block 0 seeds (the snapshot's `validators.jsonl` when it has one, otherwise the genesis `validators`) holds fewer validators active at block 0 (status `"2"`, `valid_at` 0) than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` of that set that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). A validator without a URL passes that check: `null` anywhere, and a missing or empty URL in a snapshot row, since the node accepts those rows. A PASS therefore does not mean every validator can be dialed; check those validators' addresses against the peer list of the announcement. Fix every FAIL, and check every WARN by hand, before the next step.
 
 **8. Create the database schema and start without building.**
 
@@ -337,7 +345,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
 | `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required on mainnet in every mode, and in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
-| `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. |
+| `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. A node whose genesis has a mainnet chain id (not 1 or 1337) refuses to start without it. |
 | `PROD` | `false` | `true` on validators. The node then refuses to start with a loopback or missing `EXPOSED_URL`, without the commit it was built from, or without its identity file (it never creates a new key on its own; see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Production refusals"). |
 | `CONSENSUS_TIME`, `BLOCK_TIMESTAMP_MIN_DELTA`, `BLOCK_TIMESTAMP_TOLERANCE`, `NETWORK_FEE`, `RPC_FEE`, `BURN_FEE`, `RPC_FEE_PERCENT`, `MIN_VALIDATOR_STAKE`, `ZK_ATTESTATION_POINTS` | _(empty: built-in values)_ | Chain-wide: every validator runs the same values. Mainnet validators copy them from [docs/mainnet/parameters.env](docs/mainnet/parameters.env); `./scripts/node-doctor --production` fails on any other value. |
 | `FORK_SCHEDULE_MISMATCH_POLICY` | `abstain` | What a validator does when its fork schedule differs from most validators' before a fork. Mainnet runs `abstain` only; `warn` is for devnets and testnets, and the node refuses it together with `DEMOS_REQUIRE_VALIDATORS=true`. See [docs/runbooks/fork-schedule-policy.md](docs/runbooks/fork-schedule-policy.md). |
@@ -350,7 +358,9 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `L2PS_MESSAGING_SEND_RATE` | `5` | Messages per second one sender key may send through the messaging relay once its burst is spent. Over it the sender gets `RATE_LIMITED` with a retry time and keeps its socket. `0` turns the limit off. |
 | `L2PS_MESSAGING_SEND_BURST` | `30` | Messages a sender key may send at once before the rate applies. |
 | `L2PS_MESSAGING_BACKLOG_SHARE` | `0.5` | Largest fraction of `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` that messaging may hold, so RPC transactions keep the rest. `1` gives messaging all of it. |
-| `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. A validator sets `tlsnotary` (or nothing); `monitoring` needs `GRAFANA_ADMIN_PASSWORD`. See [Profiles](#profiles). |
+| `WEB2_MAX_INFLIGHT_PER_CALLER` / `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER` / `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` / `WEB2_MAX_INFLIGHT_TOTAL` | `2` / `10` / `104857600` (100 MiB) / `32` | Caps on the outbound fetches of the web2 (DAHR) proxy: running at once per caller, started per minute per caller, origin response bytes per hour per caller, and running at once on the node. A caller is the client address for a `web2ProxyRequest` RPC (one IPv6 /64 counts as one address; behind a reverse proxy this needs `TRUSTED_PROXIES`: otherwise every client counts as the proxy, which shares one cap, or, for a proxy on the same host, is loopback and skips the per-caller caps) and the sender for a `web2Request` or DemosWork tx. Over a cap the caller gets result `429` `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and `WHITELISTED_IPS` skip the per-caller caps; every fetch counts toward the node-wide one. Every loopback source address (all of `127.0.0.0/8` and `::1`) skips the HTTP RPC's per-address limits (HTTP rate limiter, identity confirm cap, web2 per-caller caps); it still counts toward the web2 node-wide cap and the per-caller Human Passport claim limit, and OmniProtocol's per-IP limits still apply. A reverse proxy or sidecar on the same host must therefore be listed in `TRUSTED_PROXIES`, and must set `X-Forwarded-For` or `X-Real-IP` to the client's address; a forwarder that sets neither makes every client it relays local. Positive integers only, or the node does not start. Local to the node: no effect on blocks or state. |
+| `WEB2_MAX_SESSIONS_PER_CALLER` / `WEB2_MAX_SESSIONS_TOTAL` | `16` / `1024` | Caps on the web2 (DAHR) sessions the node holds; a session lives for `WEB2_SESSION_TTL_MS` after its last use. A caller (as for the fetch caps) holds at most the first; its next create closes its least recently used session. For a `web2ProxyRequest` RPC the per-caller cap is counted per source address as the node sees it: behind a reverse proxy that is not listed in `TRUSTED_PROXIES` every client shares one cap (a proxy on the same host is loopback and skips it). The node holds at most the second; over it a create gets result `429` `WEB2_FETCH_LIMITED` with reason `node-sessions` and `retryAfterSeconds`. Of its requests a session keeps only the create request's action, method and URL (when short) and the URL of its last admitted start; a start whose URL is longer than 4096 characters once normalized gets result `400`. Loopback and `WHITELISTED_IPS` skip the per-caller cap; every session counts toward the node-wide one. Positive integers only, or the node does not start. Local to the node: no effect on blocks or state. |
+| `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. A mainnet validator sets nothing at launch (TLSNotary is off, see step 3 of [Run a released image](#run-a-released-image-validators)); `monitoring` needs `GRAFANA_ADMIN_PASSWORD`. See [Profiles](#profiles). |
 | `INSTANCE_SUFFIX` / `COMPOSE_PROJECT_NAME` | _(empty)_ / _(directory name)_ | Set both on every install but one when a host runs more than one; see [More than one install on a host](#more-than-one-install-on-a-host). |
 
 Under docker compose a variable reaches the node only when `docker-compose.yml` lists it in the node's `environment:`; a value in `.env` that is not listed there does nothing. Every node variable in this table is listed.
@@ -396,7 +406,7 @@ If running behind NAT, port-forward `RPC_PORT` (53550), `OMNI_PORT` (53551) and 
 
 **2. Provide a bootstrap peer list.**
 
-The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key out: the node adds itself. On a validator network list every other validator.
+The bootstrap peer list file is stored in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key and public URL out: the node adds itself, and a listed URL that is dialed and answers with this node's identity refuses boot. Remove such an entry before restarting. On a validator network list every other validator.
 
 Run this from the checkout, with `STATE_VOLUME` and `HELPER_IMAGE` set as in [step 3](#run-a-released-image-validators) of the released-image install (a source build sets them the same way):
 
@@ -417,7 +427,7 @@ docker run --rm --entrypoint sh \
 
 Do not start the node yet: it needs the genesis pins of step 3 first.
 
-Use the keys and URLs the release announcement lists (or, on testnet, the current bootstrap nodes from the team). The node will merge any peers it learns from these into the file as it runs.
+Use the keys and URLs the release announcement lists (or, on testnet, the current bootstrap nodes from the team). Keep at least one reachable bootstrap validator in this file across restarts; the node merges learned peers in memory but does not write them back to `demos_peerlist.json`.
 
 **3. Pin the network's genesis.**
 
@@ -436,13 +446,15 @@ EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
 
 While a snapshot is present, a pin is accepted only for a genesis that declares `snapshot.manifestSha256` for it, as the mainnet genesis template does. The genesis bundled in the image declares none and the bundled snapshot is present, so on an empty database the image starts on its own files only with neither pin set and `DEMOS_ALLOW_UNPINNED_GENESIS=true`.
 
-A validator never leaves these set in `.env`: `DEMOS_ALLOW_UNPINNED_GENESIS`, and the one-start switches `DEMOS_GENERATE_IDENTITY`, `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`. Each of the last four is for the single start that needs it (see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) and below); remove it once the node runs. `./scripts/node-doctor --production` fails while any of them is set.
+A validator never leaves these enabled in `.env`: `DEMOS_ALLOW_UNPINNED_GENESIS`, `DEBUG_ASSERTIONS_ENABLED` (debug-only; refused when enabled with `PROD=true`), `DEMOS_DISABLE_FORK_MACHINERY` (rehearsal-only), and the one-start switches `DEMOS_GENERATE_IDENTITY`, `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`. Each of the last four is for the single start that needs it (see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) and below); remove it once the node runs. `./scripts/node-doctor --production` fails if any has a value other than blank, `false` or `0`.
 
-At every start the node checks it before it signs anything: on an empty database against the genesis file (`data/genesis.json`, or `DEMOS_GENESIS_FILE`) and the snapshot that genesis declares, before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
+At every start the node checks it before it signs anything: on an empty database against the genesis file (`data/genesis.json`, or `DEMOS_GENESIS_FILE`) and the snapshot that genesis declares, before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; a node on the mainnet chain id refuses to start while it is set, even with a pin. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
 
 The genesis hash leaves out the validators' `connection_url` and the order of the keys in the file, and block 0 does not, so two files with the same genesis hash can still build different blocks 0. `EXPECTED_GENESIS_BLOCK_HASH` closes that: an empty database refuses to write any other block 0, and an existing one refuses to boot on it.
 
 On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet, with the `docker-compose.override.yml` of step 3 of [Run a released image](#run-a-released-image-validators). Use the files exactly as published and check them against the announcement; never edit them ([docs/mainnet/genesis.md](docs/mainnet/genesis.md)).
+
+The genesis owners run the [plan check, including the bot allowlist review](docs/mainnet/genesis.md#bot-authorization-launch-decision-and-gate), on the published file before launch; mount exactly that file at `/app/data/genesis.json`. Every bot must have a raw genesis allocation of at least `1_000_000_000_000`; current or snapshot balances do not qualify. Preserve that genesis file on upgrades: bot authorization is reloaded from it at every boot.
 
 The node also remembers the fork schedule it last ran with. A restart whose `data/genesis.json` adds, moves or removes a fork at or below the current height plus 50 blocks is refused, and the refusal names the change. If every operator agreed to that exact schedule, restart once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints. See `docs/design/genesis-enforcement.md`.
 
@@ -474,6 +486,12 @@ For exchanges and wallets that reconcile balances. Amounts are in OS (1 DEM = 1 
 - A transaction included in a block that then fails pays its fee (or, for a non-native type, its gas with the same credits) and spends its nonce; the amount does not move. If the balance cannot cover the fee, only the nonce is spent.
 - The fee values, `additional_fee` (0 at launch) and the split percentages are network parameters that governance can change; read them from the transaction's `transaction_fee`, not from this page.
 
+### Crediting deposits
+
+- **Protocol finality is one block.** A block is final once it carries a quorum certificate: the signatures of 7 of the 10 members of its committee. Blocks are never reorganised after that. Check a deposit with `getTransactionStatus` (`state: "included"`; `failed` never credits the amount) and, to verify without trusting the node, `getTransactionProof` and `getFinalizedHead`. The calls and their answers are in [docs/runbooks/finality-read-api.md](docs/runbooks/finality-read-api.md).
+- **Launch margin.** For the first weeks after launch, credit a deposit only once its block is at least 3 blocks below the finalized head (about 30 s at the 10 s block time). This is an operational margin while the network is new, not a protocol rule. The date it ends is announced: TBD (owner).
+- The full integration guide (address format, statuses, failed transactions, expiry, halt notices) is [docs/mainnet/exchange-integration.md](docs/mainnet/exchange-integration.md).
+
 ### Network Exposure
 
 When running on a VPS or any machine you want peers to connect to, you must allow inbound connections on these ports. Each row names the `.env` variable that moves it; Docker publishes host and container port 1:1, so the node listens on the same number.
@@ -483,9 +501,8 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 53550 | `RPC_PORT` | TCP | Node RPC (HTTP); the port in `EXPOSED_URL` |
 | 53551 | `OMNI_PORT` | TCP | OmniProtocol (peer-to-peer binary RPC; peers dial the port the node advertises, so publish it on the same number) |
 | 9095 | `GOSSIP_PORT` | TCP | Gossip; peers dial `EXPOSED_URL`'s host on this port |
-| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Published on every interface |
+| 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Docker Compose publishes it on `RPC_SIGNALING_BIND` (loopback by default; clients use Caddy's `/signaling/`) |
 | 7047 | `TLSNOTARY_PORT` | TCP | TLSNotary notary, published on every interface whenever the `tlsnotary` profile is on |
-| 55688 | `TLSNOTARY_PROXY_PORT` | TCP | TLSNotary WebSocket proxy port the node advertises. The node service always publishes it, so it must be free even with TLSNotary off; it answers only with TLSNotary on |
 | 123 | | UDP, outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
 These are published on loopback (or the interface the `*_BIND` variable names), or not at all, and should NOT be exposed publicly:
@@ -499,6 +516,7 @@ These are published on loopback (or the interface the `*_BIND` variable names), 
 | 9091 | `PROMETHEUS_PORT` | Prometheus (`monitoring` profile), on `MONITORING_BIND` (loopback) |
 | 3000 | `GRAFANA_PORT` | Grafana (`monitoring` profile), on `MONITORING_BIND` (loopback); only public if you want a public dashboard |
 | 9100 | `NODE_EXPORTER_PORT` | node-exporter (`full` profile), on `MONITORING_BIND` (loopback) |
+| 55688 | `TLSNOTARY_PROXY_PORT` | Static TLSNotary proxy port `tlsnotary.getInfo` still advertises for older clients. Nothing listens on it; the node service publishes it on loopback, so it must be free |
 | 55000-55063 | `TLSNOTARY_PROXY_PORT_MIN`, `TLSNOTARY_PROXY_PORT_MAX` | TLSNotary per-session proxies, on loopback only, for a reverse proxy on this host (`/tlsn/<port>/`). The node service always publishes this window, so it must be free even with TLSNotary off; bare metal (no Docker) uses 55000-57000 unless the same variables say otherwise |
 | 7474, 7687 | `NEO4J_HTTP_PORT`, `NEO4J_BOLT_PORT` | Neo4j (`neo4j` profile), published on every interface: keep the profile off on a validator |
 | 80, 443 | | Caddy (`proxy` profile): fixed ports, so only one install per host can run that profile |
@@ -511,7 +529,6 @@ sudo ufw allow 53550/tcp comment "Demos RPC"
 sudo ufw allow 53551/tcp comment "Demos OmniProtocol"
 sudo ufw allow 9095/tcp  comment "Demos gossip"
 sudo ufw allow 7047/tcp  comment "Demos TLSNotary"
-sudo ufw allow 55688/tcp comment "Demos TLSNotary proxy"
 sudo ufw enable
 ```
 
@@ -547,6 +564,49 @@ COMPOSE_PROFILES=tlsnotary
 ```
 
 Every command in this guide that names a volume or a container uses the names compose reports for the install it runs in (`$STATE_VOLUME`, `$SUFFIX`, step 3 of [Run a released image](#run-a-released-image-validators)), and each install keeps its signer list, release files, key copy and peer list in its own place. `docker compose down -v` removes only the volumes of the install it runs in. Each node also needs its own CPU and memory headroom ([System Requirements](#system-requirements)); a compose override can cap one (`mem_limit`, `cpus` under `services: node:`).
+
+#### Instant messaging signaling
+
+The SDK's `MessagingPeer` connects directly to a signaling WebSocket from wallets
+and browsers. Signaling is enabled by default (`SIGNALING_ENABLED=true`) and is
+independent of consensus. Each connection accepts payloads up to 1 MiB. Larger
+payloads close the connection with code 1009. Clients that send large encrypted
+messages must allow for JSON and encryption overhead within the payload limit.
+
+**Docker Compose:** the host port defaults to `127.0.0.1:3005:3005`. With the
+`proxy` profile, external SDK clients can use
+`wss://<PROXY_DOMAIN>/signaling/`; Caddy reaches the node over the container
+network. To opt in to direct public IPv4 WebSocket access, set
+`RPC_SIGNALING_BIND=0.0.0.0` in the host `.env` and allow inbound TCP on
+`RPC_SIGNALING_PORT` (default 3005). This publishes on IPv4 only; IPv6 clients
+need an additional `[::]` port mapping. A private host interface can be used
+instead. The same port variable controls both sides of the mapping and Caddy's
+upstream.
+`RPC_SIGNALING_BIND` controls Docker publication only; it is not a node setting.
+Docker Engine before 28.0 does not drop traffic that other hosts on the same
+local network segment send to a port published on `127.0.0.1`; on such a host
+with untrusted neighbours, upgrade Docker or block the loopback-published
+ports (signaling, L2PS messaging, TLSNotary per-session proxies) in the host
+firewall.
+
+**Bare metal and Bun:** signaling continues listening on all interfaces; use a
+host firewall or a TLS reverse proxy to control external access. `./run` and
+`bun run start:bun` use `RPC_SIGNALING_PORT` when configured, otherwise
+`SIGNALING_SERVER_PORT` (default 3005), or the next free port if it is taken;
+check the `[PORT] signaling drifted` log line. Running
+`bun src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts`
+directly always uses port 3005. The same payload limit applies to all these
+entry points. Set `SIGNALING_ENABLED=false` to disable signaling when running
+the full node; the standalone server starts unconditionally.
+
+**Fresh installs and upgrades:** fresh Compose installs publish signaling on
+loopback. Before upgrading a node whose SDK clients use a direct public port,
+choose the Caddy route or explicitly set `RPC_SIGNALING_BIND=0.0.0.0`, then
+recreate the node container with `docker compose up -d --force-recreate node`
+using the updated image and compose file. Restarting an existing container
+alone retains its old port publication. Bare-metal and Bun deployments need a
+process restart to activate the payload limit; their listener address is
+unchanged.
 
 ### Profiles
 
@@ -602,26 +662,49 @@ docker volume inspect "$STATE_VOLUME"
 
 ### Backup the node identity
 
-Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up this install's whole state volume (`$STATE_VOLUME`, with `HELPER_IMAGE` from the same step 3), encrypted, and keep the backup off this host:
+Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up this install's whole state volume (`$STATE_VOLUME`, with `SUFFIX` and `HELPER_IMAGE` from the same step 3; a source build sets them the same way), encrypted, and keep the backup off this host:
 
 ```bash
+export GPG_TTY=$(tty)
 out="node-state$SUFFIX-$(date +%F-%H%M%S).tar.gz.gpg"
 if docker compose stop node; then
-  ( set -o pipefail
+  if ( set -o pipefail
     docker run --rm --entrypoint tar -v "$STATE_VOLUME":/src:ro "$HELPER_IMAGE" czf - -C /src . \
-      | gpg --symmetric --cipher-algo AES256 -o "$out"
-  ) || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
-  docker compose up -d --no-build    # a source build: ./run --docker -d
+      | gpg --symmetric --no-symkey-cache --cipher-algo AES256 -o "$out"
+  ) && gpg --decrypt --no-symkey-cache "$out" > /dev/null; then
+    docker compose up -d --no-build
+  else
+    echo "backup FAILED; removing $out" >&2
+    rm -f "$out"
+    docker compose up -d --no-build
+    false
+  fi
 else
   echo "the node did not stop; no backup taken" >&2
+  false
 fi
 ```
 
-A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup.
+A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup. On a source build with no `INSTANCE_SUFFIX` in `.env`, replace both `docker compose up -d --no-build` lines with `./run --docker -d`, so the node comes back with the profiles `./run` started, which can differ from `COMPOSE_PROFILES`. With a suffix, keep the block as it is: `./run --docker` resets `INSTANCE_SUFFIX` to empty, so it would start the default-named stack and leave this install's node stopped.
 
-`gpg` asks for a passphrase; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
+The block cannot clean up after an interrupt: if you press Ctrl-C at a passphrase prompt or the SSH session drops, it stops where it is and can leave the node stopped. Then run `docker compose up -d --no-build` (a source build with no `INSTANCE_SUFFIX` in `.env`: `./run --docker -d`) and delete this run's `node-state$SUFFIX-<date>-<time>.tar.gz.gpg` file, which the block did not finish checking.
+
+`GPG_TTY` lets `gpg` ask for the passphrase on this terminal, so `tty` must print a terminal path (not `not a tty`): use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file.
+
+GnuPG older than 2.2.7 rejects `--no-symkey-cache`, so the block fails, removes the file and restarts the node. On such a host, delete `--no-symkey-cache` from both `gpg` commands and paste the block again. Its decrypt check then reads the passphrase from the agent's cache, so right after it, in the same shell, flush the cache and check the file with the passphrase typed again:
+
+```bash
+gpgconf --reload gpg-agent &&
+gpg --decrypt "$out" > /dev/null &&
+gpgconf --reload gpg-agent ||
+{ echo "backup FAILED; removing $out" >&2; rm -f "$out"; false; }
+```
+
+`gpg` asks for a passphrase and asks again for the decrypt check; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
 
 Restoring is not the reverse of this: an old copy can make the key vote against a vote it already cast. Follow the restore rules in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) (newest complete copy, network head above the key's last possible vote, never two hosts running the key).
+
+This volume does not hold the genesis snapshot (`./mainnet/snapshot` above): keep the genesis snapshot on every validator for the life of the chain; with `identityCarryover` active a node without it refuses to start ([docs/mainnet/genesis-import.md](docs/mainnet/genesis-import.md)).
 
 ### View logs
 
@@ -718,6 +801,8 @@ docker volume ls --filter "name=^demos_.*$SUFFIX\$"    # left over; without a su
 ```
 
 `down -v` removes only the volumes labelled with this project, which every volume this guide seeds is, since the seeding steps run `docker compose create` first. A volume made outside compose (an older `docker run -v demos_node_state:...` seed) has no label: `down -v` prints `Volume ... was not created by Docker Compose` and keeps it. Remove such a volume by its exact name (`docker volume rm demos_node_state$SUFFIX`), and only once you have checked that no other install uses it. Never run `docker volume prune` or `down -v` from another install's checkout to clean up this one.
+
+Through the launcher, `./run --docker down -v` (or `./scripts/docker-run down -v`, also as `--volumes` or in a flag group such as `-vt 0`; as in compose, the last of these settings counts, so a later `--volumes=false` turns it off) first lists the stack's declared named volumes (the ten `demos_*` ones) and asks you to type `delete`; `down -v` also removes the anonymous volumes attached to the containers, which are not listed. Where there is no terminal (scripts, CI) it stops unless you add `--yes-delete-volumes`.
 
 ### Troubleshooting
 
@@ -882,16 +967,9 @@ git branch
 ### 5. Install Dependencies
 
 ```bash
-# Install all dependencies (requires Rust/Cargo for wstcp)
+# Install all dependencies
 ./scripts/install-deps.sh
 ```
-
-> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying. If you don't have Rust installed, run:
->
-> ```bash
-> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-> source ~/.cargo/env
-> ```
 
 ### 6. First Run — Generate Keys
 
@@ -964,11 +1042,15 @@ cp .env.example .env
 cp demos_peerlist.json.example demos_peerlist.json
 ```
 
+The peer list example is a placeholder: its key and URL are not valid, so the node skips it and boots with no peers (`[BOOTSTRAP] No usable peers`). Replace it with a real validator in [Joining a Network](#8-joining-a-network) before you expect to join one. On this node's RPC port, only two kinds of entry are skipped: the exact bound host (`RPC_BIND`), and, for a wildcard bind (`0.0.0.0` or `::`), a numeric loopback address the listener accepts (`127.0.0.0/8`, `::1`, or IPv4-mapped `127.0.0.0/8`). A hostname bind such as `RPC_BIND=localhost` matches only that hostname, and a numeric bind only that same address, so with `RPC_BIND=localhost` an entry for `http://127.0.0.1:53550` is dialed. Other spellings, including `localhost` on a wildcard bind and this node's public URL, are dialed; if they answer as this node, boot is refused and the error log names the URL. Remove that entry from the peer list by hand and restart.
+
 For the bare-metal path, override these in `.env`:
 
 - `PG_HOST=localhost`
 - `PG_PORT=5332` (the host-mapped port the `./run` Postgres sidecar uses)
 - `TLSNOTARY_HOST=localhost`
+
+With your own PostgreSQL (`./run -e` or `--external-db`), set `PG_HOST` and `PG_PORT` to that server. `./run -e` takes `PG_PORT` from `-d`, else from the shell, else from `.env`; earlier versions used 5332 unless `-d` was given, so check `PG_PORT` in `.env` before upgrading.
 
 Set `EXPOSED_URL` based on your setup:
 
@@ -1080,6 +1162,7 @@ What the setup does:
 
 - **L2PS:** creates `data/l2ps/<id>/` (config, subnet key, IV) with a fresh key, or imports the key and IV you received from the subnet owner when you join an existing subnet. Key files get mode 600 and are never printed. It also sets the history retention, plaintext history, messaging and port options in `.env`.
 - **ZK batch proofs:** builds the proving keys (about 200 MB download, several minutes; with `--yes` only when you pass `--zk-generate`) and turns `L2PS_ZK_ENABLED` on once they exist. The identity verification key is committed to the repository and is only checked, never regenerated.
+- **Settlement (mainnet, `l2psSettlement` fork active from block 0):** L2PS transfers move L1 balances only through `l2psBatch` settlement records. A member node plans the executed transfers into batches, proves each one in a separate prover process and submits it; every validator checks the proof and the signed transfers and applies the same balance changes, so no node applies L2PS edits on its own. A batch holds at most 9 transfers and 18 balance changes, and a block at most 20 batches; a batch that fails its checks is included as failed without changes, and its transfers are planned again. Members only accept transfers that carry their settlement data (current SDK clients send it), and a transfer whose fee is below the native transfer fee is dropped with a message to sign it again. A sender may queue at most 18 transfers past its L1 nonce on one member, within its balance, in envelopes of at most 174,506 bytes; a transfer no batch can place fails about 35 minutes (300 blocks) after admission (`docs/design/l2ps-zk-settlement.md`, "Admission and the queue"). `L2PS_ZK_ENABLED` and the old batch proof keys are obsolete under the fork: the node ignores the flag and says so at start. Validators that are not members set nothing: they verify against the settlement verification key committed in the release. A member node keeps the subnet files from this setup and also needs the settlement proving key and circuit, which the release image builds in (`docs/design/l2ps-zk-settlement.md`, Plan step 1); with the fork scheduled, a node without the verification key, or a member without the proving files or a prover that starts, refuses to boot. Each proof takes one core, about 1 GB and about 40 s for a batch of up to 9 transfers; `L2PS_SETTLEMENT_PROVERS` (1 to 16, default 1) sets how many a member proves at once, so give a member that many spare cores and GB of memory on top of the node.
 - Messaging is only switched on together with a usable subnet, never on its own.
 - Exit codes: 0 done (or `--check` found nothing wrong), 1 something is missing or could not be written, 2 invalid command line or `DEMOS_SETUP_*` value, 130 cancelled. With `--check --json` the output is a single JSON document on every path, errors included.
 - Nothing that already exists is replaced unless you say yes or pass `--force`. A replaced file is kept next to the original as `<name>.bak-<time>`. Add `--dry-run` to see what would be written.
@@ -1120,6 +1203,26 @@ The variable replaces the pinned digest (it does not turn the check off), so a n
 
 **Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. Inside the image the setup does not write `/app/.env`; it prints the lines to put in your host `.env` (or the compose environment), and you recreate the container afterwards. The messaging WebSocket port (`L2PS_MESSAGING_PORT`, default 3006) is published by the compose file on loopback only (`L2PS_MESSAGING_BIND`, default `127.0.0.1`; set `0.0.0.0` so SDK clients can reach the port directly; operators behind a reverse proxy keep the default), and with the `proxy` profile Caddy serves it at `/messaging/` and forwards to the same `L2PS_MESSAGING_PORT` (a custom port works there too; `/signaling/` follows `RPC_SIGNALING_PORT` the same way). The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
 
+**Docker, joining a subnet:** the setup in the container runs as uid 1000 (the image's `demos` user), so it cannot read a host key file that another user owns with mode 600, and `--l2ps-key-file` stops with `EACCES`. Either give the files to uid 1000 and mount them read-only into a one-off container:
+
+```bash
+sudo chown 1000:1000 seed/subnet.key seed/subnet.iv   # keep mode 600
+docker compose run --rm --no-deps -v "$PWD/seed:/seed:ro" node \
+    bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join \
+    --l2ps-key-file /seed/subnet.key --l2ps-iv-file /seed/subnet.iv
+sudo shred -u seed/subnet.key seed/subnet.iv   # uid 1000 owns them now
+```
+
+or read the key and IV silently into the shell as above and pass them by name, so the values stay off the command line:
+
+```bash
+docker compose run --rm --no-deps -e DEMOS_SETUP_L2PS_KEY -e DEMOS_SETUP_L2PS_IV node \
+    bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join
+unset DEMOS_SETUP_L2PS_KEY DEMOS_SETUP_L2PS_IV
+```
+
+Either way the subnet files land in the `demos_node_data` volume. Put the `.env` lines the setup prints in place, recreate the node container (`docker compose up -d node`) and check with `docker compose exec node bun run setup --check`.
+
 ---
 
 ## Security Notes
@@ -1150,8 +1253,7 @@ The variable replaces the pinned digest (it does not turn the check off), so a n
 | 53551       | OmniProtocol | P2P communication (TCP)                 |
 | 9095        | Gossip       | Gossip sidecar (TCP)                    |
 | 7047        | TLSNotary    | TLSNotary server                        |
-| 55688       | WS Proxy     | TLSNotary WebSocket proxy the node advertises (TCP) |
-| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it |
+| 3005        | Signaling    | WebRTC signaling for messaging clients (TCP); consensus does not use it. Open only with `RPC_SIGNALING_BIND=0.0.0.0` (Docker publishes it on loopback otherwise, and Caddy serves `/signaling/`) or on bare metal |
 | 55000-55063 | WS Proxy     | Per-session TLSNotary proxies (TCP), on loopback for a reverse proxy on this host; bare metal uses 55000-57000. Not opened in the firewall ([Network Exposure](#network-exposure)) |
 | 123 (out)   | NTP          | Outbound UDP; host time sync and the node's clock offset check |
 

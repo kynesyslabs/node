@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockL2psGateDormant } from "@/utilities/testSupport/coreMocks"
 
 const check = jest.fn()
 const claim = jest.fn()
@@ -27,6 +28,7 @@ mock.module("src/libs/blockchain/transaction", () => ({ __esModule: true, defaul
 mock.module("../../server_rpc", () => ({
     emptyResponse: { result: 200, response: "", require_reply: false, extra: null },
 }))
+mockL2psGateDormant()
 mock.module("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,
     default: { getInstance: () => ({ getL2PS, loadL2PS: getL2PS }) },
@@ -50,6 +52,8 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
     },
 }))
 mock.module("@/libs/l2ps/balanceCheck", () => ({ checkInnerTxBalance: async () => null }))
+// Before l2psSettlement: the executor path these tests cover.
+mock.module("@/forks/l2psSettlementGate", () => ({ l2psSettlementActive: () => false }))
 mock.module("@/libs/l2ps/executedBacklogGuard", () => ({
     __esModule: true,
     L2PS_BACKLOG_FULL: "L2PS_BACKLOG_FULL",

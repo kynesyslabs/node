@@ -92,7 +92,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "peer_online_count",
+                    "expr": "demos_peer_online_count",
                     "refId": "A"
                 }
             ],
@@ -157,7 +157,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "peer_offline_count",
+                    "expr": "demos_peer_offline_count",
                     "refId": "A"
                 }
             ],
@@ -214,7 +214,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "peers_total",
+                    "expr": "demos_peers_total",
                     "refId": "A"
                 }
             ],
@@ -416,7 +416,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "peer_online_count",
+                    "expr": "demos_peer_online_count",
                     "legendFormat": "Online",
                     "refId": "A"
                 },
@@ -425,7 +425,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "peer_offline_count",
+                    "expr": "demos_peer_offline_count",
                     "legendFormat": "Offline",
                     "refId": "B"
                 },
@@ -434,7 +434,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "peers_total",
+                    "expr": "demos_peers_total",
                     "legendFormat": "Total",
                     "refId": "C"
                 }
@@ -572,7 +572,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "system_network_rx_rate_bytes",
+                    "expr": "demos_system_network_rx_rate_bytes",
                     "legendFormat": "RX {{ interface }}",
                     "refId": "A"
                 },
@@ -581,7 +581,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "system_network_tx_rate_bytes",
+                    "expr": "demos_system_network_tx_rate_bytes",
                     "legendFormat": "TX {{ interface }}",
                     "refId": "B"
                 }
@@ -671,7 +671,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "system_network_rx_bytes_total",
+                    "expr": "demos_system_network_rx_bytes_total",
                     "legendFormat": "{{ interface }}",
                     "refId": "A"
                 }
@@ -761,7 +761,7 @@
                         "type": "prometheus",
                         "uid": "prometheus"
                     },
-                    "expr": "system_network_tx_bytes_total",
+                    "expr": "demos_system_network_tx_bytes_total",
                     "legendFormat": "{{ interface }}",
                     "refId": "A"
                 }
@@ -910,7 +910,7 @@
     "timepicker": {},
     "timezone": "browser",
     "title": "Demos - Network & Peers",
-    "uid": "demos-network",
+    "uid": "demos-network-peers",
     "version": 1,
     "weekStart": ""
 }

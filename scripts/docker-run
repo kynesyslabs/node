@@ -49,15 +49,23 @@
 #                `up` already rebuilds on source changes; reserve this for
 #                a suspect cache. Implied by nothing — pass explicitly.
 #   --detach,-d  Detach after start (`docker compose up -d`).
+#   --yes-delete-volumes
+#                Confirm `down -v` / `down --volumes` without the prompt.
+#                `down -v` lists the stack's declared named volumes (the ten
+#                `demos_*` ones, node_state included; compose also removes
+#                anonymous volumes attached to the containers) and asks you
+#                to type `delete`; without a terminal (CI, scripts) it stops
+#                unless this flag is given.
 #   --help,-h    Print this help.
 #
 # Identity sync (always-on, no flag):
-#   On every `up`, if `$REPO_ROOT/.demos_identity` exists, it is copied
-#   into the `<project>_node_state` volume (overwriting any prior copy)
+#   On every `up`, if `$REPO_ROOT/.demos_identity` exists and the
+#   `<project>_node_state` volume has none, it is copied into the volume
 #   and chmod'd 0600 / chown'd 1000:1000 to match the container user.
-#   Mirrors the bare-metal `./run` behavior which reads the file
-#   directly. To boot with a fresh auto-generated identity, delete
-#   `$REPO_ROOT/.demos_identity` first.
+#   When the volume already has a different identity, `up` stops before
+#   anything starts (before --clean wipes and --rebuild builds) and says how
+#   to resolve it. Mirrors the bare-metal `./run` behavior which reads the
+#   file directly.
 #
 # Everything else is forwarded to `docker compose` after the `up`
 # subcommand. Examples:
@@ -75,7 +83,8 @@
 #   ./scripts/docker-run --devnet down         # tear devnet down only
 #   ./scripts/docker-run --port 53650 --db 5433 -d  # second isolated instance
 #   ./scripts/docker-run --port 53650 down     # tear that instance down only
-#   ./scripts/docker-run --port 53650 down -v  # ...and delete its volumes
+#   ./scripts/docker-run --port 53650 down -v  # ...and delete its volumes (asks first)
+#   ./scripts/docker-run --port 53650 --yes-delete-volumes down -v  # same, no prompt
 
 set -euo pipefail
 
@@ -88,6 +97,7 @@ WANT_MONITORING=true
 WANT_TLSN=true
 WIPE_VOLUMES=false
 REBUILD_IMAGE=false
+YES_DELETE_VOLUMES=false
 NODE_PORT=""
 DB_PORT=""
 PASSTHROUGH=()
@@ -138,6 +148,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --rebuild)
             REBUILD_IMAGE=true
+            shift
+            ;;
+        --yes-delete-volumes)
+            YES_DELETE_VOLUMES=true
             shift
             ;;
         --profile)
@@ -391,6 +405,114 @@ if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" && ${#SUBCOMMAND_ARGS[@
     done
 fi
 
+# `down -v` / `down --volumes` deletes the stack's declared named volumes (the
+# ten `demos_*` names of the compose `volumes:` section, devnet / --port
+# variants included) and the anonymous volumes attached to its containers.
+# List the named ones and ask first: type `delete` on a terminal, or pass
+# --yes-delete-volumes.
+confirm_volume_delete() {
+    local suffix="$INSTANCE_SUFFIX" vol answer=""
+    [[ "$USE_DEVNET" == "true" ]] && suffix="_devnet"
+    echo "scripts/docker-run: 'down -v' deletes the stack's declared named volumes listed below, and also the anonymous volumes attached to its containers; their data cannot be recovered:" >&2
+    for vol in pgdata node_data node_logs node_state prometheus_data grafana_data neo4j_data neo4j_logs caddy_data caddy_config; do
+        echo "    demos_${vol}${suffix}" >&2
+    done
+    if [[ "$YES_DELETE_VOLUMES" == "true" ]]; then
+        return 0
+    fi
+    if [[ ! -t 0 ]]; then
+        echo "scripts/docker-run: no terminal to confirm on; pass --yes-delete-volumes to delete them. Nothing was deleted." >&2
+        exit 2
+    fi
+    read -r -p "Type delete to delete them: " answer || true
+    if [[ "$answer" != "delete" ]]; then
+        echo "scripts/docker-run: not confirmed; nothing was deleted." >&2
+        exit 1
+    fi
+}
+# Compose parses flags with pflag, and the last volume setting wins:
+# `--volumes=<bool>` and `-v=<bool>` go through strconv.ParseBool, so
+# 0 f F false FALSE False set it false. Every other --volumes spelling sets
+# it or is refused by compose, and so does any short flag group with a v (-v,
+# -vt 0 and -vt0 are -v -t 0; -tv is refused by compose anyway). Prints true,
+# false or nothing.
+volume_setting() {
+    case "$1" in
+        --volumes=*|-v=*)
+            case "${1#*=}" in
+                0|f|F|false|FALSE|False) echo false ;;
+                *) echo true ;;
+            esac
+            ;;
+        --volumes|-v*|-[!-]*v*) echo true ;;
+    esac
+}
+if [[ "$SUBCOMMAND" == "down" ]]; then
+    delete_volumes=false
+    for arg in ${SUBCOMMAND_ARGS[@]+"${SUBCOMMAND_ARGS[@]}"}; do
+        case "$(volume_setting "$arg")" in
+            true) delete_volumes=true ;;
+            false) delete_volumes=false ;;
+        esac
+    done
+    if [[ "$delete_volumes" == "true" ]]; then
+        confirm_volume_delete
+    fi
+fi
+
+# The `.demos_identity` comparison, run by the read-only check below and by the
+# identity sync further down. The sh body exits 3 when the state volume holds
+# an identity other than the host file's, and 4 (host file) or 5 (volume copy)
+# when it cannot read one. One leading UTF-8 BOM and leading and trailing
+# whitespace do not count: the node trims the file when it reads it.
+HOST_IDENTITY_FILE="${REPO_ROOT}/.demos_identity"
+IDENTITY_COMPARE='
+    trim() { s=$(cat "$1") || return 1; s=${s#"$(printf "\357\273\277")"}; s=${s#"${s%%[![:space:]]*}"}; printf "%s" "${s%"${s##*[![:space:]]}"}"; }
+    h=$(trim /src/.demos_identity) || exit 4
+    if [ -e /state/.demos_identity ]; then
+        v=$(trim /state/.demos_identity) || exit 5
+        [ "$v" = "$h" ] || exit 3
+    fi
+'
+# check_identity STATE_MOUNT_OPTS SH_BODY: runs SH_BODY with the state volume at
+# /state and the host identity at /src. Exit 3, 4 or 5 stops with what to do.
+check_identity() {
+    local status=0
+    docker run --rm \
+        -v "$STATE_VOL_NAME:/state$1" \
+        -v "$HOST_IDENTITY_FILE":/src/.demos_identity:ro \
+        alpine sh -c "$2" || status=$?
+    if [[ "$status" -eq 4 || "$status" -eq 5 ]]; then
+        local unread="$HOST_IDENTITY_FILE"
+        [[ "$status" -eq 4 ]] || unread="the .demos_identity in volume $STATE_VOL_NAME"
+        echo "ERROR: could not read $unread to compare the identities; nothing was started, stopped or wiped." >&2
+        exit 1
+    fi
+    if [[ "$status" -eq 3 ]]; then
+        echo "ERROR: $HOST_IDENTITY_FILE and the .demos_identity in volume $STATE_VOL_NAME differ after trimming whitespace; nothing was started, stopped or wiped." >&2
+        echo "       The volume's .demos_identity and the .demos_identity.* signing-state files next to it belong together." >&2
+        echo "       If both hold the same mnemonic, keep the volume's identity (the first way out below)." >&2
+        echo "       To keep running the volume's identity: move $HOST_IDENTITY_FILE out of $REPO_ROOT, then rerun." >&2
+        echo "       To run $HOST_IDENTITY_FILE instead: stop this stack first (\`down\` with the same flags), move the" >&2
+        echo "       volume's identity and its signing-state files into a new folder under previous-identity, then rerun:" >&2
+        # A fresh folder per run, so a later swap never overwrites an earlier
+        # one. The identity moves last: an interrupted run leaves it in place,
+        # so `up` keeps refusing instead of seeding the host identity next to
+        # the old signing state.
+        MOVE_ASIDE='D=/state/previous-identity/$(date -u +%Y%m%dT%H%M%SZ) && mkdir -p /state/previous-identity && mkdir "$D" && for f in /state/.demos_identity.*; do [ ! -e "$f" ] || mv "$f" "$D"/ || exit 1; done && mv /state/.demos_identity "$D"/'
+        echo "         docker run --rm -v $STATE_VOL_NAME:/state alpine sh -c '$MOVE_ASIDE'" >&2
+        exit 1
+    fi
+    [[ "$status" -eq 0 ]] || exit "$status"
+}
+
+# --clean (down, volume rm) and --rebuild (no-cache build, cache prune) run
+# before the identity sync, so a different identity has to stop `up` here,
+# before either. Read-only: the state volume is not wiped, the sync below seeds it.
+if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
+    check_identity :ro "$IDENTITY_COMPARE"
+fi
+
 # --clean: bring everything down + drop the named volumes before `up`.
 # Only fires when SUBCOMMAND ends up as `up`; for explicit `down`/`logs`/etc
 # the wipe would be confusing.
@@ -438,12 +560,16 @@ fi
 # Sync rules:
 #   - Only fires for SUBCOMMAND=up.
 #   - Only fires when `$REPO_ROOT/.demos_identity` exists.
-#   - Overwrites the volume copy unconditionally — the repo file is the
-#     source of truth, including across --clean. Operators who want a
-#     fresh identity should `rm .demos_identity` first.
+#   - Copies it only into a volume that has no identity yet, through a temp
+#     file that is synced and then renamed into place, so the volume never
+#     holds a partial identity. A volume
+#     identity that differs from it stops `up` before anything starts: the
+#     signing-state files in the volume (`.demos_identity.*`) belong to the
+#     volume's identity. A leading UTF-8 BOM and leading and trailing
+#     whitespace do not count as a difference. A file it cannot read stops
+#     `up` too. The same check runs read-only before --clean and --rebuild.
 #   - Sets the same perms the container's entrypoint expects
 #     (0600, owned by uid 1000 to match the demos user inside the image).
-HOST_IDENTITY_FILE="${REPO_ROOT}/.demos_identity"
 if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
     # Volume name comes from docker-compose.yml's `name:` override
     # (`demos_node_state`), or its devnet variant (`demos_node_state_devnet`)
@@ -453,14 +579,11 @@ if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
     # Create the volume if it doesn't already exist so compose can mount it.
     docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
     echo "+ syncing .demos_identity -> $STATE_VOL"
-    docker run --rm \
-        -v "$STATE_VOL":/state \
-        -v "$HOST_IDENTITY_FILE":/src/.demos_identity:ro \
-        alpine sh -c '
-            cp /src/.demos_identity /state/.demos_identity &&
-            chmod 600 /state/.demos_identity &&
-            chown 1000:1000 /state /state/.demos_identity
-        '
+    check_identity "" "$IDENTITY_COMPARE"'
+        [ -e /state/.demos_identity ] || { rm -f /state/.seed.tmp && cp /src/.demos_identity /state/.seed.tmp && sync && mv /state/.seed.tmp /state/.demos_identity; } || exit 1
+        chmod 600 /state/.demos_identity &&
+        chown 1000:1000 /state /state/.demos_identity
+    '
 fi
 
 # Always-sync host `demos_peerlist.json` -> `node_state` volume before `up`.

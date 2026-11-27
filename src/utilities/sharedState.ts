@@ -12,7 +12,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
 import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 import log from "@/utilities/logger"
-import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
+import type { TLSNotaryState } from "@/features/tlsnotary/proxyRelay"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
 import {
@@ -116,7 +116,6 @@ export default class SharedState {
     currentUTCTime = 0
     lastTimestamp = 0
     lastShardSeed = ""
-    referenceBlockRoom = 1
 
     private _shardSize: number | null = null
     get shardSize(): number {
@@ -249,7 +248,7 @@ export default class SharedState {
     >()
 
     // SECTION TLSNotary Proxy Manager State
-    // Stores wstcp proxy processes and port pool for TLS attestation
+    // Live relay sessions and the proxy port pool
     tlsnotary: TLSNotaryState | null = null
 
     // SECTION TLSNotary Token Store

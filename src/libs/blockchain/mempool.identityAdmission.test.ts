@@ -111,6 +111,7 @@ function identityTx(hash: string, method: string, payload: unknown) {
             from_ed25519_address: SENDER,
             gcr_edits: [],
             data: ["identity", { method, payload }],
+            reference_block: 100,
         },
     } as any
 }
@@ -171,17 +172,15 @@ describe("identity proofs are checked when a transaction reaches the mempool fro
     let ethosScore: ReturnType<typeof spyOn>
     let added: string[]
     let tweetLookups: number
-    let saved: { forkConfig: any; lastBlockNumber: number; referenceBlockRoom: number }
+    let saved: { forkConfig: any; lastBlockNumber: number }
 
     beforeEach(() => {
         saved = {
             forkConfig: getSharedState.forkConfig,
             lastBlockNumber: getSharedState.lastBlockNumber,
-            referenceBlockRoom: getSharedState.referenceBlockRoom,
         }
         getSharedState.forkConfig = cloneDefaultForkConfig()
         getSharedState.lastBlockNumber = 100
-        getSharedState.referenceBlockRoom = 1
 
         insertedRows = []
         added = []
@@ -233,7 +232,6 @@ describe("identity proofs are checked when a transaction reaches the mempool fro
         while (restores.length) restores.pop()!()
         getSharedState.forkConfig = saved.forkConfig
         getSharedState.lastBlockNumber = saved.lastBlockNumber
-        getSharedState.referenceBlockRoom = saved.referenceBlockRoom
     })
 
     describe("gossip ingest", () => {

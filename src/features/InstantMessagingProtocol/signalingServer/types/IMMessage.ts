@@ -1,4 +1,19 @@
-import { SerializedSignedObject } from "@kynesyslabs/demosdk/types"
+import type { SerializedSignedObject } from "@kynesyslabs/demosdk/types"
+
+export function clientIdFromSigningKey(publicKey: Uint8Array): string {
+    return `0x${Buffer.from(publicKey).toString("hex")}`
+}
+
+/** Exact bytes signed for one connection's registration. */
+export function registrationProofBytes(
+    clientId: string,
+    publicKey: Uint8Array,
+    challenge: string,
+): Uint8Array {
+    return new TextEncoder().encode(
+        JSON.stringify(["im-register-v1", clientId, Array.from(publicKey), challenge]),
+    )
+}
 
 export interface ImBaseMessage {
     type: string

@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime, spyOn } from "bun:test"
+import * as fs from "node:fs"
+import * as path from "node:path"
 
 const mockGetAuthContext = mock(() => ({
     verified: false,
@@ -63,6 +65,8 @@ mock.module("@/utilities/sharedState", () => ({
 }))
 
 const rateLimiterModule = await import("./middleware/rateLimiter")
+const { xffModeProblem } = await import("@/libs/blockchain/genesis/genesisPin")
+const { default: log } = await import("src/utilities/logger")
 
 describe("RateLimiter trusted internal requests", () => {
     let rateLimiter: InstanceType<typeof rateLimiterModule.RateLimiter>
@@ -426,6 +430,148 @@ describe("RateLimiter getClientIP — strict mode", () => {
     })
 })
 
+describe("RateLimiter getClientIP — shipped compose defaults", () => {
+    const repo = path.resolve(import.meta.dir, "../../..")
+    // The value the node container gets when .env leaves TRUSTED_PROXIES unset.
+    function composeDefault(file: string): string[] {
+        const text = fs.readFileSync(path.join(repo, file), "utf8")
+        const m = text.match(/TRUSTED_PROXIES: \$\{TRUSTED_PROXIES:-([^}]*)\}/)
+        expect(m).not.toBeNull()
+        return (m?.[1] ?? "").split(",").map(s => s.trim()).filter(s => s.length > 0)
+    }
+    const saved = {
+        TRUSTED_PROXIES: process.env.TRUSTED_PROXIES,
+        XFF_MODE: process.env.XFF_MODE,
+    }
+    beforeEach(() => {
+        delete process.env.TRUSTED_PROXIES
+        delete process.env.XFF_MODE
+    })
+    afterEach(() => {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k]
+            else process.env[k] = v
+        }
+    })
+
+    it("docker-compose.yml keys a request from the bridge gateway on its socket address, whatever forwarding header it carries", () => {
+        const limiter = buildLimiter({
+            trustedProxies: composeDefault("docker-compose.yml"),
+        })
+        expect(limiter.getXffMode()).toBe("off")
+        for (const header of ["x-forwarded-for", "x-real-ip", "cf-connecting-ip"]) {
+            const ip = limiter.getClientIP(
+                reqWith({ [header]: "203.0.113.7" }),
+                fakeServer("172.18.0.1"),
+            )
+            expect([header, ip]).toEqual([header, "172.18.0.1"])
+        }
+        limiter.destroy()
+    })
+
+    it("docker-compose.proxy.yml keys a request from caddy on the X-Forwarded-For caddy set", () => {
+        const limiter = buildLimiter({
+            trustedProxies: composeDefault("docker-compose.proxy.yml"),
+        })
+        expect(limiter.getXffMode()).toBe("strict")
+        const ip = limiter.getClientIP(
+            reqWith({ "x-forwarded-for": "203.0.113.7" }),
+            fakeServer("172.18.0.3"),
+        )
+        expect(ip).toBe("203.0.113.7")
+        limiter.destroy()
+    })
+
+    it("docker-compose.proxy.yml counts a client caddy sees from inside the bridge range as caddy, as its comment says", () => {
+        const limiter = buildLimiter({
+            trustedProxies: composeDefault("docker-compose.proxy.yml"),
+        })
+        // The docker gateway (IPv6 or hairpin clients relayed by docker) and
+        // a host on a 172.16.0.0/12 network such as AWS's default VPC.
+        for (const client of ["172.18.0.1", "172.31.5.6"]) {
+            const ip = limiter.getClientIP(
+                reqWith({ "x-forwarded-for": client }),
+                fakeServer("172.18.0.3"),
+            )
+            expect([client, ip]).toEqual([client, "172.18.0.3"])
+        }
+        limiter.destroy()
+    })
+})
+
+describe("RateLimiter getClientIP — Caddy without docker-compose.proxy.yml", () => {
+    const saved = {
+        TRUSTED_PROXIES: process.env.TRUSTED_PROXIES,
+        XFF_MODE: process.env.XFF_MODE,
+    }
+    beforeEach(() => {
+        delete process.env.TRUSTED_PROXIES
+        delete process.env.XFF_MODE
+    })
+    afterEach(() => {
+        setSystemTime()
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k]
+            else process.env[k] = v
+        }
+    })
+
+    function hints(warn: ReturnType<typeof spyOn>): string[] {
+        return warn.mock.calls
+            .map(c => String(c[0]))
+            .filter(m => m.includes("TRUSTED_PROXIES is empty"))
+    }
+
+    it("names the override file once when a private proxy forwards with no trust list, and keeps the socket key", () => {
+        const warn = spyOn(log, "warning").mockImplementation(() => undefined)
+        try {
+            setSystemTime(new Date("2026-11-26T00:00:00Z"))
+            const limiter = buildLimiter({})
+            expect(limiter.getXffMode()).toBe("off")
+            for (let i = 0; i < 5; i++) {
+                const ip = limiter.getClientIP(
+                    reqWith({ "x-forwarded-for": `203.0.113.${i}` }),
+                    fakeServer("172.18.0.3"),
+                )
+                expect(ip).toBe("172.18.0.3")
+            }
+            expect(hints(warn)).toHaveLength(1)
+            expect(hints(warn)[0]).toContain("docker-compose.proxy.yml")
+            setSystemTime(new Date("2026-11-26T00:11:00Z"))
+            limiter.getClientIP(
+                reqWith({ "x-forwarded-for": "203.0.113.9" }),
+                fakeServer("172.18.0.3"),
+            )
+            expect(hints(warn)).toHaveLength(2)
+            limiter.destroy()
+        } finally {
+            warn.mockRestore()
+        }
+    })
+
+    it("stays quiet for public sources, requests without the header and an explicit XFF_MODE=off", () => {
+        const warn = spyOn(log, "warning").mockImplementation(() => undefined)
+        try {
+            const auto = buildLimiter({})
+            auto.getClientIP(
+                reqWith({ "x-forwarded-for": "203.0.113.7" }),
+                fakeServer("198.51.100.4"),
+            )
+            auto.getClientIP(reqWith({}), fakeServer("172.18.0.3"))
+            auto.destroy()
+            const explicit = buildLimiter({ xffMode: "off" })
+            explicit.getClientIP(
+                reqWith({ "x-forwarded-for": "203.0.113.7" }),
+                fakeServer("172.18.0.3"),
+            )
+            explicit.destroy()
+            expect(hints(warn)).toHaveLength(0)
+        } finally {
+            warn.mockRestore()
+        }
+    })
+})
+
 describe("RateLimiter getClientIP — legacy mode", () => {
     it("trusts XFF first IP regardless of socket", () => {
         const limiter = buildLimiter({ xffMode: "legacy" })
@@ -444,6 +590,64 @@ describe("RateLimiter getClientIP — legacy mode", () => {
         })
         expect(limiter.getXffMode()).toBe("legacy")
         limiter.destroy()
+    })
+})
+
+// The boot check (findGenesisBlock) reads the mode through explicitXffMode, the
+// same function the constructor uses, so what it refuses is what the limiter
+// would run as.
+describe("explicitXffMode — boot refusal of XFF_MODE=legacy on a mainnet chain id", () => {
+    const saved = process.env.XFF_MODE
+    afterEach(() => {
+        if (saved === undefined) delete process.env.XFF_MODE
+        else process.env.XFF_MODE = saved
+    })
+
+    const bootProblem = (configValue: string | undefined, chainId: number) =>
+        xffModeProblem(rateLimiterModule.explicitXffMode(configValue), chainId)
+
+    it("refuses legacy from the config value or from the env override", () => {
+        delete process.env.XFF_MODE
+        expect(bootProblem("legacy", 4242)).toContain("XFF_MODE=legacy")
+        // the loader reads the env into the config; a bare limiter reads it itself
+        process.env.XFF_MODE = "legacy"
+        expect(bootProblem(undefined, 4242)).toContain("XFF_MODE=legacy")
+        expect(bootProblem("", 4242)).toContain("XFF_MODE=legacy")
+    })
+
+    it("treats the empty string docker-compose passes as unset", () => {
+        process.env.XFF_MODE = ""
+        expect(rateLimiterModule.explicitXffMode("")).toBeUndefined()
+        expect(bootProblem("", 4242)).toBeNull()
+    })
+
+    it("config wins over env, as in the constructor", () => {
+        process.env.XFF_MODE = "legacy"
+        expect(bootProblem("strict", 4242)).toBeNull()
+        process.env.XFF_MODE = "strict"
+        expect(bootProblem("legacy", 4242)).toContain("XFF_MODE=legacy")
+    })
+
+    it("allows legacy on the testnet and devnet ids", () => {
+        process.env.XFF_MODE = "legacy"
+        expect(bootProblem(undefined, 1)).toBeNull()
+        expect(bootProblem(undefined, 1337)).toBeNull()
+    })
+
+    it("agrees with the mode the limiter resolves", () => {
+        for (const [configValue, env] of [
+            ["", "legacy"],
+            ["legacy", ""],
+            ["strict", "legacy"],
+            ["", ""],
+            ["", "LEGACY"],
+        ] as const) {
+            process.env.XFF_MODE = env
+            const limiter = buildLimiter({ xffMode: configValue as "off" })
+            const refused = bootProblem(configValue, 4242) !== null
+            expect(refused).toBe(limiter.getXffMode() === "legacy")
+            limiter.destroy()
+        }
     })
 })
 

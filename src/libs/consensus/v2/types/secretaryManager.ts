@@ -1,4 +1,8 @@
-import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
+import {
+    ValidationPhase,
+    emptyValidationPhase,
+    isKnownPhase,
+} from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
@@ -32,6 +36,12 @@ export const PEERLIST_PHASE = 3
 // passing it over: long enough for a status report in flight, short against
 // the block time.
 export const HEAD_ALIGN_WAIT_MS = 2000
+/**
+ * What a member's phase report resolves to once the secretary has moved the
+ * height on to a newer round: this attempt cannot finish, the next one joins
+ * that round.
+ */
+export const SUPERSEDED_ROUND = "supersededRound"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -102,6 +112,19 @@ export default class SecretaryManager {
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
+    /**
+     * Secretary only: the highest phase this round released to the group.
+     * The group release for a phase happens once, so a member reporting such
+     * a phase later is released on its report.
+     */
+    private releasedPhase = 0
+    /** Member only: a newer round of the secretary for this height, once seen. */
+    public supersededBy: number | null = null
+    /**
+     * Member only: secretaries this attempt replaced because they did not
+     * serve the round, without asking them for a ping.
+     */
+    public passedOverSecretaries = new Set<string>()
 
     constructor() {}
 
@@ -230,8 +253,11 @@ export default class SecretaryManager {
         }
         this.unresponsiveMembers = new Set<string>()
         this.behindMembers = new Set<string>()
+        this.passedOverSecretaries = new Set<string>()
         this.blockTimestamp = null
         this.mergedPeerlist = null
+        this.releasedPhase = 0
+        this.supersededBy = null
         this.registerUnderShardBlockRef()
         freezeLocalSyncObservations(this.shard.blockRef)
 
@@ -530,6 +556,7 @@ export default class SecretaryManager {
             await this.handleNodesGoneOffline(waitingMembers)
 
         const ourPhase = this.ourValidatorPhase.currentPhase
+        this.releasedPhase = Math.max(this.releasedPhase, ourPhase)
         const notAhead = (pubKey: string) =>
             (this.shard.validationPhases[pubKey]?.currentPhase ?? 0) <=
             ourPhase
@@ -598,13 +625,18 @@ export default class SecretaryManager {
     }
 
     /**
-     * Handles the secretary going offline
+     * Handles a secretary that stopped serving the round
      *
-     * Ping the secretary to check if it's still online
-     * If it's not, we elect the next member as the new secretary and
-     * drop the dead one from the shard for this round.
+     * An unreachable secretary (two failed pings) is replaced by the next
+     * member and dropped from the shard for this round.
+     *
+     * With `notServing` the caller saw it miss the release deadline, or fail
+     * the phase report through every retry. It is then replaced the same way
+     * without the ping, and recorded in `passedOverSecretaries`. Two bounds:
+     * never ourselves, and only while the shard without it still holds a
+     * quorum. Outside those bounds the ping decides.
      */
-    public async handleSecretaryGoneOffline() {
+    public async handleSecretaryGoneOffline(notServing = false) {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
         if (!this.secretary) {
             log.error(
@@ -615,19 +647,26 @@ export default class SecretaryManager {
             )
         }
 
-        const isOnline = await this.secretary.connect()
-        log.debug(`Secretary is online: ${isOnline}`)
+        const passOver =
+            notServing &&
+            !this.checkIfWeAreSecretary() &&
+            this.shard.members.length > getCommitteeFloor()
 
-        if (isOnline) {
-            log.debug("Secretary is online, nothing to do")
-            return
-        }
+        if (!passOver) {
+            const isOnline = await this.secretary.connect()
+            log.debug(`Secretary is online: ${isOnline}`)
 
-        // INFO: ping for false negatives
-        const isStillOnline = await this.secretary.connect()
-        if (isStillOnline) {
-            log.debug("Secretary is still online, nothing to do")
-            return
+            if (isOnline) {
+                log.debug("Secretary is online, nothing to do")
+                return
+            }
+
+            // INFO: ping for false negatives
+            const isStillOnline = await this.secretary.connect()
+            if (isStillOnline) {
+                log.debug("Secretary is still online, nothing to do")
+                return
+            }
         }
 
         if (this.shard.members.length < 2) {
@@ -644,6 +683,12 @@ export default class SecretaryManager {
         const rest = this.shard.members.filter(m => m.identity !== exSecretary)
         this.shard.secretaryKey = (rest.find(m => this.canLead(m)) ?? rest[0])
             .identity
+        if (passOver) {
+            this.passedOverSecretaries.add(exSecretary)
+            log.warning(
+                `[SECRETARY] Secretary ${exSecretary} is not serving block ${this.shard.blockRef} (no release by the deadline, or its phase reports kept failing): replaced for the rest of this attempt, ${this.shard.secretaryKey} leads`,
+            )
+        }
         // remove secretary from the list of members
         this.shard.members = this.shard.members.filter(
             m => m.identity !== exSecretary,
@@ -774,6 +819,13 @@ export default class SecretaryManager {
             return res
         }
 
+        if (!isKnownPhase(theirPhase)) {
+            log.warning(
+                `[receiveValidatorPhase] Ignoring unknown phase from ${memberKey}`,
+            )
+            return res
+        }
+
         this.shard.validationPhases[memberKey].currentPhase = theirPhase
         this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
@@ -800,11 +852,22 @@ export default class SecretaryManager {
             return res
         }
 
-        // INFO: Check if node is behind us
-        if (theirPhase < this.ourValidatorPhase.currentPhase) {
+        // A member behind us, or at a phase whose group release is already
+        // done (a validator that restarted, or whose report came late), gets
+        // its greenlight now: no other release for that phase is coming, and
+        // waiting would keep it out of the round until its own timeout.
+        if (
+            theirPhase < this.ourValidatorPhase.currentPhase ||
+            theirPhase <= this.releasedPhase
+        ) {
             log.debug(
-                `[SECRETARY ROUTINE] Releasing ${memberKey} as they are behind us`,
+                `[SECRETARY ROUTINE] Releasing ${memberKey} at phase ${theirPhase}: behind us or already released`,
             )
+            // The answer below can resolve the member's wait before the
+            // greenlight call does, so it must carry the peerlist itself.
+            if (theirPhase === PEERLIST_PHASE) {
+                await this.ensureMergedPeerlist()
+            }
             this.releaseWaitingMembers(
                 [memberKey],
                 theirPhase,
@@ -834,6 +897,10 @@ export default class SecretaryManager {
             if (this.ourValidatorPhase.currentPhase === PEERLIST_PHASE) {
                 await this.ensureMergedPeerlist()
             }
+            this.releasedPhase = Math.max(
+                this.releasedPhase,
+                this.ourValidatorPhase.currentPhase,
+            )
 
             // INFO: If we are in the last phase, stop the secretary routine
             if (this.ourValidatorPhase.currentPhase === 6) {
@@ -1047,6 +1114,19 @@ export default class SecretaryManager {
             return false
         }
 
+        // The secretary releases a phase below ours only from a round it
+        // started after ours: the round we are in is over.
+        if (
+            this.isNewerRound(secretaryBlockTimestamp) &&
+            validatorPhase < this.ourValidatorPhase.currentPhase
+        ) {
+            this.leaveSupersededRound(
+                secretaryBlockTimestamp,
+                `phase ${validatorPhase} greenlight`,
+            )
+            return true
+        }
+
         if (secretaryBlockTimestamp < this.blockTimestamp) {
             log.debug(
                 "Greenlight received for an older block,returning false ...",
@@ -1065,6 +1145,14 @@ export default class SecretaryManager {
 
         if (validatorPhase === PEERLIST_PHASE && Array.isArray(peerlist)) {
             await this.receiveMergedPeerlist(peerlist)
+        }
+
+        // The attempt may have ended while the peerlist was checked. Waiter
+        // keys are per height and phase, so resolving or holding one now
+        // would release the next attempt's wait without that attempt's
+        // peerlist.
+        if (this.ended) {
+            return false
         }
 
         const waiterKey =
@@ -1113,7 +1201,7 @@ export default class SecretaryManager {
      */
     private acceptSecretaryTimestamp(
         timestamp: unknown,
-        source: "greenlight" | "getBlockTimestamp",
+        source: "greenlight" | "getBlockTimestamp" | "phase report answer",
     ): boolean {
         const verdict = checkCosignTimestamp(timestamp, getNetworkTimestamp())
         if (verdict.valid) return true
@@ -1121,6 +1209,42 @@ export default class SecretaryManager {
             `[SECRETARY] Refusing the ${source} timestamp from ${this.secretary?.identity} for block ${this.shard?.blockRef}: ${verdict.reason}`,
         )
         return false
+    }
+
+    /** Whether `timestamp` is a round of the secretary started after ours. */
+    private isNewerRound(timestamp: unknown): timestamp is number {
+        return (
+            typeof timestamp === "number" &&
+            Number.isFinite(timestamp) &&
+            this.blockTimestamp !== null &&
+            this.blockTimestamp !== undefined &&
+            timestamp > this.blockTimestamp
+        )
+    }
+
+    /**
+     * Ends this attempt's wait for the secretary: it restarted the height in
+     * a newer round, and the release this wait expects belongs to a round
+     * no member is in any more. Nothing is signed on this path.
+     */
+    private leaveSupersededRound(timestamp: number, source: string): void {
+        if (this.supersededBy === null) {
+            log.warning(
+                `[SECRETARY] Secretary ${this.secretary?.identity} moved block ${this.shard.blockRef} on to round ${timestamp} (${source}) while we are in round ${this.blockTimestamp}: leaving this attempt to join it`,
+            )
+        }
+        this.supersededBy = Math.max(this.supersededBy ?? 0, timestamp)
+        // The key below may already belong to the next attempt.
+        if (this.ended) {
+            return
+        }
+        const waiterKey =
+            Waiter.keys.GREEN_LIGHT +
+            this.shard.blockRef +
+            this.ourValidatorPhase.currentPhase
+        if (Waiter.isWaiting(waiterKey)) {
+            Waiter.resolve(waiterKey, SUPERSEDED_ROUND)
+        }
     }
 
     /**
@@ -1150,10 +1274,16 @@ export default class SecretaryManager {
      * Sends our local validator phase to the secretary and waits for the green light
      * If resolved, returns the secretary block timestamp
      */
-    public async sendOurValidatorPhaseToSecretary(retries = 3) {
+    public async sendOurValidatorPhaseToSecretary(
+        retries = 3,
+    ): Promise<number | typeof SUPERSEDED_ROUND | null> {
         log.debug("Sending our validator phase to the secretary")
         log.debug(`Our phase: ${this.ourValidatorPhase.currentPhase}`)
         log.debug(`Shard block ref: ${this.shard.blockRef}`)
+
+        if (this.supersededBy !== null) {
+            return SUPERSEDED_ROUND
+        }
 
         const waiterKey =
             Waiter.keys.GREEN_LIGHT +
@@ -1223,6 +1353,13 @@ export default class SecretaryManager {
             )
             log.debug(`Set validator phase response: ${JSON.stringify(res)}`)
 
+            // Waiter keys are per height and phase, not per attempt: an
+            // answer reaching an attempt that already ended would resolve
+            // the next attempt's wait.
+            if (this.ended) {
+                return null
+            }
+
             if (!Waiter.isWaiting(waiterKey)) {
                 // INFO: The secretary sent the green light for the phase before
                 // the setValidatorPhase request returned.
@@ -1267,7 +1404,9 @@ export default class SecretaryManager {
                     "[SEND OUR VALIDATOR PHASE] Secretary unreachable, checking if it went offline",
                 )
                 const previousSecretary = this.shard.secretaryKey
-                await this.handleSecretaryGoneOffline()
+                // The report failed through every retry: whatever a ping
+                // says, this secretary is not taking phase reports.
+                await this.handleSecretaryGoneOffline(true)
 
                 if (
                     this.shard.secretaryKey !== previousSecretary &&
@@ -1312,6 +1451,17 @@ export default class SecretaryManager {
             const timestamp = Number(res.extra.timestamp) || null
             // const blockRef = res.extra.blockRef
 
+            // Our report reached a round the secretary started after ours,
+            // which holds no place for this attempt.
+            if (
+                res.extra.blockRef === this.shard.blockRef &&
+                this.isNewerRound(timestamp) &&
+                this.acceptSecretaryTimestamp(timestamp, "phase report answer")
+            ) {
+                this.leaveSupersededRound(timestamp, "phase report answer")
+                return null
+            }
+
             if (greenlight) {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] SendStatus callback received greenlight",
@@ -1320,6 +1470,9 @@ export default class SecretaryManager {
 
                 if (Array.isArray(res.extra.peerlist)) {
                     await this.receiveMergedPeerlist(res.extra.peerlist)
+                    if (this.ended) {
+                        return null
+                    }
                 }
 
                 // INFO: Resolve the waiter with the timestamp
@@ -1363,7 +1516,28 @@ export default class SecretaryManager {
                 return null
             }
 
-            await this.handleSecretaryGoneOffline()
+            // The attempt ended while it waited: nothing is left to recover,
+            // and the waiter key may already belong to the next attempt.
+            if (this.ended) {
+                return null
+            }
+
+            // The deadline passed without a release. A secretary that runs
+            // the round releases on its own timeout well inside it, so this
+            // one is not serving the phase, whether or not it answers ping.
+            const previousSecretary = this.shard.secretaryKey
+            await this.handleSecretaryGoneOffline(true)
+
+            if (this.shard.secretaryKey !== previousSecretary && !this.ended) {
+                // Report to the new secretary and wait for its release of
+                // this phase: it carries the round's timestamp and, at the
+                // peerlist phase, the merged peerlist no block is forged
+                // without. As at phase 1, it may still be starting its
+                // routine, hence the longer retry budget.
+                return await this.sendOurValidatorPhaseToSecretary(
+                    Math.max(retries, 5),
+                )
+            }
 
             // INFO: Resend the request and handle the response
             const res = await sendStatus()

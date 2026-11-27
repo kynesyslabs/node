@@ -51,6 +51,8 @@ Branch naming conventions:
 3. **Test your changes** - Ensure all tests pass
 4. **Lint your code** - Run `bun run lint:fix` before committing
 
+CI runs a name-based check, not a taint check: in non-test `.ts` files under `src/` (`*.test.ts` and `*.spec.ts` files are skipped), CI refuses direct `log.*` and `console.*` calls whose arguments use an identifier, dotted property (`a.privateKey`), or `#private` field named `bridgePrivateKey`, `shardKey`, `signingKey`, `privateKey`, `mnemonic`, `seedPhrase`, or `secretKey` (case-insensitively), except for a `.length` read. Files outside `src/`, bracket property names such as `a["privateKey"]`, and other loggers are outside this check, and a value held under any other name (for example `privKey` or `seed`) is not checked. Run `bun scripts/check-secret-logs.ts` locally to check the source before submitting a change.
+
 ### 3. Code Quality Checks
 
 Before submitting your changes, ensure:

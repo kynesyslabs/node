@@ -17,6 +17,7 @@ const PROVIDER_KEYS = [
     EnvKey.ETHERSCAN_API_KEY,
     EnvKey.HELIUS_API_KEY,
     EnvKey.SOLANA_RPC,
+    EnvKey.VALIDATOR_SOLANA_RPCS,
 ]
 
 const repo = path.resolve(import.meta.dir, "../..")
@@ -37,5 +38,20 @@ describe("identity provider settings in docker-compose.yml", () => {
             const listed = new RegExp(`^\\s+${key}: \\$\\{${key}:-`, "m").test(node)
             expect([key, listed]).toEqual([key, true])
         }
+    })
+})
+
+describe("the admin RPC key in docker-compose.yml", () => {
+    // The node answers its admin RPC only to SUDO_PUBKEY; a key the compose
+    // file does not pass leaves the admin RPC closed inside the container.
+    it("is passed to the node container", () => {
+        expect(composeNodeService()).toMatch(
+            new RegExp(`^\\s+${EnvKey.SUDO_PUBKEY}: \\$\\{${EnvKey.SUDO_PUBKEY}:-\\}$`, "m"),
+        )
+    })
+
+    it("is listed in .env.example", () => {
+        const example = fs.readFileSync(path.join(repo, ".env.example"), "utf8")
+        expect(example).toMatch(/^SUDO_PUBKEY=$/m)
     })
 })

@@ -53,8 +53,10 @@ export function getNodePrivateKey(): Buffer | null {
             )
             return null
         }
-    } catch (error) {
-        log.error("[OmniProtocol] Error getting node private key: " + error)
+    } catch (e) {
+        log.error(
+            `[OmniProtocol] Error getting node private key (${e instanceof Error ? "Error" : typeof e})`,
+        )
         return null
     }
 }

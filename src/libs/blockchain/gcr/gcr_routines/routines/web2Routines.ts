@@ -18,12 +18,26 @@ import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
 import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
 import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
+import { isInheritedKey } from "@/libs/identity/web2Contexts"
+import { keylessWeb2AssignRefusal } from "@/forks/keylessWeb2IdentityGate"
+
+// Such a name used to throw inside apply; refusing it fails the transaction
+// the same way, with a message instead of a TypeError.
+const unsupportedContext = (context: unknown): GCRResult => ({
+    success: false,
+    message: `Unsupported web2 context: ${String(context)}`,
+})
 
 export async function applyWeb2IdentityAdd(
     editOperation: any,
     accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { context, data } = editOperation.data as Web2GCRData
+    if (isInheritedKey(context)) return unsupportedContext(context)
+    // Admission refuses it already; refused here as well so a block from a
+    // proposer that skipped admission stores the same state on every node.
+    const keyless = keylessWeb2AssignRefusal(context)
+    if (keyless) return { success: false, message: keyless }
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
@@ -124,6 +138,7 @@ export async function applyWeb2IdentityRemove(
         username: string
         userId?: unknown
     }
+    if (isInheritedKey(context)) return unsupportedContext(context)
 
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
@@ -189,6 +204,7 @@ export async function rollbackWeb2IdentityAdd(
     accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { context, data } = (editOperation.data ?? {}) as Partial<Web2GCRData>
+    if (isInheritedKey(context)) return unsupportedContext(context)
     const linked: Web2GCRData["data"][] | undefined =
         accountGCR.identities?.web2?.[context]
     const index = linked
@@ -224,6 +240,7 @@ export async function rollbackWeb2IdentityRemove(
         context: string
         username: string
     }
+    if (isInheritedKey(context)) return unsupportedContext(context)
     const removed = recordedRemoval<Web2GCRData["data"]>(place, at =>
         removedIdentityKey(
             at,

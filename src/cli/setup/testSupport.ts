@@ -4,7 +4,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { CODE_ROOT, ZK_IDENTITY_VKEY } from "./context"
 import type { Prompter } from "./prompt"
-import type { ZkRunner } from "./zk"
+import { BUILT_FOR_VKEY_FILE, canonicalDigest, type ZkRunner } from "./zk"
 
 // Tools are found in a fixed list of system directories, never by a bare name
 // through PATH, so a writable directory early in PATH cannot substitute them.
@@ -110,12 +110,28 @@ export function writeSubnet(
     return dir
 }
 
-export function writeZkBatch(root: string, size: number, parts = { zkey: true, wasm: true, vkey: true }): void {
-    const dir = path.join(root, "src", "libs", "l2ps", "zk", "keys", `batch_${size}`)
-    fs.mkdirSync(path.join(dir, `l2ps_batch_${size}_js`), { recursive: true })
-    if (parts.zkey) fs.writeFileSync(path.join(dir, `l2ps_batch_${size}.zkey`), "z")
-    if (parts.wasm) fs.writeFileSync(path.join(dir, `l2ps_batch_${size}_js`, `l2ps_batch_${size}.wasm`), "w")
+/** A batch size, or "settlement" for the settlement circuit. */
+export type ZkKeySet = number | "settlement"
+
+export function zkKeyNames(set: ZkKeySet): { dir: string; name: string } {
+    return set === "settlement"
+        ? { dir: "settlement", name: "l2ps_settlement" }
+        : { dir: `batch_${set}`, name: `l2ps_batch_${set}` }
+}
+
+export function writeZkBatch(root: string, size: ZkKeySet, parts = { zkey: true, wasm: true, vkey: true }): void {
+    const { dir: sub, name } = zkKeyNames(size)
+    const dir = path.join(root, "src", "libs", "l2ps", "zk", "keys", sub)
+    fs.mkdirSync(path.join(dir, `${name}_js`), { recursive: true })
+    if (parts.zkey) fs.writeFileSync(path.join(dir, `${name}.zkey`), "z")
+    if (parts.wasm) fs.writeFileSync(path.join(dir, `${name}_js`, `${name}.wasm`), "w")
     if (parts.vkey) fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify(BATCH_VKEY))
+    if (parts.vkey) fs.writeFileSync(path.join(dir, BUILT_FOR_VKEY_FILE), canonicalDigest(JSON.stringify(BATCH_VKEY)))
+}
+
+/** Every key the ZK setup builds: both batch sizes and the settlement circuit. */
+export function writeZkKeys(root: string): void {
+    for (const set of [5, 10, "settlement"] as const) writeZkBatch(root, set)
 }
 
 /** Answers questions in order; an exhausted script fails the test instead of hanging. */
@@ -141,10 +157,11 @@ export function fakeRunner(opts: { vkeyJson?: string; failOn?: string; silentOn?
     const calls: string[] = []
     return {
         calls,
-        async download(url, dest) {
+        async download(url, dest, min) {
             calls.push(`download ${path.basename(dest)}`)
             fs.mkdirSync(path.dirname(dest), { recursive: true })
-            fs.writeFileSync(dest, "x".repeat(10))
+            // As large as a real download must be, so a later circuit reuses it.
+            fs.writeFileSync(dest, Buffer.alloc(Math.max(10, min ?? 0), "x"))
         },
         async exec(cmd, args) {
             const name = `${path.basename(cmd)} ${args[0] === "plonk" || args[0] === "zkey" ? args.slice(0, 2).join(" ") : "compile"}`

@@ -11,10 +11,32 @@ import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import { l2psOff } from "@/forks/l2psGate"
 import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
 import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import Chain from "@/libs/blockchain/chain"
+import ParallelNetworks from "./parallelNetworks"
+import {
+    EXPIRED_TX_DEEP_WINDOW_MULTIPLIER,
+    REFERENCE_BLOCK_ROOM,
+} from "@/libs/blockchain/referenceBlockWindow"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import { SETTLEMENT_TRANSFERS } from "./settlement/encoding"
+import {
+    SETTLEMENT_DEFERRED_TTL_BLOCKS,
+    SettlementAggregator,
+    type SettlementDeps,
+    type SubmitGate,
+    type SubmitResult,
+} from "./settlement/aggregator"
+import { openSettlementTransfer } from "./settlement/transfer"
+import { readTipAccounts } from "./settlement/tipState"
+import { planSettlement } from "./settlement/planner"
+import { closeSettlementProverPool, proveSettlement } from "./settlement/prover"
+import { nativeTransferFeeOs, type SettlementRecord } from "./settlement/validation"
+import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 
 // Re-export for backward compatibility
 export type { L2PSBatchPayload } from "./types"
@@ -99,6 +121,11 @@ export class L2PSBatchAggregator {
     /** Statistics tracking */
     private stats = this.createInitialStats()
 
+    /** The settlement loop under `l2psSettlement`; built on first use. */
+    private settlement: SettlementAggregator | null = null
+    /** Settles when the cycle in progress ends, stop() or not. */
+    private cycleDone: Promise<void> | null = null
+
     /**
      * Create initial statistics object
      * Helper to avoid code duplication when resetting stats
@@ -146,12 +173,25 @@ export class L2PSBatchAggregator {
         log.info("[L2PS Batch Aggregator] Starting batch aggregation service")
 
         this.isRunning = true
+        // A cycle a timed-out stop() left behind still runs on the old loop;
+        // a new loop started beside it would recover and plan the same rows.
+        if (this.cycleDone !== null) {
+            log.info("[L2PS Batch Aggregator] Waiting for the previous cycle to end")
+            await this.cycleDone
+        }
+        if (!this.isRunning) return
         this.isAggregating = false
 
         // Off unless L2PS_ZK_ENABLED=true: the image ships the proving keys, and
         // a proof costs a core for seconds per batch while validators do not
         // check it yet (docs/design/l2ps-zk-settlement.md).
-        if (this.zkRequested) {
+        if (l2psSettlementActive()) {
+            // Settlement proves every batch itself; the old batch proof
+            // (L2PS_ZK_ENABLED) is not made or checked under the fork.
+            if (this.zkRequested) {
+                log.info("[L2PS Batch Aggregator] L2PS_ZK_ENABLED is obsolete under l2psSettlement and is ignored")
+            }
+        } else if (this.zkRequested) {
             await this.initializeZkProver()
         } else {
             log.info("[L2PS Batch Aggregator] ZK batch proofs are off (L2PS_ZK_ENABLED is not true)")
@@ -206,6 +246,10 @@ export class L2PSBatchAggregator {
         log.info("[L2PS Batch Aggregator] Stopping batch aggregation service")
 
         this.isRunning = false
+        // A cycle can outlast the wait below by a proof time: closing the
+        // loop first keeps it from starting a proof on a pool about to close,
+        // or from counting the proofs that close cuts short against transfers.
+        this.settlement?.close()
 
         // Clear the interval
         if (this.intervalId) {
@@ -228,6 +272,10 @@ export class L2PSBatchAggregator {
         this.zkProver = null
         this.zkEnabled = false
         await prover?.terminate()
+        // Settlement provers would otherwise outlive the service as well.
+        await closeSettlementProverPool()
+        // A restart recovers its batches in flight from the rows.
+        this.settlement = null
 
         log.info("[L2PS Batch Aggregator] Stopped successfully")
         this.logStatistics()
@@ -252,12 +300,32 @@ export class L2PSBatchAggregator {
             return
         }
 
+        // The stake hook that starts and stops this service does not fire
+        // when l2psGate activates at a later height on a node that stays
+        // staked, so each cycle checks the gate itself.
+        if (l2psOff()) {
+            log.info("[L2PS Batch Aggregator] L2PS is off at the tip (fork l2psGate): stopping")
+            await this.stop()
+            return
+        }
+
         this.stats.totalCycles++
         const cycleStartTime = Date.now()
 
+        let ended!: () => void
+        this.cycleDone = new Promise(resolve => {
+            ended = resolve
+        })
         try {
             this.isAggregating = true
-            await this.aggregateAndSubmitBatches()
+            if (l2psSettlementActive()) {
+                const { submitted, transfers } = await this.settlementLoop().cycle()
+                this.stats.totalBatchesCreated += submitted
+                this.stats.successfulSubmissions += submitted
+                this.stats.totalTransactionsBatched += transfers
+            } else {
+                await this.aggregateAndSubmitBatches()
+            }
 
             // Run cleanup after successful aggregation
             await this.cleanupOldBatchedTransactions()
@@ -274,8 +342,13 @@ export class L2PSBatchAggregator {
             // Retention runs whether or not this cycle aggregated anything.
             // A subnet whose submission is failing is precisely the one that
             // would otherwise hold data past the day it agreed to delete it.
-            await this.pruneHistoryRetention()
-            this.isAggregating = false
+            try {
+                await this.pruneHistoryRetention()
+            } finally {
+                this.isAggregating = false
+                this.cycleDone = null
+                ended()
+            }
         }
     }
 
@@ -462,6 +535,7 @@ export class L2PSBatchAggregator {
     private async createBatchPayload(
         l2psUid: string,
         transactions: L2PSMempoolTx[],
+        settlement?: SettlementRecord,
     ): Promise<L2PSBatchPayload> {
         const sharedState = getSharedState
 
@@ -498,6 +572,18 @@ export class L2PSBatchAggregator {
             .createHmac("sha256", hmacKey)
             .update(hmacData)
             .digest("hex")
+
+        if (settlement) {
+            return {
+                l2ps_uid: l2psUid,
+                encrypted_batch: encryptedBatch,
+                transaction_count: transactions.length,
+                batch_hash: batchHash,
+                transaction_hashes: transactionHashes,
+                authentication_tag: authenticationTag,
+                settlement,
+            }
+        }
 
         // Generate ZK proof if prover is available
         const zkProof = await this.generateZkProofForBatch(transactions, batchHash)
@@ -690,9 +776,16 @@ export class L2PSBatchAggregator {
      * to prevent cross-protocol signature reuse.
      * 
      * @param batchPayload - Encrypted batch payload (includes l2ps_uid)
-     * @returns true if submission was successful
+     * @returns the batch transaction's hash, or null when it was not submitted
      */
-    private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<boolean> {
+    private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<string | null> {
+        const sent = await this.sendBatch(batchPayload)
+        return sent.ok ? sent.l1TxHash : null
+    }
+
+    /** Submits the batch, telling a refusal no retry can change from one that may pass later. */
+    private async sendBatch(batchPayload: L2PSBatchPayload, gate?: SubmitGate): Promise<SubmitResult> {
+        const refused = (reason: string, permanent = false): SubmitResult => ({ ok: false, permanent, reason })
         try {
             const sharedState = getSharedState
 
@@ -700,7 +793,7 @@ export class L2PSBatchAggregator {
             if (this.zkEnabled && batchPayload.zk_proof) {
                 if (!this.zkProver) {
                     log.error("[L2PS Batch Aggregator] ZK proof provided but zkProver is not initialized")
-                    return false
+                    return refused("zkProver is not initialized")
                 }
 
                 const { proof, publicSignals, batchSize, finalStateRoot, totalVolume } = batchPayload.zk_proof
@@ -712,7 +805,7 @@ export class L2PSBatchAggregator {
                     totalVolumeBigInt = BigInt(totalVolume)
                 } catch {
                     log.error("[L2PS Batch Aggregator] Invalid BigInt values in ZK proof")
-                    return false
+                    return refused("invalid BigInt values in ZK proof", true)
                 }
 
                 const isValid = await this.zkProver.verifyProof({
@@ -725,14 +818,14 @@ export class L2PSBatchAggregator {
                 })
                 if (!isValid) {
                     log.error(`[L2PS Batch Aggregator] Rejecting batch ${batchPayload.batch_hash.substring(0, 16)}...: invalid ZK proof`)
-                    return false
+                    return refused("invalid ZK proof", true)
                 }
             }
 
             // Use keypair.publicKey (set by loadIdentity) instead of identity.ed25519
             if (!sharedState.keypair?.publicKey) {
                 log.error("[L2PS Batch Aggregator] Node keypair not loaded yet")
-                return false
+                return refused("node keypair not loaded yet")
             }
 
             // Get node's public key as hex string for 'from' field
@@ -741,6 +834,11 @@ export class L2PSBatchAggregator {
             // Use persistent nonce for batch transactions
             // This ensures uniqueness and proper ordering, preventing replay attacks
             const batchNonce = await this.getNextBatchNonce()
+
+            // The tip at submit time, signed in the content: peers drop a tx
+            // whose reference block is outside the deep window at their head,
+            // and a resubmission takes a fresh one.
+            const referenceBlock = await Chain.getLastBlockNumber()
 
             // Create batch transaction content
             const transactionContent = {
@@ -759,6 +857,7 @@ export class L2PSBatchAggregator {
                     additional_fee: 0,
                     rpc_address: null,
                 },
+                reference_block: referenceBlock,
             }
 
             // Create transaction hash
@@ -783,21 +882,45 @@ export class L2PSBatchAggregator {
                     data: uint8ArrayToHex(signature.signature),
                     domain: this.SIGNATURE_DOMAIN, // Include domain for verification
                 } : null,
-                reference_block: 0, // Will be set by mempool
+                reference_block: referenceBlock,
                 status: "pending", // Required by MempoolTx entity
                 extra: null, // Optional field
             }
 
-            // Submit to main mempool
-            const result = await Mempool.addTransaction(batchTransaction as any)
+            const unfit = Mempool.permanentRefusal(batchTransaction as any)
+            if (unfit !== null) {
+                log.error(`[L2PS Batch Aggregator] Failed to add batch to mempool: ${unfit}`)
+                return refused(unfit, true)
+            }
+
+            // Nonce, signature and tip above each awaited; a service stopped
+            // meanwhile must not put a batch in after its teardown.
+            if (gate?.stopped()) return refused("the service is stopping")
+            if (gate) {
+                try {
+                    await gate.beforeSend(hash)
+                } catch (error) {
+                    return refused(`the batch could not be recorded: ${getErrorMessage(error)}`)
+                }
+                if (gate.stopped()) return refused("the service is stopping")
+            }
+
+            let result: Awaited<ReturnType<typeof Mempool.addTransaction>>
+            try {
+                result = await Mempool.addTransaction(batchTransaction as any)
+            } catch (error) {
+                const message = getErrorMessage(error)
+                log.error(`[L2PS Batch Aggregator] Adding batch ${hash.slice(0, 16)}... to the mempool threw: ${message}`)
+                return { ok: false, permanent: false, reason: message, maybeSent: true }
+            }
 
             if (result.error) {
                 log.error(`[L2PS Batch Aggregator] Failed to add batch to mempool: ${result.error}`)
-                return false
+                return refused(result.error)
             }
 
             log.info(`[L2PS Batch Aggregator] Batch ${batchPayload.batch_hash.substring(0, 16)}... submitted to mempool (block ${result.confirmationBlock})`)
-            return true
+            return { ok: true, l1TxHash: hash }
 
         } catch (error: unknown) {
             const message = getErrorMessage(error)
@@ -805,8 +928,71 @@ export class L2PSBatchAggregator {
             if (error instanceof Error && error.stack) {
                 log.debug(`[L2PS Batch Aggregator] Stack trace: ${error.stack}`)
             }
-            return false
+            return refused(message)
         }
+    }
+
+    private settlementLoop(): SettlementAggregator {
+        if (this.settlement) return this.settlement
+        const deps: SettlementDeps = {
+            subnets: status => L2PSMempool.getSubnetsWithStatus(status),
+            rows: (l2psUid, status, limit, offset) =>
+                L2PSMempool.getPageByUIDAndStatus(l2psUid, status, limit, offset),
+            open: async (l2psUid, row) => {
+                const l2ps = await ParallelNetworks.getInstance().loadL2PS(l2psUid)
+                let inner: unknown
+                try {
+                    inner = await l2ps.decryptTx(row.encrypted_tx as any)
+                } catch (error) {
+                    return { ok: false, reason: `cannot decrypt: ${getErrorMessage(error)}` }
+                }
+                return openSettlementTransfer(inner as any, row.hash)
+            },
+            tip: (l2psUid, accounts) => readTipAccounts(accounts, l2psUid),
+            minimumFee: async () => {
+                // Stale parameters would drop correctly priced transfers.
+                await ensureNetworkParametersCurrent()
+                return nativeTransferFeeOs()
+            },
+            plan: planSettlement,
+            prove: proveSettlement,
+            submit: async (l2psUid, record, rows, gate) =>
+                this.sendBatch(await this.createBatchPayload(l2psUid, rows, record), gate),
+            status: hash => Chain.getTransactionStatus(hash),
+            // Both writes throw on failure, so the settlement loop keeps the
+            // batch and writes again instead of losing track of its rows.
+            setRows: async (hashes, status) => {
+                await L2PSMempool.setStatusBatch(hashes, status)
+            },
+            history: async (txHash, status, message, l1BatchHash, l1BlockNumber) => {
+                const executor = (await import("./L2PSTransactionExecutor")).default
+                await executor.updateTransactionStatus(txHash, status, l1BlockNumber, message, l1BatchHash)
+            },
+            historyBatchHash: async (l2psUid, row) => {
+                const executor = (await import("./L2PSTransactionExecutor")).default
+                const record = await executor.getTransactionByHash(l2psUid, row.original_hash)
+                return record?.l1_batch_hash ?? null
+            },
+            failedInHistory: async rowHashes => {
+                const executor = (await import("./L2PSTransactionExecutor")).default
+                return executor.getFailedByEncryptedHashes(rowHashes)
+            },
+            head: () => getSharedState.lastBlockNumber ?? 0,
+            now: () => Date.now(),
+        }
+        this.settlement = new SettlementAggregator(deps, {
+            minBatchSize: this.MIN_BATCH_SIZE,
+            maxBatchesPerCycle: this.MAX_BATCHES_PER_CYCLE,
+            queueWindow: 4 * SETTLEMENT_TRANSFERS * this.MAX_BATCHES_PER_CYCLE,
+            // The widest deep window any tip allows: a batch re-planned while
+            // the first one can still land races it for the same transfers.
+            expiryBlocks: EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * REFERENCE_BLOCK_ROOM + 1,
+            deferredTtlBlocks: SETTLEMENT_DEFERRED_TTL_BLOCKS,
+            proverBackoffMs: 5_000,
+            proverBackoffMaxMs: 300_000,
+            provers: Config.getInstance().l2ps.settlementProvers,
+        })
+        return this.settlement
     }
 
     /**
@@ -829,10 +1015,11 @@ export class L2PSBatchAggregator {
             }
 
             // Batched rows without edits never get a proof, and a proof is the
-            // only thing that removes a batched row.
-            const batchedWithoutEdits = await L2PSMempool.cleanupBatchedWithoutEdits(
-                this.CLEANUP_AGE_MS,
-            )
+            // only thing that removes a batched row. Under settlement no row
+            // carries edits, and a batched row waits for its L1 batch instead.
+            const batchedWithoutEdits = l2psSettlementActive()
+                ? 0
+                : await L2PSMempool.cleanupBatchedWithoutEdits(this.CLEANUP_AGE_MS)
             if (batchedWithoutEdits > 0) {
                 this.stats.cleanedUpTransactions += batchedWithoutEdits
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${batchedWithoutEdits} batched transactions without edits`)
@@ -850,6 +1037,15 @@ export class L2PSBatchAggregator {
             if (staleProcessed > 0) {
                 this.stats.cleanedUpTransactions += staleProcessed
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${staleProcessed} synced transactions`)
+            }
+
+            // A failed row is never settled or read again: the history keeps
+            // its status and reason and answers duplicates, so its ciphertext
+            // goes once it is as old as a confirmed row's.
+            const failed = await L2PSMempool.cleanupByStatus(L2PS_STATUS.FAILED, this.CLEANUP_AGE_MS)
+            if (failed > 0) {
+                this.stats.cleanedUpTransactions += failed
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${failed} failed transactions`)
             }
 
         } catch (error: unknown) {

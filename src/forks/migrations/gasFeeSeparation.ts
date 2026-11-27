@@ -48,6 +48,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import type { EntityManager } from "typeorm"
 import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 
 /**
  * Public name of this fork. Matches the {@link ForkName} entry registered
@@ -152,7 +153,7 @@ function buildDefaultAccountFields(pubkey: string): {
                 demosFollow: 0,
                 nomisScores: {},
             },
-            lastUpdated: new Date().toISOString(),
+            lastUpdated: applyTime().toISOString(),
         }),
         referralInfo: JSON.stringify({
             totalReferrals: 0,
@@ -205,7 +206,7 @@ async function ensureZeroAccount(
     // canonical JSON string; Postgres' binding implicitly casts a string
     // to jsonb when the target column is jsonb. Timestamps are bound as
     // ISO strings (same trick as osDenomination's fork_state UPSERT).
-    const nowIso = new Date().toISOString()
+    const nowIso = applyTime().toISOString()
     const ph = (i: number) => placeholder(entityManager, i)
     const flaggedValue: boolean | number = isPg ? false : 0
     const reviewedValue: boolean | number = isPg ? false : 0
@@ -313,7 +314,7 @@ export async function runGasFeeSeparationMigration(
         entityManager.connection.options.type === "postgres" ||
         entityManager.connection.options.type === "cockroachdb"
     const appliedValue: boolean | number = isPg ? true : 1
-    const appliedAtValue: string = new Date().toISOString()
+    const appliedAtValue: string = applyTime().toISOString()
     const ph = (i: number) => placeholder(entityManager, i)
     await entityManager.query(
         `INSERT INTO fork_state (
