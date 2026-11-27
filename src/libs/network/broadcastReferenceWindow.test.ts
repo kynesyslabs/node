@@ -44,6 +44,10 @@ jest.mock("./outboundAdmission", () => ({
     outboundAdmissionRefusal: async () => null,
     claimOutboundRun: () => true,
 }))
+// Reusing an attested response is covered in web2AttestedResponse tests.
+jest.mock("./routines/transactions/web2AttestedResponse", () => ({
+    attestedWeb2Response: () => null,
+}))
 jest.mock("src/libs/gossip/GossipManager", () => ({
     __esModule: true,
     default: { isEnabled: () => true },

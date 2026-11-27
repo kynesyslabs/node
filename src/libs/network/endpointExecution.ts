@@ -16,6 +16,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
 import { tlsnAdmissionCopy } from "../blockchain/gcr/tlsnTransitions"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import { attestedWeb2Response } from "./routines/transactions/web2AttestedResponse"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import { web2CallerForAddress } from "@/features/web2/web2FetchLimiter"
 import {
@@ -478,8 +479,20 @@ export async function handleExecuteTransaction(
             ) {
                 return result
             }
+            const recorded = payload?.message?.web2Request
+            const attested = attestedWeb2Response(
+                payload?.message?.sessionId,
+                recorded?.raw,
+                recorded?.result,
+            )
+            if (attested) {
+                result.response = attested
+                result.success = true
+                break
+            }
             const params = parseWeb2ProxyRequest(payload)
-            // This re-runs the request when the tx is broadcast. Drop the
+            // Without that attested response, this re-runs the request when
+            // the tx is broadcast. Drop the
             // credential headers on the sensitive-key list and the tx's own
             // authorization so the replay does not carry them; other
             // credentials are not covered.

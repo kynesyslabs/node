@@ -51,6 +51,10 @@ mock.module("./outboundAdmission", () => ({
     outboundAdmissionRefusal: async () => null,
     claimOutboundRun: () => true,
 }))
+// Reusing an attested response is covered in web2AttestedResponse tests.
+mock.module("./routines/transactions/web2AttestedResponse", () => ({
+    attestedWeb2Response: () => null,
+}))
 mock.module("src/libs/consensus/stakedSet", () => ({
     getStakedSet: async () => new Set<string>(),
     getStakedSetHeight: () => 0,

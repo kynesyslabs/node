@@ -63,6 +63,9 @@ mock.module("./routines/transactions/handleWeb2ProxyRequest", () => ({ handleWeb
 mock.module("../utils/web2RequestUtils", () => ({
     parseWeb2ProxyRequest: () => ({ web2Request: { raw: { headers: {} } } }),
 }))
+let attestedReply: any = null
+const attestedWeb2Response = jest.fn((..._args: unknown[]) => attestedReply)
+mock.module("./routines/transactions/web2AttestedResponse", () => ({ attestedWeb2Response }))
 mock.module("./routines/transactions/handleIdentityRequest", () => ({ __esModule: true, default: jest.fn() }))
 mock.module("./routines/transactions/handleNativeBridgeTx", () => ({ __esModule: true, default: jest.fn() }))
 mock.module("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
@@ -100,6 +103,8 @@ beforeEach(() => {
     handleDemosWorkRequest.mockImplementation(async () => ({ result: 200, response: {} }))
     handleWeb2ProxyRequest.mockClear()
     web2Status = 200
+    attestedReply = null
+    attestedWeb2Response.mockClear()
 })
 
 describe("refusals run before outbound calls", () => {
@@ -194,5 +199,41 @@ describe("an outbound call that failed keeps the tx out of the mempool", () => {
         expect(reply.success).toBe(false)
         expect(JSON.stringify(reply.response)).toContain("step failed")
         expect(submitValidatedTx).not.toHaveBeenCalled()
+    })
+})
+
+describe("web2Request broadcast reuses the attested response", () => {
+    const recorded = { raw: { url: "https://example.com/a", method: "GET" }, result: { responseHash: "aa" } }
+
+    it("does not fetch again when the session attested the recorded response", async () => {
+        attestedReply = { result: 200, response: { responseHash: "aa" }, require_reply: false, extra: null }
+        const reply = await handleExecuteTransaction(
+            tx("web2Request", { message: { sessionId: "s1", web2Request: recorded } }),
+            "s",
+        )
+        expect(reply.success).toBe(true)
+        expect(attestedWeb2Response).toHaveBeenCalledWith("s1", recorded.raw, recorded.result)
+        expect(handleWeb2ProxyRequest).not.toHaveBeenCalled()
+        expect(submitValidatedTx).toHaveBeenCalledTimes(1)
+    })
+
+    it("fetches again when there is no attested response", async () => {
+        const reply = await handleExecuteTransaction(
+            tx("web2Request", { message: { sessionId: "s1", web2Request: recorded } }),
+            "s",
+        )
+        expect(reply.success).toBe(true)
+        expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it("still runs the admission refusals first", async () => {
+        attestedReply = { result: 200, response: {}, require_reply: false, extra: null }
+        admissionRefusal = "Transaction already in mempool"
+        const reply = await handleExecuteTransaction(
+            tx("web2Request", { message: { sessionId: "s1", web2Request: recorded } }),
+            "s",
+        )
+        expect(reply.success).toBe(false)
+        expect(attestedWeb2Response).not.toHaveBeenCalled()
     })
 })

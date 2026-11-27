@@ -28,6 +28,11 @@ export type DAHRStartProxyParams = IDAHRStartProxyParams & {
 export class DAHR {
     private readonly _sessionId: string
     private readonly _proxy: Proxy
+    private _attested: {
+        url: string
+        method: string
+        result: IWeb2Result
+    } | null = null
 
     /**
      * Constructor for the DAHR class.
@@ -133,7 +138,40 @@ export class DAHR {
             )
         }
 
+        this._attested = {
+            url: validation.normalizedUrl,
+            method,
+            result: web2Response,
+        }
         return web2Response
+    }
+
+    /**
+     * The response this session last attested, when `url` and `method` name
+     * that request and `claimed` carries its status and hashes; else null.
+     * It is handed out once, so a broadcast can stand on it instead of
+     * fetching the origin again, but only one.
+     */
+    takeAttestedResponse(
+        url: string,
+        method: string,
+        claimed: unknown,
+    ): IWeb2Result | null {
+        const attested = this._attested
+        if (!attested || !claimed || typeof claimed !== "object") return null
+        const c = claimed as Partial<IWeb2Result>
+        const r = attested.result
+        const matches =
+            attested.url === url &&
+            attested.method === method &&
+            c.status === r.status &&
+            typeof r.responseHash === "string" &&
+            c.responseHash === r.responseHash &&
+            c.responseHeadersHash === r.responseHeadersHash &&
+            (r.requestHash === undefined || c.requestHash === r.requestHash)
+        if (!matches) return null
+        this._attested = null
+        return r
     }
 
     /**
