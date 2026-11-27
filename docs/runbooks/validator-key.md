@@ -28,6 +28,16 @@ independent host is caught only once its signatures reach this node (see
 Keep the record together with the identity file. Deleting it is only safe
 after the chain itself was reset.
 
+The record also names the public key it belongs to; a record written by an
+older version gets the running key at the first boot. A node whose record
+names another key logs `[SIGNING] signing record ... belongs to key ...` and
+does not sign in that process (`SigningHalted` with marker 0), while it still
+syncs and serves. Run the identity the record belongs to, or, when the node
+now runs another key on purpose, move the record and the other signing-state
+files away together with the identity they belong to. `./run --docker` also
+refuses to start when the state volume holds an identity other than the
+checkout's `.demos_identity`, and prints both ways out.
+
 Under docker compose the container entrypoint links the record for the
 configured `IDENTITY_FILE` into the `/app/state` volume. If `IDENTITY_FILE` is
 an absolute path or sits in a subdirectory, the entrypoint only warns: put the

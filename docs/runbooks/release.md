@@ -966,6 +966,20 @@ this restart is a fallback there.
     client ID equal to that key; SDK 4.0.24 signs with ML-DSA and requests
     no challenge, so keep `transitional` until an SDK release supports it.
     Mainnet validators run with `SIGNALING_ENABLED=false`.
+  - `./run --docker` (`scripts/docker-run`) copies `.demos_identity` into
+    the state volume only when the volume has none. When the volume holds a
+    different identity, `up` stops before anything starts, `--clean` and
+    `--rebuild` included, and prints how to keep the volume's identity or
+    move it aside with its signing-state files. Before, the checkout's file
+    overwrote the volume copy on every `up`. Raw `docker compose` starts do
+    not run this check.
+  - The signing record (`<identity file>.signed.json`) stores the public key
+    it belongs to; a record without one is bound to the running key at the
+    first boot (older versions ignore the field). A record of another key
+    stops signing in that process (`SigningHalted`, marker 0) with
+    `[SIGNING] signing record ... belongs to key ...`; see
+    `docs/runbooks/validator-key.md`. Rerun the reset-node and
+    wipe-and-reboot drills on this release.
   - `launch-go-no-go` no longer limits beneficial owners or operators.
     Anyone may run as many validators as they hold seat NFTs for, so an
     owner or operator above `min(launch, shardSize) - quorum` validators, a
