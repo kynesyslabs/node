@@ -394,9 +394,13 @@ export async function handleExecuteTransaction(
                 payload[1] as XMScript,
             )
             // A partial run is admitted: the tx records what reached other
-            // chains. Only a run where nothing was sent is refused.
+            // chains. A run where every operation failed is refused; its
+            // claim is released only when no operation ran at all, since an
+            // executor may report an error after its transaction went out.
             result.success = xmResult.success === true
-            if (!result.success) releaseOutboundRun(queriedTx.hash)
+            if (!result.success && Object.keys(xmResult.results ?? {}).length === 0) {
+                releaseOutboundRun(queriedTx.hash)
+            }
             result.response = {
                 message: xmResult.message,
                 results: xmResult.results,

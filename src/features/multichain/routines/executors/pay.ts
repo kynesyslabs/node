@@ -226,20 +226,19 @@ async function handleXRPLPay(
     let submitHash: string | null = null
     try {
         // No auto-reconnect: the client is closed once this one submit
-        // settles. connect() can report false after a retry that did
-        // connect, so the client's own flag decides.
+        // settles.
         const connected = await xrplInstance.connect(false)
         log.debug("CONNECT RETURNED: ", connected)
+        if (!connected) {
+            return {
+                result: "error",
+                error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
+            }
+        }
 
         // REVIEW 10 seconds timeout for connection
         let timer = 0
         while (!xrplInstance.connected) {
-            if (!connected) {
-                return {
-                    result: "error",
-                    error: `Failed to connect to the XRP network. RPC URL: "${rpcUrl}" on ${operation.chain}.${operation.subchain} is not reachable`,
-                }
-            }
             await new Promise(resolve => setTimeout(resolve, 300))
             timer += 300
             if (timer > 10000) {

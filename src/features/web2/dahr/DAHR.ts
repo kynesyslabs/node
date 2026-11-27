@@ -14,6 +14,11 @@ import {
     isSuccessStatus,
     UnattestableResponseError,
 } from "src/features/web2/dahr/originStatus"
+import {
+    releaseAttestedBytes,
+    reserveAttestedBytes,
+} from "src/features/web2/dahr/attestedBudget"
+import { WEB2_ATTESTED_RETAIN_MS } from "src/utilities/constants"
 
 export type DAHRStartProxyParams = IDAHRStartProxyParams & {
     /** Return non-2xx origin responses instead of refusing them. */
@@ -32,6 +37,8 @@ export class DAHR {
         url: string
         method: string
         result: IWeb2Result
+        bytes: number
+        expiry: ReturnType<typeof setTimeout>
     } | null = null
 
     /**
@@ -138,10 +145,18 @@ export class DAHR {
             )
         }
 
-        this._attested = {
-            url: validation.normalizedUrl,
-            method,
-            result: web2Response,
+        this.dropAttested()
+        const bytes = attestedSize(web2Response, meter)
+        if (reserveAttestedBytes(bytes)) {
+            const expiry = setTimeout(() => this.dropAttested(), WEB2_ATTESTED_RETAIN_MS)
+            expiry.unref?.()
+            this._attested = {
+                url: validation.normalizedUrl,
+                method,
+                result: web2Response,
+                bytes,
+                expiry,
+            }
         }
         return web2Response
     }
@@ -170,14 +185,23 @@ export class DAHR {
             c.responseHeadersHash === r.responseHeadersHash &&
             (r.requestHash === undefined || c.requestHash === r.requestHash)
         if (!matches) return null
-        this._attested = null
+        this.dropAttested()
         return r
+    }
+
+    private dropAttested(): void {
+        const attested = this._attested
+        if (!attested) return
+        this._attested = null
+        clearTimeout(attested.expiry)
+        releaseAttestedBytes(attested.bytes)
     }
 
     /**
      * Stop the proxy.
      */
     async stopProxy(): Promise<void> {
+        this.dropAttested()
         await this._proxy.stopProxy()
     }
 
@@ -201,4 +225,12 @@ export class DAHR {
             },
         }
     }
+}
+
+// What a kept response costs: the bytes read from the origin, or its body
+// when the read was not metered.
+function attestedSize(result: IWeb2Result, meter?: Web2FetchMeter): number {
+    if (meter && meter.bytes > 0) return meter.bytes
+    const body = (result as { data?: unknown }).data
+    return typeof body === "string" ? Buffer.byteLength(body) : 0
 }

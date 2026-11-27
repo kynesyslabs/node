@@ -174,8 +174,18 @@ describe("XM verdict", () => {
         expect(submitValidatedTx).toHaveBeenCalledTimes(1)
     })
 
-    it("a script that sent nothing is not submitted and can be broadcast again", async () => {
+    it("a script whose operations all failed is not submitted and keeps its claim", async () => {
         digestReply = { success: false, message: "all_ops_failed", results: { a: { result: "error" } } }
+        const reply = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
+        expect(reply.success).toBe(false)
+        expect(submitValidatedTx).not.toHaveBeenCalled()
+        const again = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
+        expect(again.extra).toMatchObject({ error: OUTBOUND_ALREADY_RUN })
+        expect(digest).toHaveBeenCalledTimes(1)
+    })
+
+    it("a script that ran no operation is not submitted and can be broadcast again", async () => {
+        digestReply = { success: false, message: "invalid_script: no operations", results: {} }
         const reply = await handleExecuteTransaction(tx("crosschainOperation", { operations: {} }), "s")
         expect(reply.success).toBe(false)
         expect(submitValidatedTx).not.toHaveBeenCalled()

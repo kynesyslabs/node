@@ -13,6 +13,10 @@ mock.module("@/utilities/logger", () => ({ __esModule: true, default: quietLog }
 const { Config } = await import("src/config")
 const { DAHRFactory } = await import("src/features/web2/dahr/DAHRFactory")
 const { attestedWeb2Response } = await import("./web2AttestedResponse")
+const { __resetAttestedBudget, retainedAttestedBytes, reserveAttestedBytes } = await import(
+    "src/features/web2/dahr/attestedBudget"
+)
+const { WEB2_ATTESTED_RETAIN_MAX_BYTES } = await import("src/utilities/constants")
 
 const fetched = {
     status: 200,
@@ -52,6 +56,7 @@ async function attestedSession(): Promise<string> {
 beforeEach(() => {
     Config.resetInstance()
     DAHRFactory.resetInstance()
+    __resetAttestedBudget()
     sendHTTPRequest = jest.fn(async () => ({ ...fetched }))
 })
 
@@ -100,5 +105,30 @@ describe("attestedWeb2Response", () => {
         ).rejects.toThrow()
         const raw = { url: "https://example.com/a", method: "GET" }
         expect(attestedWeb2Response(dahr.sessionId, raw, { ...claimed, status: 500 })).toBeNull()
+    })
+})
+
+describe("attested response budget", () => {
+    const body = Buffer.byteLength(fetched.data)
+
+    it("counts a kept response and frees it when the broadcast takes it", async () => {
+        const sessionId = await attestedSession()
+        expect(retainedAttestedBytes()).toBe(body)
+        expect(attestedWeb2Response(sessionId, request.raw, claimed)).not.toBeNull()
+        expect(retainedAttestedBytes()).toBe(0)
+    })
+
+    it("frees a kept response when its session stops", async () => {
+        const sessionId = await attestedSession()
+        await DAHRFactory.instance.getDAHR(sessionId)!.stopProxy()
+        expect(retainedAttestedBytes()).toBe(0)
+        expect(attestedWeb2Response(sessionId, request.raw, claimed)).toBeNull()
+    })
+
+    it("keeps nothing past the node-wide budget, so the broadcast fetches again", async () => {
+        expect(reserveAttestedBytes(WEB2_ATTESTED_RETAIN_MAX_BYTES)).toBe(true)
+        const sessionId = await attestedSession()
+        expect(retainedAttestedBytes()).toBe(WEB2_ATTESTED_RETAIN_MAX_BYTES)
+        expect(attestedWeb2Response(sessionId, request.raw, claimed)).toBeNull()
     })
 })

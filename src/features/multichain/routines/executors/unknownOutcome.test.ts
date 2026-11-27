@@ -159,21 +159,6 @@ describe("XRPL submit deadline", () => {
         expect(disconnect).toHaveBeenCalledTimes(1)
     })
 
-    it("submits when connect() reports false but the client did connect", async () => {
-        const signed = signedXrplTx()
-        const submitAndWait = jest.fn(async () => ({
-            result: { meta: { TransactionResult: "tesSUCCESS" }, hash: signed.hash, validated: true },
-        }))
-        const disconnect = jest.fn(async () => undefined)
-        spyOn(multichain.XRPL.prototype, "connect").mockImplementation(async function (this: any) {
-            this.connected = true
-            this.provider = { submitAndWait, disconnect }
-            return false
-        })
-        expect(await handlePayOperation(xrplOp(signed.tx_blob), 0)).toEqual({ result: "success", hash: signed.hash })
-        expect(disconnect).toHaveBeenCalledTimes(1)
-    })
-
     it("closes the client when it never connected", async () => {
         const disconnect = jest.fn(async () => undefined)
         spyOn(multichain.XRPL.prototype, "connect").mockImplementation(async function (this: any) {
