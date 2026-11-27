@@ -277,10 +277,13 @@ export async function handleExecuteTransaction(
             const xmResult = await multichainDispatcher.digest(
                 payload[1] as XMScript,
             )
-            result.success = xmResult.success
+            // Only an all-ok script is admitted; on any other verdict the
+            // reply still lists which external transactions were sent.
+            result.success = xmResult.success === true
             result.response = {
                 message: xmResult.message,
                 results: xmResult.results,
+                ...("outcomes" in xmResult ? { outcomes: xmResult.outcomes } : {}),
             }
             break
         }

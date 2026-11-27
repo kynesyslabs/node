@@ -5,6 +5,7 @@ import XMParser from "./routines/XMParser"
 import { XMScript } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
+import { xmOpOutcome, xmScriptVerdict, type XmOpOutcome } from "./xmOutcome"
 
 export default class MultichainDispatcher {
     // INFO Digesting the request from the server
@@ -39,28 +40,30 @@ export default class MultichainDispatcher {
         return await XMParser.load(script)
     }
 
-    // INFO Executes a xM Script
+    /**
+     * Runs every operation and admits the Demos tx only when all of them
+     * succeeded. Operations go to independent chains one after another, so
+     * the script cannot be atomic: when one fails, the ones before it may
+     * already be final on their chains and nothing here can undo them.
+     * Refusing the Demos tx after a partial run is the honest answer; the
+     * reply lists each operation's result (and hash, when one was sent) so
+     * the caller sees what reached other chains.
+     */
     static async execute(script: XMScript) {
         const results = await XMParser.execute(script)
-
-        const totalOperations = Object.values(results).length
-        const failedOperations = Object.values(results).filter(
-            result => result.result === "error",
-        ).length
-
-        // INFO: If all operations failed, this demos tx won't be forged in the block
-        if (failedOperations === totalOperations) {
-            return {
-                success: false,
-                message: "all_ops_failed",
-                results: results,
-            }
+        const outcomes: Record<string, XmOpOutcome> = {}
+        for (const [name, reply] of Object.entries(results)) {
+            outcomes[name] = xmOpOutcome(
+                script.operations[name]?.task?.type,
+                reply,
+            )
         }
-
+        const message = xmScriptVerdict(Object.values(outcomes))
         return {
-            success: true,
-            message: failedOperations > 0 ? "partial_success" : "all_ops_ok",
-            results: results,
+            success: message === "all_ops_ok",
+            message,
+            results,
+            outcomes,
         }
     }
 }
