@@ -7,7 +7,8 @@ import {
 } from "src/libs/consensus/stakedSet"
 import Hashing from "src/libs/crypto/hashing"
 import { serializeBlockContent } from "@/forks"
-import { verifyBlock } from "src/libs/blockchain/validation/verifyBlock"
+import { checkKnownBlockOwnSignature, verifyBlock } from "src/libs/blockchain/validation/verifyBlock"
+import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "src/utilities/logger"
 
@@ -125,6 +126,22 @@ export async function validateHeightsMessage(
 export interface BlockValidation {
     result: GossipVerdict
     block?: Block
+    /** Only populated after local storage confirms it. */
+    knownHash?: string
+}
+
+const VERIFIED_BLOCKS_MAX = 2048
+const BLOCK_CHECKS_MAX = 128
+const verifiedBlocks = new Map<string, true>()
+const checkingBlocks = new Set<string>()
+export const applyingBlocks = new Set<string>()
+
+export function confirmBlock(hash: string): void {
+    verifiedBlocks.delete(hash)
+    verifiedBlocks.set(hash, true)
+    if (verifiedBlocks.size > VERIFIED_BLOCKS_MAX) {
+        verifiedBlocks.delete(verifiedBlocks.keys().next().value)
+    }
 }
 
 export async function validateBlockMessage(
@@ -167,35 +184,72 @@ export async function validateBlockMessage(
         return { result: "ignore" }
     }
 
-    let expectedHash: string
-    try {
-        expectedHash = Hashing.sha256(
-            serializeBlockContent(block.content, block.number),
-        )
-    } catch {
-        recordVerdict("blocks", "reject")
-        return { result: "reject" }
+    if (verifiedBlocks.has(block.hash)) {
+        // A confirmed hash returns here. Our key was checked on the adopted
+        // certificate and on copies seen before confirmation.
+        confirmBlock(block.hash)
+        recordVerdict("blocks", "ignore")
+        return { result: "ignore", knownHash: block.hash }
     }
-    if (expectedHash !== block.hash) {
-        log.debug(
-            `[GOSSIP] block reject: hash mismatch (claimed ${block.hash}, recomputed ${expectedHash})`,
-        )
-        recordVerdict("blocks", "reject")
-        return { result: "reject" }
+    if (applyingBlocks.has(block.hash)) {
+        recordVerdict("blocks", "ignore")
+        return { result: "ignore" }
     }
-
-    // Full quorum verification needs the parent block; only possible for
-    // heights we can anchor locally. `ignore` (never `reject`) when the
-    // failure is our own lag.
-    if (block.number > head + 1) {
-        log.debug(
-            `[GOSSIP] block ignore: ${block.number} ahead of head ${head}, cannot verify quorum yet`,
-        )
+    const payloadHash = Hashing.sha256Bytes(data)
+    if (
+        checkingBlocks.has(payloadHash) ||
+        checkingBlocks.size >= BLOCK_CHECKS_MAX
+    ) {
         recordVerdict("blocks", "ignore")
         return { result: "ignore" }
     }
 
+    // Coalesce only identical payloads; a different certificate can still verify.
+    checkingBlocks.add(payloadHash)
     try {
+        let expectedHash: string
+        try {
+            expectedHash = Hashing.sha256(
+                serializeBlockContent(block.content, block.number),
+            )
+        } catch {
+            recordVerdict("blocks", "reject")
+            return { result: "reject" }
+        }
+        if (expectedHash !== block.hash) {
+            log.debug(
+                `[GOSSIP] block reject: hash mismatch (claimed ${block.hash}, recomputed ${expectedHash})`,
+            )
+            recordVerdict("blocks", "reject")
+            return { result: "reject" }
+        }
+
+        // Full quorum verification needs the parent block; only possible for
+        // heights we can anchor locally. `ignore` (never `reject`) when the
+        // failure is our own lag.
+        if (block.number > head + 1) {
+            log.debug(
+                `[GOSSIP] block ignore: ${block.number} ahead of head ${head}, cannot verify quorum yet`,
+            )
+            recordVerdict("blocks", "ignore")
+            return { result: "ignore" }
+        }
+        const storedBlock = await Chain.getBlockByHash(block.hash)
+        if (storedBlock) {
+            confirmBlock(block.hash)
+            // Any spelling of our key is checked, as verifyBlock checks it:
+            // checkKnownBlockOwnSignature returns at once when there is none.
+            if (storedBlock.number === block.number) {
+                await checkKnownBlockOwnSignature({
+                    ...block,
+                    number: storedBlock.number,
+                    content: storedBlock.content,
+                })
+            }
+            recordVerdict("blocks", "ignore")
+            return { result: "ignore", knownHash: block.hash }
+        }
+
         const verdict = await verifyBlock(block)
         if (!verdict.valid) {
             if (verdict.reason?.includes("not found")) {
@@ -219,6 +273,8 @@ export async function validateBlockMessage(
         )
         recordVerdict("blocks", "ignore")
         return { result: "ignore" }
+    } finally {
+        checkingBlocks.delete(payloadHash)
     }
 
     log.debug(

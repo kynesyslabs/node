@@ -12,6 +12,12 @@ export const BLOCKS_MAX_BYTES = 1024 * 1024 + 4096
  */
 export const TXS_MAX_BYTES = 256 * 1024
 
+export const TOPIC_MAX_BYTES: Readonly<Record<string, number>> = {
+    [HEIGHTS_TOPIC]: HEIGHTS_MAX_BYTES,
+    [BLOCKS_TOPIC]: BLOCKS_MAX_BYTES,
+    [TXS_TOPIC]: TXS_MAX_BYTES,
+}
+
 /**
  * Tx topic limits, sized for ~500 txs per 10 s block network-wide. One
  * popular validator RPC may legitimately front all of it, so per-publisher

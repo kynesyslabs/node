@@ -24,6 +24,9 @@ const REPORTED_ELSEWHERE: Record<string, number> = {
   "token_invariants_known_holders.ts": 1,
   // The one catch is inside a token-script source string that runs in the node's script VM.
   "token_script_rejects.ts": 1,
+  // Mark the register and challenge promises handled while the socket waits; both are
+  // awaited later, where their rejections reach the caller.
+  "im_shared.ts": 2,
 }
 
 // Same: every catch in this file is inside a token-script source string.

@@ -8,6 +8,7 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 import { inspect } from "node:util"
 import readline from "node:readline"
+import { BlockPolicy, BLOCKS_TOPIC } from "./blockPolicy.js"
 
 import { createLibp2p } from "libp2p"
 import { tcp } from "@libp2p/tcp"
@@ -25,9 +26,11 @@ import {
 } from "@scure/bip39"
 import { wordlist } from "@scure/bip39/wordlists/english.js"
 
-const PROTOCOL_VERSION = 1
+import { parseTopicLimits, topicValidatorsFor, withinTopicLimit } from "./limits.js"
+
+// v2: the parent sends remember_block, which a v1 sidecar does not know.
+const PROTOCOL_VERSION = 2
 const HEIGHTS_TOPIC = "demos/heights/1"
-const BLOCKS_TOPIC = "demos/blocks/1"
 const TXS_TOPIC = "demos/txs/1"
 // Subscribed on command from the Bun side: only staked nodes ingest txs.
 const ALWAYS_TOPICS = [HEIGHTS_TOPIC, BLOCKS_TOPIC]
@@ -69,6 +72,34 @@ const ALLOW_PUBLISH_TO_ZERO_PEERS = true
 
 const slog = (msg) => process.stderr.write(`[SIDECAR] ${msg}\n`)
 
+// The parent's per-topic size bounds. Without them an oversized message
+// would be relayed across the mesh and only dropped by each node after
+// delivery, so the sidecar does not start.
+let topicLimits
+try {
+    topicLimits = parseTopicLimits(process.env.GOSSIP_TOPIC_MAX_BYTES, ALL_TOPICS)
+} catch (e) {
+    slog(`cannot start without topic size bounds: ${e.message}`)
+    process.exit(1)
+}
+
+const OVERSIZED_LOG_INTERVAL_MS = 30_000
+let oversizedSinceLog = 0
+let lastOversizedLogAt = 0
+
+// One line per interval however many arrive: every stderr line is logged
+// by the parent.
+function noteOversized(topic, length) {
+    oversizedSinceLog++
+    const now = Date.now()
+    if (now - lastOversizedLogAt < OVERSIZED_LOG_INTERVAL_MS) return
+    slog(
+        `refused ${oversizedSinceLog} oversized message(s) before relay; last: ${length} bytes on ${topic}`,
+    )
+    lastOversizedLogAt = now
+    oversizedSinceLog = 0
+}
+
 function componentLogger() {
     const makeLogger = (component) => {
         const noop = () => {}
@@ -97,8 +128,8 @@ function componentLogger() {
 // block hash must not stand in for the message: the parent validates the
 // content only after gossipsub has deduplicated by ID, so an invalid
 // payload carrying a real hash would make the real message a duplicate.
-// Identical re-broadcasts still collapse; the parent dedups the rest by
-// transaction and block hash itself.
+// Identical re-broadcasts collapse; the parent dedups by transaction and block hash.
+// A known block hash is relayed once, then later copies are dropped.
 function gossipMsgId(msg) {
     return new Uint8Array(
         createHash("sha256")
@@ -165,6 +196,15 @@ const node = await createLibp2p({
     },
 })
 const pubsub = node.services.pubsub
+const blockPolicy = new BlockPolicy()
+// Before any subscription, so no message is forwarded unchecked. A block is
+// held to its size bound before the known-block check parses it.
+const topicValidators = topicValidatorsFor(ALL_TOPICS, topicLimits, noteOversized, {
+    [BLOCKS_TOPIC]: (peer, msg) => blockPolicy.validate(peer, msg),
+})
+for (const [topic, validate] of topicValidators) {
+    pubsub.topicValidators.set(topic, validate)
+}
 for (const topic of ALWAYS_TOPICS) pubsub.subscribe(topic)
 slog(`libp2p up: peerId ${node.peerId.toString()} port ${PORT}`)
 
@@ -231,6 +271,10 @@ pubsub.addEventListener("message", (evt) => {
 
 async function handleCommand(cmd) {
     switch (cmd.type) {
+        case "remember_block": {
+            blockPolicy.remember(cmd.hash)
+            break
+        }
         case "hello": {
             if (cmd.v !== PROTOCOL_VERSION) {
                 slog(`protocol version mismatch: client v${cmd.v}, ours v${PROTOCOL_VERSION}`)
@@ -247,7 +291,14 @@ async function handleCommand(cmd) {
         }
         case "publish": {
             try {
-                await pubsub.publish(cmd.topic, Buffer.from(cmd.data, "base64"))
+                const data = Buffer.from(cmd.data, "base64")
+                // Topic validators do not run on a node's own messages.
+                if (!withinTopicLimit(topicLimits, cmd.topic, data.length)) {
+                    throw new Error(
+                        `message of ${data.length} bytes is over the size bound for ${cmd.topic}`,
+                    )
+                }
+                await pubsub.publish(cmd.topic, data)
                 send({ type: "publish_result", topic: cmd.topic, ok: true })
             } catch (e) {
                 slog(`publish to ${cmd.topic} failed: ${e.message}`)

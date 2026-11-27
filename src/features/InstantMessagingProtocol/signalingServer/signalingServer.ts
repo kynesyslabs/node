@@ -31,6 +31,7 @@
  *    e. Send/receive messages to/from specific peers
  *
  * Message Types:
+ * - register_challenge: Request a one-time challenge for a bound registration proof
  * - register: Register a new peer with a client ID and public key
  * - discover: Get list of all connected peers
  * - message: Send a message to a specific peer
@@ -44,6 +45,7 @@
 
 import { Server } from "bun"
 import { Mutex } from "async-mutex"
+import { Config } from "@/config"
 import { ImPeer } from "./ImPeers"
 import { ImErrorType } from "./types/Errors"
 import {
@@ -52,6 +54,8 @@ import {
     ImDiscoverMessage,
     ImPeerMessage,
     ImPublicKeyRequestMessage,
+    clientIdFromSigningKey,
+    registrationProofBytes,
 } from "./types/IMMessage"
 import Transaction from "@/libs/blockchain/transaction"
 import Chain from "@/libs/blockchain/chain"
@@ -76,15 +80,24 @@ import log from "@/utilities/logger"
 import { handleError } from "@/errors"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import {
+    INDEX_KEY_MAX_BYTES,
+    fitsIndexKey,
+    isKeyStorable,
+} from "@/libs/blockchain/validation/postgresStorable"
+import {
     serializeTransactionContent,
     txSignaturePreimageForPendingBlock,
 } from "@/forks"
+const MAX_ADVERTISED_KEY_BYTES = 4096
+
 /**
  * SignalingServer class that manages peer connections and message routing
  */
 export class SignalingServer {
     /** Map of connected peers, keyed by their client IDs */
     private peers: Map<string, ImPeer> = new Map()
+    private readonly registrationChallenges = new WeakMap<WebSocket, string>()
+    private readonly registerMode = Config.getInstance().core.signalingRegisterMode
     private server: Server
     /** Per-sender nonce counter for transaction uniqueness and replay prevention */
     private readonly senderNonces: Map<string, number> = new Map()
@@ -97,6 +110,11 @@ export class SignalingServer {
     // REVIEW: PR Fix #2 - Add mutex for thread-safe count management
     private readonly countMutex: Mutex = new Mutex()
     private readonly MAX_OFFLINE_MESSAGES_PER_SENDER = 100
+    /**
+     * UTF-8 bytes a target ID may hold. It becomes the `to` of the message's
+     * transaction and keys an `offline_messages` row, both b-tree indexed.
+     */
+    private readonly MAX_TARGET_ID_BYTES = INDEX_KEY_MAX_BYTES
 
     /**
      * Creates a new signaling server instance
@@ -112,6 +130,7 @@ export class SignalingServer {
                 return new Response("Upgrade failed", { status: 500 })
             },
             websocket: {
+                maxPayloadLength: 1024 * 1024,
                 message: this.handleMessage.bind(this),
                 open: this.handleOpen.bind(this),
                 close: this.handleClose.bind(this),
@@ -144,10 +163,34 @@ export class SignalingServer {
     }
 
     /**
+     * Whether a target ID is storable within MAX_TARGET_ID_BYTES
+     * @param targetId - The target ID as the client sent it
+     */
+    private isValidTargetId(targetId: unknown): targetId is string {
+        return (
+            isKeyStorable(targetId) &&
+            fitsIndexKey(targetId, this.MAX_TARGET_ID_BYTES)
+        )
+    }
+
+    /**
+     * Sends the error for a target ID isValidTargetId refuses
+     * @param ws - The WebSocket that sent the target ID
+     */
+    private sendTargetIdError(ws: WebSocket) {
+        this.sendError(
+            ws,
+            ImErrorType.INVALID_MESSAGE,
+            `Target ID must be a storable string of at most ${this.MAX_TARGET_ID_BYTES} bytes`,
+        )
+    }
+
+    /**
      * Handles new WebSocket connections
      * @param ws - The new WebSocket connection
      */
     private handleOpen(ws: WebSocket) {
+        this.registrationChallenges.set(ws, "")
         log.info("New peer connected")
     }
 
@@ -156,6 +199,7 @@ export class SignalingServer {
      * @param ws - The disconnected WebSocket
      */
     private handleClose(ws: WebSocket) {
+        this.registrationChallenges.delete(ws)
         // Find and remove the disconnected peer
         for (const [id, peer] of this.peers.entries()) {
             if (peer.ws === ws) {
@@ -192,10 +236,19 @@ export class SignalingServer {
             }
 
             switch (data.type) {
+                case "register_challenge": {
+                    if (!this.registrationChallenges.has(ws)) {
+                        this.sendError(ws, ImErrorType.INVALID_MESSAGE, "Registration unavailable")
+                        return
+                    }
+                    const challenge = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")
+                    this.registrationChallenges.set(ws, challenge)
+                    ws.send(JSON.stringify({ type: "register_challenge", payload: { challenge } }))
+                    break
+                }
                 case "register": {
                     log.debug("[IM] Received a register message")
                     // Validate the message schema
-                    log.debug(data)
                     const registerMessage: ImRegisterMessage =
                         data as ImRegisterMessage
                     if (
@@ -209,10 +262,11 @@ export class SignalingServer {
                             ImErrorType.INVALID_MESSAGE,
                             "Invalid message schema",
                         )
+                        return
                     }
                     log.debug("[IM] Register message validated")
                     // Once we have the data, we can use it
-                    this.handleRegister(
+                    await this.handleRegister(
                         ws,
                         registerMessage.payload.clientId,
                         registerMessage.payload.publicKey,
@@ -233,6 +287,10 @@ export class SignalingServer {
                         )
                         return
                     }
+                    if (!this.isValidTargetId(data.payload.targetId)) {
+                        this.sendTargetIdError(ws)
+                        return
+                    }
                     // REVIEW: PR Fix - Await async method to catch errors
                     await this.handlePeerMessage(ws, data.payload)
                     break
@@ -243,6 +301,10 @@ export class SignalingServer {
                             ImErrorType.INVALID_MESSAGE,
                             "Missing target ID",
                         )
+                        return
+                    }
+                    if (!this.isValidTargetId(data.payload.targetId)) {
+                        this.sendTargetIdError(ws)
                         return
                     }
                     this.handlePublicKeyRequest(ws, data.payload.targetId)
@@ -295,6 +357,14 @@ export class SignalingServer {
         proof: SerializedSignedObject,
     ) {
         try {
+            if (!this.registrationChallenges.has(ws)) {
+                this.sendError(ws, ImErrorType.INVALID_MESSAGE, "Registration unavailable")
+                return
+            }
+            if (typeof clientId !== "string" || clientId.length === 0) {
+                this.sendError(ws, ImErrorType.INVALID_MESSAGE, "Invalid client ID")
+                return
+            }
             if (this.peers.has(clientId)) {
                 this.sendError(
                     ws,
@@ -306,14 +376,29 @@ export class SignalingServer {
 
             // Validate public key format
             // Transform the public key to a Uint8Array
-            const publicKeyUint8Array = new Uint8Array(publicKey)
-            log.debug("[IM] Public key: ", publicKey)
-            if (publicKeyUint8Array.length === 0) {
+            if (
+                !(Array.isArray(publicKey) || publicKey instanceof Uint8Array) ||
+                publicKey.length === 0 ||
+                publicKey.length > MAX_ADVERTISED_KEY_BYTES
+            ) {
                 this.sendError(
                     ws,
                     ImErrorType.INVALID_PUBLIC_KEY,
                     "Invalid public key format",
                 )
+                return
+            }
+            for (let i = 0; i < publicKey.length; i++) {
+                if (!Object.hasOwn(publicKey, i) || !Number.isInteger(publicKey[i]) || publicKey[i] < 0 || publicKey[i] > 255) {
+                    this.sendError(ws, ImErrorType.INVALID_PUBLIC_KEY, "Invalid public key format")
+                    return
+                }
+            }
+            const publicKeyUint8Array = new Uint8Array(publicKey)
+
+            const challenge = this.registrationChallenges.get(ws)
+            if (!challenge && this.registerMode === "strict") {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Registration challenge required")
                 return
             }
 
@@ -326,6 +411,38 @@ export class SignalingServer {
             }
 
             const signingPublicKey = deserializedProof.publicKey
+            if (this.registerMode === "strict" &&
+                (deserializedProof.algorithm !== "ed25519" || signingPublicKey.length !== 32)) {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")
+                return
+            }
+            const signingKeyId = clientIdFromSigningKey(signingPublicKey)
+            const matches = (expected: Uint8Array) =>
+                deserializedProof.message.length === expected.length &&
+                deserializedProof.message.every((byte, i) => byte === expected[i])
+            const newProof = !!challenge && matches(registrationProofBytes(clientId, publicKeyUint8Array, challenge))
+            const legacyProof = matches(publicKeyUint8Array)
+            const matchesSigningKey = clientId === signingKeyId || (legacyProof && clientId.toLowerCase() === signingKeyId)
+            if (/^0x[0-9a-f]+$/i.test(clientId) && clientId.length === signingKeyId.length && !matchesSigningKey) {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Client ID does not match signing key")
+                return
+            }
+            if (clientId.length > 256 && !matchesSigningKey) {
+                this.sendError(ws, ImErrorType.INVALID_MESSAGE, "Client ID is too long")
+                return
+            }
+            if (!newProof && !legacyProof) {
+                this.sendError(
+                    ws,
+                    ImErrorType.INVALID_PROOF,
+                    "Proof does not match public key",
+                )
+                return
+            }
+            if (legacyProof && this.registerMode === "strict") {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Legacy registration proof disabled in strict mode")
+                return
+            }
 
             // Validate the proof
             const verified = await TxValidatorPool.getInstance().verify(deserializedProof)
@@ -334,11 +451,31 @@ export class SignalingServer {
                 this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")
                 return
             }
+            if (newProof && clientId !== signingKeyId) {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Client ID does not match signing key")
+                return
+            }
+            if (this.registrationChallenges.get(ws) !== challenge) {
+                this.sendError(ws, ImErrorType.INVALID_PROOF, "Registration challenge expired")
+                return
+            }
+            // Another registration may have completed while verification ran.
+            // Keep the occupied-ID check and insertion in the same synchronous turn.
+            if (this.peers.has(clientId)) {
+                this.sendError(
+                    ws,
+                    ImErrorType.CLIENT_ID_TAKEN,
+                    `Client ID ${clientId} is already taken`,
+                )
+                return
+            }
+            this.registrationChallenges.delete(ws)
             this.peers.set(clientId, {
                 id: clientId,
                 ws,
-                publicKey,
+                publicKey: publicKeyUint8Array,
                 signingPublicKey,
+                deliverQueued: newProof,
             })
             log.info(`Peer registered with ID: ${clientId}`)
 
@@ -350,7 +487,6 @@ export class SignalingServer {
                 }),
             )
 
-            // Deliver any offline messages to the newly registered peer
             await this.deliverOfflineMessages(ws, clientId)
         } catch (error) {
             log.error("Registration error:", error)
@@ -412,6 +548,10 @@ export class SignalingServer {
             const targetPeer = this.peers.get(payload.targetId)
 
             if (!targetPeer) {
+                if (this.registerMode !== "strict" || !/^0x[0-9a-f]{64}$/.test(payload.targetId)) {
+                    this.sendError(ws, ImErrorType.PEER_NOT_FOUND, "Recipient is offline and cannot receive queued messages")
+                    return
+                }
                 // Store as offline message if target is not online
                 // REVIEW: PR Fix #3 #5 - Store to database first (easier to rollback), then blockchain (best-effort)
                 // REVIEW: PR Fix #2 - Removed redundant rate limit check; storeOfflineMessage has authoritative check with mutex
@@ -824,6 +964,9 @@ export class SignalingServer {
      * @param peerId - The ID of the peer
      */
     private async deliverOfflineMessages(ws: WebSocket, peerId: string) {
+        const peer = this.peers.get(peerId)
+        if (!peer || peer.ws !== ws || peer.deliverQueued !== true) return
+
         const offlineMessages = await this.getOfflineMessages(peerId)
 
         // Get DB/repository once before loop for better performance

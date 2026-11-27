@@ -3,6 +3,7 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Network } from "@aptos-labs/ts-sdk"
 import log from "@/utilities/logger"
+import errorKind from "../errorKind"
 
 export default async function handleAptosBalanceQuery(operation: IOperation) {
     log.debug("[XM Method] Aptos Balance Query")
@@ -41,12 +42,8 @@ export default async function handleAptosBalanceQuery(operation: IOperation) {
         const aptosInstance = new multichain.APTOS(providerUrl, network)
         await aptosInstance.connect()
 
-        log.debug("params: \n")
-        log.debug(operation.task.params)
-        log.debug("\n end params: \n")
-
+        // NOTE Params, results and full errors are not logged
         const params = operation.task.params
-        log.debug("parsed params: " + JSON.stringify(params))
 
         // Validate required parameters for Aptos balance queries
         if (!params.address) {
@@ -65,9 +62,6 @@ export default async function handleAptosBalanceQuery(operation: IOperation) {
             }
         }
 
-        log.debug(`querying balance for address: ${params.address}`)
-        log.debug(`coin type: ${params.coinType}`)
-
         // Query balance using the appropriate method
         let balance: string
 
@@ -82,14 +76,14 @@ export default async function handleAptosBalanceQuery(operation: IOperation) {
             )
         }
 
-        log.debug("balance query result:", balance)
+        log.debug("balance query result received")
 
         return {
             result: balance,
             status: true,
         }
     } catch (error) {
-        log.error("Aptos balance query error:", error)
+        log.error(`Aptos balance query error: ${errorKind(error)}`)
         return {
             result: "error",
             error: error.toString(),

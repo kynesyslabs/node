@@ -18,8 +18,8 @@ export async function runImMessageRoundtrip() {
   if (!wsUrl) throw new Error("im_message_roundtrip requires at least one signaling target")
 
   const timeoutMs = envInt("IM_MESSAGE_TIMEOUT_MS", 10000)
-  const senderId = generateClientId()
-  const receiverId = generateClientId()
+  let senderId = generateClientId()
+  let receiverId = generateClientId()
   const messageId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
   const run = getRunConfig()
 
@@ -37,12 +37,14 @@ export async function runImMessageRoundtrip() {
       instanceId: `im-roundtrip:${senderId}`,
       timeoutSec: Math.ceil(timeoutMs / 1000),
     })
+    senderId = sender.clientId
     receiver = await registerClient({
       wsUrl,
       clientId: receiverId,
       instanceId: `im-roundtrip:${receiverId}`,
       timeoutSec: Math.ceil(timeoutMs / 1000),
     })
+    receiverId = receiver.clientId
 
     const receiverInbound = waitForJsonMessage(
       receiver.ws,

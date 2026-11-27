@@ -52,6 +52,21 @@ published and drops every other host port of the node.
    therefore be listed in `TRUSTED_PROXIES`, and must set `X-Forwarded-For`
    or `X-Real-IP` to the client's address; a forwarder that sets neither
    makes every client it relays local.
+   `docker-compose.proxy.yml` sets it to the docker bridge range when `.env`
+   leaves it unset. `docker-compose.yml` alone leaves it empty: there the RPC
+   port is published directly, and docker relays some of those clients from
+   the bridge gateway, so the bridge range is not a proxy address there.
+   Clients relayed that way (host loopback, IPv6 to an IPv4 bridge, a proxy
+   on the host in front of the published port) share one rate-limit counter,
+   so a host-side proxy gets no per-client counters from the compose default;
+   use Caddy from the `proxy` profile with `docker-compose.proxy.yml`, or
+   publish the RPC port on `127.0.0.1` only (a compose override with
+   `ports: !override`, which replaces the whole list, so the node's other
+   ports in `docker-compose.yml` must be repeated; the mapping has no bind
+   variable) and set `TRUSTED_PROXIES` to the gateway address the node sees
+   the host proxy at (`docker network inspect demos-network`).
+   An entry with prefix length 0 (`0.0.0.0/0`, `::/0`) stops the node at
+   startup with an error naming the entry.
 
 ## Step-by-step
 
@@ -69,9 +84,8 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 PROXY_DOMAIN=node.example.com
 ACME_EMAIL=ops@example.com
 
-# Tell the node to trust XFF from Caddy. The docker bridge default is
-# 172.16.0.0/12. Localhost added for direct probe access.
-TRUSTED_PROXIES=172.16.0.0/12,127.0.0.1/32
+# TRUSTED_PROXIES stays unset: docker-compose.proxy.yml supplies the docker
+# bridge range, where Caddy connects from.
 
 # Generate a basic-auth hash for /metrics
 docker run --rm caddy:2 caddy hash-password --plaintext 'YOUR_PASSWORD_HERE'
@@ -219,12 +233,15 @@ Not working yet, for the reason above:
 # The reaper stops the whole stack when the node container exits, and the
 # node is recreated below; stop it first (a no-op without the reaper profile)
 docker compose stop reaper caddy
-# Drop the proxy profile AND the proxy override from .env, touching only
-# those two settings. The profile list is padded with commas so `proxy` is
-# removed as a whole entry wherever it sits (first, middle, last or alone)
+# Drop the proxy profile, the proxy override and any TRUSTED_PROXIES line
+# from .env, touching only those settings (the RPC port is published again,
+# with no proxy in front of it). The profile list is padded with commas so
+# `proxy` is removed as a whole entry wherever it sits (first, middle, last
+# or alone)
 sed -i \
   -e '/^COMPOSE_PROFILES=/{s/=/=,/;s/$/,/;s/,proxy,/,/g;s/=,/=/;s/,$//}' \
-  -e '/^COMPOSE_FILE=/s/:docker-compose.proxy.yml//' .env
+  -e '/^COMPOSE_FILE=/s/:docker-compose.proxy.yml//' \
+  -e '/^TRUSTED_PROXIES=/d' .env
 # Serve Grafana from its own port again
 sed -i -e '/^GRAFANA_ROOT_URL=/d' -e '/^GRAFANA_SERVE_FROM_SUB_PATH=/d' .env
 # Recreate the services so their host ports are published again
@@ -241,8 +258,11 @@ Grafana keeps redirecting to the stopped proxy while `GRAFANA_ROOT_URL`
 points there with `GRAFANA_SERVE_FROM_SUB_PATH=true`; with both removed it
 falls back to `http://localhost:3000` at the root path.
 
-After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct
+After that, host ports `53550 53551 9090 3000 9091 7047` work direct
 again, next to `9095` (gossip), which stays published in both modes.
+Signaling port 3005 stays on 127.0.0.1 unless `RPC_SIGNALING_BIND=0.0.0.0`
+is set before recreating the node container. External SDK clients can use
+the Caddy route or an explicitly published signaling port.
 
 ## Related
 
