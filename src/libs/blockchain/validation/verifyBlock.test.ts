@@ -20,6 +20,7 @@ let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
 // The key of every signature verify, in call order
 let verifiedKeys: string[] = []
+let storedGenesisHash: string | null = null
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -63,6 +64,7 @@ jest.mock("src/libs/crypto/hashing", () => ({
 jest.mock("../chain", () => ({
     __esModule: true,
     default: {
+        getGenesisBlockHash: jest.fn(async () => storedGenesisHash),
         getBlockByNumber: jest.fn(async (n: number) => ({
             number: n,
             hash: `hash-${n}`,
@@ -155,6 +157,7 @@ beforeEach(() => {
     checkOwnSignature.mockClear()
     verifyBlockTxSignatures.mockClear()
     verifyBlockTxSignatures.mockImplementation(async () => ({ valid: true }))
+    storedGenesisHash = null
     pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
@@ -285,9 +288,44 @@ describe("verifyBlock", () => {
         expect(result.reason).toContain("before finalityProofs")
     })
 
-    it("accepts genesis without signatures", async () => {
+    it("accepts genesis without signatures when no genesis is stored yet", async () => {
         const result = await verifyBlock(makeBlock({ number: 0 }))
         expect(result.valid).toBe(true)
+    })
+
+    it("accepts block 0 when it matches the stored genesis", async () => {
+        storedGenesisHash = "valid-hash"
+        const result = await verifyBlock(makeBlock({ number: 0 }))
+        expect(result.valid).toBe(true)
+    })
+
+    it("rejects a block 0 that differs from the stored genesis", async () => {
+        storedGenesisHash = "stored-genesis-hash"
+        const result = await verifyBlock(makeBlock({ number: 0 }))
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("stored genesis")
+    })
+
+    // The content of every block here hashes to "valid-hash" (see the mocks).
+    it("rejects a block 0 that claims the stored genesis hash over other content", async () => {
+        storedGenesisHash = "stored-genesis-hash"
+        const result = await verifyBlock(
+            makeBlock({ number: 0, hash: "stored-genesis-hash" }),
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toBe(
+            "block hash mismatch: claimed stored-genesis-hash, recomputed valid-hash",
+        )
+    })
+
+    it("rejects a block 0 whose content does not hash to its hash when no genesis is stored yet", async () => {
+        const result = await verifyBlock(
+            makeBlock({ number: 0, hash: "forged-hash" }),
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toBe(
+            "block hash mismatch: claimed forged-hash, recomputed valid-hash",
+        )
     })
 
     it("does not re-check transactions when none are supplied", async () => {

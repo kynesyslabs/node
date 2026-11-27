@@ -366,6 +366,16 @@ export async function verifyBlockCertificate(
     }
 }
 
+/** Recompute the block hash and compare with incoming: the refusal, or null. */
+function hashMismatch(block: Block): string | null {
+    const expectedHash = Hashing.sha256(
+        serializeBlockContent(block.content, block.number),
+    )
+    return expectedHash === block.hash
+        ? null
+        : `block hash mismatch: claimed ${block.hash}, recomputed ${expectedHash}`
+}
+
 /**
  * A copy of `block` whose signature map holds only the signatures its
  * quorum counts: by the signers its height admits, verifying over its
@@ -430,8 +440,19 @@ export async function verifyBlock(
     txs?: Transaction[],
     options: CommitmentOptions = {},
 ): Promise<BlockVerification> {
-    // Genesis has no shard or signatures
+    // Genesis has no shard or signatures; it is valid only when it matches the
+    // stored genesis (or, with none stored, which no running node reaches, on
+    // its own hash), and its content must hash to its hash either way
     if (block.number === 0) {
+        const mismatch = hashMismatch(block)
+        if (mismatch !== null) return { valid: false, reason: mismatch }
+        const storedGenesisHash = await Chain.getGenesisBlockHash()
+        if (storedGenesisHash && storedGenesisHash !== block.hash) {
+            return {
+                valid: false,
+                reason: `block 0 hash ${block.hash} is not the stored genesis ${storedGenesisHash}`,
+            }
+        }
         return { valid: true }
     }
 
@@ -440,16 +461,8 @@ export async function verifyBlock(
         return { valid: false, reason: unstorable }
     }
 
-    // Recompute the block hash and compare with incoming.
-    const expectedHash = Hashing.sha256(
-        serializeBlockContent(block.content, block.number),
-    )
-    if (expectedHash !== block.hash) {
-        return {
-            valid: false,
-            reason: `block hash mismatch: claimed ${block.hash}, recomputed ${expectedHash}`,
-        }
-    }
+    const mismatch = hashMismatch(block)
+    if (mismatch !== null) return { valid: false, reason: mismatch }
 
     const prevBlock = await Chain.getBlockByNumber(block.number - 1)
     if (!prevBlock) {
