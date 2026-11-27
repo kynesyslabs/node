@@ -72,7 +72,7 @@ them like the values above.
 | Variable | Mainnet | Why |
 |---|---|---|
 | `SIGNALING_ENABLED` | `false` | The WebRTC signaling server (`RPC_SIGNALING_PORT`, 3005) serves instant-messaging clients; consensus does not use it. While it runs, each online message becomes a node-signed `instantMessaging` transaction with no fee, and the online path has no per-sender cap. When it is off, the node logs `Signaling server disabled (SIGNALING_ENABLED=false)` and `/health` lists the `signaling` subsystem as skipped. Compose still publishes the port; nothing answers on it. |
-| `XM_ENABLED`, `DEMOSWORK_ENABLED` | TBD (owner) | Cross-chain (XM) execution is on by default (`src/config/defaults.ts`). If the owner turns it off at launch, both lines go on the sheet as `false` before the genesis is published; DemosWork steps share the XM dispatch path. Web2 requests stay on either way. |
+| `XM_ENABLED`, `DEMOSWORK_ENABLED` | `true` | Decided 2026-11-28: cross-chain (XM) execution and DemosWork run at launch, as in the code default (`src/config/defaults.ts`). The sheet states it so `node-doctor` flags a validator that turned them off. The hardening items for XM and Web2 transactions are tracked on mainnet-launch#38. |
 
 The `v1.0.0-rc.11` tag carries a sheet without these lines. A validator
 installing that tag appends `SIGNALING_ENABLED=false` to `.env` by hand,
