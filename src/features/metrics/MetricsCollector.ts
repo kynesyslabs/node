@@ -15,6 +15,7 @@ import log from "@/utilities/logger"
 import { diskSpacePath, freeDiskBytes } from "@/utilities/diskSpace"
 import { Config } from "src/config"
 import { DbProbe } from "./dbProbe"
+import { clearCommitteeOfflineAtOrBelow } from "./consensusMetrics"
 import type { MetricsCollectorConfig } from "./types"
 import {
     DEFAULT_COLLECTOR_CONFIG,
@@ -442,6 +443,7 @@ export class MetricsCollector {
                 "block_height",
                 sharedState.lastBlockNumber,
             )
+            clearCommitteeOfflineAtOrBelow(sharedState.lastBlockNumber)
 
             // The MempoolBacklog alert reads this; without a writer the gauge stays 0.
             try {

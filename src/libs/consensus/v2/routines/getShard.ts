@@ -17,6 +17,7 @@ import {
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import { quorumThreshold } from "../quorum"
 import { isForkActive } from "@/forks/forkGates"
+import { setCommitteeOffline } from "@/features/metrics/consensusMetrics"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 
 // The eligible pool is a pure function of on-chain state at a given
@@ -551,11 +552,14 @@ function liveBoundMembers(
         // Every retry at this height draws the same committee, so operators
         // recover by bringing these members back; name them.
         const offline = committee.filter(identity => !liveByIdentity.has(identity))
+        setCommitteeOffline(lastBlockNumber + 1, offline)
         log.warning(
             `[getShard] ${shard.length} of the ${committee.length} bound committee members for block ` +
                 `${lastBlockNumber + 1} are live, below the quorum of ${getCommitteeFloor()}: ` +
                 `the block cannot be forged until more of them are online. Offline: ${offline.join(", ")}`,
         )
+    } else {
+        setCommitteeOffline(lastBlockNumber + 1, [])
     }
     return shard
 }
