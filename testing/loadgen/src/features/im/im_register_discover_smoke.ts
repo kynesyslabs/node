@@ -12,7 +12,7 @@ export async function runImRegisterDiscoverSmoke() {
 
   const timeoutMs = envInt("IM_MESSAGE_TIMEOUT_MS", 10000)
   const probes = await Promise.all(wsTargets.map(async wsUrl => {
-    const clientId = generateClientId()
+    let clientId = generateClientId()
     let client: Awaited<ReturnType<typeof registerClient>> | null = null
     try {
       client = await registerClient({
@@ -21,6 +21,7 @@ export async function runImRegisterDiscoverSmoke() {
         instanceId: `im-smoke:${clientId}`,
         timeoutSec: Math.ceil(timeoutMs / 1000),
       })
+      clientId = client.clientId
 
       const discoverPromise = waitForJsonMessage(
         client.ws,

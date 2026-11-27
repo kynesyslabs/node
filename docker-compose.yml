@@ -175,6 +175,7 @@ services:
       OMNI_PORT: ${OMNI_PORT:-53551}
       OMNI_MODE: ${OMNI_MODE:-OMNI_PREFERRED}
       SIGNALING_ENABLED: ${SIGNALING_ENABLED:-true}
+      SIGNALING_REGISTER_MODE: ${SIGNALING_REGISTER_MODE:-transitional}
       MIN_DISK_SPACE: ${MIN_DISK_SPACE:-}
       # The data volume, not the container's root filesystem. Postgres keeps
       # its own volume, which node-exporter's filesystem metrics cover.
