@@ -51,8 +51,8 @@ describe("the NFT allowlist file", () => {
         const raw = readFileSync(NFT_ALLOWLIST_PATH, "utf8")
         const mints = parseAllowlist(
             raw,
-            "3da7c881016692f1724c34c4d68ce6233e6f34eb3a5cf34323022c8930bab116",
+            "f9a9c1cd829269f92fb1d23800dd53b1d348e808b56a8793e4e75bbda44a1f53",
         )
-        expect(mints.size).toBe(460)
+        expect(mints.size).toBe(450)
     })
 })
